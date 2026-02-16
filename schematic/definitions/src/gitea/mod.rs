@@ -49,7 +49,10 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{
+    params::{EndpointParams, PaginationStyle, QueryParamType},
+    ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod,
+};
 
 /// Creates the Gitea REST API definition.
 ///
@@ -168,24 +171,50 @@ pub fn define_gitea_api() -> RestApi {
             Endpoint {
                 id: "ListPullRequests".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls?state=all&sort=recentupdate&limit=50"
-                    .to_string(),
-                description: "List pull requests with metadata (all states, most recent first)"
-                    .to_string(),
+                path: "/repos/{owner}/{repo}/pulls".to_string(),
+                description: "List pull requests with metadata".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestSummary"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitea())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "open".to_string(),
+                                "closed".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by PR state"),
+                        )
+                        .with_query_param(
+                            "sort",
+                            QueryParamType::Enum(vec![
+                                "oldest".to_string(),
+                                "recentupdate".to_string(),
+                                "leastupdate".to_string(),
+                                "mostcomment".to_string(),
+                                "leastcomment".to_string(),
+                                "priority".to_string(),
+                            ]),
+                            false,
+                            Some("Sort order for results"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "ListPullRequestFiles".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls/{index}/files?limit=50".to_string(),
+                path: "/repos/{owner}/{repo}/pulls/{index}/files".to_string(),
                 description: "List files changed in a pull request".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
+                ),
             },
             // =================================================================
             // Issues
@@ -193,12 +222,35 @@ pub fn define_gitea_api() -> RestApi {
             Endpoint {
                 id: "ListIssues".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues?state=all&type=issues&limit=50".to_string(),
-                description: "List issues (excludes PRs with type=issues filter)".to_string(),
+                path: "/repos/{owner}/{repo}/issues".to_string(),
+                description: "List issues (use type=issues to exclude PRs)".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("IssueSummary"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitea())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "open".to_string(),
+                                "closed".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by issue state"),
+                        )
+                        .with_query_param(
+                            "issue_type",
+                            QueryParamType::Enum(vec![
+                                "issues".to_string(),
+                                "pulls".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by type (issues, pulls, or all)"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -213,22 +265,26 @@ pub fn define_gitea_api() -> RestApi {
             Endpoint {
                 id: "ListIssueComments".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{index}/comments?limit=50".to_string(),
+                path: "/repos/{owner}/{repo}/issues/{index}/comments".to_string(),
                 description: "List comments on an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
+                ),
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{index}/timeline?limit=50".to_string(),
+                path: "/repos/{owner}/{repo}/issues/{index}/timeline".to_string(),
                 description: "List timeline events for an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
+                ),
             },
             // =================================================================
             // Tags and Releases
@@ -236,23 +292,39 @@ pub fn define_gitea_api() -> RestApi {
             Endpoint {
                 id: "ListTags".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/tags?limit=50".to_string(),
+                path: "/repos/{owner}/{repo}/tags".to_string(),
                 description: "List repository tags".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
+                ),
             },
             Endpoint {
                 id: "ListReleases".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/releases?draft=true&pre-release=true&limit=50"
-                    .to_string(),
-                description: "List releases (linked to tags via tag_name, includes drafts/prereleases)".to_string(),
+                path: "/repos/{owner}/{repo}/releases".to_string(),
+                description: "List releases (linked to tags via tag_name)".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Release"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitea())
+                        .with_query_param(
+                            "draft",
+                            QueryParamType::Boolean,
+                            false,
+                            Some("Include draft releases"),
+                        )
+                        .with_query_param(
+                            "pre_release",
+                            QueryParamType::Boolean,
+                            false,
+                            Some("Include pre-releases"),
+                        ),
+                ),
             },
             // Note: Gitea's /git/refs/{ref} returns an ARRAY, unlike GitHub's single object
             // Path uses {git_ref} instead of {ref} to avoid Rust keyword collision
@@ -372,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_endpoints_use_limit_param() {
+    fn pull_request_endpoints_use_pagination() {
         let api = define_gitea_api();
 
         let list_prs = api
@@ -380,10 +452,15 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListPullRequests")
             .unwrap();
-        assert!(list_prs.path.contains("state=all"));
-        assert!(list_prs.path.contains("limit=50"));
-        // Gitea uses limit, not per_page
-        assert!(!list_prs.path.contains("per_page"));
+        // Clean path without hardcoded query params
+        assert_eq!(list_prs.path, "/repos/{owner}/{repo}/pulls");
+        // Pagination and query params are in params field
+        let params = list_prs.params.as_ref().expect("ListPullRequests should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
+        assert!(params.query.iter().any(|p| p.name == "limit"));
+        assert!(params.query.iter().any(|p| p.name == "state"));
+        assert!(params.query.iter().any(|p| p.name == "sort"));
 
         let list_files = api
             .endpoints
@@ -391,21 +468,30 @@ mod tests {
             .find(|e| e.id == "ListPullRequestFiles")
             .unwrap();
         assert!(list_files.path.contains("{index}"));
-        assert!(list_files.path.contains("limit=50"));
+        // Clean path without hardcoded limit
+        assert!(!list_files.path.contains("limit"));
+        let params = list_files.params.as_ref().expect("ListPullRequestFiles should have params");
+        assert!(params.has_pagination());
     }
 
     #[test]
-    fn issue_endpoints_use_type_filter() {
+    fn issue_endpoints_use_pagination_and_type_filter() {
         let api = define_gitea_api();
 
         let list = api.endpoints.iter().find(|e| e.id == "ListIssues").unwrap();
-        assert!(list.path.contains("state=all"));
-        // Gitea-specific: type=issues filters out PRs
-        assert!(list.path.contains("type=issues"));
-        assert!(list.path.contains("limit=50"));
+        // Clean path without hardcoded query params
+        assert_eq!(list.path, "/repos/{owner}/{repo}/issues");
+        // Pagination and filters in params field
+        let params = list.params.as_ref().expect("ListIssues should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "state"));
+        // Gitea-specific: type param filters out PRs
+        assert!(params.query.iter().any(|p| p.name == "issue_type"));
 
         let get = api.endpoints.iter().find(|e| e.id == "GetIssue").unwrap();
         assert!(get.path.contains("{index}"));
+        // GetIssue doesn't need pagination
+        assert!(get.params.is_none());
 
         let comments = api
             .endpoints
@@ -413,6 +499,9 @@ mod tests {
             .find(|e| e.id == "ListIssueComments")
             .unwrap();
         assert!(comments.path.contains("{index}/comments"));
+        assert!(!comments.path.contains("limit")); // No hardcoded limit in path
+        let params = comments.params.as_ref().expect("ListIssueComments should have params");
+        assert!(params.has_pagination());
 
         let timeline = api
             .endpoints
@@ -420,24 +509,33 @@ mod tests {
             .find(|e| e.id == "ListIssueTimeline")
             .unwrap();
         assert!(timeline.path.contains("timeline"));
+        assert!(!timeline.path.contains("limit")); // No hardcoded limit in path
+        let params = timeline.params.as_ref().expect("ListIssueTimeline should have params");
+        assert!(params.has_pagination());
     }
 
     #[test]
-    fn tag_and_release_endpoints() {
+    fn tag_and_release_endpoints_use_pagination() {
         let api = define_gitea_api();
 
         let tags = api.endpoints.iter().find(|e| e.id == "ListTags").unwrap();
-        assert!(tags.path.contains("tags?limit=50"));
+        // Clean path without hardcoded query params
+        assert_eq!(tags.path, "/repos/{owner}/{repo}/tags");
+        let params = tags.params.as_ref().expect("ListTags should have params");
+        assert!(params.has_pagination());
 
         let releases = api
             .endpoints
             .iter()
             .find(|e| e.id == "ListReleases")
             .unwrap();
-        assert!(releases.path.contains("releases"));
-        // Gitea-specific: include drafts and prereleases
-        assert!(releases.path.contains("draft=true"));
-        assert!(releases.path.contains("pre-release=true"));
+        // Clean path without hardcoded query params
+        assert_eq!(releases.path, "/repos/{owner}/{repo}/releases");
+        let params = releases.params.as_ref().expect("ListReleases should have params");
+        assert!(params.has_pagination());
+        // Gitea-specific: draft and pre-release filters as explicit params
+        assert!(params.query.iter().any(|p| p.name == "draft"));
+        assert!(params.query.iter().any(|p| p.name == "pre_release"));
 
         let ref_endpoint = api
             .endpoints
@@ -445,6 +543,8 @@ mod tests {
             .find(|e| e.id == "GetTagReference")
             .unwrap();
         assert!(ref_endpoint.path.contains("git/refs/{git_ref}"));
+        // GetTagReference doesn't need pagination
+        assert!(ref_endpoint.params.is_none());
 
         let annotated = api
             .endpoints
@@ -452,6 +552,8 @@ mod tests {
             .find(|e| e.id == "GetAnnotatedTag")
             .unwrap();
         assert!(annotated.path.contains("git/tags/{sha}"));
+        // GetAnnotatedTag doesn't need pagination
+        assert!(annotated.params.is_none());
     }
 
     #[test]
@@ -552,5 +654,73 @@ mod tests {
     fn module_path_is_set() {
         let api = define_gitea_api();
         assert_eq!(api.module_path, Some("gitea".to_string()));
+    }
+
+    #[test]
+    fn all_list_endpoints_use_gitea_pagination() {
+        use schematic_define::params::PaginationStyle;
+
+        let api = define_gitea_api();
+
+        // All endpoints that return Vec types should use Gitea pagination
+        // (except GetTagReference which returns array but doesn't paginate)
+        let paginated_endpoints = [
+            "ListPullRequests",
+            "ListPullRequestFiles",
+            "ListIssues",
+            "ListIssueComments",
+            "ListIssueTimeline",
+            "ListTags",
+            "ListReleases",
+        ];
+
+        for id in paginated_endpoints {
+            let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
+            let params = endpoint
+                .params
+                .as_ref()
+                .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
+
+            assert!(
+                params.has_pagination(),
+                "Endpoint {} should use pagination",
+                id
+            );
+
+            // Verify it's Gitea-style pagination (page + limit)
+            match &params.pagination {
+                Some(PaginationStyle::PageNumber {
+                    page_param,
+                    per_page_param,
+                    default_per_page,
+                    max_per_page,
+                }) => {
+                    assert_eq!(page_param, "page", "Endpoint {} page param", id);
+                    assert_eq!(per_page_param, "limit", "Endpoint {} should use 'limit' not 'per_page'", id);
+                    assert_eq!(*default_per_page, 50, "Endpoint {} default_per_page", id);
+                    assert_eq!(*max_per_page, 100, "Endpoint {} max_per_page", id);
+                }
+                _ => panic!("Endpoint {} should use PageNumber pagination style", id),
+            }
+        }
+    }
+
+    #[test]
+    fn no_hardcoded_limit_in_paths() {
+        let api = define_gitea_api();
+
+        for endpoint in &api.endpoints {
+            // GetGitTreeRecursive is allowed to have ?recursive=true (behavior flag, not pagination)
+            if endpoint.id == "GetGitTreeRecursive" {
+                continue;
+            }
+
+            assert!(
+                !endpoint.path.contains("limit="),
+                "Endpoint {} has hardcoded limit in path: {}",
+                endpoint.id,
+                endpoint.path
+            );
+        }
     }
 }

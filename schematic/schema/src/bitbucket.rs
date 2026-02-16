@@ -41,7 +41,7 @@
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::bitbucket::*;
-use crate::shared::{RequestParts, SchematicError};
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -112,7 +112,7 @@ pub struct ListDirectoryContentsRequest {
     pub commit: String,
     /// Path parameter: path
     pub path: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -163,18 +163,23 @@ impl ListDirectoryContentsRequest {
             "/repositories/{}/{}/src/{}/{}", self.workspace, self.repo_slug, self.commit,
             self.path
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -265,7 +270,7 @@ pub struct ListPullRequestsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -316,25 +321,26 @@ impl ListPullRequestsRequest {
         let mut path = format!(
             "/repositories/{}/{}/pullrequests", self.workspace, self.repo_slug
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
-            } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
-            }
+            query_pairs.push(("pagelen", value.to_string()));
         }
         if let Some(ref value) = self.state {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "state", value));
+            query_pairs.push(("state", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "state", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -422,7 +428,7 @@ pub struct ListPullRequestCommentsRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -471,18 +477,23 @@ impl ListPullRequestCommentsRequest {
             "/repositories/{}/{}/pullrequests/{}/comments", self.workspace, self
             .repo_slug, self.id
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -510,7 +521,7 @@ pub struct ListIssuesRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -553,18 +564,23 @@ impl ListIssuesRequest {
         let mut path = format!(
             "/repositories/{}/{}/issues", self.workspace, self.repo_slug
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -651,7 +667,7 @@ pub struct ListIssueCommentsRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -700,18 +716,23 @@ impl ListIssueCommentsRequest {
             "/repositories/{}/{}/issues/{}/comments", self.workspace, self.repo_slug,
             self.id
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -741,7 +762,7 @@ pub struct ListIssueChangesRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -790,18 +811,23 @@ impl ListIssueChangesRequest {
             "/repositories/{}/{}/issues/{}/changes", self.workspace, self.repo_slug, self
             .id
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -829,7 +855,7 @@ pub struct ListTagsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -872,18 +898,23 @@ impl ListTagsRequest {
         let mut path = format!(
             "/repositories/{}/{}/refs/tags", self.workspace, self.repo_slug
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -968,7 +999,7 @@ pub struct ListDownloadsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
-    /// Query parameter: Page number (1-indexed)
+    /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
     /// Query parameter: Items per page (default: 50, max: 100)
     pub pagelen: Option<i64>,
@@ -1011,18 +1042,23 @@ impl ListDownloadsRequest {
         let mut path = format!(
             "/repositories/{}/{}/downloads", self.workspace, self.repo_slug
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "page", value));
-            } else {
-                path.push_str(&format!("&{}={}", "page", value));
-            }
+            query_pairs.push(("page", value.to_string()));
         }
         if let Some(ref value) = self.pagelen {
-            if !path.contains('?') {
-                path.push_str(&format!("?{}={}", "pagelen", value));
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
             } else {
-                path.push_str(&format!("&{}={}", "pagelen", value));
+                path.push_str(&format!("?{}", query_string));
             }
         }
         Ok(("GET", path, None, vec![]))
@@ -1090,6 +1126,14 @@ impl crate::shared::EndpointSpec for GetDownloadRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "GetDownload";
 }
+impl Paginated for ListDirectoryContentsRequest {}
+impl Paginated for ListPullRequestsRequest {}
+impl Paginated for ListPullRequestCommentsRequest {}
+impl Paginated for ListIssuesRequest {}
+impl Paginated for ListIssueCommentsRequest {}
+impl Paginated for ListIssueChangesRequest {}
+impl Paginated for ListTagsRequest {}
+impl Paginated for ListDownloadsRequest {}
 /// Request enum for Bitbucket API.
 ///
 /// Each variant wraps a strongly-typed request struct.

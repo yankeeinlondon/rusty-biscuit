@@ -11,6 +11,7 @@
 //! - [`QueryParamType`] - Type of a parameter value
 //! - [`ParamStyle`] - Serialization style for parameter values
 //! - [`PaginationStyle`] - Common pagination patterns with builder support
+//! - [`PaginationResponse`] - How APIs signal pagination state in responses
 //!
 //! ## Pagination Helpers
 //!
@@ -45,7 +46,20 @@
 //!
 //! ## Examples
 //!
-//! Define endpoint parameters:
+//! Define endpoint parameters using the builder pattern (recommended):
+//!
+//! ```
+//! use schematic_define::params::{EndpointParams, PaginationStyle, QueryParamType};
+//!
+//! let params = EndpointParams::default()
+//!     .with_pagination(PaginationStyle::github())
+//!     .with_query_param("state", QueryParamType::String, false, Some("Filter by state"));
+//!
+//! assert_eq!(params.query.len(), 3); // page, per_page, state
+//! assert!(params.has_pagination());
+//! ```
+//!
+//! Or construct directly with all fields:
 //!
 //! ```
 //! use schematic_define::params::{EndpointParams, ParamDef, QueryParamType, ParamStyle};
@@ -71,10 +85,14 @@
 //!     ],
 //!     header: vec![],
 //!     cookie: vec![],
+//!     pagination: None,
+//!     response_pagination: None,
 //! };
 //!
 //! assert_eq!(params.query.len(), 2);
 //! ```
+
+use serde::{Deserialize, Serialize};
 
 /// Collection of parameters for an endpoint.
 ///
@@ -100,6 +118,18 @@ pub struct EndpointParams {
     pub header: Vec<ParamDef>,
     /// Cookie parameters.
     pub cookie: Vec<ParamDef>,
+    /// Pagination style used by this endpoint, if any.
+    ///
+    /// Stored separately for introspection (e.g., code generation, documentation).
+    /// The pagination parameters are also added to [`Self::query`] via
+    /// [`Self::with_pagination`].
+    pub pagination: Option<PaginationStyle>,
+    /// How the API signals pagination state in responses, if any.
+    ///
+    /// Describes how clients can determine whether more pages exist and how to
+    /// fetch them. Used for introspection and potential code generation of
+    /// pagination helpers.
+    pub response_pagination: Option<PaginationResponse>,
 }
 
 /// Definition of a single parameter.
@@ -304,14 +334,6 @@ pub enum PaginationStyle {
         default_limit: u32,
     },
 
-    /// Bitbucket-specific pagination (page + pagelen).
-    ///
-    /// Bitbucket uses `pagelen` instead of `per_page` and supports `page`
-    /// for 1-indexed page navigation.
-    Bitbucket {
-        /// Default page size (typically 50).
-        default_pagelen: u32,
-    },
 }
 
 impl PaginationStyle {
@@ -346,7 +368,9 @@ impl PaginationStyle {
         Self::github()
     }
 
-    /// Creates Bitbucket-style pagination (page + pagelen, default 50).
+    /// Creates Bitbucket-style pagination (page + pagelen, default 50, max 100).
+    ///
+    /// Bitbucket uses `pagelen` instead of `per_page` for items per page.
     ///
     /// ## Example
     ///
@@ -356,8 +380,31 @@ impl PaginationStyle {
     /// let style = PaginationStyle::bitbucket();
     /// ```
     pub fn bitbucket() -> Self {
-        Self::Bitbucket {
-            default_pagelen: 50,
+        Self::PageNumber {
+            page_param: "page".to_string(),
+            per_page_param: "pagelen".to_string(),
+            default_per_page: 50,
+            max_per_page: 100,
+        }
+    }
+
+    /// Creates Gitea-style pagination (page + limit, default 50).
+    ///
+    /// Gitea uses `limit` instead of `per_page` for items per page.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::gitea();
+    /// ```
+    pub fn gitea() -> Self {
+        Self::PageNumber {
+            page_param: "page".to_string(),
+            per_page_param: "limit".to_string(),
+            default_per_page: 50,
+            max_per_page: 100,
         }
     }
 
@@ -506,37 +553,107 @@ impl PaginationStyle {
 
                 params
             }
-            Self::Bitbucket { default_pagelen } => {
-                vec![
-                    ParamDef {
-                        name: "page".to_string(),
-                        required: false,
-                        description: Some("Page number (1-indexed)".to_string()),
-                        param_type: QueryParamType::Integer,
-                        explode: false,
-                        style: ParamStyle::Form,
-                    },
-                    ParamDef {
-                        name: "pagelen".to_string(),
-                        required: false,
-                        description: Some(format!(
-                            "Items per page (default: {}, max: 100)",
-                            default_pagelen
-                        )),
-                        param_type: QueryParamType::Integer,
-                        explode: false,
-                        style: ParamStyle::Form,
-                    },
-                ]
-            }
         }
     }
+}
+
+/// Describes how an API signals pagination state in responses.
+///
+/// Different APIs communicate "more pages available" in different ways:
+///
+/// - **BodyField**: Next page URL in a JSON response field
+/// - **LinkHeader**: RFC 5988 Link header with rel="next"
+/// - **TotalCount**: Total item count with current page/offset tracking
+///
+/// This is infrastructure for future pagination helpers. Code generation may use
+/// this to generate `Paginated` trait implementations or pagination utilities.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::params::PaginationResponse;
+///
+/// // GitHub-style: Link header pagination
+/// let response = PaginationResponse::LinkHeader;
+///
+/// // REST API with next page URL in body
+/// let response = PaginationResponse::BodyField {
+///     next_field: "next_page_url".to_string(),
+/// };
+///
+/// // API returning total count
+/// let response = PaginationResponse::TotalCount {
+///     total_field: "total".to_string(),
+///     page_field: Some("page".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PaginationResponse {
+    /// Next page URL is in a response body field.
+    ///
+    /// Common pattern where APIs return the full URL for the next page
+    /// in a field like `"next"`, `"next_page_url"`, or `"links.next"`.
+    ///
+    /// ## Example Response
+    ///
+    /// ```json
+    /// {
+    ///   "data": [...],
+    ///   "next": "https://api.example.com/items?page=2"
+    /// }
+    /// ```
+    BodyField {
+        /// Field name containing the next page URL (e.g., "next", "next_page_url").
+        next_field: String,
+    },
+
+    /// Pagination via RFC 5988 Link header.
+    ///
+    /// The server returns pagination links in the HTTP `Link` header with
+    /// relationship types like `rel="next"`, `rel="prev"`, `rel="first"`, `rel="last"`.
+    ///
+    /// ## Example Header
+    ///
+    /// ```text
+    /// Link: <https://api.example.com/items?page=2>; rel="next",
+    ///       <https://api.example.com/items?page=10>; rel="last"
+    /// ```
+    ///
+    /// Used by GitHub, GitLab, and many standards-compliant REST APIs.
+    LinkHeader,
+
+    /// Total count with current page tracking.
+    ///
+    /// The response includes the total number of items, allowing clients to
+    /// calculate whether more pages exist based on current page/offset and limit.
+    ///
+    /// ## Example Response
+    ///
+    /// ```json
+    /// {
+    ///   "data": [...],
+    ///   "total": 500,
+    ///   "page": 1,
+    ///   "per_page": 50
+    /// }
+    /// ```
+    TotalCount {
+        /// Field name containing total item count (e.g., "total", "total_count").
+        total_field: String,
+        /// Field name containing current page number (optional).
+        ///
+        /// If `None`, the client tracks page state externally.
+        page_field: Option<String>,
+    },
 }
 
 impl EndpointParams {
     /// Adds pagination parameters to this endpoint.
     ///
-    /// Appends pagination query parameters to the existing query params.
+    /// Appends pagination query parameters to the existing query params and
+    /// stores the pagination style for later introspection.
     /// Use this for list endpoints that support pagination.
     ///
     /// ## Examples
@@ -551,9 +668,11 @@ impl EndpointParams {
     /// assert_eq!(params.query.len(), 2);
     /// assert!(params.query.iter().any(|p| p.name == "page"));
     /// assert!(params.query.iter().any(|p| p.name == "pagelen"));
+    /// assert!(params.pagination.is_some());
     /// ```
     pub fn with_pagination(mut self, style: PaginationStyle) -> Self {
         self.query.extend(style.to_query_params());
+        self.pagination = Some(style);
         self
     }
 
@@ -619,15 +738,44 @@ impl EndpointParams {
 
     /// Checks if this endpoint has pagination parameters.
     ///
-    /// Returns `true` if the endpoint has common pagination parameter names:
-    /// `page`, `per_page`, `pagelen`, `offset`, `limit`, `cursor`, `after`, `before`.
+    /// Returns `true` if pagination was added via [`Self::with_pagination`].
+    ///
+    /// ## Note
+    ///
+    /// This checks whether a [`PaginationStyle`] was explicitly set, not whether
+    /// query parameters happen to have pagination-like names.
     pub fn has_pagination(&self) -> bool {
-        let pagination_params = [
-            "page", "per_page", "pagelen", "offset", "limit", "cursor", "after", "before",
-        ];
-        self.query
-            .iter()
-            .any(|p| pagination_params.contains(&p.name.as_str()))
+        self.pagination.is_some()
+    }
+
+    /// Sets how the API signals pagination state in responses.
+    ///
+    /// Use this to describe how clients can determine whether more pages exist.
+    /// This is metadata for introspection and potential code generation.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::params::{EndpointParams, PaginationStyle, PaginationResponse};
+    ///
+    /// // GitHub-style: page params + Link header responses
+    /// let params = EndpointParams::default()
+    ///     .with_pagination(PaginationStyle::github())
+    ///     .with_response_pagination(PaginationResponse::LinkHeader);
+    ///
+    /// assert!(params.has_pagination());
+    /// assert!(params.has_response_pagination());
+    /// ```
+    pub fn with_response_pagination(mut self, response: PaginationResponse) -> Self {
+        self.response_pagination = Some(response);
+        self
+    }
+
+    /// Checks if this endpoint has response pagination information.
+    ///
+    /// Returns `true` if response pagination was set via [`Self::with_response_pagination`].
+    pub fn has_response_pagination(&self) -> bool {
+        self.response_pagination.is_some()
     }
 }
 
@@ -651,6 +799,8 @@ mod tests {
             query: vec![],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
         let cloned = params.clone();
         assert_eq!(params, cloned);
@@ -670,6 +820,8 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
         assert_eq!(params.query.len(), 1);
         assert!(params.header.is_empty());
@@ -702,6 +854,8 @@ mod tests {
                 explode: false,
                 style: ParamStyle::Form,
             }],
+            pagination: None,
+            response_pagination: None,
         };
         assert_eq!(params.query.len(), 1);
         assert_eq!(params.header.len(), 1);
@@ -902,6 +1056,8 @@ mod tests {
             ],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
 
         assert_eq!(params.query.len(), 3);
@@ -925,6 +1081,8 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
 
         let status_param = &params.query[0];
@@ -970,6 +1128,48 @@ mod tests {
         assert_eq!(params.len(), 2);
         assert!(params.iter().any(|p| p.name == "page"));
         assert!(params.iter().any(|p| p.name == "pagelen"));
+
+        // Verify bitbucket() returns PageNumber variant with correct params
+        match style {
+            PaginationStyle::PageNumber {
+                page_param,
+                per_page_param,
+                default_per_page,
+                max_per_page,
+            } => {
+                assert_eq!(page_param, "page");
+                assert_eq!(per_page_param, "pagelen");
+                assert_eq!(default_per_page, 50);
+                assert_eq!(max_per_page, 100);
+            }
+            _ => panic!("bitbucket() should return PageNumber variant"),
+        }
+    }
+
+    #[test]
+    fn pagination_style_gitea() {
+        let style = PaginationStyle::gitea();
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "page"));
+        assert!(params.iter().any(|p| p.name == "limit"));
+
+        // Verify gitea() returns PageNumber variant with correct params
+        match style {
+            PaginationStyle::PageNumber {
+                page_param,
+                per_page_param,
+                default_per_page,
+                max_per_page,
+            } => {
+                assert_eq!(page_param, "page");
+                assert_eq!(per_page_param, "limit");
+                assert_eq!(default_per_page, 50);
+                assert_eq!(max_per_page, 100);
+            }
+            _ => panic!("gitea() should return PageNumber variant"),
+        }
     }
 
     #[test]
@@ -1009,6 +1209,12 @@ mod tests {
 
         assert_eq!(params.query.len(), 2);
         assert!(params.has_pagination());
+        // Verify the pagination style is stored
+        assert!(params.pagination.is_some());
+        assert!(matches!(
+            params.pagination,
+            Some(PaginationStyle::PageNumber { .. })
+        ));
     }
 
     #[test]
@@ -1017,6 +1223,42 @@ mod tests {
 
         assert_eq!(params.query.len(), 2);
         assert!(params.has_pagination());
+        // Verify the pagination style is stored
+        assert!(params.pagination.is_some());
+    }
+
+    #[test]
+    fn endpoint_params_with_pagination_gitea() {
+        let params = EndpointParams::default().with_pagination(PaginationStyle::gitea());
+
+        assert_eq!(params.query.len(), 2);
+        assert!(params.has_pagination());
+        // Verify limit param (not per_page)
+        assert!(params.query.iter().any(|p| p.name == "limit"));
+        assert!(!params.query.iter().any(|p| p.name == "per_page"));
+    }
+
+    #[test]
+    fn endpoint_params_pagination_field_stores_style() {
+        let params = EndpointParams::default().with_pagination(PaginationStyle::offset_limit(
+            "skip", "take", 25, 200,
+        ));
+
+        // Verify the style is stored for introspection
+        match &params.pagination {
+            Some(PaginationStyle::OffsetLimit {
+                offset_param,
+                limit_param,
+                default_limit,
+                max_limit,
+            }) => {
+                assert_eq!(offset_param, "skip");
+                assert_eq!(limit_param, "take");
+                assert_eq!(*default_limit, 25);
+                assert_eq!(*max_limit, 200);
+            }
+            _ => panic!("Expected OffsetLimit pagination style"),
+        }
     }
 
     #[test]
@@ -1049,7 +1291,8 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_params_has_pagination_detects_page() {
+    fn endpoint_params_has_pagination_requires_explicit_style() {
+        // Manually constructing with pagination-like param names does NOT set has_pagination
         let params = EndpointParams {
             query: vec![ParamDef {
                 name: "page".to_string(),
@@ -1061,27 +1304,22 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
 
-        assert!(params.has_pagination());
+        // has_pagination() checks for explicit style, not param names
+        assert!(!params.has_pagination());
     }
 
     #[test]
-    fn endpoint_params_has_pagination_detects_cursor() {
-        let params = EndpointParams {
-            query: vec![ParamDef {
-                name: "after".to_string(),
-                required: false,
-                description: None,
-                param_type: QueryParamType::String,
-                explode: false,
-                style: ParamStyle::Form,
-            }],
-            header: vec![],
-            cookie: vec![],
-        };
+    fn endpoint_params_has_pagination_with_explicit_style() {
+        // Using with_pagination() sets both query params AND the pagination field
+        let params = EndpointParams::default().with_pagination(PaginationStyle::cursor("after", None, 20));
 
         assert!(params.has_pagination());
+        assert!(params.pagination.is_some());
+        assert!(params.query.iter().any(|p| p.name == "after"));
     }
 
     #[test]
@@ -1097,6 +1335,8 @@ mod tests {
             }],
             header: vec![],
             cookie: vec![],
+            pagination: None,
+            response_pagination: None,
         };
 
         assert!(!params.has_pagination());
@@ -1110,5 +1350,211 @@ mod tests {
 
         assert_eq!(params.query.len(), 3);
         assert!(params.has_pagination());
+    }
+
+    // ========== PaginationResponse Tests ==========
+
+    #[test]
+    fn pagination_response_body_field_construction() {
+        let response = PaginationResponse::BodyField {
+            next_field: "next_page_url".to_string(),
+        };
+
+        match response {
+            PaginationResponse::BodyField { next_field } => {
+                assert_eq!(next_field, "next_page_url");
+            }
+            _ => panic!("Expected BodyField variant"),
+        }
+    }
+
+    #[test]
+    fn pagination_response_link_header_construction() {
+        let response = PaginationResponse::LinkHeader;
+        assert!(matches!(response, PaginationResponse::LinkHeader));
+    }
+
+    #[test]
+    fn pagination_response_total_count_construction() {
+        let response = PaginationResponse::TotalCount {
+            total_field: "total".to_string(),
+            page_field: Some("page".to_string()),
+        };
+
+        match response {
+            PaginationResponse::TotalCount {
+                total_field,
+                page_field,
+            } => {
+                assert_eq!(total_field, "total");
+                assert_eq!(page_field, Some("page".to_string()));
+            }
+            _ => panic!("Expected TotalCount variant"),
+        }
+    }
+
+    #[test]
+    fn pagination_response_total_count_without_page_field() {
+        let response = PaginationResponse::TotalCount {
+            total_field: "count".to_string(),
+            page_field: None,
+        };
+
+        match response {
+            PaginationResponse::TotalCount {
+                total_field,
+                page_field,
+            } => {
+                assert_eq!(total_field, "count");
+                assert!(page_field.is_none());
+            }
+            _ => panic!("Expected TotalCount variant"),
+        }
+    }
+
+    #[test]
+    fn pagination_response_debug_clone_eq() {
+        let response = PaginationResponse::LinkHeader;
+        let cloned = response.clone();
+        assert_eq!(response, cloned);
+        assert!(format!("{:?}", response).contains("LinkHeader"));
+    }
+
+    #[test]
+    fn pagination_response_serialization_body_field() {
+        let response = PaginationResponse::BodyField {
+            next_field: "next".to_string(),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("body_field"));
+        assert!(json.contains("next_field"));
+        assert!(json.contains("\"next\""));
+
+        let deserialized: PaginationResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(response, deserialized);
+    }
+
+    #[test]
+    fn pagination_response_serialization_link_header() {
+        let response = PaginationResponse::LinkHeader;
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("link_header"));
+
+        let deserialized: PaginationResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(response, deserialized);
+    }
+
+    #[test]
+    fn pagination_response_serialization_total_count() {
+        let response = PaginationResponse::TotalCount {
+            total_field: "total".to_string(),
+            page_field: Some("current_page".to_string()),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("total_count"));
+        assert!(json.contains("total_field"));
+        assert!(json.contains("page_field"));
+
+        let deserialized: PaginationResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(response, deserialized);
+    }
+
+    #[test]
+    fn pagination_response_serialization_total_count_null_page() {
+        let response = PaginationResponse::TotalCount {
+            total_field: "total".to_string(),
+            page_field: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+
+        let deserialized: PaginationResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(response, deserialized);
+    }
+
+    // ========== EndpointParams with_response_pagination Tests ==========
+
+    #[test]
+    fn endpoint_params_with_response_pagination_link_header() {
+        let params = EndpointParams::default()
+            .with_response_pagination(PaginationResponse::LinkHeader);
+
+        assert!(params.has_response_pagination());
+        assert!(matches!(
+            params.response_pagination,
+            Some(PaginationResponse::LinkHeader)
+        ));
+    }
+
+    #[test]
+    fn endpoint_params_with_response_pagination_body_field() {
+        let params = EndpointParams::default()
+            .with_response_pagination(PaginationResponse::BodyField {
+                next_field: "next".to_string(),
+            });
+
+        assert!(params.has_response_pagination());
+        match &params.response_pagination {
+            Some(PaginationResponse::BodyField { next_field }) => {
+                assert_eq!(next_field, "next");
+            }
+            _ => panic!("Expected BodyField"),
+        }
+    }
+
+    #[test]
+    fn endpoint_params_with_response_pagination_total_count() {
+        let params = EndpointParams::default()
+            .with_response_pagination(PaginationResponse::TotalCount {
+                total_field: "total_items".to_string(),
+                page_field: Some("page_number".to_string()),
+            });
+
+        assert!(params.has_response_pagination());
+        match &params.response_pagination {
+            Some(PaginationResponse::TotalCount {
+                total_field,
+                page_field,
+            }) => {
+                assert_eq!(total_field, "total_items");
+                assert_eq!(page_field.as_deref(), Some("page_number"));
+            }
+            _ => panic!("Expected TotalCount"),
+        }
+    }
+
+    #[test]
+    fn endpoint_params_has_response_pagination_returns_false_by_default() {
+        let params = EndpointParams::default();
+        assert!(!params.has_response_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_chained_both_pagination_styles() {
+        // Full pagination: request params + response signaling
+        let params = EndpointParams::default()
+            .with_pagination(PaginationStyle::github())
+            .with_response_pagination(PaginationResponse::LinkHeader);
+
+        assert!(params.has_pagination());
+        assert!(params.has_response_pagination());
+        assert_eq!(params.query.len(), 2); // page, per_page
+        assert!(matches!(
+            params.response_pagination,
+            Some(PaginationResponse::LinkHeader)
+        ));
+    }
+
+    #[test]
+    fn endpoint_params_chained_with_query_params_and_response_pagination() {
+        let params = EndpointParams::default()
+            .with_query_param("state", QueryParamType::String, false, Some("Filter state"))
+            .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20))
+            .with_response_pagination(PaginationResponse::BodyField {
+                next_field: "next_cursor".to_string(),
+            });
+
+        assert_eq!(params.query.len(), 3); // state, after, limit
+        assert!(params.has_pagination());
+        assert!(params.has_response_pagination());
     }
 }

@@ -733,6 +733,11 @@ fn generate_endpoint_spec_impl(
 }
 
 /// Generates the path format expression with query parameter handling.
+///
+/// Uses a collector pattern for query parameters:
+/// 1. Collects all params into a `Vec<(&str, String)>`
+/// 2. URL-encodes values using `urlencoding::encode()`
+/// 3. Constructs query string with single `?`/`&` check
 fn generate_path_format(
     path: &str,
     path_params: &[&str],
@@ -758,24 +763,22 @@ fn generate_path_format(
         quote! { let #mut_tok path = format!(#format_str, #(#format_args),*); }
     };
 
-    // Generate query parameter appending
+    // Generate query parameter collection and appending
     let query_appending = if query_params.is_empty() {
         quote! {}
     } else {
-        let query_param_code = query_params.iter().map(|qp| {
+        // Generate collection statements for each param
+        let query_param_collectors = query_params.iter().map(|qp| {
             let field_name = format_ident!("{}", qp.name);
             let param_name = &qp.name;
 
             match &qp.param_type {
                 QueryParamType::Array(_) => {
+                    // Arrays add multiple entries for the same key
                     quote! {
                         if let Some(ref values) = self.#field_name {
                             for value in values {
-                                if !path.contains('?') {
-                                    path.push_str(&format!("?{}={}", #param_name, value));
-                                } else {
-                                    path.push_str(&format!("&{}={}", #param_name, value));
-                                }
+                                query_pairs.push((#param_name, value.to_string()));
                             }
                         }
                     }
@@ -783,11 +786,7 @@ fn generate_path_format(
                 _ => {
                     quote! {
                         if let Some(ref value) = self.#field_name {
-                            if !path.contains('?') {
-                                path.push_str(&format!("?{}={}", #param_name, value));
-                            } else {
-                                path.push_str(&format!("&{}={}", #param_name, value));
-                            }
+                            query_pairs.push((#param_name, value.to_string()));
                         }
                     }
                 }
@@ -795,7 +794,20 @@ fn generate_path_format(
         });
 
         quote! {
-            #(#query_param_code)*
+            let mut query_pairs: Vec<(&str, String)> = Vec::new();
+            #(#query_param_collectors)*
+            if !query_pairs.is_empty() {
+                let query_string: String = query_pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                    .collect::<Vec<_>>()
+                    .join("&");
+                if path.contains('?') {
+                    path.push_str(&format!("&{}", query_string));
+                } else {
+                    path.push_str(&format!("?{}", query_string));
+                }
+            }
         }
     };
 
@@ -1578,6 +1590,8 @@ mod tests {
                     .collect(),
                 header: vec![],
                 cookie: vec![],
+                pagination: None,
+                response_pagination: None,
             })
         };
 
@@ -1653,14 +1667,35 @@ mod tests {
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Check that query param appending is generated
-        // The format uses: path.push_str(&format!("?{}={}", "page", value))
+        // Check that collector pattern is generated
         assert!(
-            code.contains(r#"path.push_str(&format!("?{}={}", "page""#),
-            "Expected page query param append, got:\n{}",
+            code.contains("let mut query_pairs: Vec<(&str, String)> = Vec::new()"),
+            "Expected query_pairs collector, got:\n{}",
             code
         );
-        assert!(code.contains(r#""limit""#), "Expected limit param name");
+        // Check params are pushed to collector
+        assert!(
+            code.contains(r#"query_pairs.push(("page", value.to_string()))"#),
+            "Expected page param push, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains(r#"query_pairs.push(("limit", value.to_string()))"#),
+            "Expected limit param push, got:\n{}",
+            code
+        );
+        // Check URL encoding is used
+        assert!(
+            code.contains("urlencoding::encode(v)"),
+            "Expected urlencoding::encode, got:\n{}",
+            code
+        );
+        // Check single query string construction
+        assert!(
+            code.contains(r#"path.push_str(&format!("?{}", query_string))"#),
+            "Expected single query string append, got:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -1708,8 +1743,17 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(code.contains("pub tags: Option<Vec<String>>"));
-        // Array params are handled specially
-        assert!(code.contains("for value in values"));
+        // Array params push multiple entries to collector
+        assert!(
+            code.contains("for value in values"),
+            "Expected loop over array values, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains(r#"query_pairs.push(("tags", value.to_string()))"#),
+            "Expected tags push in loop, got:\n{}",
+            code
+        );
     }
 
     #[test]
@@ -1737,5 +1781,305 @@ mod tests {
         assert!(
             code.contains("pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self")
         );
+    }
+
+    // === Paginated trait tests ===
+    // NOTE: These tests are disabled until generate_paginated_trait and
+    // generate_paginated_impl functions are implemented as part of the
+    // pagination codegen feature.
+    //
+    // TODO(pagination-codegen): Uncomment these tests when implementing:
+    // - generate_paginated_trait()
+    // - generate_paginated_impl(&Endpoint, &str) -> TokenStream
+    /*
+    mod paginated_trait_tests {
+        use super::*;
+        use crate::codegen::generate_paginated_trait;
+        use schematic_define::params::{EndpointParams, PaginationStyle};
+
+        fn make_paginated_endpoint(id: &str, path: &str) -> Endpoint {
+            Endpoint {
+                id: id.to_string(),
+                method: RestMethod::Get,
+                path: path.to_string(),
+                description: format!("Test paginated endpoint for {}", id),
+                request: None,
+                response: ApiResponse::json_type("TestResponse"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
+            }
+        }
+
+        fn make_non_paginated_endpoint(id: &str, path: &str) -> Endpoint {
+            Endpoint {
+                id: id.to_string(),
+                method: RestMethod::Get,
+                path: path.to_string(),
+                description: format!("Test non-paginated endpoint for {}", id),
+                request: None,
+                response: ApiResponse::json_type("TestResponse"),
+                headers: vec![],
+                params: None,
+            }
+        }
+
+        #[test]
+        fn generate_paginated_trait_produces_valid_code() {
+            let tokens = generate_paginated_trait();
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Should generate the Paginated trait
+            assert!(
+                code.contains("pub trait Paginated"),
+                "Should generate Paginated trait, got:\n{}",
+                code
+            );
+            // Should have doc comment
+            assert!(
+                code.contains("Marker trait for paginated request types"),
+                "Should have doc comment, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn generate_paginated_impl_for_paginated_endpoint() {
+            use crate::codegen::generate_paginated_impl;
+
+            let endpoint = make_paginated_endpoint("ListPullRequests", "/repos/{owner}/{repo}/pulls");
+            let tokens = generate_paginated_impl(&endpoint, "Request");
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Should generate impl Paginated for the request struct
+            assert!(
+                code.contains("impl Paginated for ListPullRequestsRequest"),
+                "Should generate Paginated impl for paginated endpoint, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn skip_paginated_impl_for_non_paginated_endpoint() {
+            use crate::codegen::generate_paginated_impl;
+
+            let endpoint = make_non_paginated_endpoint("GetUser", "/users/{id}");
+            let tokens = generate_paginated_impl(&endpoint, "Request");
+
+            // Should produce empty TokenStream (no impl)
+            assert!(
+                tokens.is_empty(),
+                "Should not generate Paginated impl for non-paginated endpoint, got: {}",
+                tokens
+            );
+        }
+
+        #[test]
+        fn generate_paginated_impl_with_custom_suffix() {
+            use crate::codegen::generate_paginated_impl;
+
+            let endpoint = make_paginated_endpoint("ListItems", "/items");
+            let tokens = generate_paginated_impl(&endpoint, "Params");
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Should use the custom suffix
+            assert!(
+                code.contains("impl Paginated for ListItemsParams"),
+                "Should use custom suffix, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn endpoint_with_no_params_is_not_paginated() {
+            use crate::codegen::generate_paginated_impl;
+
+            let endpoint = Endpoint {
+                id: "ListAll".to_string(),
+                method: RestMethod::Get,
+                path: "/all".to_string(),
+                description: "List all".to_string(),
+                request: None,
+                response: ApiResponse::json_type("TestResponse"),
+                headers: vec![],
+                params: None,
+            };
+            let tokens = generate_paginated_impl(&endpoint, "Request");
+
+            assert!(
+                tokens.is_empty(),
+                "Endpoint with no params should not implement Paginated"
+            );
+        }
+
+        #[test]
+        fn endpoint_with_query_params_but_no_pagination_is_not_paginated() {
+            use crate::codegen::generate_paginated_impl;
+            use schematic_define::params::QueryParamType;
+
+            let endpoint = Endpoint {
+                id: "Search".to_string(),
+                method: RestMethod::Get,
+                path: "/search".to_string(),
+                description: "Search".to_string(),
+                request: None,
+                response: ApiResponse::json_type("SearchResponse"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default()
+                        .with_query_param("q", QueryParamType::String, true, Some("Search query")),
+                ),
+            };
+            let tokens = generate_paginated_impl(&endpoint, "Request");
+
+            assert!(
+                tokens.is_empty(),
+                "Endpoint with query params but no pagination should not implement Paginated"
+            );
+        }
+    }
+    */
+
+    // === Pagination metadata in doc comments tests ===
+
+    mod pagination_doc_tests {
+        use super::*;
+        use schematic_define::params::{EndpointParams, PaginationStyle};
+
+        fn make_endpoint_with_pagination(id: &str, path: &str, style: PaginationStyle) -> Endpoint {
+            let params = EndpointParams::default().with_pagination(style);
+
+            Endpoint {
+                id: id.to_string(),
+                method: RestMethod::Get,
+                path: path.to_string(),
+                description: format!("Test endpoint for {}", id),
+                request: None,
+                response: ApiResponse::json_type("TestResponse"),
+                headers: vec![],
+                params: Some(params),
+            }
+        }
+
+        #[test]
+        fn github_pagination_docs_include_default_and_max_values() {
+            let endpoint =
+                make_endpoint_with_pagination("ListRepos", "/repos", PaginationStyle::github());
+            let tokens = generate_request_struct(&endpoint);
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Verify page param has default 1
+            assert!(
+                code.contains("Query parameter: Page number (1-indexed, default: 1)"),
+                "Expected page doc with default value, got:\n{}",
+                code
+            );
+            // Verify per_page param has default and max
+            assert!(
+                code.contains("Query parameter: Items per page (default: 100, max: 100)"),
+                "Expected per_page doc with default and max values, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn bitbucket_pagination_docs_have_correct_values() {
+            let endpoint = make_endpoint_with_pagination(
+                "ListPullRequests",
+                "/pullrequests",
+                PaginationStyle::bitbucket(),
+            );
+            let tokens = generate_request_struct(&endpoint);
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Verify page param has default 1
+            assert!(
+                code.contains("Query parameter: Page number (1-indexed, default: 1)"),
+                "Expected page doc with default value, got:\n{}",
+                code
+            );
+            // Verify pagelen param (Bitbucket-style) has default 50, max 100
+            assert!(
+                code.contains("Query parameter: Items per page (default: 50, max: 100)"),
+                "Expected pagelen doc with default 50 and max 100, got:\n{}",
+                code
+            );
+            // Verify field name is pagelen
+            assert!(
+                code.contains("pub pagelen: Option<i64>"),
+                "Expected pagelen field, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn gitea_pagination_docs_have_limit_param() {
+            let endpoint =
+                make_endpoint_with_pagination("ListIssues", "/issues", PaginationStyle::gitea());
+            let tokens = generate_request_struct(&endpoint);
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Verify limit param (Gitea-style) has default 50, max 100
+            assert!(
+                code.contains("Query parameter: Items per page (default: 50, max: 100)"),
+                "Expected limit doc with default 50 and max 100, got:\n{}",
+                code
+            );
+            // Verify field name is limit
+            assert!(
+                code.contains("pub limit: Option<i64>"),
+                "Expected limit field, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn offset_limit_pagination_docs_show_values() {
+            let endpoint = make_endpoint_with_pagination(
+                "ListItems",
+                "/items",
+                PaginationStyle::offset_limit("offset", "limit", 25, 200),
+            );
+            let tokens = generate_request_struct(&endpoint);
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Verify offset param description
+            assert!(
+                code.contains("Query parameter: Number of items to skip"),
+                "Expected offset doc, got:\n{}",
+                code
+            );
+            // Verify limit param has default 25, max 200
+            assert!(
+                code.contains("Query parameter: Maximum items to return (default: 25, max: 200)"),
+                "Expected limit doc with default 25 and max 200, got:\n{}",
+                code
+            );
+        }
+
+        #[test]
+        fn cursor_pagination_docs_show_default_limit() {
+            let endpoint = make_endpoint_with_pagination(
+                "ListEvents",
+                "/events",
+                PaginationStyle::cursor("after", Some("limit"), 20),
+            );
+            let tokens = generate_request_struct(&endpoint);
+            let code = format_generated_code(&tokens).expect("Failed to format code");
+
+            // Verify cursor param description
+            assert!(
+                code.contains("Query parameter: Pagination cursor from previous response"),
+                "Expected cursor doc, got:\n{}",
+                code
+            );
+            // Verify limit param has default 20
+            assert!(
+                code.contains("Query parameter: Maximum items to return (default: 20)"),
+                "Expected limit doc with default 20, got:\n{}",
+                code
+            );
+        }
     }
 }

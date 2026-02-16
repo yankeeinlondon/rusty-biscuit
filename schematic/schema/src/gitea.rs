@@ -15,14 +15,14 @@
 //! - `GetGitTree` - Get a Git tree (non-recursive, single level)
 //! - `GetGitTreeRecursive` - Get a Git tree recursively (may be paginated for large repos)
 //! - `GetRepositoryContentRaw` - Get raw file content from repository
-//! - `ListPullRequests` - List pull requests with metadata (all states, most recent first)
+//! - `ListPullRequests` - List pull requests with metadata
 //! - `ListPullRequestFiles` - List files changed in a pull request
-//! - `ListIssues` - List issues (excludes PRs with type=issues filter)
+//! - `ListIssues` - List issues (use type=issues to exclude PRs)
 //! - `GetIssue` - Get a single issue by index
 //! - `ListIssueComments` - List comments on an issue
 //! - `ListIssueTimeline` - List timeline events for an issue
 //! - `ListTags` - List repository tags
-//! - `ListReleases` - List releases (linked to tags via tag_name, includes drafts/prereleases)
+//! - `ListReleases` - List releases (linked to tags via tag_name)
 //! - `GetTagReference` - Get tag reference (returns array; check object.type: 'commit' vs 'tag')
 //! - `GetAnnotatedTag` - Get annotated tag object details (message, tagger)
 //!
@@ -41,7 +41,7 @@
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::gitea::*;
-use crate::shared::{RequestParts, SchematicError};
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -265,6 +265,10 @@ impl crate::shared::EndpointSpec for GetRepositoryContentRawRequest {
 /// use schematic_schema::gitea::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
+///     .with_state(/* value */)
+///     .with_sort(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -273,6 +277,14 @@ pub struct ListPullRequestsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
+    /// Query parameter: Filter by PR state
+    pub state: Option<String>,
+    /// Query parameter: Sort order for results
+    pub sort: Option<String>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -280,7 +292,31 @@ impl ListPullRequestsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            limit: None,
+            state: None,
+            sort: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
+    }
+    /// Sets the `state` query parameter.
+    pub fn with_state(mut self, value: String) -> Self {
+        self.state = Some(value);
+        self
+    }
+    /// Sets the `sort` query parameter.
+    pub fn with_sort(mut self, value: String) -> Self {
+        self.sort = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -297,10 +333,32 @@ impl ListPullRequestsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/pulls?state=all&sort=recentupdate&limit=50", self.owner, self
-            .repo
-        );
+        let mut path = format!("/repos/{}/{}/pulls", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if let Some(ref value) = self.state {
+            query_pairs.push(("state", value.to_string()));
+        }
+        if let Some(ref value) = self.sort {
+            query_pairs.push(("sort", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -316,6 +374,8 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 /// use schematic_schema::gitea::ListPullRequestFilesRequest;
 ///
 /// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -326,6 +386,10 @@ pub struct ListPullRequestFilesRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
 }
 impl ListPullRequestFilesRequest {
     /// Creates a new request with the required path parameters.
@@ -338,7 +402,19 @@ impl ListPullRequestFilesRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
+            page: None,
+            limit: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -355,9 +431,28 @@ impl ListPullRequestFilesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/pulls/{}/files?limit=50", self.owner, self.repo, self.index
+        let mut path = format!(
+            "/repos/{}/{}/pulls/{}/files", self.owner, self.repo, self.index
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -373,6 +468,10 @@ impl crate::shared::EndpointSpec for ListPullRequestFilesRequest {
 /// use schematic_schema::gitea::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
+///     .with_state(/* value */)
+///     .with_issue_type(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -381,6 +480,14 @@ pub struct ListIssuesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
+    /// Query parameter: Filter by issue state
+    pub state: Option<String>,
+    /// Query parameter: Filter by type (issues, pulls, or all)
+    pub issue_type: Option<String>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -388,7 +495,31 @@ impl ListIssuesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            limit: None,
+            state: None,
+            issue_type: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
+    }
+    /// Sets the `state` query parameter.
+    pub fn with_state(mut self, value: String) -> Self {
+        self.state = Some(value);
+        self
+    }
+    /// Sets the `issue_type` query parameter.
+    pub fn with_issue_type(mut self, value: String) -> Self {
+        self.issue_type = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -405,9 +536,32 @@ impl ListIssuesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues?state=all&type=issues&limit=50", self.owner, self.repo
-        );
+        let mut path = format!("/repos/{}/{}/issues", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if let Some(ref value) = self.state {
+            query_pairs.push(("state", value.to_string()));
+        }
+        if let Some(ref value) = self.issue_type {
+            query_pairs.push(("issue_type", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -478,6 +632,8 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 /// use schematic_schema::gitea::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -488,6 +644,10 @@ pub struct ListIssueCommentsRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
 }
 impl ListIssueCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -500,7 +660,19 @@ impl ListIssueCommentsRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
+            page: None,
+            limit: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -517,9 +689,28 @@ impl ListIssueCommentsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues/{}/comments?limit=50", self.owner, self.repo, self.index
+        let mut path = format!(
+            "/repos/{}/{}/issues/{}/comments", self.owner, self.repo, self.index
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -535,6 +726,8 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 /// use schematic_schema::gitea::ListIssueTimelineRequest;
 ///
 /// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -545,6 +738,10 @@ pub struct ListIssueTimelineRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
 }
 impl ListIssueTimelineRequest {
     /// Creates a new request with the required path parameters.
@@ -557,7 +754,19 @@ impl ListIssueTimelineRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
+            page: None,
+            limit: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -574,9 +783,28 @@ impl ListIssueTimelineRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues/{}/timeline?limit=50", self.owner, self.repo, self.index
+        let mut path = format!(
+            "/repos/{}/{}/issues/{}/timeline", self.owner, self.repo, self.index
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -592,6 +820,8 @@ impl crate::shared::EndpointSpec for ListIssueTimelineRequest {
 /// use schematic_schema::gitea::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -600,6 +830,10 @@ pub struct ListTagsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
@@ -607,7 +841,19 @@ impl ListTagsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            limit: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -624,7 +870,26 @@ impl ListTagsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/repos/{}/{}/tags?limit=50", self.owner, self.repo);
+        let mut path = format!("/repos/{}/{}/tags", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -640,6 +905,10 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 /// use schematic_schema::gitea::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
+///     .with_draft(/* value */)
+///     .with_pre_release(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -648,6 +917,14 @@ pub struct ListReleasesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
+    /// Query parameter: Include draft releases
+    pub draft: Option<bool>,
+    /// Query parameter: Include pre-releases
+    pub pre_release: Option<bool>,
 }
 impl ListReleasesRequest {
     /// Creates a new request with the required path parameters.
@@ -655,7 +932,31 @@ impl ListReleasesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            limit: None,
+            draft: None,
+            pre_release: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
+    }
+    /// Sets the `draft` query parameter.
+    pub fn with_draft(mut self, value: bool) -> Self {
+        self.draft = Some(value);
+        self
+    }
+    /// Sets the `pre_release` query parameter.
+    pub fn with_pre_release(mut self, value: bool) -> Self {
+        self.pre_release = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -672,10 +973,32 @@ impl ListReleasesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/releases?draft=true&pre-release=true&limit=50", self.owner,
-            self.repo
-        );
+        let mut path = format!("/repos/{}/{}/releases", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if let Some(ref value) = self.draft {
+            query_pairs.push(("draft", value.to_string()));
+        }
+        if let Some(ref value) = self.pre_release {
+            query_pairs.push(("pre_release", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -795,6 +1118,13 @@ impl crate::shared::EndpointSpec for GetAnnotatedTagRequest {
     type Response = AnnotatedTagObject;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
 }
+impl Paginated for ListPullRequestsRequest {}
+impl Paginated for ListPullRequestFilesRequest {}
+impl Paginated for ListIssuesRequest {}
+impl Paginated for ListIssueCommentsRequest {}
+impl Paginated for ListIssueTimelineRequest {}
+impl Paginated for ListTagsRequest {}
+impl Paginated for ListReleasesRequest {}
 /// Request enum for Gitea API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -807,11 +1137,11 @@ pub enum GiteaRequest {
     GetGitTreeRecursive(GetGitTreeRecursiveRequest),
     /// Get raw file content from repository
     GetRepositoryContentRaw(GetRepositoryContentRawRequest),
-    /// List pull requests with metadata (all states, most recent first)
+    /// List pull requests with metadata
     ListPullRequests(ListPullRequestsRequest),
     /// List files changed in a pull request
     ListPullRequestFiles(ListPullRequestFilesRequest),
-    /// List issues (excludes PRs with type=issues filter)
+    /// List issues (use type=issues to exclude PRs)
     ListIssues(ListIssuesRequest),
     /// Get a single issue by index
     GetIssue(GetIssueRequest),
@@ -821,7 +1151,7 @@ pub enum GiteaRequest {
     ListIssueTimeline(ListIssueTimelineRequest),
     /// List repository tags
     ListTags(ListTagsRequest),
-    /// List releases (linked to tags via tag_name, includes drafts/prereleases)
+    /// List releases (linked to tags via tag_name)
     ListReleases(ListReleasesRequest),
     /// Get tag reference (returns array; check object.type: 'commit' vs 'tag')
     GetTagReference(GetTagReferenceRequest),

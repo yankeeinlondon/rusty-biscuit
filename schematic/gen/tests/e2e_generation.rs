@@ -756,3 +756,106 @@ fn multiple_apis_compile() {
         );
     }
 }
+
+// =============================================================================
+// Pagination Trait Tests
+// =============================================================================
+
+/// Tests that paginated endpoints generate the Paginated trait implementation.
+#[test]
+fn paginated_endpoints_generate_paginated_trait() {
+    use schematic_define::params::{EndpointParams, PaginationStyle};
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+
+    let api = RestApi {
+        name: "PaginatedTest".to_string(),
+        description: "API with pagination".to_string(),
+        base_url: "https://api.pagination.com".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        env_auth: vec![],
+        env_username: None,
+        env_mapping: None,
+        headers: vec![],
+        endpoints: vec![
+            // Paginated endpoint
+            Endpoint {
+                id: "ListItems".to_string(),
+                method: RestMethod::Get,
+                path: "/items".to_string(),
+                description: "List items with pagination".to_string(),
+                request: None,
+                response: ApiResponse::json_type("ListItemsResponse"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
+            },
+            // Non-paginated endpoint
+            Endpoint {
+                id: "GetItem".to_string(),
+                method: RestMethod::Get,
+                path: "/items/{id}".to_string(),
+                description: "Get a single item".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Item"),
+                headers: vec![],
+                params: None,
+            },
+        ],
+        module_path: None,
+        request_suffix: None,
+    };
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    // Check the shared.rs for the Paginated trait
+    let shared_content =
+        std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
+
+    assert!(
+        shared_content.contains("pub trait Paginated"),
+        "shared.rs should define Paginated trait"
+    );
+
+    // Check the API module for the trait impl
+    let api_content = std::fs::read_to_string(src_dir.join("paginatedtest.rs"))
+        .expect("Failed to read paginatedtest.rs");
+
+    // Paginated endpoint should implement the trait
+    assert!(
+        api_content.contains("impl Paginated for ListItemsRequest"),
+        "ListItemsRequest should implement Paginated"
+    );
+
+    // Non-paginated endpoint should NOT implement the trait
+    assert!(
+        !api_content.contains("impl Paginated for GetItemRequest"),
+        "GetItemRequest should NOT implement Paginated"
+    );
+}
+
+/// Tests that shared.rs contains the Paginated trait.
+#[test]
+fn shared_module_contains_paginated_trait() {
+    let api = define_openai_api();
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let shared_content =
+        std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
+
+    assert!(
+        shared_content.contains("pub trait Paginated"),
+        "shared.rs should define Paginated trait"
+    );
+    assert!(
+        shared_content.contains("Marker trait for paginated request types"),
+        "Paginated trait should have doc comment"
+    );
+}

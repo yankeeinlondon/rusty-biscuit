@@ -42,6 +42,7 @@
 //! ```
 
 pub use crate::auth::{AuthStrategy, UpdateStrategy};
+pub use crate::params::{EndpointParams, PaginationResponse, PaginationStyle};
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
 pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};

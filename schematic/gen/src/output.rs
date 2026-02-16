@@ -29,7 +29,8 @@ use quote::{format_ident, quote};
 use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
 use crate::codegen::{
-    ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
+    ModuleDocBuilder, generate_api_struct, generate_error_type, generate_paginated_impl,
+    generate_paginated_trait, generate_request_enum_with_suffix,
     generate_request_method_with_suffix, generate_request_parts_type,
     generate_request_struct_with_options, generate_variant_types, lines_to_doc_comments,
 };
@@ -124,6 +125,7 @@ fn get_request_suffix(api: &RestApi) -> String {
 /// - Common error type used by all API clients
 /// - Common type aliases (e.g., `RequestParts`)
 /// - Re-export of reqwest for downstream crates
+/// - `Paginated` marker trait for paginated request types
 ///
 /// ## Returns
 ///
@@ -133,6 +135,7 @@ pub fn assemble_shared_module() -> TokenStream {
     let request_parts_type = generate_request_parts_type();
     let error_type = generate_error_type();
     let variant_types = generate_variant_types();
+    let paginated_trait = generate_paginated_trait();
 
     quote! {
         //! Shared types and utilities for generated API clients.
@@ -148,6 +151,8 @@ pub fn assemble_shared_module() -> TokenStream {
         #error_type
 
         #variant_types
+
+        #paginated_trait
     }
 }
 
@@ -197,6 +202,13 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
         .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&api_name_lower)))
         .collect();
 
+    // Generate Paginated trait implementations for paginated endpoints
+    let paginated_impls: TokenStream = api
+        .endpoints
+        .iter()
+        .map(|ep| generate_paginated_impl(ep, &suffix))
+        .collect();
+
     // Generate request enum
     let request_enum = generate_request_enum_with_suffix(api, &suffix);
 
@@ -225,6 +237,18 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
         }
     };
 
+    // Conditionally import Paginated only when endpoints use pagination
+    let has_paginated = api
+        .endpoints
+        .iter()
+        .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()));
+
+    let shared_import = if has_paginated {
+        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
+    } else {
+        quote! { use crate::shared::{RequestParts, SchematicError}; }
+    };
+
     // Combine all pieces with necessary imports
     quote! {
         #module_docs
@@ -234,9 +258,11 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
         #definitions_import
 
         // Import shared types
-        use crate::shared::{RequestParts, SchematicError};
+        #shared_import
 
         #request_structs
+
+        #paginated_impls
 
         #request_enum
 
@@ -298,12 +324,21 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
                 .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&module_path)))
                 .collect();
 
+            // Generate Paginated trait implementations for paginated endpoints
+            let paginated_impls: TokenStream = api
+                .endpoints
+                .iter()
+                .map(|ep| generate_paginated_impl(ep, &suffix))
+                .collect();
+
             let request_enum = generate_request_enum_with_suffix(api, &suffix);
             let api_struct = generate_api_struct(api);
             let request_method = generate_request_method_with_suffix(api, &suffix);
 
             quote! {
                 #request_structs
+
+                #paginated_impls
 
                 #request_enum
 
@@ -314,6 +349,19 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
 
+    // Conditionally import Paginated only when any API has paginated endpoints
+    let has_paginated = apis.iter().any(|api| {
+        api.endpoints
+            .iter()
+            .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()))
+    });
+
+    let shared_import = if has_paginated {
+        quote! { use crate::shared::{Paginated, RequestParts, SchematicError}; }
+    } else {
+        quote! { use crate::shared::{RequestParts, SchematicError}; }
+    };
+
     quote! {
         #combined_docs
 
@@ -322,7 +370,7 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
         #definitions_import
 
         // Import shared types
-        use crate::shared::{RequestParts, SchematicError};
+        #shared_import
 
         #(#per_api_code)*
     }

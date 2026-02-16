@@ -56,6 +56,8 @@
 //! - [`ParamDef`] - Single parameter definition
 //! - [`QueryParamType`] - Parameter value type
 //! - [`ParamStyle`] - Parameter serialization style
+//! - [`PaginationStyle`] - Common pagination request patterns
+//! - [`PaginationResponse`] - How APIs signal pagination state in responses
 //!
 //! ## Examples
 //!
@@ -147,7 +149,9 @@ pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
     TypeRef,
 };
-pub use params::{EndpointParams, ParamDef, ParamStyle, PaginationStyle, QueryParamType};
+pub use params::{
+    EndpointParams, PaginationResponse, PaginationStyle, ParamDef, ParamStyle, QueryParamType,
+};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};

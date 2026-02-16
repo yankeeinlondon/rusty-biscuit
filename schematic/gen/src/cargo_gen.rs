@@ -30,6 +30,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["rt", "macros"] }
+urlencoding = "2.1"
 
 [dev-dependencies]
 wiremock = "0.6"
@@ -266,6 +267,18 @@ mod tests {
         assert!(
             deps.contains_key("bytes"),
             "bytes dependency is required for binary responses"
+        );
+    }
+
+    #[test]
+    fn generate_cargo_toml_includes_urlencoding() {
+        let content = generate_cargo_toml(None);
+        let parsed: toml::Table = toml::from_str(&content).unwrap();
+
+        let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
+        assert!(
+            deps.contains_key("urlencoding"),
+            "urlencoding dependency is required for query parameter encoding"
         );
     }
 

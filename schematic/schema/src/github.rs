@@ -15,7 +15,7 @@
 //! - `GetGitTree` - Get a Git tree (non-recursive, single level)
 //! - `GetGitTreeRecursive` - Get a Git tree recursively (may truncate at 100k entries or 7MB)
 //! - `GetRepositoryContentRaw` - Get raw file content from repository
-//! - `ListPullRequests` - List pull requests with metadata (all states, most recent first)
+//! - `ListPullRequests` - List pull requests with metadata
 //! - `ListPullRequestFiles` - List files changed in a pull request
 //! - `ListIssues` - List issues (includes PRs; filter by pull_request field)
 //! - `GetIssue` - Get a single issue by number
@@ -41,7 +41,7 @@
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::github::*;
-use crate::shared::{RequestParts, SchematicError};
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -155,6 +155,7 @@ impl crate::shared::EndpointSpec for GetGitTreeRequest {
 /// use schematic_schema::github::GetGitTreeRecursiveRequest;
 ///
 /// let request = GetGitTreeRecursiveRequest::new("owner_value", "repo_value", "tree_sha_value")
+///     .with_recursive(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -165,6 +166,8 @@ pub struct GetGitTreeRecursiveRequest {
     pub repo: String,
     /// Path parameter: tree_sha
     pub tree_sha: String,
+    /// Query parameter: Fetch tree recursively (always true for this endpoint)
+    pub recursive: Option<bool>,
 }
 impl GetGitTreeRecursiveRequest {
     /// Creates a new request with the required path parameters.
@@ -177,7 +180,13 @@ impl GetGitTreeRecursiveRequest {
             owner: owner.into(),
             repo: repo.into(),
             tree_sha: tree_sha.into(),
+            recursive: None,
         }
+    }
+    /// Sets the `recursive` query parameter.
+    pub fn with_recursive(mut self, value: bool) -> Self {
+        self.recursive = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -194,9 +203,25 @@ impl GetGitTreeRecursiveRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/git/trees/{}?recursive=1", self.owner, self.repo, self.tree_sha
+        let mut path = format!(
+            "/repos/{}/{}/git/trees/{}", self.owner, self.repo, self.tree_sha
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.recursive {
+            query_pairs.push(("recursive", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -272,6 +297,11 @@ impl crate::shared::EndpointSpec for GetRepositoryContentRawRequest {
 /// use schematic_schema::github::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_state(/* value */)
+///     .with_sort(/* value */)
+///     .with_direction(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -280,6 +310,16 @@ pub struct ListPullRequestsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by PR state
+    pub state: Option<String>,
+    /// Query parameter: Sort field
+    pub sort: Option<String>,
+    /// Query parameter: Sort direction
+    pub direction: Option<String>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -287,7 +327,37 @@ impl ListPullRequestsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            per_page: None,
+            state: None,
+            sort: None,
+            direction: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `state` query parameter.
+    pub fn with_state(mut self, value: String) -> Self {
+        self.state = Some(value);
+        self
+    }
+    /// Sets the `sort` query parameter.
+    pub fn with_sort(mut self, value: String) -> Self {
+        self.sort = Some(value);
+        self
+    }
+    /// Sets the `direction` query parameter.
+    pub fn with_direction(mut self, value: String) -> Self {
+        self.direction = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -304,10 +374,35 @@ impl ListPullRequestsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/pulls?state=all&sort=updated&direction=desc&per_page=100", self
-            .owner, self.repo
-        );
+        let mut path = format!("/repos/{}/{}/pulls", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.state {
+            query_pairs.push(("state", value.to_string()));
+        }
+        if let Some(ref value) = self.sort {
+            query_pairs.push(("sort", value.to_string()));
+        }
+        if let Some(ref value) = self.direction {
+            query_pairs.push(("direction", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -323,6 +418,8 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 /// use schematic_schema::github::ListPullRequestFilesRequest;
 ///
 /// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -333,6 +430,10 @@ pub struct ListPullRequestFilesRequest {
     pub repo: String,
     /// Path parameter: pull_number
     pub pull_number: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
 }
 impl ListPullRequestFilesRequest {
     /// Creates a new request with the required path parameters.
@@ -345,7 +446,19 @@ impl ListPullRequestFilesRequest {
             owner: owner.into(),
             repo: repo.into(),
             pull_number: pull_number.into(),
+            page: None,
+            per_page: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -362,10 +475,28 @@ impl ListPullRequestFilesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/pulls/{}/files?per_page=100", self.owner, self.repo, self
-            .pull_number
+        let mut path = format!(
+            "/repos/{}/{}/pulls/{}/files", self.owner, self.repo, self.pull_number
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -381,6 +512,11 @@ impl crate::shared::EndpointSpec for ListPullRequestFilesRequest {
 /// use schematic_schema::github::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_state(/* value */)
+///     .with_sort(/* value */)
+///     .with_direction(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -389,6 +525,16 @@ pub struct ListIssuesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by issue state
+    pub state: Option<String>,
+    /// Query parameter: Sort field
+    pub sort: Option<String>,
+    /// Query parameter: Sort direction
+    pub direction: Option<String>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -396,7 +542,37 @@ impl ListIssuesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            per_page: None,
+            state: None,
+            sort: None,
+            direction: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `state` query parameter.
+    pub fn with_state(mut self, value: String) -> Self {
+        self.state = Some(value);
+        self
+    }
+    /// Sets the `sort` query parameter.
+    pub fn with_sort(mut self, value: String) -> Self {
+        self.sort = Some(value);
+        self
+    }
+    /// Sets the `direction` query parameter.
+    pub fn with_direction(mut self, value: String) -> Self {
+        self.direction = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -413,9 +589,35 @@ impl ListIssuesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues?state=all&per_page=100", self.owner, self.repo
-        );
+        let mut path = format!("/repos/{}/{}/issues", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.state {
+            query_pairs.push(("state", value.to_string()));
+        }
+        if let Some(ref value) = self.sort {
+            query_pairs.push(("sort", value.to_string()));
+        }
+        if let Some(ref value) = self.direction {
+            query_pairs.push(("direction", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -488,6 +690,8 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 /// use schematic_schema::github::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -498,6 +702,10 @@ pub struct ListIssueCommentsRequest {
     pub repo: String,
     /// Path parameter: issue_number
     pub issue_number: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
 }
 impl ListIssueCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -510,7 +718,19 @@ impl ListIssueCommentsRequest {
             owner: owner.into(),
             repo: repo.into(),
             issue_number: issue_number.into(),
+            page: None,
+            per_page: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -527,10 +747,28 @@ impl ListIssueCommentsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues/{}/comments?per_page=100", self.owner, self.repo, self
-            .issue_number
+        let mut path = format!(
+            "/repos/{}/{}/issues/{}/comments", self.owner, self.repo, self.issue_number
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -546,6 +784,8 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 /// use schematic_schema::github::ListIssueTimelineRequest;
 ///
 /// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -556,6 +796,10 @@ pub struct ListIssueTimelineRequest {
     pub repo: String,
     /// Path parameter: issue_number
     pub issue_number: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
 }
 impl ListIssueTimelineRequest {
     /// Creates a new request with the required path parameters.
@@ -568,7 +812,19 @@ impl ListIssueTimelineRequest {
             owner: owner.into(),
             repo: repo.into(),
             issue_number: issue_number.into(),
+            page: None,
+            per_page: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -585,10 +841,28 @@ impl ListIssueTimelineRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repos/{}/{}/issues/{}/timeline?per_page=100", self.owner, self.repo, self
-            .issue_number
+        let mut path = format!(
+            "/repos/{}/{}/issues/{}/timeline", self.owner, self.repo, self.issue_number
         );
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -604,6 +878,8 @@ impl crate::shared::EndpointSpec for ListIssueTimelineRequest {
 /// use schematic_schema::github::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -612,6 +888,10 @@ pub struct ListTagsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
@@ -619,7 +899,19 @@ impl ListTagsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            per_page: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -636,7 +928,26 @@ impl ListTagsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/repos/{}/{}/tags?per_page=100", self.owner, self.repo);
+        let mut path = format!("/repos/{}/{}/tags", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -652,6 +963,8 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 /// use schematic_schema::github::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -660,6 +973,10 @@ pub struct ListReleasesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
 }
 impl ListReleasesRequest {
     /// Creates a new request with the required path parameters.
@@ -667,7 +984,19 @@ impl ListReleasesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
+            page: None,
+            per_page: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -684,7 +1013,26 @@ impl ListReleasesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/repos/{}/{}/releases?per_page=100", self.owner, self.repo);
+        let mut path = format!("/repos/{}/{}/releases", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -806,6 +1154,13 @@ impl crate::shared::EndpointSpec for GetAnnotatedTagRequest {
     type Response = AnnotatedTagObject;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
 }
+impl Paginated for ListPullRequestsRequest {}
+impl Paginated for ListPullRequestFilesRequest {}
+impl Paginated for ListIssuesRequest {}
+impl Paginated for ListIssueCommentsRequest {}
+impl Paginated for ListIssueTimelineRequest {}
+impl Paginated for ListTagsRequest {}
+impl Paginated for ListReleasesRequest {}
 /// Request enum for GitHub API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -818,7 +1173,7 @@ pub enum GitHubRequest {
     GetGitTreeRecursive(GetGitTreeRecursiveRequest),
     /// Get raw file content from repository
     GetRepositoryContentRaw(GetRepositoryContentRawRequest),
-    /// List pull requests with metadata (all states, most recent first)
+    /// List pull requests with metadata
     ListPullRequests(ListPullRequestsRequest),
     /// List files changed in a pull request
     ListPullRequestFiles(ListPullRequestFilesRequest),

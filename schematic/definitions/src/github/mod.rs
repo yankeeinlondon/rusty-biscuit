@@ -40,6 +40,7 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
+    params::{EndpointParams, PaginationStyle, QueryParamType},
     ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
 };
 
@@ -54,7 +55,7 @@ use schematic_define::{
 /// |----|--------|------|-------------|
 /// | GetRepository | GET | /repos/{owner}/{repo} | Get repository metadata |
 /// | GetGitTree | GET | /repos/{owner}/{repo}/git/trees/{tree_sha} | Get tree (non-recursive) |
-/// | GetGitTreeRecursive | GET | /repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1 | Get tree recursively |
+/// | GetGitTreeRecursive | GET | /repos/{owner}/{repo}/git/trees/{tree_sha} | Get tree recursively |
 /// | GetRepositoryContentRaw | GET | /repos/{owner}/{repo}/contents/{path} | Get raw file content |
 /// | ListPullRequests | GET | /repos/{owner}/{repo}/pulls | List pull requests |
 /// | ListPullRequestFiles | GET | /repos/{owner}/{repo}/pulls/{pull_number}/files | List PR files |
@@ -66,6 +67,9 @@ use schematic_define::{
 /// | ListReleases | GET | /repos/{owner}/{repo}/releases | List releases |
 /// | GetTagReference | GET | /repos/{owner}/{repo}/git/ref/tags/{tag} | Get tag reference |
 /// | GetAnnotatedTag | GET | /repos/{owner}/{repo}/git/tags/{tag_sha} | Get annotated tag object |
+///
+/// All `List*` endpoints support pagination via `page` and `per_page` query parameters.
+/// The `GetGitTreeRecursive` endpoint has a required `recursive` boolean parameter.
 ///
 /// ## Examples
 ///
@@ -121,13 +125,20 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "GetGitTreeRecursive".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1".to_string(),
+                path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
                 description: "Get a Git tree recursively (may truncate at 100k entries or 7MB)"
                     .to_string(),
                 request: None,
                 response: ApiResponse::json_type("GitTreeResponse"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_query_param(
+                        "recursive",
+                        QueryParamType::Boolean,
+                        true,
+                        Some("Fetch tree recursively (always true for this endpoint)"),
+                    ),
+                ),
             },
             // =================================================================
             // Repository Contents (raw file access)
@@ -151,24 +162,54 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "ListPullRequests".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100"
-                    .to_string(),
-                description: "List pull requests with metadata (all states, most recent first)"
-                    .to_string(),
+                path: "/repos/{owner}/{repo}/pulls".to_string(),
+                description: "List pull requests with metadata".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestSummary"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::github())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "open".to_string(),
+                                "closed".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by PR state"),
+                        )
+                        .with_query_param(
+                            "sort",
+                            QueryParamType::Enum(vec![
+                                "created".to_string(),
+                                "updated".to_string(),
+                                "popularity".to_string(),
+                                "long-running".to_string(),
+                            ]),
+                            false,
+                            Some("Sort field"),
+                        )
+                        .with_query_param(
+                            "direction",
+                            QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
+                            false,
+                            Some("Sort direction"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "ListPullRequestFiles".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls/{pull_number}/files?per_page=100".to_string(),
+                path: "/repos/{owner}/{repo}/pulls/{pull_number}/files".to_string(),
                 description: "List files changed in a pull request".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
             },
             // =================================================================
             // Issues
@@ -176,12 +217,41 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "ListIssues".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues?state=all&per_page=100".to_string(),
+                path: "/repos/{owner}/{repo}/issues".to_string(),
                 description: "List issues (includes PRs; filter by pull_request field)".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("IssueSummary"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::github())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "open".to_string(),
+                                "closed".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by issue state"),
+                        )
+                        .with_query_param(
+                            "sort",
+                            QueryParamType::Enum(vec![
+                                "created".to_string(),
+                                "updated".to_string(),
+                                "comments".to_string(),
+                            ]),
+                            false,
+                            Some("Sort field"),
+                        )
+                        .with_query_param(
+                            "direction",
+                            QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
+                            false,
+                            Some("Sort direction"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -196,24 +266,26 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "ListIssueComments".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{issue_number}/comments?per_page=100"
-                    .to_string(),
+                path: "/repos/{owner}/{repo}/issues/{issue_number}/comments".to_string(),
                 description: "List comments on an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{issue_number}/timeline?per_page=100"
-                    .to_string(),
+                path: "/repos/{owner}/{repo}/issues/{issue_number}/timeline".to_string(),
                 description: "List timeline events for an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
             },
             // =================================================================
             // Tags and Releases
@@ -221,22 +293,26 @@ pub fn define_github_api() -> RestApi {
             Endpoint {
                 id: "ListTags".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/tags?per_page=100".to_string(),
+                path: "/repos/{owner}/{repo}/tags".to_string(),
                 description: "List repository tags".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
             },
             Endpoint {
                 id: "ListReleases".to_string(),
                 method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/releases?per_page=100".to_string(),
+                path: "/repos/{owner}/{repo}/releases".to_string(),
                 description: "List releases (linked to tags via tag_name)".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Release"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::github()),
+                ),
             },
             Endpoint {
                 id: "GetTagReference".to_string(),
@@ -345,13 +421,20 @@ mod tests {
         let tree = api.endpoints.iter().find(|e| e.id == "GetGitTree").unwrap();
         assert_eq!(tree.path, "/repos/{owner}/{repo}/git/trees/{tree_sha}");
         assert!(!tree.path.contains("recursive"));
+        assert!(tree.params.is_none());
 
         let recursive = api
             .endpoints
             .iter()
             .find(|e| e.id == "GetGitTreeRecursive")
             .unwrap();
-        assert!(recursive.path.contains("recursive=1"));
+        assert_eq!(
+            recursive.path,
+            "/repos/{owner}/{repo}/git/trees/{tree_sha}"
+        );
+        // recursive param is now explicit
+        let params = recursive.params.as_ref().expect("should have params");
+        assert!(params.query.iter().any(|p| p.name == "recursive"));
     }
 
     #[test]
@@ -383,8 +466,12 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListPullRequests")
             .unwrap();
-        assert!(list_prs.path.contains("state=all"));
-        assert!(list_prs.path.contains("per_page=100"));
+        assert_eq!(list_prs.path, "/repos/{owner}/{repo}/pulls");
+        let params = list_prs.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "state"));
+        assert!(params.query.iter().any(|p| p.name == "sort"));
+        assert!(params.query.iter().any(|p| p.name == "direction"));
 
         let list_files = api
             .endpoints
@@ -392,6 +479,8 @@ mod tests {
             .find(|e| e.id == "ListPullRequestFiles")
             .unwrap();
         assert!(list_files.path.contains("{pull_number}"));
+        let file_params = list_files.params.as_ref().expect("should have params");
+        assert!(file_params.has_pagination());
     }
 
     #[test]
@@ -399,7 +488,10 @@ mod tests {
         let api = define_github_api();
 
         let list = api.endpoints.iter().find(|e| e.id == "ListIssues").unwrap();
-        assert!(list.path.contains("state=all"));
+        assert_eq!(list.path, "/repos/{owner}/{repo}/issues");
+        let params = list.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "state"));
 
         let get = api.endpoints.iter().find(|e| e.id == "GetIssue").unwrap();
         assert!(get.path.contains("{issue_number}"));
@@ -410,6 +502,8 @@ mod tests {
             .find(|e| e.id == "ListIssueComments")
             .unwrap();
         assert!(comments.path.contains("{issue_number}/comments"));
+        let comment_params = comments.params.as_ref().expect("should have params");
+        assert!(comment_params.has_pagination());
 
         let timeline = api
             .endpoints
@@ -417,6 +511,8 @@ mod tests {
             .find(|e| e.id == "ListIssueTimeline")
             .unwrap();
         assert!(timeline.path.contains("timeline"));
+        let timeline_params = timeline.params.as_ref().expect("should have params");
+        assert!(timeline_params.has_pagination());
     }
 
     #[test]
@@ -424,14 +520,18 @@ mod tests {
         let api = define_github_api();
 
         let tags = api.endpoints.iter().find(|e| e.id == "ListTags").unwrap();
-        assert!(tags.path.ends_with("tags?per_page=100"));
+        assert_eq!(tags.path, "/repos/{owner}/{repo}/tags");
+        let tag_params = tags.params.as_ref().expect("should have params");
+        assert!(tag_params.has_pagination());
 
         let releases = api
             .endpoints
             .iter()
             .find(|e| e.id == "ListReleases")
             .unwrap();
-        assert!(releases.path.contains("releases"));
+        assert_eq!(releases.path, "/repos/{owner}/{repo}/releases");
+        let release_params = releases.params.as_ref().expect("should have params");
+        assert!(release_params.has_pagination());
 
         let ref_endpoint = api
             .endpoints
@@ -530,6 +630,73 @@ mod tests {
                 }
                 _ => {} // GetRepositoryContentRaw returns Text, which is fine
             }
+        }
+    }
+
+    #[test]
+    fn list_endpoints_have_pagination() {
+        let api = define_github_api();
+
+        let list_endpoints = [
+            "ListPullRequests",
+            "ListPullRequestFiles",
+            "ListIssues",
+            "ListIssueComments",
+            "ListIssueTimeline",
+            "ListTags",
+            "ListReleases",
+        ];
+
+        for id in list_endpoints {
+            let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
+            let params = endpoint
+                .params
+                .as_ref()
+                .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
+            assert!(
+                params.has_pagination(),
+                "Endpoint {} should have pagination",
+                id
+            );
+            // Verify GitHub-style pagination (page + per_page)
+            assert!(
+                params.query.iter().any(|p| p.name == "page"),
+                "Endpoint {} should have page param",
+                id
+            );
+            assert!(
+                params.query.iter().any(|p| p.name == "per_page"),
+                "Endpoint {} should have per_page param",
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn no_hardcoded_query_params_in_paths() {
+        let api = define_github_api();
+
+        for endpoint in &api.endpoints {
+            assert!(
+                !endpoint.path.contains("per_page="),
+                "Endpoint {} should not have hardcoded per_page in path",
+                endpoint.id
+            );
+            assert!(
+                !endpoint.path.contains("state="),
+                "Endpoint {} should not have hardcoded state in path",
+                endpoint.id
+            );
+            assert!(
+                !endpoint.path.contains("sort="),
+                "Endpoint {} should not have hardcoded sort in path",
+                endpoint.id
+            );
+            assert!(
+                !endpoint.path.contains("direction="),
+                "Endpoint {} should not have hardcoded direction in path",
+                endpoint.id
+            );
         }
     }
 }

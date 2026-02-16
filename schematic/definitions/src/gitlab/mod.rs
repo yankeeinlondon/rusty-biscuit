@@ -42,6 +42,7 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
+    params::{EndpointParams, PaginationStyle, QueryParamType},
     ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
 };
 
@@ -105,12 +106,33 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListRepositoryTree".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/repository/tree?per_page=100&recursive=true".to_string(),
+                path: "/projects/{id}/repository/tree".to_string(),
                 description: "List repository tree recursively (files and directories)".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("TreeItem"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitlab())
+                        .with_query_param(
+                            "recursive",
+                            QueryParamType::Boolean,
+                            false,
+                            Some("Include files from subdirectories recursively"),
+                        )
+                        .with_query_param(
+                            "git_ref",
+                            QueryParamType::String,
+                            false,
+                            Some("Branch, tag, or commit SHA to list tree for"),
+                        )
+                        .with_query_param(
+                            "path",
+                            QueryParamType::String,
+                            false,
+                            Some("Subdirectory path to list"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "GetRepositoryFile".to_string(),
@@ -129,12 +151,26 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListMergeRequests".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests?state=all&per_page=100".to_string(),
-                description: "List merge requests with metadata (all states)".to_string(),
+                path: "/projects/{id}/merge_requests".to_string(),
+                description: "List merge requests with metadata".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("MergeRequest"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitlab())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "opened".to_string(),
+                                "closed".to_string(),
+                                "merged".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by merge request state"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "GetMergeRequest".to_string(),
@@ -149,13 +185,14 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListMergeRequestCommits".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests/{merge_request_iid}/commits?per_page=100"
-                    .to_string(),
+                path: "/projects/{id}/merge_requests/{merge_request_iid}/commits".to_string(),
                 description: "List commits in a merge request".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Commit"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
+                ),
             },
             Endpoint {
                 id: "ListMergeRequestChanges".to_string(),
@@ -173,12 +210,25 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListIssues".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/issues?state=all&per_page=100".to_string(),
-                description: "List issues (all states)".to_string(),
+                path: "/projects/{id}/issues".to_string(),
+                description: "List issues".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Issue"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitlab())
+                        .with_query_param(
+                            "state",
+                            QueryParamType::Enum(vec![
+                                "opened".to_string(),
+                                "closed".to_string(),
+                                "all".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by issue state"),
+                        ),
+                ),
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -193,12 +243,14 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListIssueNotes".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/issues/{issue_iid}/notes?per_page=100".to_string(),
+                path: "/projects/{id}/issues/{issue_iid}/notes".to_string(),
                 description: "List comments/notes on an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Note"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
+                ),
             },
             Endpoint {
                 id: "ListIssueParticipants".to_string(),
@@ -216,13 +268,15 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListTags".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/repository/tags?per_page=100".to_string(),
+                path: "/projects/{id}/repository/tags".to_string(),
                 description: "List repository tags (check `release` field for release tags)"
                     .to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Tag"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
+                ),
             },
             Endpoint {
                 id: "GetTag".to_string(),
@@ -237,12 +291,14 @@ pub fn define_gitlab_api() -> RestApi {
             Endpoint {
                 id: "ListReleases".to_string(),
                 method: RestMethod::Get,
-                path: "/projects/{id}/releases?per_page=100".to_string(),
+                path: "/projects/{id}/releases".to_string(),
                 description: "List releases".to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("Release"),
                 headers: vec![],
-                params: None,
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
+                ),
             },
             Endpoint {
                 id: "GetRelease".to_string(),
@@ -335,7 +391,7 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert!(endpoint.path.contains("/repository/tree"));
-        assert!(endpoint.path.contains("recursive=true"));
+        assert!(!endpoint.path.contains("?"), "Path should not contain query params");
         assert!(endpoint.request.is_none());
         match &endpoint.response {
             ApiResponse::Json(schema) => {
@@ -343,6 +399,13 @@ mod tests {
             }
             _ => panic!("Expected JSON response"),
         }
+
+        // Verify pagination and query params are in params
+        let params = endpoint.params.as_ref().expect("params should be set");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "recursive"));
+        assert!(params.query.iter().any(|p| p.name == "git_ref"));
+        assert!(params.query.iter().any(|p| p.name == "path"));
     }
 
     #[test]
@@ -368,8 +431,10 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListMergeRequests")
             .unwrap();
-        assert!(list.path.contains("state=all"));
-        assert!(list.path.contains("per_page=100"));
+        assert!(!list.path.contains("?"), "Path should not contain query params");
+        let list_params = list.params.as_ref().expect("params should be set");
+        assert!(list_params.has_pagination());
+        assert!(list_params.query.iter().any(|p| p.name == "state"));
 
         let get = api
             .endpoints
@@ -384,6 +449,9 @@ mod tests {
             .find(|e| e.id == "ListMergeRequestCommits")
             .unwrap();
         assert!(commits.path.contains("/commits"));
+        assert!(!commits.path.contains("?"), "Path should not contain query params");
+        let commits_params = commits.params.as_ref().expect("params should be set");
+        assert!(commits_params.has_pagination());
 
         let changes = api
             .endpoints
@@ -398,7 +466,10 @@ mod tests {
         let api = define_gitlab_api();
 
         let list = api.endpoints.iter().find(|e| e.id == "ListIssues").unwrap();
-        assert!(list.path.contains("state=all"));
+        assert!(!list.path.contains("?"), "Path should not contain query params");
+        let list_params = list.params.as_ref().expect("params should be set");
+        assert!(list_params.has_pagination());
+        assert!(list_params.query.iter().any(|p| p.name == "state"));
 
         let get = api.endpoints.iter().find(|e| e.id == "GetIssue").unwrap();
         assert!(get.path.contains("{issue_iid}"));
@@ -409,6 +480,9 @@ mod tests {
             .find(|e| e.id == "ListIssueNotes")
             .unwrap();
         assert!(notes.path.contains("/notes"));
+        assert!(!notes.path.contains("?"), "Path should not contain query params");
+        let notes_params = notes.params.as_ref().expect("params should be set");
+        assert!(notes_params.has_pagination());
 
         let participants = api
             .endpoints
@@ -545,5 +619,80 @@ mod tests {
     fn module_path_set_correctly() {
         let api = define_gitlab_api();
         assert_eq!(api.module_path, Some("gitlab".to_string()));
+    }
+
+    #[test]
+    fn list_endpoints_use_gitlab_pagination() {
+        use schematic_define::params::PaginationStyle;
+
+        let api = define_gitlab_api();
+
+        let paginated_endpoints = [
+            "ListRepositoryTree",
+            "ListMergeRequests",
+            "ListMergeRequestCommits",
+            "ListIssues",
+            "ListIssueNotes",
+            "ListTags",
+            "ListReleases",
+        ];
+
+        for id in paginated_endpoints {
+            let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
+            let params = endpoint
+                .params
+                .as_ref()
+                .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
+
+            assert!(
+                params.has_pagination(),
+                "Endpoint {} should have pagination",
+                id
+            );
+
+            // Verify GitLab pagination style (page + per_page)
+            match &params.pagination {
+                Some(PaginationStyle::PageNumber {
+                    page_param,
+                    per_page_param,
+                    default_per_page,
+                    max_per_page,
+                }) => {
+                    assert_eq!(page_param, "page", "Endpoint {} page_param", id);
+                    assert_eq!(per_page_param, "per_page", "Endpoint {} per_page_param", id);
+                    assert_eq!(*default_per_page, 100, "Endpoint {} default_per_page", id);
+                    assert_eq!(*max_per_page, 100, "Endpoint {} max_per_page", id);
+                }
+                _ => panic!("Endpoint {} should use PageNumber pagination", id),
+            }
+        }
+    }
+
+    #[test]
+    fn no_hardcoded_query_params_in_paths() {
+        let api = define_gitlab_api();
+
+        for endpoint in &api.endpoints {
+            // GetRepositoryFile is allowed to have ?ref= as a path parameter
+            if endpoint.id == "GetRepositoryFile" {
+                continue;
+            }
+
+            assert!(
+                !endpoint.path.contains("per_page="),
+                "Endpoint {} should not have hardcoded per_page in path",
+                endpoint.id
+            );
+            assert!(
+                !endpoint.path.contains("state="),
+                "Endpoint {} should not have hardcoded state in path",
+                endpoint.id
+            );
+            assert!(
+                !endpoint.path.contains("recursive="),
+                "Endpoint {} should not have hardcoded recursive in path",
+                endpoint.id
+            );
+        }
     }
 }
