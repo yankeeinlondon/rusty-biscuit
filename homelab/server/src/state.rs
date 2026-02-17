@@ -48,6 +48,10 @@ pub struct AppState {
     pub arcam_last_query: Arc<RwLock<Option<Instant>>>,
     /// Current Arcam polling interval in seconds (based on Auto Shutdown setting)
     pub arcam_poll_interval_secs: Arc<RwLock<u64>>,
+    /// Last known Sony power status (for change-only INFO logging)
+    pub sony_last_power_status: Arc<RwLock<Option<String>>>,
+    /// Last known Arcam power state (for change-only INFO logging)
+    pub arcam_last_power_state: Arc<RwLock<Option<bool>>>,
 }
 
 /// Configuration errors
@@ -96,6 +100,8 @@ impl AppState {
             arcam_cached_status: Arc::new(RwLock::new(None)),
             arcam_last_query: Arc::new(RwLock::new(None)),
             arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
+            sony_last_power_status: Arc::new(RwLock::new(None)),
+            arcam_last_power_state: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -142,6 +148,8 @@ impl AppState {
             arcam_cached_status: Arc::new(RwLock::new(None)),
             arcam_last_query: Arc::new(RwLock::new(None)),
             arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
+            sony_last_power_status: Arc::new(RwLock::new(None)),
+            arcam_last_power_state: Arc::new(RwLock::new(None)),
         }
     }
 

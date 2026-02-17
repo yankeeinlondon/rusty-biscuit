@@ -43,7 +43,7 @@ fn device_suffix(host: &str, port: u16, source: &DeviceSource) -> String {
 
 /// Renders a styled single-line result using Prose.
 fn styled(text: impl Into<String>) -> String {
-    Prose::new(text).render(None)
+    Prose::new(text).fallback_render(&Terminal::default())
 }
 
 const COMPLETIONS_HELP: &str = r#"
@@ -463,9 +463,39 @@ impl From<SonyEndpoint> for SonyReceiverEndpoints {
 // =============================================================================
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
-    color_eyre::install()?;
+    if let Err(e) = run().await {
+        // Deduplicate chain: skip causes whose message is already contained in a prior message.
+        let top = e.to_string();
+        let mut seen = top.clone();
+        let causes: Vec<String> = e
+            .chain()
+            .skip(1)
+            .filter_map(|c| {
+                let msg = c.to_string();
+                if seen.contains(&msg) {
+                    None
+                } else {
+                    seen.push_str(&msg);
+                    Some(msg)
+                }
+            })
+            .collect();
+        let msg = if causes.is_empty() {
+            format!("<red><b>Error:</b></red> {top}")
+        } else {
+            format!(
+                "<red><b>Error:</b></red> {top} <dim>▸</dim> {}",
+                causes.join(" <dim>▸</dim> ")
+            )
+        };
+        eprintln!("{}", styled(msg));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let json = cli.json;
@@ -1133,7 +1163,19 @@ async fn handle_sony_audio(
             }
         }
         SonyAudioAction::SpeakerSettings { target } => {
-            let settings = receiver.get_speaker_settings(target.as_api_str()).await?;
+            let result = receiver.get_speaker_settings(target.as_api_str()).await;
+            if result.is_err() && matches!(target, SpeakerTarget::All) {
+                let valid = ["level", "distance", "size", "pattern"];
+                let list = valid.iter().map(|v| format!("<b>{v}</b>")).collect::<Vec<_>>().join(", ");
+                eprintln!(
+                    "{}",
+                    styled(format!(
+                        "<red><b>Error:</b></red> speaker-settings requires a target. Valid targets: {list}",
+                    ))
+                );
+                std::process::exit(1);
+            }
+            let settings = result?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
@@ -1295,7 +1337,19 @@ async fn handle_sony_input(
             }
         }
         SonyInputAction::Bluetooth { target } => {
-            let result = receiver.get_bluetooth_settings(target.as_api_str()).await?;
+            let result = receiver.get_bluetooth_settings(target.as_api_str()).await;
+            if result.is_err() && matches!(target, BluetoothTarget::All) {
+                let valid = ["bt-standby", "aac"];
+                let list = valid.iter().map(|v| format!("<b>{v}</b>")).collect::<Vec<_>>().join(", ");
+                eprintln!(
+                    "{}",
+                    styled(format!(
+                        "<red><b>Error:</b></red> bluetooth requires a target. Valid targets: {list}",
+                    ))
+                );
+                std::process::exit(1);
+            }
+            let result = result?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
@@ -1308,7 +1362,7 @@ async fn handle_sony_input(
                     ]);
                     for item in arr {
                         if let Some(obj) = item.as_object() {
-                            let target =
+                            let bt_target =
                                 obj.get("target").and_then(|v| v.as_str()).unwrap_or("");
                             let value = obj
                                 .get("currentValue")
@@ -1316,7 +1370,7 @@ async fn handle_sony_input(
                                 .unwrap_or("");
                             let title =
                                 obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                            table.add_row(vec![target.into(), value.into(), title.into()]);
+                            table.add_row(vec![bt_target.into(), value.into(), title.into()]);
                         }
                     }
                     print!("{}", table.display(&Terminal::default()));
@@ -1335,9 +1389,21 @@ async fn handle_sony_input(
             }
         }
         SonyInputAction::PlaybackMode { target } => {
-            let settings = receiver
+            let result = receiver
                 .get_playback_mode_settings(target.as_api_str())
-                .await?;
+                .await;
+            if result.is_err() && matches!(target, PlaybackModeTarget::All) {
+                let valid = ["shuffle", "repeat"];
+                let list = valid.iter().map(|v| format!("<b>{v}</b>")).collect::<Vec<_>>().join(", ");
+                eprintln!(
+                    "{}",
+                    styled(format!(
+                        "<red><b>Error:</b></red> playback-mode requires a target. Valid targets: {list}",
+                    ))
+                );
+                std::process::exit(1);
+            }
+            let settings = result?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
@@ -1574,12 +1640,12 @@ async fn handle_sony_native(
                     TableColumn::new(""),
                     TableColumn::new(""),
                 ]);
-                table.add_row(vec!["Volume Display".into(), settings.volume_display.as_str().into()]);
-                table.add_row(vec!["Dimmer".into(), settings.dimmer.as_str().into()]);
-                table.add_row(vec!["Device Name".into(), settings.device_name.as_str().into()]);
-                table.add_row(vec!["Wired LAN".into(), settings.network.wired.as_str().into()]);
-                table.add_row(vec!["Wireless LAN".into(), settings.network.wireless.as_str().into()]);
-                table.add_row(vec!["Internet".into(), settings.network.internet.as_str().into()]);
+                table.add_row(vec!["Volume Display".into(), settings.volume_display.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Dimmer".into(), settings.dimmer.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Device Name".into(), settings.device_name.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Wired LAN".into(), settings.network.wired.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Wireless LAN".into(), settings.network.wireless.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Internet".into(), settings.network.internet.as_deref().unwrap_or("N/A").into()]);
                 print!("{}", table.display(&Terminal::default()));
             }
         }
@@ -1593,13 +1659,13 @@ async fn handle_sony_native(
                     TableColumn::new(""),
                     TableColumn::new(""),
                 ]);
-                table.add_row(vec!["Pure Direct".into(), settings.pure_direct.as_str().into()]);
-                table.add_row(vec!["Sound Field".into(), settings.sound_field.as_str().into()]);
-                table.add_row(vec!["Front Balance".into(), settings.front_balance.as_str().into()]);
-                table.add_row(vec!["Center Level".into(), settings.center_level.as_str().into()]);
-                table.add_row(vec!["Subwoofer Level".into(), settings.subwoofer_level.as_str().into()]);
-                table.add_row(vec!["Dolby Level".into(), settings.dolby_level.as_str().into()]);
-                table.add_row(vec!["Surround Level".into(), settings.surround_level.as_str().into()]);
+                table.add_row(vec!["Pure Direct".into(), settings.pure_direct.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Sound Field".into(), settings.sound_field.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Front Balance".into(), settings.front_balance.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Center Level".into(), settings.center_level.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Subwoofer Level".into(), settings.subwoofer_level.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Dolby Level".into(), settings.dolby_level.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Surround Level".into(), settings.surround_level.as_deref().unwrap_or("N/A").into()]);
                 print!("{}", table.display(&Terminal::default()));
             }
         }

@@ -33,6 +33,9 @@ homey arcam off             # Power off
 homey arcam power-status    # Get power state
 homey arcam mute-status     # Get mute state
 homey arcam mute-toggle     # Toggle mute
+homey arcam probe           # Probe: send queries and show raw response bytes
+homey arcam auto-shutdown   # Get auto shutdown setting
+homey arcam auto-shutdown-set <value>  # Set auto shutdown (0=off, 1=20min, 2=30min, 3=1hr, 4=2hr)
 ```
 
 ### Sony
@@ -68,6 +71,7 @@ homey sony audio speaker-settings [all|level|distance|size|pattern]
 homey sony input list
 homey sony input current
 homey sony input set "extInput:hdmi?port=1"
+homey sony input config                    # Input configuration (names, HDMI assignments, visibility)
 homey sony input schemes
 homey sony input sources <scheme>
 homey sony input content-count <source>
@@ -98,6 +102,16 @@ homey sony debug methods <endpoint>            # aliases: av, app, access
 homey sony debug probe
 ```
 
+**Native** — Native Web API (port 80)
+
+```bash
+homey sony native zone              # Main zone status (power, volume, mute, input)
+homey sony native zone2             # Zone 2 status
+homey sony native zone3             # Zone 3 status
+homey sony native system-settings    # System settings (volume display, dimmer, device name, network)
+homey sony native audio-settings    # Audio settings (pure direct, sound field, speaker levels)
+```
+
 ## Global Flags
 
 | Flag | Description |
@@ -109,6 +123,7 @@ homey sony debug probe
 | Flag | Applies To | Description |
 |------|-----------|-------------|
 | `--host <IP>` | `arcam`, `sony` | Override device host (also set via env vars above) |
+| `--name <device>` | `arcam`, `sony` | Select device from `~/homey.json` config |
 | `--port <PORT>` | `sony` | Override receiver port (default: 10000) |
 
 ## Shell Completions

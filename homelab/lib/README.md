@@ -7,10 +7,11 @@ Core library for controlling home automation devices over the local network.
 | Module | Description |
 |--------|-------------|
 | `arcam` | Arcam PA240/PA410/PA720 amplifier control (binary protocol over TCP) |
+| `config` | Configuration file management (`~/homey.json`) for device settings |
 | `network` | Host addressing (IPv4, IPv6, DNS) |
 | `sony_receiver` | Sony ES receiver control (JSON-RPC over HTTP) |
 
-> **Planned modules** (stub files exist but are not yet implemented): `ha`, `mqtt`, `node_red`, `ubiquiti`
+> **Stub modules** (empty files, not yet implemented): `ha`, `mqtt`, `node_red`, `ubiquiti`
 
 ## Lessons Learned
 
@@ -34,3 +35,9 @@ The Sony Audio Control API (used by ES receivers like the STR-AZ7000ES) has seve
 5. **Ghost methods** -- Methods listed by `getMethodTypes` may return error code 12 ("No Such Method") at runtime if the feature is not enabled or provisioned on the receiver. For example, `getAlexaRegistrationStatus` appears in the system method catalog but fails if Alexa has never been configured. Handle these gracefully in the CLI with user-friendly messages.
 
 **Recommended approach**: Deserialize Sony responses as `serde_json::Value` and extract fields manually with a helper like `value_as_string()` rather than relying on typed structs. This avoids "invalid type: map, expected a string" errors when the API returns an object where a string was assumed.
+
+### CLI Error Handling
+
+1. **Human-readable errors** -- CLI errors must be styled with `Prose` (via `fallback_render`) and presented as a single line. Never expose raw error chains, file locations, or backtrace hints to the user. The `main()` function catches errors and formats them with `<red><b>Error:</b></red>` prefix, deduplicating causes that repeat.
+
+2. **Enumerated parameter hints** -- When a command takes an enumerated target parameter (e.g. `speaker-settings`, `bluetooth`, `playback-mode`) and the user omits it (uses the `all` default), the CLI intercepts the error and shows valid values: `Error: speaker-settings requires a target. Valid targets: level, distance, size, pattern`. When a specific target is provided and fails, the real API error propagates normally — do not mask it with a list of "valid" values that may themselves be wrong.

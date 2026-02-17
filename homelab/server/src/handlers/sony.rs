@@ -20,9 +20,10 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(get_volume_by_name, set_volume_by_name))
         .routes(routes!(get_mute_by_name, set_mute_by_name))
         .routes(routes!(list_inputs_by_name))
-        .routes(routes!(get_input_config_by_name))
+        .routes(routes!(list_sources_by_name))
         .routes(routes!(get_current_input_by_name))
         .routes(routes!(set_input_by_name))
+        .routes(routes!(set_source_by_name))
         .routes(routes!(get_system_info_by_name))
         .routes(routes!(get_main_zone_by_name))
         .routes(routes!(get_zone2_by_name))
@@ -82,17 +83,23 @@ pub struct InputRequest {
     uri: String,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct NativeInputConfigResponse {
-    /// Input category (e.g. "GAME", "STB", "BD")
+#[derive(Deserialize, ToSchema)]
+pub struct SourceRequest {
+    /// Source category (e.g. "GAME", "STB", "BD", "SAT", "VIDEO", "AUX", "TV", "CD")
     category: String,
-    /// User-facing display name
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SourceResponse {
+    /// Source category (e.g. "GAME", "STB", "BD")
+    category: String,
+    /// User-defined display name
     name: String,
     /// HDMI port assignment (e.g. "HDMI 1", "HDMI 3")
     hdmi_assign: String,
-    /// Icon identifier
+    /// Icon identifier used in input URIs (e.g. "game", "mediaBox")
     icon: String,
-    /// Whether the input is visible in the receiver UI
+    /// Whether the source is visible in the receiver UI
     visible: bool,
     /// Sound field preset (e.g. "A.F.D.", "2ch Stereo")
     sound_field: String,
@@ -377,18 +384,18 @@ pub(crate) async fn list_inputs_by_name(
 
 #[utoipa::path(
     get,
-    path = "/{name}/inputs/config",
+    path = "/{name}/sources",
     tag = "sony_receiver",
     params(
         ("name" = String, Path, description = "Device name")
     ),
     responses(
-        (status = 200, description = "Input configuration from native API", body = Vec<NativeInputConfigResponse>),
+        (status = 200, description = "Audio sources with user-defined names and assignments", body = Vec<SourceResponse>),
         (status = 404, description = "Device not found", body = ErrorResponse),
         (status = 504, description = "Request timeout", body = ErrorResponse),
     )
 )]
-pub(crate) async fn get_input_config_by_name(
+pub(crate) async fn list_sources_by_name(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, ServerError> {
@@ -399,9 +406,9 @@ pub(crate) async fn get_input_config_by_name(
 
     let inputs = with_timeout(state.request_timeout, sony.get_native_inputs()).await?;
 
-    let response: Vec<NativeInputConfigResponse> = inputs
+    let response: Vec<SourceResponse> = inputs
         .into_iter()
-        .map(|i| NativeInputConfigResponse {
+        .map(|i| SourceResponse {
             category: i.category,
             name: i.name,
             hdmi_assign: i.hdmi_assign,
@@ -468,6 +475,61 @@ pub(crate) async fn set_input_by_name(
     with_timeout(state.request_timeout, sony.set_input(&req.uri)).await?;
 
     Ok(Json(serde_json::json!({ "uri": req.uri })))
+}
+
+/// Maps a Sony input category to the `extInput:` URI used by `setPlayContent`.
+///
+/// These are the standard Sony ES receiver URI schemes for each input category.
+fn category_to_uri(category: &str) -> Option<&'static str> {
+    match category {
+        "GAME" => Some("extInput:game"),
+        "STB" => Some("extInput:mediaBox"),
+        "BD" => Some("extInput:bd"),
+        "SAT" => Some("extInput:sat_catv"),
+        "VIDEO" => Some("extInput:video"),
+        "AUX" => Some("extInput:line"),
+        "TV" => Some("extInput:tv"),
+        "CD" => Some("extInput:sacd_cd"),
+        _ => None,
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/{name}/source",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    request_body = SourceRequest,
+    responses(
+        (status = 200, description = "Source changed", body = inline(serde_json::Value)),
+        (status = 400, description = "Invalid source category", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn set_source_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<SourceRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    let category = req.category.to_uppercase();
+    let uri = category_to_uri(&category).ok_or_else(|| {
+        ServerError::InvalidParameter(format!(
+            "unknown source category \"{}\", valid categories: GAME, STB, BD, SAT, VIDEO, AUX, TV, CD",
+            req.category
+        ))
+    })?;
+
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    with_timeout(state.request_timeout, sony.set_input(uri)).await?;
+
+    Ok(Json(serde_json::json!({ "category": category, "uri": uri })))
 }
 
 #[utoipa::path(
@@ -682,5 +744,30 @@ where
             warn!("Sony API timeout after {:?}", duration);
             Err(ServerError::Timeout)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn category_to_uri_all_categories() {
+        assert_eq!(category_to_uri("GAME"), Some("extInput:game"));
+        assert_eq!(category_to_uri("STB"), Some("extInput:mediaBox"));
+        assert_eq!(category_to_uri("BD"), Some("extInput:bd"));
+        assert_eq!(category_to_uri("SAT"), Some("extInput:sat_catv"));
+        assert_eq!(category_to_uri("VIDEO"), Some("extInput:video"));
+        assert_eq!(category_to_uri("AUX"), Some("extInput:line"));
+        assert_eq!(category_to_uri("TV"), Some("extInput:tv"));
+        assert_eq!(category_to_uri("CD"), Some("extInput:sacd_cd"));
+        assert_eq!(category_to_uri("UNKNOWN"), None);
+    }
+
+    #[test]
+    fn category_to_uri_case_sensitive() {
+        // Handler uppercases before calling, so the function itself is case-sensitive
+        assert_eq!(category_to_uri("game"), None);
+        assert_eq!(category_to_uri("stb"), None);
     }
 }

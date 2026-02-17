@@ -67,10 +67,21 @@ pub fn build_router(state: AppState) -> Router {
 /// Device status for a single device (serializable for the `/status` endpoint).
 #[derive(Serialize, Clone)]
 pub struct DeviceStatusJson {
-    css_class: &'static str,
+    /// Semantic status: `"active"`, `"standby"`, `"error"`, `"not_configured"`
+    status: &'static str,
     label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<serde_json::Value>,
+}
+
+/// Maps a semantic status to a CSS class for the initial HTML render.
+fn status_to_css(status: &str) -> &'static str {
+    match status {
+        "active" => "green",
+        "standby" => "amber",
+        "error" => "red",
+        _ => "grey",
+    }
 }
 
 /// Combined status for all devices.
@@ -87,13 +98,20 @@ struct StatusResponse {
 async fn probe_sony(state: &AppState) -> DeviceStatusJson {
     match &state.sony {
         None => DeviceStatusJson {
-            css_class: "grey",
+            status: "not_configured",
             label: "Not configured".to_string(),
             detail: None,
         },
         Some(sony) => match timeout(state.request_timeout, sony.get_power_status()).await {
             Ok(Ok(status)) => {
-                tracing::info!(status = %status, "Sony power status retrieved");
+                let mut last = state.sony_last_power_status.write().await;
+                if last.as_deref() != Some(status.as_str()) {
+                    tracing::info!(status = %status, "Sony power status changed");
+                    *last = Some(status.clone());
+                } else {
+                    tracing::trace!(status = %status, "Sony power status unchanged");
+                }
+                drop(last);
                 match status.as_str() {
                 "active" => {
                     // Best-effort instrumentation: volume, current input, native sources
@@ -116,14 +134,32 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                             d.insert("muted".into(), json!(v.mute == "on"));
                         }
                         let current_cat = input.as_ref().and_then(|i| {
-                            match_uri_to_category(&i.uri, native.as_deref())
+                            let cat = match_uri_to_category(&i.uri, native.as_deref());
+                            if cat.is_none() {
+                                let icons: Vec<&str> = native.as_deref()
+                                    .map(|n| n.iter().map(|x| x.icon.as_str()).collect())
+                                    .unwrap_or_default();
+                                tracing::warn!(
+                                    uri = %i.uri,
+                                    ?icons,
+                                    "No source matched current input URI"
+                                );
+                            }
+                            cat
                         });
                         if let Some(inputs) = &native {
                             let source_list: Vec<serde_json::Value> = inputs
                                 .iter()
                                 .map(|i| {
+                                    let name = format_source_name(&i.name);
+                                    let name = if name.is_empty() {
+                                        display_name_for_category(&i.category)
+                                    } else {
+                                        name
+                                    };
                                     json!({
-                                        "name": format_source_name(&i.name),
+                                        "category": i.category,
+                                        "name": name,
                                         "active": current_cat.as_deref() == Some(i.category.as_str()),
                                     })
                                 })
@@ -136,18 +172,18 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                     .ok();
 
                     DeviceStatusJson {
-                        css_class: "green",
+                        status: "active",
                         label: "Active".to_string(),
                         detail,
                     }
                 }
                 "standby" => DeviceStatusJson {
-                    css_class: "amber",
+                    status: "standby",
                     label: "Standby".to_string(),
                     detail: None,
                 },
                 other => DeviceStatusJson {
-                    css_class: "amber",
+                    status: "standby",
                     label: format!("Power: {other}"),
                     detail: None,
                 },
@@ -156,7 +192,7 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "Sony power status error");
                 DeviceStatusJson {
-                    css_class: "red",
+                    status: "error",
                     label: format!("Error: {e}"),
                     detail: None,
                 }
@@ -164,7 +200,7 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
             Err(_) => {
                 tracing::warn!("Sony power status timeout");
                 DeviceStatusJson {
-                    css_class: "red",
+                    status: "error",
                     label: "Timeout".to_string(),
                     detail: None,
                 }
@@ -228,24 +264,100 @@ fn format_source_name(s: &str) -> String {
     result
 }
 
+/// Returns a human-friendly display name for a Sony input category.
+///
+/// Used as a fallback when the native API doesn't provide a user-defined
+/// input name (i.e. the `inputname` field is empty).
+fn display_name_for_category(category: &str) -> String {
+    match category {
+        "GAME" => "Game",
+        "STB" => "Media Box",
+        "BD" => "Blu-ray",
+        "SAT" => "Satellite",
+        "VIDEO" => "Video",
+        "AUX" => "Aux",
+        "TV" => "TV",
+        "CD" => "CD",
+        other => return format_source_name(other),
+    }
+    .to_string()
+}
+
 /// Matches a Sony input URI to a native input category.
 ///
-/// The receiver reports the current input as `extInput:{icon}` where the
-/// icon value corresponds to the `icon` field from the native input
-/// configuration. For example, `extInput:mediaBox` matches the native
-/// input whose `icon == "mediabox"` (case-insensitive).
+/// Uses a three-phase matching strategy against `getPlayingContentInfo` URIs:
+///
+/// 1. **Icon-based**: `extInput:game` matches native input with `icon == "game"`
+/// 2. **HDMI port-based**: `extInput:hdmi?port=2` matches the native input assigned
+///    to HDMI port 2 (handles `hdmi_assign` formats like `"IN 2"`, `"in2"`, etc.)
+/// 3. **Known URI mapping**: Falls back to a hardcoded mapping of Sony URI bases
+///    to input categories (e.g. `mediaBox` -> `STB`). This handles receivers
+///    whose native API returns empty icon fields.
 fn match_uri_to_category(
     uri: &str,
     native: Option<&[homelab::sony_receiver::NativeInputConfig]>,
 ) -> Option<String> {
     let rest = uri.strip_prefix("extInput:")?;
-    let (base, _query) = rest.split_once('?').unwrap_or((rest, ""));
+    let (base, query) = rest.split_once('?').unwrap_or((rest, ""));
     let base_lower = base.to_lowercase();
+    let native = native?;
 
-    native?
-        .iter()
-        .find(|n| n.icon.to_lowercase() == base_lower)
-        .map(|n| n.category.clone())
+    // Phase 1: icon-based matching (e.g. extInput:game -> icon "game")
+    if let Some(matched) = native.iter().find(|n| n.icon.to_lowercase() == base_lower) {
+        return Some(matched.category.clone());
+    }
+
+    // Phase 2: HDMI port matching (e.g. extInput:hdmi?port=2)
+    if base_lower == "hdmi" {
+        if let Some(port) = query
+            .split('&')
+            .find_map(|p| p.strip_prefix("port="))
+            .and_then(|p| p.parse::<u32>().ok())
+        {
+            if let Some(matched) = native
+                .iter()
+                .find(|n| extract_hdmi_port(&n.hdmi_assign) == Some(port))
+            {
+                return Some(matched.category.clone());
+            }
+        }
+    }
+
+    // Phase 3: known URI-to-category mapping (fallback for empty icons)
+    let mapped_category = match base {
+        "game" => "GAME",
+        "mediaBox" => "STB",
+        "bd" => "BD",
+        "sat" | "sat_catv" => "SAT",
+        "video" => "VIDEO",
+        "aux" => "AUX",
+        "tv" => "TV",
+        "cd" | "sacd_cd" => "CD",
+        _ => return None,
+    };
+    // Only return if the category exists in native inputs
+    if native.iter().any(|n| n.category == mapped_category) {
+        return Some(mapped_category.to_string());
+    }
+
+    None
+}
+
+/// Extracts the HDMI port number from a native API `hdmi_assign` value.
+///
+/// Handles formats like `"IN 1"`, `"in1"`, `"IN 7"`, `"HDMI 2"`.
+/// Returns `None` for non-HDMI assignments like `"none"`, `"eARC/OUT A"`, `""`.
+fn extract_hdmi_port(hdmi_assign: &str) -> Option<u32> {
+    let trimmed = hdmi_assign.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    // Extract trailing digits (handles "IN 1", "in1", "HDMI 2", "IN 7")
+    let digits: String = trimmed.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.chars().rev().collect::<String>().parse().ok()
 }
 
 /// Formats a Sony input URI into a human-readable name.
@@ -298,7 +410,7 @@ fn format_input_name(uri: &str) -> String {
 
 #[cfg(test)]
 mod format_tests {
-    use super::{format_source_name, format_input_name, match_uri_to_category};
+    use super::{format_source_name, format_input_name, match_uri_to_category, extract_hdmi_port, display_name_for_category};
 
     #[test]
     fn hdmi_with_port() {
@@ -330,70 +442,37 @@ mod format_tests {
         assert_eq!(format_input_name("extInput:mediaBox"), "Media Box");
     }
 
+    fn make_source(category: &str, name: &str, hdmi_assign: &str, icon: &str) -> homelab::sony_receiver::NativeInputConfig {
+        homelab::sony_receiver::NativeInputConfig {
+            category: category.to_string(),
+            name: name.to_string(),
+            hdmi_assign: hdmi_assign.to_string(),
+            icon: icon.to_string(),
+            visible: false,
+            sound_field: String::new(),
+            digital_assign: String::new(),
+            input_mode: String::new(),
+            subwoofer_level: String::new(),
+            subwoofer_lpf: String::new(),
+            in_ceiling_mode: false,
+            trigger_1: false,
+            trigger_2: false,
+            trigger_3: false,
+            preset_gain: String::new(),
+            av_sync: String::new(),
+        }
+    }
+
     #[test]
     fn uri_to_category_matches_icon() {
-        use homelab::sony_receiver::NativeInputConfig;
-        // The receiver reports current input as extInput:{icon}
-        // where icon is the native config's icon field (case-insensitive)
         let inputs = vec![
-            NativeInputConfig {
-                category: "STB".to_string(),
-                name: "MEDIA BOX".to_string(),
-                hdmi_assign: "in2".to_string(),
-                icon: "mediabox".to_string(),
-                visible: false,
-                sound_field: String::new(),
-                digital_assign: String::new(),
-                input_mode: String::new(),
-                subwoofer_level: String::new(),
-                subwoofer_lpf: String::new(),
-                in_ceiling_mode: false,
-                trigger_1: false,
-                trigger_2: false,
-                trigger_3: false,
-                preset_gain: String::new(),
-                av_sync: String::new(),
-            },
-            NativeInputConfig {
-                category: "GAME".to_string(),
-                name: "GAME".to_string(),
-                hdmi_assign: "in1".to_string(),
-                icon: "game".to_string(),
-                visible: false,
-                sound_field: String::new(),
-                digital_assign: String::new(),
-                input_mode: String::new(),
-                subwoofer_level: String::new(),
-                subwoofer_lpf: String::new(),
-                in_ceiling_mode: false,
-                trigger_1: false,
-                trigger_2: false,
-                trigger_3: false,
-                preset_gain: String::new(),
-                av_sync: String::new(),
-            },
-            NativeInputConfig {
-                category: "TV".to_string(),
-                name: "TV".to_string(),
-                hdmi_assign: "none".to_string(),
-                icon: "tv".to_string(),
-                visible: false,
-                sound_field: String::new(),
-                digital_assign: String::new(),
-                input_mode: String::new(),
-                subwoofer_level: String::new(),
-                subwoofer_lpf: String::new(),
-                in_ceiling_mode: false,
-                trigger_1: false,
-                trigger_2: false,
-                trigger_3: false,
-                preset_gain: String::new(),
-                av_sync: String::new(),
-            },
+            make_source("STB", "MEDIA BOX", "in2", "MEDIA BOX"),
+            make_source("GAME", "GAME", "in1", "GAME"),
+            make_source("TV", "TV", "eARC/OUT A", "TV"),
         ];
-        // extInput:mediaBox matches icon "mediabox" (case-insensitive)
+        // Icon-based matching (case-insensitive)
         assert_eq!(
-            match_uri_to_category("extInput:mediaBox", Some(&inputs)),
+            match_uri_to_category("extInput:MEDIA BOX", Some(&inputs)),
             Some("STB".to_string())
         );
         assert_eq!(
@@ -413,6 +492,147 @@ mod format_tests {
         assert_eq!(match_uri_to_category("radio:fm", Some(&inputs)), None);
         // No native inputs
         assert_eq!(match_uri_to_category("extInput:game", None), None);
+    }
+
+    #[test]
+    fn uri_to_category_matches_hdmi_port() {
+        // Realistic hdmi_assign values from Sony native API: "in1", "in2", etc.
+        let inputs = vec![
+            make_source("GAME", "GAME", "in1", "GAME"),
+            make_source("STB", "MEDIA BOX", "in2", "MEDIA BOX"),
+            make_source("BD", "BD/DVD", "in3", "BD Player"),
+            make_source("SAT", "SAT/CATV", "in4", "Tuner"),
+            make_source("VIDEO", "VIDEO", "in7", "VIDEO"),
+            make_source("AUX", "AUX", "in5", "Tuner"),
+            make_source("TV", "TV", "eARC/OUT A", "TV"),
+            make_source("CD", "SA-CD/CD", "in6", "CD Player"),
+        ];
+        // HDMI port matching: extInput:hdmi?port=N -> hdmi_assign with trailing N
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=1", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=2", Some(&inputs)),
+            Some("STB".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=3", Some(&inputs)),
+            Some("BD".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=7", Some(&inputs)),
+            Some("VIDEO".to_string())
+        );
+        // No HDMI port 9 assigned
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=9", Some(&inputs)),
+            None
+        );
+        // eARC/OUT A has no trailing number — won't match any port
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=0", Some(&inputs)),
+            None
+        );
+    }
+
+    #[test]
+    fn uri_to_category_hdmi_alternate_formats() {
+        // Handle various hdmi_assign formats from different firmware versions
+        let inputs = vec![
+            make_source("GAME", "GAME", "IN 1", "GAME"),
+            make_source("STB", "MEDIA BOX", "HDMI 2", "MEDIA BOX"),
+        ];
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=1", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=2", Some(&inputs)),
+            Some("STB".to_string())
+        );
+    }
+
+    #[test]
+    fn uri_to_category_known_uri_fallback() {
+        // When icons are empty (some receiver models), fall back to known URI mapping
+        let inputs = vec![
+            make_source("GAME", "", "in1", ""),
+            make_source("STB", "", "in2", ""),
+            make_source("BD", "", "in3", ""),
+            make_source("SAT", "", "in4", ""),
+            make_source("VIDEO", "", "in7", ""),
+            make_source("AUX", "", "in5", ""),
+            make_source("TV", "", "eARC/OUT A", ""),
+            make_source("CD", "", "in6", ""),
+        ];
+        // Direct URI-to-category mapping
+        assert_eq!(
+            match_uri_to_category("extInput:mediaBox", Some(&inputs)),
+            Some("STB".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:game", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:bd", Some(&inputs)),
+            Some("BD".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:sat", Some(&inputs)),
+            Some("SAT".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:sat_catv", Some(&inputs)),
+            Some("SAT".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:video", Some(&inputs)),
+            Some("VIDEO".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:aux", Some(&inputs)),
+            Some("AUX".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:tv", Some(&inputs)),
+            Some("TV".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:cd", Some(&inputs)),
+            Some("CD".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:sacd_cd", Some(&inputs)),
+            Some("CD".to_string())
+        );
+        // Unknown URI still returns None
+        assert_eq!(
+            match_uri_to_category("extInput:unknown", Some(&inputs)),
+            None
+        );
+        // HDMI port matching still works with empty icons
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=1", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_hdmi_port_formats() {
+        // Native API formats
+        assert_eq!(extract_hdmi_port("in1"), Some(1));
+        assert_eq!(extract_hdmi_port("in7"), Some(7));
+        // UI display formats
+        assert_eq!(extract_hdmi_port("IN 1"), Some(1));
+        assert_eq!(extract_hdmi_port("IN 5"), Some(5));
+        assert_eq!(extract_hdmi_port("HDMI 2"), Some(2));
+        // Non-HDMI
+        assert_eq!(extract_hdmi_port("none"), None);
+        assert_eq!(extract_hdmi_port(""), None);
+        assert_eq!(extract_hdmi_port("eARC/OUT A"), None);
+        assert_eq!(extract_hdmi_port("OPT 1"), Some(1)); // Won't cause issues — only checked for HDMI URIs
     }
 
     #[test]
@@ -438,6 +658,20 @@ mod format_tests {
         assert_eq!(format_source_name("VIDEO"), "Video");
     }
 
+    #[test]
+    fn display_name_for_category_all() {
+        assert_eq!(display_name_for_category("GAME"), "Game");
+        assert_eq!(display_name_for_category("STB"), "Media Box");
+        assert_eq!(display_name_for_category("BD"), "Blu-ray");
+        assert_eq!(display_name_for_category("SAT"), "Satellite");
+        assert_eq!(display_name_for_category("VIDEO"), "Video");
+        assert_eq!(display_name_for_category("AUX"), "Aux");
+        assert_eq!(display_name_for_category("TV"), "TV");
+        assert_eq!(display_name_for_category("CD"), "CD");
+        // Unknown category falls back to format_source_name
+        assert_eq!(display_name_for_category("PHONO"), "Phono");
+    }
+
 }
 
 /// Probe the Arcam amplifier and return its status.
@@ -448,7 +682,7 @@ mod format_tests {
 async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
     match &state.arcam_host {
         None => DeviceStatusJson {
-            css_class: "grey",
+            status: "not_configured",
             label: "Not configured".to_string(),
             detail: None,
         },
@@ -456,7 +690,14 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
             let arcam = Arcam::from(host.as_str());
             match timeout(state.request_timeout, arcam.request_power_state()).await {
                 Ok(Ok(true)) => {
-                    tracing::info!("Arcam power: on");
+                    let mut last = state.arcam_last_power_state.write().await;
+                    if *last != Some(true) {
+                        tracing::info!("Arcam power: on");
+                        *last = Some(true);
+                    } else {
+                        tracing::trace!("Arcam power: on");
+                    }
+                    drop(last);
                     let model = state.arcam_model.read().await.clone();
                     // Best-effort instrumentation: mute + mode + auto-shutdown + timeout
                     // Each call opens a new TCP connection (Arcam is single-connection)
@@ -508,13 +749,20 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
                     .ok();
 
                     DeviceStatusJson {
-                        css_class: "green",
+                        status: "active",
                         label: "Active".to_string(),
                         detail,
                     }
                 }
                 Ok(Ok(false)) => {
-                    tracing::info!("Arcam power: standby");
+                    let mut last = state.arcam_last_power_state.write().await;
+                    if *last != Some(false) {
+                        tracing::info!("Arcam power: standby");
+                        *last = Some(false);
+                    } else {
+                        tracing::trace!("Arcam power: standby");
+                    }
+                    drop(last);
                     let model = state.arcam_model.read().await.clone();
                     let heartbeat = state
                         .arcam_heartbeat_alive
@@ -530,7 +778,7 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
                         None
                     };
                     DeviceStatusJson {
-                        css_class: "amber",
+                        status: "standby",
                         label: "Standby".to_string(),
                         detail,
                     }
@@ -538,7 +786,7 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
                 Ok(Err(e)) => {
                     tracing::warn!(error = %e, "Arcam power error");
                     DeviceStatusJson {
-                        css_class: "red",
+                        status: "error",
                         label: format!("Error: {e}"),
                         detail: None,
                     }
@@ -546,7 +794,7 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
                 Err(_) => {
                     tracing::warn!("Arcam power timeout");
                     DeviceStatusJson {
-                        css_class: "red",
+                        status: "error",
                         label: "Timeout".to_string(),
                         detail: None,
                     }
@@ -602,7 +850,7 @@ async fn get_cached_or_fresh_arcam(state: &AppState) -> DeviceStatusJson {
         state.arcam_cached_status.read().await.clone().unwrap_or_else(|| {
             // If no cache yet, return "unknown" state
             DeviceStatusJson {
-                css_class: "grey",
+                status: "not_configured",
                 label: "Unknown".to_string(),
                 detail: None,
             }
@@ -710,6 +958,16 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         .map(|h| format!("{h}<span class=\"port\">:50000</span>"))
         .unwrap_or_default();
 
+    // Get first device names from config for API routes
+    let sony_device_name = {
+        let receivers = state.sony_receivers.read().await;
+        receivers.keys().next().cloned().unwrap_or_default()
+    };
+    let arcam_device_name = {
+        let hosts = state.arcam_hosts.read().await;
+        hosts.keys().next().cloned().unwrap_or_default()
+    };
+
     Html(format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -751,8 +1009,10 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .sources > .badge-row {{ min-height: 0; }}
   .sources.visible {{ grid-template-rows: 1fr; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a2a45; }}
   .sources .badge-row {{ justify-content: flex-end; }}
-  .sources .badge {{ transition: background 0.2s, border-color 0.2s, color 0.2s; }}
-  .badge-dim {{ background: transparent; border-color: #182540; color: #3a4a60; }}
+  .sources .badge {{ transition: background 0.2s, border-color 0.2s, color 0.2s; cursor: pointer; }}
+  .sources .badge:hover:not(.badge-active) {{ background: rgba(15, 52, 96, 0.4); border-color: #1a5a8a; color: #7ab8e0; }}
+  .sources .badge.badge-active {{ cursor: default; }}
+  .badge-dim {{ background: rgba(15, 52, 96, 0.15); border-color: #1a3050; color: #4a6278; }}
   .explore {{ margin-top: 24px; color: #b5b5b5; }}
   .explore a {{ color: #7cc4ff; text-decoration: none; }}
   .explore a:hover {{ text-decoration: underline; }}
@@ -858,7 +1118,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 
 <script>
 (function() {{
+  const SONY_DEVICE = '{}';
+  const ARCAM_DEVICE = '{}';
   const CLASSES = ["green", "amber", "red", "grey"];
+  const STATUS_CLASS = {{ active: 'green', standby: 'amber', error: 'red', not_configured: 'grey' }};
+  function toClass(status) {{ return STATUS_CLASS[status] || 'grey'; }}
 
   function setDot(el, cls) {{
     if (!el.classList.contains(cls)) {{
@@ -881,6 +1145,9 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   let sonyLockExpiry = 0;
   let arcamLockClass = null;
   let arcamLockExpiry = 0;
+  // Lock: hold source badges at optimistic state until poll confirms
+  let sonySourceLock = null; // category string
+  let sonySourceLockExpiry = 0;
   // Lock: hold auto-shutdown badge at optimistic value until server confirms
   let arcamAutoShutdownLock = null; // {{ value, label, serverLabel }}
   let arcamAutoShutdownLockExpiry = 0;
@@ -908,7 +1175,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       }}
       sonyLockClass = expectedClass;
       sonyLockExpiry = Date.now() + 15000;
-      fetch('/sony/power', {{
+      fetch('/sony_receiver/' + encodeURIComponent(SONY_DEVICE) + '/power', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ active: !isOn }})
@@ -933,7 +1200,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       arcamLockClass = expectedClass;
       arcamLockExpiry = Date.now() + 15000;
       const action = isOn ? 'off' : 'on';
-      fetch('/arcam/power/' + action, {{ method: 'POST' }}).catch(() => {{}});
+      fetch('/arcam_amp/' + encodeURIComponent(ARCAM_DEVICE) + '/power/' + action, {{ method: 'POST' }}).catch(() => {{}});
     }}
   }}
 
@@ -1119,11 +1386,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       // --- Sony (lock-based) ---
       if (data.sony.detail) lastSonyDetail = data.sony.detail;
       const sonyLocked = sonyLockClass && Date.now() < sonyLockExpiry;
-      if (sonyLocked && data.sony.css_class !== sonyLockClass) {{
+      if (sonyLocked && toClass(data.sony.status) !== sonyLockClass) {{
         // Still transitioning — keep optimistic state
       }} else {{
         if (sonyLocked) sonyLockClass = null;
-        setDot(document.getElementById("sony-dot"), data.sony.css_class);
+        setDot(document.getElementById("sony-dot"), toClass(data.sony.status));
         setText(document.getElementById("sony-label"), data.sony.label);
         renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);
       }}
@@ -1131,22 +1398,22 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       // --- Arcam (lock-based) ---
       // Always cache detail for optimistic rendering
       if (data.arcam.detail && data.arcam.detail.model) lastArcamModel = data.arcam.detail.model;
-      if (data.arcam.css_class === 'green' && data.arcam.detail) lastArcamOnDetail = data.arcam.detail;
+      if (data.arcam.status === 'active' && data.arcam.detail) lastArcamOnDetail = data.arcam.detail;
 
       const locked = arcamLockClass && Date.now() < arcamLockExpiry;
-      if (locked && data.arcam.css_class !== arcamLockClass) {{
+      if (locked && toClass(data.arcam.status) !== arcamLockClass) {{
         // Still transitioning — keep optimistic state, skip update
       }} else {{
         // Either unlocked, or real data matches expected state — render real data
         if (locked) arcamLockClass = null; // confirmed, unlock
-        setDot(document.getElementById("arcam-dot"), data.arcam.css_class);
+        setDot(document.getElementById("arcam-dot"), toClass(data.arcam.status));
         setText(document.getElementById("arcam-label"), data.arcam.label);
         const arcamInstruments = document.getElementById("arcam-instruments");
-        if (data.arcam.css_class === 'amber' && data.arcam.detail && data.arcam.detail.model) {{
+        if (data.arcam.status === 'standby' && data.arcam.detail && data.arcam.detail.model) {{
           const want = '<span class="device-model">' + data.arcam.detail.model + '</span>'
             + '<span class="heartbeat" title="Heartbeat keepalive active">\u2764\uFE0F</span>';
           if (arcamInstruments.innerHTML !== want) arcamInstruments.innerHTML = want;
-        }} else if (data.arcam.css_class === 'green') {{
+        }} else if (data.arcam.status === 'active') {{
           // Auto-shutdown lock: override stale server data with optimistic value
           if (arcamAutoShutdownLock && Date.now() < arcamAutoShutdownLockExpiry) {{
             if (data.arcam.detail && data.arcam.detail.auto_shutdown !== arcamAutoShutdownLock.value) {{
@@ -1207,12 +1474,14 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 
 </body>
 </html>"#,
-        sony_status.css_class,
+        status_to_css(sony_status.status),
         sony_status.label,
         sony_host,
-        arcam_status.css_class,
+        status_to_css(arcam_status.status),
         arcam_status.label,
         arcam_host,
+        sony_device_name,
+        arcam_device_name,
     ))
 }
 
