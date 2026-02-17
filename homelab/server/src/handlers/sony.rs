@@ -477,21 +477,55 @@ pub(crate) async fn set_input_by_name(
     Ok(Json(serde_json::json!({ "uri": req.uri })))
 }
 
-/// Maps a Sony input category to the `extInput:` URI used by `setPlayContent`.
+/// Resolves a source category to the actual input URI by querying the receiver.
 ///
-/// These are the standard Sony ES receiver URI schemes for each input category.
-fn category_to_uri(category: &str) -> Option<&'static str> {
-    match category {
-        "GAME" => Some("extInput:game"),
-        "STB" => Some("extInput:mediaBox"),
-        "BD" => Some("extInput:bd"),
-        "SAT" => Some("extInput:sat_catv"),
-        "VIDEO" => Some("extInput:video"),
-        "AUX" => Some("extInput:line"),
-        "TV" => Some("extInput:tv"),
-        "CD" => Some("extInput:sacd_cd"),
-        _ => None,
+/// Fetches both native inputs (category-to-HDMI mapping) and the input list
+/// (real URIs), then finds the URI whose HDMI port matches the category's
+/// HDMI assignment.
+async fn resolve_category_to_uri(
+    sony: &homelab::sony_receiver::SonyReceiver,
+    category: &str,
+    timeout_duration: Duration,
+) -> Result<String, ServerError> {
+    let (native, inputs) = tokio::join!(
+        with_timeout(timeout_duration, sony.get_native_inputs()),
+        with_timeout(timeout_duration, sony.list_inputs()),
+    );
+    let native = native?;
+    let inputs = inputs?;
+
+    // Find this category's HDMI port from native config
+    let native_input = native
+        .iter()
+        .find(|n| n.category == category)
+        .ok_or_else(|| {
+            ServerError::InvalidParameter(format!(
+                "unknown source category \"{category}\", valid: {}",
+                native.iter().map(|n| n.category.as_str()).collect::<Vec<_>>().join(", ")
+            ))
+        })?;
+
+    // Match against real input URIs: find the HDMI input whose port matches
+    let hdmi_port = crate::extract_hdmi_port(&native_input.hdmi_assign);
+    if let Some(port) = hdmi_port {
+        let target = format!("extInput:hdmi?port={port}");
+        if let Some(input) = inputs.iter().find(|i| i.uri == target) {
+            return Ok(input.uri.clone());
+        }
     }
+
+    // Fallback: try matching by icon/title against input URIs
+    // (handles non-HDMI inputs like TV via eARC)
+    for input in &inputs {
+        let matched = crate::match_uri_to_category(&input.uri, Some(&native));
+        if matched.as_deref() == Some(category) {
+            return Ok(input.uri.clone());
+        }
+    }
+
+    Err(ServerError::InvalidParameter(format!(
+        "could not resolve category \"{category}\" to an input URI"
+    )))
 }
 
 #[utoipa::path(
@@ -515,19 +549,15 @@ pub(crate) async fn set_source_by_name(
     Json(req): Json<SourceRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let category = req.category.to_uppercase();
-    let uri = category_to_uri(&category).ok_or_else(|| {
-        ServerError::InvalidParameter(format!(
-            "unknown source category \"{}\", valid categories: GAME, STB, BD, SAT, VIDEO, AUX, TV, CD",
-            req.category
-        ))
-    })?;
 
     let sony = state
         .get_sony(&name)
         .await
         .ok_or_else(|| ServerError::DeviceNotFound(name))?;
 
-    with_timeout(state.request_timeout, sony.set_input(uri)).await?;
+    let uri = resolve_category_to_uri(&sony, &category, state.request_timeout).await?;
+
+    with_timeout(state.request_timeout, sony.set_input(&uri)).await?;
 
     Ok(Json(serde_json::json!({ "category": category, "uri": uri })))
 }
@@ -749,25 +779,50 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{extract_hdmi_port, match_uri_to_category};
+    use homelab::sony_receiver::NativeInputConfig;
 
-    #[test]
-    fn category_to_uri_all_categories() {
-        assert_eq!(category_to_uri("GAME"), Some("extInput:game"));
-        assert_eq!(category_to_uri("STB"), Some("extInput:mediaBox"));
-        assert_eq!(category_to_uri("BD"), Some("extInput:bd"));
-        assert_eq!(category_to_uri("SAT"), Some("extInput:sat_catv"));
-        assert_eq!(category_to_uri("VIDEO"), Some("extInput:video"));
-        assert_eq!(category_to_uri("AUX"), Some("extInput:line"));
-        assert_eq!(category_to_uri("TV"), Some("extInput:tv"));
-        assert_eq!(category_to_uri("CD"), Some("extInput:sacd_cd"));
-        assert_eq!(category_to_uri("UNKNOWN"), None);
+    fn make_source(category: &str, name: &str, hdmi: &str, icon: &str) -> NativeInputConfig {
+        NativeInputConfig {
+            category: category.to_string(),
+            name: name.to_string(),
+            hdmi_assign: hdmi.to_string(),
+            icon: icon.to_string(),
+            visible: true,
+            sound_field: String::new(),
+            digital_assign: String::new(),
+            input_mode: String::new(),
+            subwoofer_level: String::new(),
+            subwoofer_lpf: String::new(),
+            in_ceiling_mode: false,
+            trigger_1: false,
+            trigger_2: false,
+            trigger_3: false,
+            preset_gain: String::new(),
+            av_sync: String::new(),
+        }
     }
 
     #[test]
-    fn category_to_uri_case_sensitive() {
-        // Handler uppercases before calling, so the function itself is case-sensitive
-        assert_eq!(category_to_uri("game"), None);
-        assert_eq!(category_to_uri("stb"), None);
+    fn resolve_hdmi_port_from_category() {
+        // Verify native config -> HDMI port extraction works for resolving categories
+        let inputs = vec![
+            make_source("GAME", "", "in1", ""),
+            make_source("STB", "", "in2", ""),
+            make_source("TV", "", "eARC/OUT A", ""),
+        ];
+        assert_eq!(extract_hdmi_port(&inputs[0].hdmi_assign), Some(1));
+        assert_eq!(extract_hdmi_port(&inputs[1].hdmi_assign), Some(2));
+        assert_eq!(extract_hdmi_port(&inputs[2].hdmi_assign), None); // eARC has no port
+
+        // match_uri_to_category reverse-matches HDMI URIs back to categories
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=1", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:hdmi?port=2", Some(&inputs)),
+            Some("STB".to_string())
+        );
     }
 }

@@ -127,6 +127,8 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                                 None
                             }
                         };
+                        // Fetch real terminal URIs for source switching
+                        let terminals = sony.list_inputs().await.ok();
                         let mut d = serde_json::Map::new();
                         if let Some(v) = volume {
                             d.insert("volume".into(), json!(v.volume));
@@ -147,8 +149,10 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                             }
                             cat
                         });
-                        if let Some(inputs) = &native {
-                            let source_list: Vec<serde_json::Value> = inputs
+                        if let Some(native_inputs) = &native {
+                            // Build category -> terminal URI map
+                            let cat_to_uri = build_category_uri_map(native_inputs, terminals.as_deref());
+                            let source_list: Vec<serde_json::Value> = native_inputs
                                 .iter()
                                 .map(|i| {
                                     let name = format_source_name(&i.name);
@@ -157,10 +161,12 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                                     } else {
                                         name
                                     };
+                                    let uri = cat_to_uri.get(i.category.as_str());
                                     json!({
                                         "category": i.category,
                                         "name": name,
                                         "active": current_cat.as_deref() == Some(i.category.as_str()),
+                                        "uri": uri,
                                     })
                                 })
                                 .collect();
@@ -283,6 +289,63 @@ fn display_name_for_category(category: &str) -> String {
     .to_string()
 }
 
+/// Builds a map from native input category to the URI for `setPlayContent`.
+///
+/// Uses a two-phase strategy:
+///
+/// 1. **Terminal matching**: For each URI from `getCurrentExternalTerminalsStatus`,
+///    resolves which category it belongs to via `match_uri_to_category`.
+///    Produces real `extInput:hdmi?port=N` URIs when native fields are populated.
+///
+/// 2. **Known URI fallback**: For categories not resolved in phase 1, falls back
+///    to the standard Sony logical URIs (e.g. `extInput:game`, `extInput:mediaBox`).
+///    These are the same URIs `getPlayingContentInfo` reports and are accepted by
+///    `setPlayContent` on Sony ES receivers.
+fn build_category_uri_map(
+    native: &[homelab::sony_receiver::NativeInputConfig],
+    terminals: Option<&[homelab::sony_receiver::InputSource]>,
+) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+
+    // Phase 1: resolve from real terminal URIs
+    if let Some(terminals) = terminals {
+        for t in terminals {
+            if let Some(cat) = match_uri_to_category(&t.uri, Some(native)) {
+                map.entry(cat).or_insert_with(|| t.uri.clone());
+            }
+        }
+    }
+
+    // Phase 2: fill gaps with known logical URIs
+    for n in native {
+        if !map.contains_key(&n.category) {
+            if let Some(uri) = category_to_logical_uri(&n.category) {
+                map.insert(n.category.clone(), uri.to_string());
+            }
+        }
+    }
+
+    map
+}
+
+/// Maps a Sony input category to its standard logical URI.
+///
+/// These are the URIs reported by `getPlayingContentInfo` and accepted
+/// by `setPlayContent` on Sony ES receivers.
+fn category_to_logical_uri(category: &str) -> Option<&'static str> {
+    match category {
+        "GAME" => Some("extInput:game"),
+        "STB" => Some("extInput:mediaBox"),
+        "BD" => Some("extInput:bd"),
+        "SAT" => Some("extInput:sat_catv"),
+        "VIDEO" => Some("extInput:video"),
+        "AUX" => Some("extInput:line"),
+        "TV" => Some("extInput:tv"),
+        "CD" => Some("extInput:sacd_cd"),
+        _ => None,
+    }
+}
+
 /// Matches a Sony input URI to a native input category.
 ///
 /// Uses a three-phase matching strategy against `getPlayingContentInfo` URIs:
@@ -293,7 +356,7 @@ fn display_name_for_category(category: &str) -> String {
 /// 3. **Known URI mapping**: Falls back to a hardcoded mapping of Sony URI bases
 ///    to input categories (e.g. `mediaBox` -> `STB`). This handles receivers
 ///    whose native API returns empty icon fields.
-fn match_uri_to_category(
+pub(crate) fn match_uri_to_category(
     uri: &str,
     native: Option<&[homelab::sony_receiver::NativeInputConfig]>,
 ) -> Option<String> {
@@ -347,7 +410,7 @@ fn match_uri_to_category(
 ///
 /// Handles formats like `"IN 1"`, `"in1"`, `"IN 7"`, `"HDMI 2"`.
 /// Returns `None` for non-HDMI assignments like `"none"`, `"eARC/OUT A"`, `""`.
-fn extract_hdmi_port(hdmi_assign: &str) -> Option<u32> {
+pub(crate) fn extract_hdmi_port(hdmi_assign: &str) -> Option<u32> {
     let trimmed = hdmi_assign.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
         return None;
@@ -410,7 +473,7 @@ fn format_input_name(uri: &str) -> String {
 
 #[cfg(test)]
 mod format_tests {
-    use super::{format_source_name, format_input_name, match_uri_to_category, extract_hdmi_port, display_name_for_category};
+    use super::{format_source_name, format_input_name, match_uri_to_category, extract_hdmi_port, display_name_for_category, build_category_uri_map, category_to_logical_uri};
 
     #[test]
     fn hdmi_with_port() {
@@ -670,6 +733,135 @@ mod format_tests {
         assert_eq!(display_name_for_category("CD"), "CD");
         // Unknown category falls back to format_source_name
         assert_eq!(display_name_for_category("PHONO"), "Phono");
+    }
+
+    #[test]
+    fn build_category_uri_map_with_empty_native_fields() {
+        use homelab::sony_receiver::InputSource;
+
+        // Reproduce real-world scenario: native API returns empty icons AND
+        // empty hdmi_assign values. Terminal URIs can't be matched to categories
+        // via icon or HDMI port, so the fallback logical URIs are used.
+        let native = vec![
+            make_source("GAME", "", "", ""),
+            make_source("STB", "", "", ""),
+            make_source("BD", "", "", ""),
+            make_source("SAT", "", "", ""),
+            make_source("VIDEO", "", "", ""),
+            make_source("AUX", "", "", ""),
+            make_source("TV", "", "", ""),
+            make_source("CD", "", "", ""),
+        ];
+
+        let terminals = vec![
+            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource { title: "HDMI 2".into(), uri: "extInput:hdmi?port=2".into(), icon_url: None, connection: None, label: None, active: None },
+        ];
+
+        let map = build_category_uri_map(&native, Some(&terminals));
+
+        // Phase 1 can't match HDMI terminals to categories (empty native fields),
+        // but Phase 2 fills ALL categories with logical URIs.
+        assert_eq!(map.len(), 8, "all 8 categories should have URIs: {:?}", map);
+        assert_eq!(map.get("GAME"), Some(&"extInput:game".to_string()));
+        assert_eq!(map.get("STB"), Some(&"extInput:mediaBox".to_string()));
+        assert_eq!(map.get("BD"), Some(&"extInput:bd".to_string()));
+        assert_eq!(map.get("SAT"), Some(&"extInput:sat_catv".to_string()));
+        assert_eq!(map.get("VIDEO"), Some(&"extInput:video".to_string()));
+        assert_eq!(map.get("AUX"), Some(&"extInput:line".to_string()));
+        assert_eq!(map.get("TV"), Some(&"extInput:tv".to_string()));
+        assert_eq!(map.get("CD"), Some(&"extInput:sacd_cd".to_string()));
+    }
+
+    #[test]
+    fn build_category_uri_map_with_populated_hdmi_assign() {
+        use homelab::sony_receiver::InputSource;
+
+        // Normal scenario: native API returns hdmi_assign values
+        let native = vec![
+            make_source("GAME", "", "in1", ""),
+            make_source("STB", "", "in2", ""),
+            make_source("BD", "", "in3", ""),
+            make_source("TV", "", "eARC/OUT A", ""),
+        ];
+
+        let terminals = vec![
+            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource { title: "HDMI 2".into(), uri: "extInput:hdmi?port=2".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource { title: "HDMI 3".into(), uri: "extInput:hdmi?port=3".into(), icon_url: None, connection: None, label: None, active: None },
+        ];
+
+        let map = build_category_uri_map(&native, Some(&terminals));
+
+        assert_eq!(map.get("GAME"), Some(&"extInput:hdmi?port=1".to_string()));
+        assert_eq!(map.get("STB"), Some(&"extInput:hdmi?port=2".to_string()));
+        assert_eq!(map.get("BD"), Some(&"extInput:hdmi?port=3".to_string()));
+        // TV on eARC has no matching terminal, gets logical URI fallback
+        assert_eq!(map.get("TV"), Some(&"extInput:tv".to_string()));
+    }
+
+    #[test]
+    fn build_category_uri_map_with_icon_matching() {
+        use homelab::sony_receiver::InputSource;
+
+        // Scenario: native API returns icons (some receiver models)
+        let native = vec![
+            make_source("GAME", "", "in1", "game"),
+            make_source("STB", "", "in2", "mediaBox"),
+        ];
+
+        // Terminals with non-HDMI URIs that match by icon
+        let terminals = vec![
+            InputSource { title: "Game".into(), uri: "extInput:game".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource { title: "Media Box".into(), uri: "extInput:mediaBox".into(), icon_url: None, connection: None, label: None, active: None },
+        ];
+
+        let map = build_category_uri_map(&native, Some(&terminals));
+
+        assert_eq!(map.get("GAME"), Some(&"extInput:game".to_string()));
+        assert_eq!(map.get("STB"), Some(&"extInput:mediaBox".to_string()));
+    }
+
+    #[test]
+    fn build_category_uri_map_no_terminals() {
+        // Even without terminal data, Phase 2 fallback provides logical URIs
+        let native = vec![make_source("GAME", "", "in1", "")];
+        let map = build_category_uri_map(&native, None);
+        assert_eq!(map.get("GAME"), Some(&"extInput:game".to_string()));
+    }
+
+    #[test]
+    fn build_category_uri_map_phase1_takes_priority() {
+        use homelab::sony_receiver::InputSource;
+
+        // When Phase 1 resolves a real HDMI URI, Phase 2 fallback is NOT used
+        let native = vec![
+            make_source("GAME", "", "in1", ""),
+            make_source("STB", "", "", ""),  // empty hdmi_assign
+        ];
+        let terminals = vec![
+            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
+        ];
+
+        let map = build_category_uri_map(&native, Some(&terminals));
+
+        // GAME resolved from terminal via HDMI port matching
+        assert_eq!(map.get("GAME"), Some(&"extInput:hdmi?port=1".to_string()));
+        // STB not matched by terminals, gets logical URI fallback
+        assert_eq!(map.get("STB"), Some(&"extInput:mediaBox".to_string()));
+    }
+
+    #[test]
+    fn category_to_logical_uri_all() {
+        assert_eq!(category_to_logical_uri("GAME"), Some("extInput:game"));
+        assert_eq!(category_to_logical_uri("STB"), Some("extInput:mediaBox"));
+        assert_eq!(category_to_logical_uri("BD"), Some("extInput:bd"));
+        assert_eq!(category_to_logical_uri("SAT"), Some("extInput:sat_catv"));
+        assert_eq!(category_to_logical_uri("VIDEO"), Some("extInput:video"));
+        assert_eq!(category_to_logical_uri("AUX"), Some("extInput:line"));
+        assert_eq!(category_to_logical_uri("TV"), Some("extInput:tv"));
+        assert_eq!(category_to_logical_uri("CD"), Some("extInput:sacd_cd"));
+        assert_eq!(category_to_logical_uri("UNKNOWN"), None);
     }
 
 }
@@ -1009,8 +1201,9 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .sources > .badge-row {{ min-height: 0; }}
   .sources.visible {{ grid-template-rows: 1fr; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a2a45; }}
   .sources .badge-row {{ justify-content: flex-end; }}
-  .sources .badge {{ transition: background 0.2s, border-color 0.2s, color 0.2s; cursor: pointer; }}
-  .sources .badge:hover:not(.badge-active) {{ background: rgba(15, 52, 96, 0.4); border-color: #1a5a8a; color: #7ab8e0; }}
+  .sources .badge {{ transition: background 0.2s, border-color 0.2s, color 0.2s; }}
+  .sources .badge[data-uri] {{ cursor: pointer; }}
+  .sources .badge[data-uri]:hover:not(.badge-active) {{ background: rgba(15, 52, 96, 0.4); border-color: #1a5a8a; color: #7ab8e0; }}
   .sources .badge.badge-active {{ cursor: default; }}
   .badge-dim {{ background: rgba(15, 52, 96, 0.15); border-color: #1a3050; color: #4a6278; }}
   .explore {{ margin-top: 24px; color: #b5b5b5; }}
@@ -1042,6 +1235,13 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   #auto-shutdown-select:hover {{ border-color: #2a6aaa; }}
   #auto-shutdown-select:focus {{ outline: none; border-color: #7cc4ff; box-shadow: 0 0 0 2px rgba(124,196,255,0.15); }}
   #auto-shutdown-select option {{ background: #0f1a2e; color: #c8d8e8; padding: 6px; }}
+  .frost-overlay {{ position: fixed; inset: 0; z-index: 9000; backdrop-filter: blur(6px) saturate(0.3); -webkit-backdrop-filter: blur(6px) saturate(0.3); background: rgba(10, 10, 20, 0.55); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.6s ease; }}
+  .frost-overlay.visible {{ opacity: 1; pointer-events: auto; }}
+  .frost-modal {{ background: #16213e; border: 1px solid #1a4a7a; border-radius: 12px; padding: 28px 36px; text-align: center; box-shadow: 0 12px 48px rgba(0,0,0,0.6); max-width: 340px; }}
+  .frost-modal h2 {{ color: #e8e8e8; font-size: 1.1em; margin: 0 0 10px; font-weight: 600; }}
+  .frost-modal p {{ color: #778; font-size: 0.85em; margin: 0; line-height: 1.5; }}
+  .frost-modal .spinner {{ display: inline-block; width: 18px; height: 18px; border: 2px solid #334; border-top-color: #7cc4ff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-top: 14px; }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
 </style>
 </head>
 <body>
@@ -1074,6 +1274,14 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 </div>
 
 <p class="explore">Try interacting with the API by using the <a href="./explore">explore</a> UI.</p>
+
+<div class="frost-overlay" id="frost-overlay">
+  <div class="frost-modal">
+    <h2>Homelab Server is unreachable</h2>
+    <p>Waiting for connection&hellip;</p>
+    <div class="spinner"></div>
+  </div>
+</div>
 
 <div id="pop-sony-power" popover="manual" class="info-popover">
   <h4>Sony Receiver &mdash; Power States</h4>
@@ -1151,6 +1359,10 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   // Lock: hold auto-shutdown badge at optimistic value until server confirms
   let arcamAutoShutdownLock = null; // {{ value, label, serverLabel }}
   let arcamAutoShutdownLockExpiry = 0;
+  // Server reachability tracking
+  let consecutiveFailures = 0;
+  let serverUnreachable = false;
+  const FAILURE_THRESHOLD = 2; // Show overlay after 2 consecutive failures
 
   function togglePower(dotEl, device) {{
     if (dotEl.classList.contains('grey')) return;
@@ -1250,7 +1462,10 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         return a.name.localeCompare(b.name);
       }});
       const srcHtml = '<div class="badge-row">' + sorted.map(s =>
-        '<span class="badge' + (s.active ? ' badge-active' : ' badge-dim') + '" data-category="' + (s.category || '') + '">' + s.name + '</span>'
+        '<span class="badge' + (s.active ? ' badge-active' : ' badge-dim') + '"'
+        + ' data-category="' + (s.category || '') + '"'
+        + (s.uri ? ' data-uri="' + s.uri + '"' : '')
+        + '>' + s.name + '</span>'
       ).join('') + '</div>';
       if (sourcesEl.innerHTML !== srcHtml) {{
         sourcesEl.innerHTML = srcHtml;
@@ -1264,10 +1479,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   }}
 
   function bindSourceClicks(container) {{
-    container.querySelectorAll('.badge[data-category]').forEach(badge => {{
+    container.querySelectorAll('.badge[data-uri]').forEach(badge => {{
       badge.addEventListener('click', function() {{
+        const uri = this.dataset.uri;
         const cat = this.dataset.category;
-        if (!cat || this.classList.contains('badge-active')) return;
+        if (!uri || this.classList.contains('badge-active')) return;
         // Optimistic UI: activate this badge, dim all others
         container.querySelectorAll('.badge').forEach(b => {{
           b.classList.remove('badge-active');
@@ -1281,11 +1497,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         }}
         sonySourceLock = cat;
         sonySourceLockExpiry = Date.now() + 10000;
-        // Fire API call
-        fetch('/sony_receiver/' + encodeURIComponent(SONY_DEVICE) + '/source', {{
+        // Fire API call using the known-good set_input endpoint
+        fetch('/sony_receiver/' + encodeURIComponent(SONY_DEVICE) + '/input', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ category: cat }})
+          body: JSON.stringify({{ uri: uri }})
         }}).catch(() => {{}});
       }});
     }});
@@ -1411,8 +1627,15 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   async function poll() {{
     try {{
       const resp = await fetch("/status");
-      if (!resp.ok) return;
+      if (!resp.ok) throw new Error('status ' + resp.status);
       const data = await resp.json();
+
+      // Server is reachable — if recovering, reload for fresh state
+      if (serverUnreachable) {{
+        location.reload();
+        return;
+      }}
+      consecutiveFailures = 0;
 
       // --- Sony (lock-based) ---
       if (data.sony.detail) lastSonyDetail = data.sony.detail;
@@ -1481,7 +1704,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         }}
       }}
     }} catch (_) {{
-      // Network error — leave current state, retry next tick
+      consecutiveFailures++;
+      if (consecutiveFailures >= FAILURE_THRESHOLD && !serverUnreachable) {{
+        serverUnreachable = true;
+        document.getElementById('frost-overlay').classList.add('visible');
+      }}
     }}
   }}
 
