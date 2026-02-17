@@ -54,8 +54,8 @@ Same as command, but with an **Answer Code (Ac)** inserted between Cc and Dl.
 |----|---------|
 | `0x00` | Status update (success) |
 | `0x82` | Zone invalid |
-| `0x83` | Command not recognised |
-| `0x84` | Parameter not recognised |
+| `0x83` | Command not recognized |
+| `0x84` | Parameter not recognized |
 | `0x86` | Invalid data length |
 
 ### Unsolicited Messages
@@ -277,15 +277,20 @@ Set or query the signal-sense auto shutdown timer.
 
 | Data | Meaning |
 |------|---------|
-| `0x00` | Disabled |
-| `0x01` | 20 min (default) |
+| `0x00` | Disabled (default, recommended) |
+| `0x01` | 20 min |
 | `0x02` | 30 min |
 | `0x03` | 1 hour |
 | `0x04` | 2 hours |
-| `0x05` | 4 hours |
+| `0x05` | 4 hours (not recommended - may exceed network timeout) |
 | `0xF0` | Query |
 
 ```
+Cmd: 21 01 58 01 F0 0D
+Resp: 21 01 58 00 01 01 0D               (=20 min)
+```
+
+**Note:** Any command sent to the amp (including heartbeat `0x25` and status queries) resets the EuP auto-standby timer. To allow auto-shutdown to work, the server polls at intervals greater than the configured timeout.
 Cmd:  21 01 58 01 F0 0D
 Resp: 21 01 58 00 01 01 0D               (=20 min)
 ```
@@ -335,9 +340,9 @@ Query the amplifier operating mode.
 
 | Data (response) | Meaning |
 |-----------------|---------|
-| `0x00` | Stereo |
-| `0x01` | Bridged |
-| `0x02` | Dual Mono |
+| `0x00`          | Stereo |
+| `0x01`          | Bridged |
+| `0x02`          | Dual Mono |
 
 ```
 Cmd:  21 01 61 01 F0 0D
@@ -361,7 +366,7 @@ Resp: 21 01 61 00 01 00 0D               (=Stereo)
 | `0x55` | Timeout Counter | All | 1 | 2 | `0xF0` |
 | `0x56` | Lifter Temperature | PA720, PA240 | 1 | 2 | `0xF0`/`0xF1` |
 | `0x57` | Output Temperature | All | 1 | 2 | `0xF0`/`0xF1` |
-| `0x58` | Auto Shutdown | All | 1 | 1 | `0xF0` |
+| `0x58` | Auto Shutdown | All | 1 | 1 | `0xF0` (0x00=off, 0x01=20m, 0x02=30m, 0x03=1h, 0x04=2h) |
 | `0x5A` | Input Detect | All | 1 | 1 | `0xF0` |
 | `0x5D` | System Status | All | 1 | 1+ | `0xF0` |
 | `0x5E` | System Model | All | 1 | n (max 10) | `0xF0` |
@@ -377,6 +382,16 @@ The amp supports AMX Duet Dynamic Device Discovery Protocol.
 Cmd:  AMX\r
 Resp: AMXB<Device-SDKClass=Amplifier><Device-Make=ARCAM><Device-Model=PA720, PA240, PA410><Device-Revision=x.y.z>\r
 ```
+
+> AMX Duet Dynamic Device Discovery Protocol (DDDP) is a technology within the AMX Duet platform that enables NetLinx control systems to automatically detect, configure, and connect to compatible third-party devices (serial or IP). It utilizes Java-based modules to instantly load appropriate device drivers, eliminating manual programming for device integration.
+>
+> Key Features and Benefits:
+Automatic Device Recognition: When a device with DDDP is connected, the AMX Master recognizes it and automatically installs the necessary Duet module.
+> Simplified Integration: It uses the Duet Standard NetLinx API (SNAPI), providing a fixed interface for common device types, allowing for easier, standardized control programming.
+> Plug-and-Play Setup: The system can pull the required module from the master, the AMX website, or the manufacturer's site, enabling seamless, "plug-and-play" functionality.
+> Device Swapping: Devices can be replaced without requiring changes to the existing control code.
+> Partner Program: DDDP is part of an [AMX partner program](https://www.amx.com/vn/site_elements/excerpt-what-s-new-in-x-series-controllers) that ensures high-level interoperability with various manufacturer equipment.
+> It essentially automates the backend, allowing installers to connect hardware and have the control system instantly understand and control it.
 
 ## Network Standby Behavior
 
@@ -428,6 +443,22 @@ EU Energy-using Products (EuP) regulations require automatic standby after a per
 3. **Handle reconnection gracefully** — if the amp enters standby without prior IP activity (e.g., powered on via front panel only), the network will be unreachable until the next manual power-on
 4. **12V trigger is the most reliable non-network wake method** — unlike SA-series amps, there is no IR fallback
 
+## Amplifier Mode Value Discrepancy
+
+Real-world testing with a PA240 shows that the physical MODE switch set to
+"ST" (Stereo, leftmost position) returns `0x01`, not `0x00` as documented.
+This suggests the firmware uses 1-indexed values:
+
+| Data (actual) | Physical Switch | Documented Meaning |
+|---------------|-----------------|-------------------|
+| `0x01`        | ST (Stereo)     | Bridged           |
+| `0x02`        | BRIDGE          | Dual Mono         |
+| `0x00` or `0x03` | DM (Dual Mono) | Unknown        |
+
+**Status**: Needs verification by testing with switch in all 3 positions.
+The `mode_raw` field is included in both the dashboard detail JSON and
+`homey arcam probe` output to assist with mapping the actual byte values.
+
 ## homelab-server Integration Status
 
 Confirmed through real-world testing with `homelab-server` and the PA240:
@@ -441,3 +472,45 @@ The server's background heartbeat messages (`0x25`) successfully keep the amp's 
 The same heartbeat messages also reset the EuP auto-standby timer (`0x58`). This means the amp will **never** auto-shutdown due to signal inactivity while the server is running, since each heartbeat resets the countdown.
 
 This is a known trade-off: the auto-shutdown feature (which powers down the amp after a configurable period of no audio signal) can be useful for energy savings, but it is effectively disabled by the server's heartbeat cycle. A future enhancement could selectively pause heartbeats to allow auto-shutdown when desired, but for now the server prioritizes reliable network connectivity over energy-saving standby.
+
+### Timeout Counter Behavior
+
+The Timeout Counter (`0x55`) returns the number of **seconds since audio stopped**, counting up toward the configured Auto Shutdown limit. For example, with Auto Shutdown set to 20 minutes:
+
+- 0 seconds: audio just stopped
+- 60 seconds: 1 minute of silence
+- 1200 seconds: auto-standby triggers
+
+**Important:** Any TCP command to the amp (heartbeat, status query, etc.) resets this timer. This means the server's polling will prevent auto-shutdown from ever triggering while the server is running.
+
+### Dynamic Polling Strategy
+
+To allow auto-shutdown to work when desired, the server implements dynamic polling intervals:
+
+- **When Auto Shutdown is Disabled (`0x00`)**: Poll frequently (every 3 seconds) for responsive dashboard updates
+- **When Auto Shutdown is Enabled** (20min, 30min, 1hr, 2hr): Poll at `timeout_window + 1 minute` to allow the timer to count down
+
+This approach balances responsiveness with the ability to auto-shutdown:
+
+| Scenario | Polling Interval | Trade-off |
+|----------|-----------------|-----------|
+| Auto Shutdown = Off | 3 seconds | Responsive, never auto-shutdowns |
+| Auto Shutdown = On | timeout + 1 min | Delay in detecting manual power-off, but auto-shutdown works |
+
+The latency in detecting manual power-off is acceptable because:
+1. **API/remote control**: Event-driven, instant state change detection
+2. **Manual front-panel power-off**: Network stays active for hours before deep sleep, so delayed detection has minimal impact
+
+### Auto Shutdown Configuration
+
+The Auto Shutdown setting is configurable via CLI, API, and dashboard:
+
+| Value | Setting | Recommended |
+|-------|---------|-------------|
+| `0x00` | Disabled | Default for most users |
+| `0x01` | 20 min | Energy-conscious users |
+| `0x02` | 30 min | - |
+| `0x03` | 1 hour | - |
+| `0x04` | 2 hours | Not recommended (may exceed network timeout) |
+
+Note: 4-hour setting (`0x05`) is not exposed as it may exceed the network interface timeout, causing loss of connectivity.

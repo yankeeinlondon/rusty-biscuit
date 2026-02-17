@@ -289,11 +289,19 @@ curl -s http://<IP>:80/fcgi-bin/request.fcgi \
   -d '{"type":"http_set","packet":[{"id":0,"feature":"feature1","value":"newvalue"}]}'
 ```
 
-### Power Features
+### Power and Zone Features
 
-| Feature | Values | Description |
-|---------|--------|-------------|
+| Feature | Example Values | Description |
+|---------|---------------|-------------|
 | `main.power` | `"on"` / `"off"` | Main zone power (reliable, unlike JSON-RPC) |
+| `main.input` | Current input URI | Currently active input |
+| `main.volume` | `"50"` | Current volume level |
+| `main.mute` | `"on"` / `"off"` | Mute state |
+| `zone2.power` | `"on"` / `"off"` | Zone 2 power |
+| `zone2.volume` | `"30"` | Zone 2 volume |
+| `zone2.input` | `"SAT"` | Zone 2 input selection |
+| `zone3.power` | `"on"` / `"off"` | Zone 3 power |
+| `zone3.volume` | `"25"` | Zone 3 volume |
 
 ### Input Configuration Features
 
@@ -325,17 +333,51 @@ Each category exposes these features (replace `GAME` with the category name):
 | `GAME.show` | `"true"` / `"false"` | Whether input is visible in the UI |
 | `GAME.category` | `"game"` | Internal category tag |
 | `GAME.videoin` | `""` | Video input override |
-| `GAME.digitalassign` | `""` | Digital audio input assignment |
+| `GAME.digitalassign` | `"opt"` / `"coax"` / `""` | Digital audio input assignment (Opt/Coax) |
 | `GAME.inceilingmode` | `"true"` / `"false"` | In-ceiling speaker mode |
-| `GAME.inputmode` | `"auto"` | Input mode setting |
+| `GAME.inputmode` | `"auto"`, `"4ch"`, `"analog"` | Input mode setting |
 | `GAME.soundfield` | `"A.F.D."` | Sound field preset for this input |
-| `GAME.swlevel` | `"0"` | Subwoofer level offset |
-| `GAME.swlpf` | `"off"` | Subwoofer low-pass filter |
+| `GAME.swlevel` | `"0"` | Subwoofer level offset (-10 to +10) |
+| `GAME.swlpf` | `"off"`, `"80Hz"`, `"120Hz"` | Subwoofer low-pass filter |
 | `GAME.usetrigger1` | `"true"` / `"false"` | 12V trigger 1 activation |
 | `GAME.usetrigger2` | `"true"` / `"false"` | 12V trigger 2 activation |
 | `GAME.usetrigger3` | `"true"` / `"false"` | 12V trigger 3 activation |
-| `GAME.presetgain` | `"0"` | Input gain preset |
-| `GAME.avsync` | `"0"` | AV sync delay (ms) |
+| `GAME.presetgain` | `"0"` | Input gain preset (-12dB to +12dB) |
+| `GAME.avsync` | `"0"` | AV sync delay (0-300ms) |
+
+#### Additional System Features
+
+The native API also exposes system-wide settings not available via JSON-RPC:
+
+| Feature | Example Values | Description |
+|---------|---------------|-------------|
+| `main.power` | `"on"` / `"off"` | Main zone power (reliable) |
+| `main.input` | Current input URI | Currently active input |
+| `main.volume` | `"50"` | Current volume level |
+| `main.mute` | `"on"` / `"off"` | Mute state |
+| `zone2.power` | `"on"` / `"off"` | Zone 2 power |
+| `zone2.volume` | `"30"` | Zone 2 volume |
+| `zone2.input` | `"SAT"` | Zone 2 input |
+| `zone3.power` | `"on"` / `"off"` | Zone 3 power |
+| `zone3.volume` | `"25"` | Zone 3 volume |
+| `system.volumedisplay` | `"dB"`, `"linear"` | Volume display units |
+| `system.dimmer` | `"off"`, `"dark"`, `"bright"` | Display dimmer |
+| `system.devicename` | `"Living Room"` | Device name setting |
+| `system.internetstatus` | `"connected"` / `"disconnected"` | Internet connectivity |
+| `system.wiredlan` | `"connected"` / `"disconnected"` | Wired network status |
+| `system.wirelesslan` | `"connected"` / `"disconnected"` | Wireless network status |
+
+#### Audio Settings (Native API)
+
+| Feature | Example Values | Description |
+|---------|---------------|-------------|
+| `audio.puredirect` | `"on"` / `"off"` | Pure Direct mode |
+| `audio.soundfield` | `"A.F.D."` | Current sound field |
+| `audio.frontbalance` | `"0"` | Front speaker balance |
+| `audio.centerlevel` | `"0"` | Center speaker level |
+| `audio.subwooferlevel` | `"0"` | Subwoofer level |
+| `audio.dolbylevel` | `"0"` | Dolby volume level |
+| `audio.surroundlevel` | `"0"` | Surround speaker level |
 
 #### Querying All Inputs at Once
 
@@ -352,14 +394,70 @@ type system.
 
 ## SDCP / CIS (Binary Protocol)
 
-For professional control systems requiring raw TCP communication.
+For professional control systems requiring raw TCP communication on port 33335.
 
 - **Port**: 33335
-- **Protocol**: Raw TCP socket with hex byte strings
-- **Header**: Commands start with `0x02` start byte
+- **Protocol**: Raw TCP socket with hex-encoded binary messages
+- **Header**: Commands start with `0x02` (STX) followed by message length
+- **Delimiter**: Commands terminated with `0x03` (ETX)
 
-This protocol is faster but harder to debug. Unless building a commercial driver for
-Control4/Crestron, use the JSON-RPC and Native Web APIs instead.
+### Message Format
+
+```
+[STX] [Length-H] [Length-L] [Data...] [ETX] [Checksum]
+```
+
+| Byte | Description |
+|------|-------------|
+| 0x02 | Start of text (STX) |
+| Length | 16-bit big-endian message length |
+| Data | Command payload (variable) |
+| 0x03 | End of text (ETX) |
+| Checksum | XOR of all bytes from STX to ETX (inclusive) |
+
+### Known Command Categories
+
+Based on protocol analysis of similar Sony ES receivers:
+
+| Category | Purpose |
+|----------|---------|
+| Power | Power on/off, standby modes |
+| Volume | Master volume, zone volumes |
+| Input | Input selection, routing |
+| Audio | Sound field, EQ, tone controls |
+| Video | Video pass-through, picture modes |
+| System | Device info, network settings |
+
+### Command Structure Example
+
+```
+02 00 10 01 03 00 01 00 00 03 14
+│  │  │  │  │  │  │  │  │  │
+│  │  │  │  │  │  │  │  │  └── Checksum
+│  │  │  │  │  │  │  │  └───── ETX
+│  │  │  │  │  │  │  └──────── Command data
+│  │  │  │  │  │  └────────── Sub-command
+│  │  │  │  │  └───────────── Command
+│  │  │  │  └──────────────── Source/Zone
+│  │  │  └────────────────── Message type
+│  │  └───────────────────── Length (16 bytes)
+│  └──────────────────────── STX
+```
+
+### Capabilities vs JSON-RPC
+
+The SDCP protocol provides:
+- **Faster response**: Binary protocol with lower overhead than HTTP
+- **Zone control**: Native multi-zone support (Main, Zone 2, Zone 3)
+- **Real-time feedback**: Push notifications for volume/input changes
+- **Professional integration**: Control4, Crestron, Savant compatibility
+
+**Limitations**:
+- Harder to debug (binary vs JSON)
+- Requires specialized libraries
+- Less documented than REST APIs
+
+> **Recommendation**: Unless building a commercial driver for Control4/Crestron, use the JSON-RPC and Native Web APIs instead.
 
 
 ## Implementation Notes
