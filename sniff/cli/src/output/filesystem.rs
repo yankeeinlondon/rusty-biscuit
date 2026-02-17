@@ -3,12 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidRenderer;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::utils::layout::Margin;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
@@ -850,7 +848,7 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
 }
 
 /// Print markdown documents section.
-pub(crate) fn print_docs_section(docs: &[MarkdownMeta]) {
+pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
     let prompt_count = docs.iter().filter(|d| d.prompt.is_some()).count();
 
     let header = if prompt_count > 0 {
@@ -862,42 +860,37 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta]) {
     } else {
         format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
     };
-    println!("\n{}\n", Prose::new(&header).render(None));
+    eprintln!("\n{}\n", Prose::new(&header).render(None));
 
-    for doc in docs {
-        let pkg_display = doc.package.as_deref().unwrap_or("(root)");
-        let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
+    let items: Vec<String> = docs
+        .iter()
+        .map(|doc| {
+            let file_link =
+                format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
 
-        let mut details = vec![
-            format!("<dim>Package:</dim> {pkg_display}"),
-            format!("<dim>Updated:</dim> {date_str}"),
-        ];
+            if verbose > 0 {
+                let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
+                let mut meta_parts = Vec::new();
+                if !doc.title.is_empty() {
+                    meta_parts.push(format!("title: <dim>{}</dim>", doc.title));
+                }
+                meta_parts.push(format!("updated: <dim>{date_str}</dim>"));
+                format!("{file_link} ({meta})", meta = meta_parts.join(", "))
+            } else {
+                file_link
+            }
+        })
+        .map(|item| Prose::new(&item).render(None))
+        .collect();
 
-        if !doc.title.is_empty() {
-            details.insert(0, format!("<dim>Title:</dim> {}", doc.title));
-        }
+    let list = UnorderedList::new(items);
+    println!("{}", list.render(None));
 
-        if let Some(ref model) = doc.model {
-            details.push(format!("<dim>Model:</dim> {model}"));
-        }
-
-        // Filepath: dim path prefix, bold filename, wrapped in OSC8 link
-        let file_link = format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
-        println!("{}", Prose::new(&file_link).render(None));
-
-        for detail in &details {
-            println!("    {}", Prose::new(detail).render(None));
-        }
-
-        // Render prompt label + block quote (word wrap handles width)
-        if let Some(ref prompt) = doc.prompt {
-            println!("    {}", Prose::new("<dim>Prompt:</dim>").render(None));
-            let mut quote = BlockQuote::from(prompt.as_str());
-            quote.layout_mut().left_margin = Margin::Chars(6);
-            println!("{}", quote.render(None));
-        }
-
-        println!();
+    if verbose == 0 {
+        eprintln!(
+            "{}",
+            Prose::new("<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>").render(None)
+        );
     }
 }
 

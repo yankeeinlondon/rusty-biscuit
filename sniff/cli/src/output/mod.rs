@@ -338,7 +338,7 @@ pub fn print_text(
                 && let Some(ref docs) = filesystem.docs
             {
                 let filtered = filter_docs(docs, docs_filter);
-                print_docs_section(&filtered);
+                print_docs_section(&filtered, verbose);
             }
         }
         // Programs and Services filters are handled separately in main.rs
