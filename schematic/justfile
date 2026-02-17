@@ -15,11 +15,11 @@ CYAN := '\033[36m'
 PACKAGE := "Schematic"
 SCHEMATIC := lowercase(PACKAGE)
 DEFINE_NAME := PACKAGE + " Define Library"
-DEFINE := SCHEMATIC + "/define"
+DEFINE := SCHEMATIC + "-define"
 GEN_NAME := PACKAGE + " Gen Library"
-GEN := SCHEMATIC + "/gen"
+GEN := SCHEMATIC + "-gen"
 SCHEMA_NAME := PACKAGE + " Schema Library"
-SCHEMA := SCHEMATIC + "/schema"
+SCHEMA := SCHEMATIC + "-schema"
 
 DOCS := "@schematic/docs/io/openapi-extensions.md @schematic/docs/json-schema/deep-dive.md "
 
@@ -40,10 +40,87 @@ default:
     just --list | grep -v 'default'
     echo
 
-
 # Uses TTS if available but never error
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+_notify message:
+    #!/usr/bin/env bash
+    if command -v osascript &> /dev/null; then
+        osascript -e '{{message}}'
+    elif command -v notify-send &> /dev/null; then
+        notify-send '{{message}}'
+    fi
+
+_ask_opencode prompt:
+    #!/usr/bin/env bash
+    if command -v opencode &> /dev/null; then
+        local MODEL
+        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
+        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
+        echo
+        opencode run "{{prompt}}" --model "$MODEL"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_claude prompt:
+    #!/usr/bin/env bash
+    if command -v claude &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_codex prompt:
+    #!/usr/bin/env bash
+    if command -v codex &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        codex exec "{{prompt}}"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+
+# use an AI agent to respond to a question (uses `AGENT`)
+ask prompt:
+    #!/usr/bin/env bash
+    if [[ "${AGENT,,}" == "opencode" ]]; then
+        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    elif [[ "${AGENT,,}" == "codex"  ]]; then
+        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    else
+        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
+    fi
+
 
 # build schematic packages (define, definitions, gen)
 build *args="":
@@ -86,6 +163,8 @@ generate:
     @echo "--------------------------"
     @echo ""
     @cargo run -p schematic-gen -- --api all --output schema/src -v
+    @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema"
+
 
 # generate a single API client to schematic/schema
 generate-one api:
@@ -95,23 +174,6 @@ generate-one api:
     @echo ""
     @cargo run -p schematic-gen -- --api {{api}} --output schema/src -v
 
-# generate all API clients and OpenAPI specs
-generate-openapi:
-    @echo ""
-    @echo "Generating API Clients + OpenAPI Specs"
-    @echo "---------------------------------------"
-    @echo ""
-    @mkdir -p openapi
-    @cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi -v
-
-# export OpenAPI specs only (no code generation)
-export-openapi api="openai" format="json":
-    @echo ""
-    @echo "Exporting OpenAPI Spec for {{api}}"
-    @echo "-----------------------------------"
-    @echo ""
-    @mkdir -p openapi
-    @cargo run -p schematic-gen -- generate --api {{api}} --output schema/src --openapi-out openapi --openapi-format {{format}} -v
 
 # build, install CLI, generate schemas, and verify
 install:
@@ -168,21 +230,20 @@ docs:
     @echo "Documentation for Schematic packages"
     @echo ""
     @cargo doc --workspace --no-deps --open
+    @just _speak "Documentation for {{PACKAGE}} was built";
 
 release:
     @just lint
     @just test-e2e
-    @just just build --release
-    @just just full
+    @just build --release
+    @just full
     @just docs
 
 
-# Use GPT 5.2 to commit staged changes
+# Use GPT 5.2 codex to commit staged changes
 commit:
     @cd .. && opencode run commit "-f" --model "openai/gpt-5.2-codex"
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "git commits completed in {{BOLD}}rusty-biscuit{{RESET}} monorepo"; \
-    fi
+    @just _speak "git commits completed in {{BOLD}}rusty-biscuit{{RESET}} monorepo"
 
 # Open Claude Code in yolo mode
 oc *args="":
@@ -303,6 +364,8 @@ drift *args="":
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{DOCS}} {{args}}
     @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+
+
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

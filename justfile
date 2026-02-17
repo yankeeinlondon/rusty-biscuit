@@ -5,7 +5,10 @@ set positional-arguments
 areas := "biscuit-hash biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa so-you-say tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
 
 BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
 RESET := '\033[0m'
+RED := '\033[31m'
 
 default:
     #!/usr/bin/env bash
@@ -38,6 +41,83 @@ oc *args="":
 # Uses TTS if available but never error
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+_notify message:
+    #!/usr/bin/env bash
+    if command -v osascript &> /dev/null; then
+        osascript -e '{{message}}'
+    elif command -v notify-send &> /dev/null; then
+        notify-send '{{message}}'
+    fi
+
+_ask_opencode prompt:
+    #!/usr/bin/env bash
+    if command -v opencode &> /dev/null; then
+        local MODEL
+        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
+        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
+        echo
+        opencode run "{{prompt}}" --model "$MODEL"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_claude prompt:
+    #!/usr/bin/env bash
+    if command -v claude &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_codex prompt:
+    #!/usr/bin/env bash
+    if command -v codex &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        codex exec "{{prompt}}"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+
+# use an AI agent to respond to a question (uses `AGENT`)
+ask prompt:
+    #!/usr/bin/env bash
+    if [[ "${AGENT,,}" == "opencode" ]]; then
+        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    elif [[ "${AGENT,,}" == "codex"  ]]; then
+        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    else
+        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
+    fi
 
 # Ask Claude Code in a non-interactive session
 _claude PROMPT:
@@ -104,13 +184,16 @@ install:
     for area in {{areas}}; do
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "install"; then
+                echo
                 echo "Installing from $area..."
                 just -f "$area/justfile" install || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
             else
                 if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
+                    echo
                     echo "No INSTALL command for $area, doing release build..."
                     just -f "$area/justfile" build --release || ( just _speak "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
                 else
+                    echo
                     echo "- no INSTALL command for the area **$area**" >&2
                 fi
             fi
