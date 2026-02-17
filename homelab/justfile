@@ -15,10 +15,6 @@ CYAN := '\033[36m'
 WHITE := '\033[37m'
 DOCS := ""
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
 
 default:
     #!/usr/bin/env bash
@@ -35,6 +31,12 @@ default:
     echo ""
     just --list | grep -v 'default'
     echo
+
+
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
 
 _notify message:
     osascript -e 'display notification "{{message}}" with title "Homelab"'

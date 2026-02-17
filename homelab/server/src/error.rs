@@ -1,7 +1,7 @@
 use axum::{
-    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
+    Json,
 };
 use homelab::{arcam::ArcamError, sony_receiver::SonyError};
 use serde::Serialize;
@@ -33,6 +33,8 @@ pub enum ServerError {
     ConfigIo(String),
     /// Configuration parse error
     ConfigParse(String),
+    /// Invalid parameter value (400)
+    InvalidParameter(String),
 }
 
 impl fmt::Display for ServerError {
@@ -57,6 +59,7 @@ impl fmt::Display for ServerError {
             Self::Timeout => write!(f, "Request timed out"),
             Self::ConfigIo(msg) => write!(f, "Configuration I/O error: {msg}"),
             Self::ConfigParse(msg) => write!(f, "Configuration parse error: {msg}"),
+            Self::InvalidParameter(msg) => write!(f, "Invalid parameter: {msg}"),
         }
     }
 }
@@ -119,6 +122,7 @@ impl IntoResponse for ServerError {
             ServerError::ConfigParse(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_PARSE_ERROR")
             }
+            ServerError::InvalidParameter(_) => (StatusCode::BAD_REQUEST, "INVALID_PARAMETER"),
         };
 
         let body = ErrorResponse {

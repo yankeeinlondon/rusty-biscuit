@@ -5,7 +5,7 @@
 
 use crate::config::{ArcamAmpService, HomeyConfig, SonyReceiverService};
 use homelab::{network::Host, sony_receiver::SonyReceiver};
-use std::{collections::HashMap, net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, sync::atomic::AtomicBool, time::Duration, time::Instant};
 use tokio::sync::RwLock;
 
 /// Default port for Sony receivers
@@ -38,6 +38,16 @@ pub struct AppState {
     pub config: Arc<RwLock<HomeyConfig>>,
     /// Path to config file (for saving changes)
     pub config_path: Option<std::path::PathBuf>,
+    /// Cached Arcam model name (queried once on first heartbeat)
+    pub arcam_model: Arc<RwLock<Option<String>>>,
+    /// Whether the last heartbeat succeeded (for UI heartbeat indicator)
+    pub arcam_heartbeat_alive: Arc<AtomicBool>,
+    /// Cached Arcam status (for rate-limited polling)
+    pub arcam_cached_status: Arc<RwLock<Option<super::DeviceStatusJson>>>,
+    /// Last time Arcam was queried (for rate limiting)
+    pub arcam_last_query: Arc<RwLock<Option<Instant>>>,
+    /// Current Arcam polling interval in seconds (based on Auto Shutdown setting)
+    pub arcam_poll_interval_secs: Arc<RwLock<u64>>,
 }
 
 /// Configuration errors
@@ -81,6 +91,11 @@ impl AppState {
             arcam_hosts: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(HomeyConfig::new())),
             config_path: None,
+            arcam_model: Arc::new(RwLock::new(None)),
+            arcam_heartbeat_alive: Arc::new(AtomicBool::new(false)),
+            arcam_cached_status: Arc::new(RwLock::new(None)),
+            arcam_last_query: Arc::new(RwLock::new(None)),
+            arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
         })
     }
 
@@ -122,6 +137,11 @@ impl AppState {
             arcam_hosts: Arc::new(RwLock::new(arcam_hosts)),
             config: Arc::new(RwLock::new(config)),
             config_path,
+            arcam_model: Arc::new(RwLock::new(None)),
+            arcam_heartbeat_alive: Arc::new(AtomicBool::new(false)),
+            arcam_cached_status: Arc::new(RwLock::new(None)),
+            arcam_last_query: Arc::new(RwLock::new(None)),
+            arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
         }
     }
 
@@ -143,6 +163,30 @@ impl AppState {
     pub async fn get_arcam_host(&self, name: &str) -> Option<(String, u16)> {
         let hosts = self.arcam_hosts.read().await;
         hosts.get(name).map(|s| (s.host.clone(), s.port))
+    }
+
+    /// Invalidates the cached Arcam status so the next poll fetches fresh data.
+    ///
+    /// Call this after any command that mutates device state (e.g., set auto-shutdown).
+    pub async fn invalidate_arcam_cache(&self) {
+        *self.arcam_last_query.write().await = None;
+    }
+
+    /// Updates the Arcam polling interval based on Auto Shutdown setting.
+    ///
+    /// Formula: poll_interval = auto_shutdown_seconds + 60
+    /// - Auto Shutdown = Off (0): poll every 60 seconds
+    /// - Auto Shutdown = 20 min: poll every 1260 seconds (21 min)
+    pub async fn update_arcam_poll_interval(&self, auto_shutdown_value: u8) {
+        let interval_secs = match auto_shutdown_value {
+            0x00 => 60,                           // Off -> 1 minute
+            0x01 => 20 * 60 + 60,                // 20 min + 1 min = 21 min
+            0x02 => 30 * 60 + 60,                // 30 min + 1 min = 31 min
+            0x03 => 60 * 60 + 60,                // 1 hour + 1 min
+            0x04 => 2 * 60 * 60 + 60,            // 2 hours + 1 min
+            _ => 60,                              // Default 1 minute
+        };
+        *self.arcam_poll_interval_secs.write().await = interval_secs;
     }
 
     /// Adds or updates a Sony receiver and saves config.
@@ -372,24 +416,10 @@ fn parse_sony_host(host_str: &str) -> Result<SonyReceiver, ConfigError> {
     Ok(SonyReceiver::new(host, port))
 }
 
-/// Parse a host string into a Host enum
+/// Parse a host string into a Host enum using the library function
 fn parse_host(host_str: &str) -> Result<Host, ConfigError> {
-    // Try IPv4 first
-    if let Ok(ipv4) = host_str.parse::<Ipv4Addr>() {
-        return Ok(Host::V4(ipv4));
-    }
-
-    // Try IPv6
-    if let Ok(ipv6) = host_str.parse() {
-        return Ok(Host::V6(ipv6));
-    }
-
-    // Must be DNS
-    if host_str.is_empty() {
-        return Err(ConfigError::InvalidHost("empty hostname".to_string()));
-    }
-
-    Ok(Host::Dns(host_str.to_string()))
+    homelab::network::parse_host(host_str)
+        .map_err(|e| ConfigError::InvalidHost(e.0))
 }
 
 #[cfg(test)]

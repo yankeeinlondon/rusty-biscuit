@@ -7,11 +7,12 @@ pub mod error;
 pub mod handlers;
 pub mod state;
 
-use axum::{Json, Router, extract::State, response::Html, routing::get};
+use axum::{Json, Router, extract::State, response::Html, routing::{get, put}};
 use axum::response::IntoResponse;
 use homelab::arcam::Arcam;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Instant;
 use tokio::time::timeout;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::{OpenApi, ToSchema};
@@ -50,11 +51,11 @@ pub fn build_router(state: AppState) -> Router {
         .split_for_parts();
 
     router
-        // Legacy routes (not advertised in API docs)
-        .nest("/sony", handlers::sony::routes().split_for_parts().0)
-        .nest("/arcam", handlers::arcam::routes().split_for_parts().0)
         .route("/", get(index))
         .route("/status", get(status))
+        .route("/arcam/timeout", get(arcam_timeout))
+        .route("/arcam/auto-shutdown", get(arcam_auto_shutdown_get))
+        .route("/arcam/auto-shutdown", put(arcam_auto_shutdown_set))
         .merge(Scalar::with_url("/explore", api))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
@@ -65,7 +66,7 @@ pub fn build_router(state: AppState) -> Router {
 
 /// Device status for a single device (serializable for the `/status` endpoint).
 #[derive(Serialize, Clone)]
-struct DeviceStatusJson {
+pub struct DeviceStatusJson {
     css_class: &'static str,
     label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,7 +92,9 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
             detail: None,
         },
         Some(sony) => match timeout(state.request_timeout, sony.get_power_status()).await {
-            Ok(Ok(status)) => match status.as_str() {
+            Ok(Ok(status)) => {
+                tracing::info!(status = %status, "Sony power status retrieved");
+                match status.as_str() {
                 "active" => {
                     // Best-effort instrumentation: volume, current input, native sources
                     // JSON-RPC calls are sequential (Sony allows one TCP connection);
@@ -134,13 +137,13 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
 
                     DeviceStatusJson {
                         css_class: "green",
-                        label: "Power: on".to_string(),
+                        label: "Active".to_string(),
                         detail,
                     }
                 }
                 "standby" => DeviceStatusJson {
                     css_class: "amber",
-                    label: "Power: off".to_string(),
+                    label: "Standby".to_string(),
                     detail: None,
                 },
                 other => DeviceStatusJson {
@@ -148,17 +151,24 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                     label: format!("Power: {other}"),
                     detail: None,
                 },
+                }
             },
-            Ok(Err(e)) => DeviceStatusJson {
-                css_class: "red",
-                label: format!("Error: {e}"),
-                detail: None,
-            },
-            Err(_) => DeviceStatusJson {
-                css_class: "red",
-                label: "Timeout".to_string(),
-                detail: None,
-            },
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "Sony power status error");
+                DeviceStatusJson {
+                    css_class: "red",
+                    label: format!("Error: {e}"),
+                    detail: None,
+                }
+            }
+            Err(_) => {
+                tracing::warn!("Sony power status timeout");
+                DeviceStatusJson {
+                    css_class: "red",
+                    label: "Timeout".to_string(),
+                    detail: None,
+                }
+            }
         },
     }
 }
@@ -333,6 +343,16 @@ mod format_tests {
                 icon: "mediabox".to_string(),
                 visible: false,
                 sound_field: String::new(),
+                digital_assign: String::new(),
+                input_mode: String::new(),
+                subwoofer_level: String::new(),
+                subwoofer_lpf: String::new(),
+                in_ceiling_mode: false,
+                trigger_1: false,
+                trigger_2: false,
+                trigger_3: false,
+                preset_gain: String::new(),
+                av_sync: String::new(),
             },
             NativeInputConfig {
                 category: "GAME".to_string(),
@@ -341,6 +361,16 @@ mod format_tests {
                 icon: "game".to_string(),
                 visible: false,
                 sound_field: String::new(),
+                digital_assign: String::new(),
+                input_mode: String::new(),
+                subwoofer_level: String::new(),
+                subwoofer_lpf: String::new(),
+                in_ceiling_mode: false,
+                trigger_1: false,
+                trigger_2: false,
+                trigger_3: false,
+                preset_gain: String::new(),
+                av_sync: String::new(),
             },
             NativeInputConfig {
                 category: "TV".to_string(),
@@ -349,6 +379,16 @@ mod format_tests {
                 icon: "tv".to_string(),
                 visible: false,
                 sound_field: String::new(),
+                digital_assign: String::new(),
+                input_mode: String::new(),
+                subwoofer_level: String::new(),
+                subwoofer_lpf: String::new(),
+                in_ceiling_mode: false,
+                trigger_1: false,
+                trigger_2: false,
+                trigger_3: false,
+                preset_gain: String::new(),
+                av_sync: String::new(),
             },
         ];
         // extInput:mediaBox matches icon "mediabox" (case-insensitive)
@@ -402,8 +442,9 @@ mod format_tests {
 
 /// Probe the Arcam amplifier and return its status.
 ///
-/// When the amplifier is on, fetches mute status and amplifier mode
-/// for dashboard instrumentation (best-effort — errors are silenced).
+/// When the amplifier is on, fetches mute status, amplifier mode (PA240 only),
+/// auto-shutdown setting, and timeout counter for dashboard instrumentation.
+/// When off, includes cached model name and heartbeat status.
 async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
     match &state.arcam_host {
         None => DeviceStatusJson {
@@ -415,26 +456,52 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
             let arcam = Arcam::from(host.as_str());
             match timeout(state.request_timeout, arcam.request_power_state()).await {
                 Ok(Ok(true)) => {
-                    // Best-effort instrumentation: mute + mode
+                    tracing::info!("Arcam power: on");
+                    let model = state.arcam_model.read().await.clone();
+                    // Best-effort instrumentation: mute + mode + auto-shutdown + timeout
                     // Each call opens a new TCP connection (Arcam is single-connection)
                     let detail = timeout(state.request_timeout, async {
-                        let arcam = Arcam::from(host.as_str());
-                        let muted = arcam.get_mute_status().await.ok();
-                        let arcam = Arcam::from(host.as_str());
-                        let mode_byte = arcam.get_amplifier_mode().await.ok();
                         let mut d = serde_json::Map::new();
-                        if let Some(m) = muted {
+                        if let Some(m) = &model {
+                            d.insert("model".into(), json!(m));
+                        }
+
+                        let arcam = Arcam::from(host.as_str());
+                        if let Ok(m) = arcam.get_mute_status().await {
                             d.insert("muted".into(), json!(m));
                         }
-                        if let Some(mb) = mode_byte {
-                            let mode = match mb {
-                                0 => "Stereo",
-                                1 => "Bridged",
-                                2 => "Dual Mono",
-                                _ => "Unknown",
-                            };
-                            d.insert("mode".into(), json!(mode));
+
+                        // Only query amp mode for PA240.
+                        // Firmware returns 1-indexed values (not 0-indexed as
+                        // documented in SH305E Issue 3): ST=1, BR=2, DM=3.
+                        if model.as_deref() == Some("PA240") {
+                            let arcam = Arcam::from(host.as_str());
+                            if let Ok(mb) = arcam.get_amplifier_mode().await {
+                                let mode = match mb {
+                                    1 => "Stereo",
+                                    2 => "Bridged",
+                                    3 => "Dual Mono",
+                                    _ => "Unknown",
+                                };
+                                d.insert("mode".into(), json!(mode));
+                                d.insert("mode_raw".into(), json!(mb));
+                            }
                         }
+
+                        let arcam = Arcam::from(host.as_str());
+                        if let Ok(asd) = arcam.get_auto_shutdown().await {
+                            d.insert("auto_shutdown".into(), json!(asd));
+                            d.insert(
+                                "auto_shutdown_label".into(),
+                                json!(homelab::arcam::auto_shutdown_label(asd)),
+                            );
+
+                            // NOTE: timeout counter is NOT queried here because each
+                            // preceding TCP command resets the amp's EuP idle timer,
+                            // making the reading meaningless. It has a dedicated
+                            // endpoint (/arcam/timeout) queried independently.
+                        }
+
                         serde_json::Value::Object(d)
                     })
                     .await
@@ -442,25 +509,48 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
 
                     DeviceStatusJson {
                         css_class: "green",
-                        label: "Power: on".to_string(),
+                        label: "Active".to_string(),
                         detail,
                     }
                 }
-                Ok(Ok(false)) => DeviceStatusJson {
-                    css_class: "amber",
-                    label: "Power: off".to_string(),
-                    detail: None,
-                },
-                Ok(Err(e)) => DeviceStatusJson {
-                    css_class: "red",
-                    label: format!("Error: {e}"),
-                    detail: None,
-                },
-                Err(_) => DeviceStatusJson {
-                    css_class: "red",
-                    label: "Timeout".to_string(),
-                    detail: None,
-                },
+                Ok(Ok(false)) => {
+                    tracing::info!("Arcam power: standby");
+                    let model = state.arcam_model.read().await.clone();
+                    let heartbeat = state
+                        .arcam_heartbeat_alive
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let detail = if model.is_some() || heartbeat {
+                        let mut d = serde_json::Map::new();
+                        if let Some(m) = &model {
+                            d.insert("model".into(), json!(m));
+                        }
+                        d.insert("heartbeat".into(), json!(heartbeat));
+                        Some(serde_json::Value::Object(d))
+                    } else {
+                        None
+                    };
+                    DeviceStatusJson {
+                        css_class: "amber",
+                        label: "Standby".to_string(),
+                        detail,
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "Arcam power error");
+                    DeviceStatusJson {
+                        css_class: "red",
+                        label: format!("Error: {e}"),
+                        detail: None,
+                    }
+                }
+                Err(_) => {
+                    tracing::warn!("Arcam power timeout");
+                    DeviceStatusJson {
+                        css_class: "red",
+                        label: "Timeout".to_string(),
+                        detail: None,
+                    }
+                }
             }
         }
     }
@@ -468,8 +558,142 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
 
 /// JSON status endpoint polled by the index page.
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    let (sony, arcam) = tokio::join!(probe_sony(&state), probe_arcam(&state));
+    let arcam = get_cached_or_fresh_arcam(&state).await;
+    let sony = probe_sony(&state).await;
     Json(StatusResponse { sony, arcam })
+}
+
+/// Get Arcam status with rate limiting based on Auto Shutdown setting.
+///
+/// Only queries the amp if enough time has passed since the last query.
+/// Otherwise returns cached status.
+async fn get_cached_or_fresh_arcam(state: &AppState) -> DeviceStatusJson {
+    let interval_secs = *state.arcam_poll_interval_secs.read().await;
+    let now = Instant::now();
+
+    // Check if we should query fresh data
+    let should_query = {
+        let last_query = state.arcam_last_query.read().await;
+        match *last_query {
+            Some(last) => now.duration_since(last).as_secs() >= interval_secs,
+            None => true,
+        }
+    };
+
+    if should_query {
+        // Query fresh data
+        let fresh = probe_arcam(state).await;
+
+        // Cache it
+        *state.arcam_cached_status.write().await = Some(fresh.clone());
+        *state.arcam_last_query.write().await = Some(now);
+
+        // Update polling interval based on Auto Shutdown setting
+        // This is a best-effort update - we don't want to block on this
+        if let Some(ref detail) = fresh.detail {
+            if let Some(auto_shutdown) = detail.get("auto_shutdown").and_then(|v| v.as_u64()) {
+                state.update_arcam_poll_interval(auto_shutdown as u8).await;
+            }
+        }
+
+        fresh
+    } else {
+        // Return cached data
+        state.arcam_cached_status.read().await.clone().unwrap_or_else(|| {
+            // If no cache yet, return "unknown" state
+            DeviceStatusJson {
+                css_class: "grey",
+                label: "Unknown".to_string(),
+                detail: None,
+            }
+        })
+    }
+}
+
+/// Dedicated timeout counter query — sends ONLY the timeout counter command
+/// on a fresh TCP connection so the reading isn't contaminated by other commands.
+/// Returns raw response bytes for debugging.
+async fn arcam_timeout(State(state): State<AppState>) -> impl IntoResponse {
+    let host = state.arcam_host.as_deref().unwrap_or("");
+    if host.is_empty() {
+        return Json(json!({ "error": "not configured" }));
+    }
+    let arcam = Arcam::from(host);
+    // Send raw command and return full response details
+    let cmd = [0x21, 0x01, 0x55, 0x01, 0xF0, 0x0D];
+    match arcam.send_command(&cmd).await {
+        Ok(resp) => {
+            let hex_data: Vec<String> = resp.data.iter().map(|b| format!("{b:02X}")).collect();
+            let parsed_be = if resp.data.len() >= 2 {
+                u16::from_be_bytes([resp.data[0], resp.data[1]])
+            } else if resp.data.len() == 1 {
+                resp.data[0] as u16
+            } else {
+                0
+            };
+            let parsed_le = if resp.data.len() >= 2 {
+                u16::from_le_bytes([resp.data[0], resp.data[1]])
+            } else if resp.data.len() == 1 {
+                resp.data[0] as u16
+            } else {
+                0
+            };
+            Json(json!({
+                "answer_code": resp.answer_code,
+                "data_len": resp.data.len(),
+                "data_hex": hex_data,
+                "data_raw": resp.data,
+                "parsed_be": parsed_be,
+                "parsed_le": parsed_le,
+                "full_frame_hex": resp.raw.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>()
+            }))
+        }
+        Err(e) => Json(json!({ "error": e.to_string() })),
+    }
+}
+
+/// Get auto-shutdown setting (no name required - uses legacy config)
+async fn arcam_auto_shutdown_get(State(state): State<AppState>) -> impl IntoResponse {
+    let host = match &state.arcam_host {
+        Some(h) => h.clone(),
+        None => return Json(json!({ "error": "not configured" })),
+    };
+    let arcam = Arcam::from(host.as_str());
+    match arcam.get_auto_shutdown().await {
+        Ok(value) => {
+            let label = homelab::arcam::auto_shutdown_label(value).to_string();
+            Json(json!({ "value": value, "label": label }))
+        }
+        Err(e) => Json(json!({ "error": e.to_string() })),
+    }
+}
+
+/// Set auto-shutdown setting (no name required - uses legacy config)
+async fn arcam_auto_shutdown_set(State(state): State<AppState>, Json(req): Json<SetAutoShutdownRequest>) -> impl IntoResponse {
+    if req.value > 4 {
+        return Json(json!({ "error": "value must be 0-4" }));
+    }
+    let host = match &state.arcam_host {
+        Some(h) => h.clone(),
+        None => return Json(json!({ "error": "not configured" })),
+    };
+    let arcam = Arcam::from(host.as_str());
+    match arcam.set_auto_shutdown(req.value).await {
+        Ok(value) => {
+            // Update polling interval and invalidate cache so the next poll
+            // fetches fresh data instead of returning stale cached status
+            state.update_arcam_poll_interval(value).await;
+            state.invalidate_arcam_cache().await;
+            let label = homelab::arcam::auto_shutdown_label(value).to_string();
+            Json(json!({ "value": value, "label": label }))
+        }
+        Err(e) => Json(json!({ "error": e.to_string() })),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetAutoShutdownRequest {
+    value: u8,
 }
 
 async fn index(State(state): State<AppState>) -> Html<String> {
@@ -500,9 +724,9 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .device {{ background: #16213e; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; }}
   .device-row {{ display: flex; align-items: center; gap: 16px; }}
   .device-info {{ flex: 1; min-width: 0; }}
-  .dot {{ width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; cursor: pointer; border: 2px solid transparent; }}
-  .dot:not(.grey):hover {{ border-color: rgba(255,255,255,0.15); }}
-  .dot:not(.grey):active {{ transform: scale(0.9); }}
+  .dot {{ width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s, transform 0.2s ease, filter 0.2s ease, border-color 0.2s ease; cursor: pointer; border: 2px solid transparent; }}
+  .dot:not(.grey):hover {{ border-color: rgba(255,255,255,0.12); transform: scale(1.08); filter: brightness(1.15); }}
+  .dot:not(.grey):active {{ transform: scale(0.92); }}
   .dot.pressing {{ animation: dot-press 0.4s ease-out; }}
   .green {{ background: #4caf50; box-shadow: 0 0 10px #4caf5088; }}
   .amber {{ background: #ff9800; box-shadow: 0 0 10px #ff980088; }}
@@ -513,9 +737,10 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .device-detail {{ color: #999; font-size: 0.85em; }}
   .host {{ color: #666; font-size: 0.8em; }}
   .port {{ opacity: 0.5; }}
-  .instruments {{ display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex-shrink: 0; }}
+  .instruments {{ display: flex; flex-direction: column; gap: 2px; align-items: flex-end; flex-shrink: 0; justify-content: center; }}
   .badge-row {{ display: flex; gap: 6px; flex-wrap: wrap; }}
-  .badge {{ background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; padding: 4px 10px; font-size: 0.75em; color: #a8c8e8; white-space: nowrap; letter-spacing: 0.02em; }}
+  .badge {{ background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; padding: 4px 10px; font-size: 0.75em; color: #a8c8e8; white-space: nowrap; letter-spacing: 0.02em; transition: filter 0.2s ease, transform 0.2s ease; }}
+  .badge[id]:hover {{ filter: brightness(1.2); transform: scale(1.04); }}
   .badge-muted {{ background: #4a2e0a; border-color: #7a5a1a; color: #f0a030; }}
   .volume-wrap {{ display: flex; align-items: center; gap: 8px; width: 140px; }}
   .volume-track {{ flex: 1; height: 5px; background: #0a1628; border-radius: 3px; overflow: hidden; }}
@@ -544,8 +769,19 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   #arcam-dot {{ anchor-name: --arcam-dot; }}
   #pop-sony-power {{ position-anchor: --sony-dot; }}
   #pop-arcam-power {{ position-anchor: --arcam-dot; }}
+  .heartbeat {{ display: inline-block; animation: pulse 2s ease-in-out infinite; line-height: 1; font-size: 0.9em; }}
+  @keyframes pulse {{ 0%, 100% {{ opacity: 0.3; }} 50% {{ opacity: 1; }} }}
+  .badge-auto-shutdown {{ background: #1a3a2e; border-color: #2a5a4e; color: #80c8a0; cursor: help; }}
+  .badge-auto-shutdown-off {{ background: #2a2a2a; border-color: #3a3a3a; color: #888; cursor: help; }}
+  .device-model {{ color: #556; font-size: 0.8em; font-weight: 500; letter-spacing: 0.03em; line-height: 1; }}
   #arcam-mode-badge {{ anchor-name: --arcam-mode; cursor: help; }}
   #pop-arcam-mode {{ position-anchor: --arcam-mode; }}
+  #arcam-auto-shutdown-badge {{ anchor-name: --arcam-auto-shutdown; cursor: pointer; }}
+  #pop-arcam-auto-shutdown {{ position-anchor: --arcam-auto-shutdown; margin-top: 10px; }}
+  #auto-shutdown-select {{ margin: 0.5em 0 0; padding: 8px 12px; font-size: 0.9em; background: #0f1a2e; color: #c8d8e8; border: 1px solid #1a4a7a; border-radius: 6px; cursor: pointer; width: 100%; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%237cc4ff' d='M1 1l5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }}
+  #auto-shutdown-select:hover {{ border-color: #2a6aaa; }}
+  #auto-shutdown-select:focus {{ outline: none; border-color: #7cc4ff; box-shadow: 0 0 0 2px rgba(124,196,255,0.15); }}
+  #auto-shutdown-select option {{ background: #0f1a2e; color: #c8d8e8; padding: 6px; }}
 </style>
 </head>
 <body>
@@ -608,6 +844,18 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   </dl>
 </div>
 
+<div id="pop-arcam-auto-shutdown" popover="auto" class="info-popover">
+  <h4>Auto Shutdown</h4>
+  <p>When enabled, the amplifier monitors its audio input. If no signal is detected for the configured period, it enters low-power standby mode.</p>
+  <select id="auto-shutdown-select">
+    <option value="0">Off</option>
+    <option value="1">20 min</option>
+    <option value="2">30 min</option>
+    <option value="3">1 hour</option>
+    <option value="4">2 hours</option>
+  </select>
+</div>
+
 <script>
 (function() {{
   const CLASSES = ["green", "amber", "red", "grey"];
@@ -625,47 +873,67 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     }}
   }}
 
-  let pollSuppressedUntil = 0;
   let lastSonyDetail = null;
+  let lastArcamOnDetail = null;
+  let lastArcamModel = null;
+  // Locks: hold dot+label at optimistic state until real data confirms transition
+  let sonyLockClass = null;
+  let sonyLockExpiry = 0;
+  let arcamLockClass = null;
+  let arcamLockExpiry = 0;
+  // Lock: hold auto-shutdown badge at optimistic value until server confirms
+  let arcamAutoShutdownLock = null; // {{ value, label, serverLabel }}
+  let arcamAutoShutdownLockExpiry = 0;
 
   function togglePower(dotEl, device) {{
     if (dotEl.classList.contains('grey')) return;
     const isOn = dotEl.classList.contains('green');
     // Animate press
     dotEl.classList.remove('pressing');
-    void dotEl.offsetWidth; // reflow to restart animation
+    void dotEl.offsetWidth;
     dotEl.classList.add('pressing');
     dotEl.addEventListener('animationend', () => dotEl.classList.remove('pressing'), {{ once: true }});
-    // Optimistic UI update — immediate, no waiting
+    // Optimistic UI — immediate
     const labelEl = document.getElementById(device === 'sony' ? 'sony-label' : 'arcam-label');
-    setDot(dotEl, isOn ? 'amber' : 'green');
-    setText(labelEl, isOn ? 'Power: off' : 'Power: on');
+    const expectedClass = isOn ? 'amber' : 'green';
+    setDot(dotEl, expectedClass);
+    setText(labelEl, isOn ? 'Standby' : 'Active');
     if (device === 'sony') {{
       const srcEl = document.getElementById('sony-sources');
       const insEl = document.getElementById('sony-instruments');
       if (isOn) {{
-        // Turning off: collapse sources and volume
         renderSony(insEl, srcEl, null);
       }} else if (lastSonyDetail) {{
-        // Turning on: restore last known sources and volume
         renderSony(insEl, srcEl, lastSonyDetail);
       }}
-    }}
-    // Suppress polling while receiver transitions:
-    // power-off is slow (~4s), power-on from standby is fast (~1s)
-    const delay = isOn ? 4000 : 1000;
-    pollSuppressedUntil = Date.now() + delay;
-    // Send API call, then resume polling
-    const done = () => setTimeout(poll, delay);
-    if (device === 'sony') {{
+      sonyLockClass = expectedClass;
+      sonyLockExpiry = Date.now() + 15000;
       fetch('/sony/power', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ active: !isOn }})
-      }}).then(done, done);
+      }}).catch(() => {{}});
     }} else if (device === 'arcam') {{
+      const insEl = document.getElementById('arcam-instruments');
+      if (isOn) {{
+        if (lastArcamModel) {{
+          insEl.innerHTML = '<span class="device-model">' + lastArcamModel + '</span>'
+            + '<span class="heartbeat" title="Heartbeat keepalive active">\u2764\uFE0F</span>';
+        }} else {{
+          insEl.innerHTML = '';
+        }}
+      }} else {{
+        if (lastArcamOnDetail) {{
+          const badges = arcamBadges(lastArcamOnDetail);
+          renderBadges(insEl, badges);
+          setupModeBadgeHover();
+          setupAutoShutdownBadgeHover();
+        }}
+      }}
+      arcamLockClass = expectedClass;
+      arcamLockExpiry = Date.now() + 15000;
       const action = isOn ? 'off' : 'on';
-      fetch('/arcam/power/' + action, {{ method: 'POST' }}).then(done, done);
+      fetch('/arcam/power/' + action, {{ method: 'POST' }}).catch(() => {{}});
     }}
   }}
 
@@ -730,14 +998,24 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     const b = [];
     if (detail.mode) b.push({{ text: detail.mode, id: 'arcam-mode-badge' }});
     if (detail.muted) b.push({{ text: 'MUTED', cls: 'badge-muted' }});
+    if (detail.auto_shutdown !== undefined) {{
+      b.push({{
+        text: 'Auto Shutdown: ' + detail.auto_shutdown_label,
+        id: 'arcam-auto-shutdown-badge',
+        cls: detail.auto_shutdown === 0 ? 'badge-auto-shutdown-off' : 'badge-auto-shutdown'
+      }});
+    }}
     return b;
   }}
 
   function hoverPopover(trigger, pop) {{
     let showT, hideT;
+    const created = Date.now();
     trigger.addEventListener('mouseenter', () => {{
+      // Skip synthetic mouseenter from innerHTML recreation under cursor
+      if (Date.now() - created < 100) return;
       clearTimeout(hideT);
-      showT = setTimeout(() => {{ try {{ pop.showPopover(); }} catch(_) {{}} }}, 300);
+      showT = setTimeout(() => {{ try {{ pop.showPopover(); }} catch(_) {{}} }}, 1000);
     }});
     trigger.addEventListener('mouseleave', () => {{
       clearTimeout(showT);
@@ -760,22 +1038,139 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   }}
   setupModeBadgeHover();
 
+  function setupAutoShutdownBadgeHover() {{
+    const badge = document.getElementById('arcam-auto-shutdown-badge');
+    const pop = document.getElementById('pop-arcam-auto-shutdown');
+    const select = document.getElementById('auto-shutdown-select');
+    
+    // Make badge clickable instead of hover (dropdown now in popover)
+    if (badge && !badge._clickBound) {{
+      badge.style.cursor = 'pointer';
+      badge.addEventListener('click', (e) => {{
+        e.preventDefault();
+        try {{
+          if (pop.matches(':popover-open')) {{
+            pop.hidePopover();
+          }} else {{
+            pop.showPopover();
+          }}
+        }} catch(_) {{}}
+      }});
+      badge._clickBound = true;
+    }}
+    
+    // Handle dropdown change — optimistic instant update
+    if (select && !select._changeBound) {{
+      // Use same labels as server (arcam::auto_shutdown_label) for consistency
+      const BADGE_LABELS = {{ '0': 'Off', '1': '20 min', '2': '30 min', '3': '1 hour', '4': '2 hours' }};
+      select.addEventListener('change', () => {{
+        const value = parseInt(select.value, 10);
+        const label = BADGE_LABELS[select.value] || 'Unknown';
+
+        // Re-query badge (poll() rebuilds innerHTML so the captured ref may be stale)
+        const liveBadge = document.getElementById('arcam-auto-shutdown-badge');
+        if (liveBadge) {{
+          liveBadge.textContent = 'Auto Shutdown: ' + label;
+          liveBadge.className = 'badge ' + (value === 0 ? 'badge-auto-shutdown-off' : 'badge-auto-shutdown');
+        }}
+        lastArcamOnDetail = lastArcamOnDetail || {{}};
+        lastArcamOnDetail.auto_shutdown = value;
+        lastArcamOnDetail.auto_shutdown_label = label;
+        // Lock: prevent poll() from overwriting badge until server confirms
+        arcamAutoShutdownLock = {{ value, label }};
+        arcamAutoShutdownLockExpiry = Date.now() + 15000;
+        try {{ pop.hidePopover(); }} catch(_) {{}}
+
+        // Fire-and-forget API call (badge already updated)
+        fetch('/arcam/auto-shutdown', {{
+          method: 'PUT',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ value }})
+        }}).catch(() => {{}});
+      }});
+      select._changeBound = true;
+    }}
+    
+    // Sync select with current value when popover opens
+    if (badge && pop && !pop._syncBound) {{
+      const originalShow = pop.showPopover;
+      pop.showPopover = function() {{
+        originalShow.call(this);
+        // Fetch current value
+        fetch('/arcam/auto-shutdown')
+          .then(r => r.json())
+          .then(data => {{
+            if (!data.error && select) {{
+              select.value = data.value.toString();
+            }}
+          }})
+          .catch(() => {{}});
+      }};
+      pop._syncBound = true;
+    }}
+  }}
+
   async function poll() {{
-    if (Date.now() < pollSuppressedUntil) return;
     try {{
       const resp = await fetch("/status");
       if (!resp.ok) return;
       const data = await resp.json();
 
+      // --- Sony (lock-based) ---
       if (data.sony.detail) lastSonyDetail = data.sony.detail;
-      setDot(document.getElementById("sony-dot"), data.sony.css_class);
-      setText(document.getElementById("sony-label"), data.sony.label);
-      renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);
+      const sonyLocked = sonyLockClass && Date.now() < sonyLockExpiry;
+      if (sonyLocked && data.sony.css_class !== sonyLockClass) {{
+        // Still transitioning — keep optimistic state
+      }} else {{
+        if (sonyLocked) sonyLockClass = null;
+        setDot(document.getElementById("sony-dot"), data.sony.css_class);
+        setText(document.getElementById("sony-label"), data.sony.label);
+        renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);
+      }}
 
-      setDot(document.getElementById("arcam-dot"), data.arcam.css_class);
-      setText(document.getElementById("arcam-label"), data.arcam.label);
-      renderBadges(document.getElementById("arcam-instruments"), arcamBadges(data.arcam.detail));
-      setupModeBadgeHover();
+      // --- Arcam (lock-based) ---
+      // Always cache detail for optimistic rendering
+      if (data.arcam.detail && data.arcam.detail.model) lastArcamModel = data.arcam.detail.model;
+      if (data.arcam.css_class === 'green' && data.arcam.detail) lastArcamOnDetail = data.arcam.detail;
+
+      const locked = arcamLockClass && Date.now() < arcamLockExpiry;
+      if (locked && data.arcam.css_class !== arcamLockClass) {{
+        // Still transitioning — keep optimistic state, skip update
+      }} else {{
+        // Either unlocked, or real data matches expected state — render real data
+        if (locked) arcamLockClass = null; // confirmed, unlock
+        setDot(document.getElementById("arcam-dot"), data.arcam.css_class);
+        setText(document.getElementById("arcam-label"), data.arcam.label);
+        const arcamInstruments = document.getElementById("arcam-instruments");
+        if (data.arcam.css_class === 'amber' && data.arcam.detail && data.arcam.detail.model) {{
+          const want = '<span class="device-model">' + data.arcam.detail.model + '</span>'
+            + '<span class="heartbeat" title="Heartbeat keepalive active">\u2764\uFE0F</span>';
+          if (arcamInstruments.innerHTML !== want) arcamInstruments.innerHTML = want;
+        }} else if (data.arcam.css_class === 'green') {{
+          // Auto-shutdown lock: override stale server data with optimistic value
+          if (arcamAutoShutdownLock && Date.now() < arcamAutoShutdownLockExpiry) {{
+            if (data.arcam.detail && data.arcam.detail.auto_shutdown !== arcamAutoShutdownLock.value) {{
+              data.arcam.detail.auto_shutdown = arcamAutoShutdownLock.value;
+              data.arcam.detail.auto_shutdown_label = arcamAutoShutdownLock.label;
+            }} else {{
+              arcamAutoShutdownLock = null; // server confirmed, unlock
+            }}
+          }} else {{
+            arcamAutoShutdownLock = null;
+          }}
+          const badges = arcamBadges(data.arcam.detail);
+          const want = badges.length ? '<div class="badge-row">' + badges.map(b =>
+            '<span' + (b.id ? ' id="' + b.id + '"' : '') + ' class="badge' + (b.cls ? ' ' + b.cls : '') + '">' + b.text + '</span>'
+          ).join('') + '</div>' : '';
+          if (arcamInstruments.innerHTML !== want) {{
+            arcamInstruments.innerHTML = want;
+            setupModeBadgeHover();
+            setupAutoShutdownBadgeHover();
+          }}
+        }} else {{
+          if (arcamInstruments.innerHTML !== '') arcamInstruments.innerHTML = '';
+        }}
+      }}
     }} catch (_) {{
       // Network error — leave current state, retry next tick
     }}
@@ -783,6 +1178,30 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 
   poll();
   setInterval(poll, 3000);
+
+  // Separate timeout counter poll — independent TCP connection, no command chain contamination
+  async function pollTimeout() {{
+    try {{
+      const resp = await fetch('/arcam/timeout');
+      if (!resp.ok) return;
+      const d = await resp.json();
+      if (d.error) {{
+        console.warn('[arcam] timeout_counter error:', d.error);
+      }} else {{
+        console.log('[arcam] timeout_counter raw:', {{
+          answer_code: '0x' + d.answer_code.toString(16).padStart(2, '0'),
+          data_len: d.data_len,
+          data_hex: d.data_hex.join(' '),
+          data_raw: d.data_raw,
+          parsed_be: d.parsed_be + 's (' + Math.floor(d.parsed_be/60) + 'm ' + (d.parsed_be%60) + 's)',
+          parsed_le: d.parsed_le + 's (' + Math.floor(d.parsed_le/60) + 'm ' + (d.parsed_le%60) + 's)',
+          frame: d.full_frame_hex.join(' ')
+        }});
+      }}
+    }} catch (_) {{}}
+  }}
+  pollTimeout();
+  setInterval(pollTimeout, 30000);
 }})();
 </script>
 

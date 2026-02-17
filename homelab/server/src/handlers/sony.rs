@@ -6,24 +6,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing::{info, warn, debug};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::error::{ErrorResponse, ServerError};
 use crate::state::AppState;
-
-/// Create all Sony receiver routes (legacy - single device)
-pub fn routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new()
-        .routes(routes!(get_power, set_power))
-        .routes(routes!(get_volume, set_volume))
-        .routes(routes!(get_mute, set_mute))
-        .routes(routes!(list_inputs))
-        .routes(routes!(get_input_config))
-        .routes(routes!(get_current_input))
-        .routes(routes!(set_input))
-        .routes(routes!(get_system_info))
-}
 
 /// Create all Sony receiver routes with device name parameter
 pub fn routes_with_name() -> OpenApiRouter<AppState> {
@@ -36,6 +24,11 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(get_current_input_by_name))
         .routes(routes!(set_input_by_name))
         .routes(routes!(get_system_info_by_name))
+        .routes(routes!(get_main_zone_by_name))
+        .routes(routes!(get_zone2_by_name))
+        .routes(routes!(get_zone3_by_name))
+        .routes(routes!(get_system_settings_by_name))
+        .routes(routes!(get_audio_settings_by_name))
 }
 
 // --- Request/Response DTOs ---
@@ -105,302 +98,65 @@ pub struct NativeInputConfigResponse {
     sound_field: String,
 }
 
-// --- Legacy Handlers (single device via ENV) ---
-
-#[utoipa::path(
-    get,
-    path = "/power",
-    tag = "sony",
-    responses(
-        (status = 200, description = "Current power status", body = PowerResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_power(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let status = with_timeout(state.request_timeout, sony.get_power_status()).await?;
-
-    Ok(Json(PowerResponse { status }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/power",
-    tag = "sony",
-    request_body = PowerRequest,
-    responses(
-        (status = 200, description = "Power state updated", body = PowerResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn set_power(
-    State(state): State<AppState>,
-    Json(req): Json<PowerRequest>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    with_timeout(state.request_timeout, sony.set_power(req.active)).await?;
-
-    Ok(Json(PowerResponse {
-        status: if req.active {
-            "active".to_string()
-        } else {
-            "standby".to_string()
-        },
-    }))
-}
-
-#[utoipa::path(
-    get,
-    path = "/volume",
-    tag = "sony",
-    responses(
-        (status = 200, description = "Current volume info", body = VolumeResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_volume(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let info = with_timeout(state.request_timeout, sony.get_volume()).await?;
-
-    Ok(Json(VolumeResponse {
-        volume: info.volume,
-        mute: info.mute,
-        min_volume: info.min_volume,
-        max_volume: info.max_volume,
-    }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/volume",
-    tag = "sony",
-    request_body = VolumeRequest,
-    responses(
-        (status = 200, description = "Volume updated", body = inline(serde_json::Value)),
-        (status = 400, description = "Invalid volume level", body = ErrorResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn set_volume(
-    State(state): State<AppState>,
-    Json(req): Json<VolumeRequest>,
-) -> Result<impl IntoResponse, ServerError> {
-    // Validate volume range
-    if req.level > 100 {
-        return Err(ServerError::InvalidVolume(format!(
-            "level must be 0-100, got {}",
-            req.level
-        )));
-    }
-
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    with_timeout(state.request_timeout, sony.set_volume(req.level)).await?;
-
-    Ok(Json(serde_json::json!({ "volume": req.level })))
-}
-
-#[utoipa::path(
-    get,
-    path = "/mute",
-    tag = "sony",
-    responses(
-        (status = 200, description = "Current mute status", body = MuteResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_mute(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let muted = with_timeout(state.request_timeout, sony.get_mute_status()).await?;
-
-    Ok(Json(MuteResponse { muted }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/mute",
-    tag = "sony",
-    request_body = MuteRequest,
-    responses(
-        (status = 200, description = "Mute state updated", body = MuteResponse),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn set_mute(
-    State(state): State<AppState>,
-    Json(req): Json<MuteRequest>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    with_timeout(state.request_timeout, sony.set_mute(req.mute)).await?;
-
-    Ok(Json(MuteResponse { muted: req.mute }))
-}
-
-#[utoipa::path(
-    get,
-    path = "/inputs",
-    tag = "sony",
-    responses(
-        (status = 200, description = "List of available inputs", body = inline(Vec<serde_json::Value>)),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn list_inputs(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let inputs = with_timeout(state.request_timeout, sony.list_inputs()).await?;
-
-    Ok(Json(inputs))
-}
-
-#[utoipa::path(
-    get,
-    path = "/inputs/config",
-    tag = "sony",
-    responses(
-        (status = 200, description = "Input configuration from native API", body = Vec<NativeInputConfigResponse>),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_input_config(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let inputs = with_timeout(state.request_timeout, sony.get_native_inputs()).await?;
-
-    let response: Vec<NativeInputConfigResponse> = inputs
-        .into_iter()
-        .map(|i| NativeInputConfigResponse {
-            category: i.category,
-            name: i.name,
-            hdmi_assign: i.hdmi_assign,
-            icon: i.icon,
-            visible: i.visible,
-            sound_field: i.sound_field,
-        })
-        .collect();
-
-    Ok(Json(response))
-}
-
-#[utoipa::path(
-    get,
-    path = "/input/current",
-    tag = "sony",
-    responses(
-        (status = 200, description = "Currently selected input", body = inline(serde_json::Value)),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_current_input(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let info = with_timeout(state.request_timeout, sony.get_current_input()).await?;
-
-    Ok(Json(info))
-}
-
-#[utoipa::path(
-    post,
-    path = "/input",
-    tag = "sony",
-    request_body = InputRequest,
-    responses(
-        (status = 200, description = "Input changed", body = inline(serde_json::Value)),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn set_input(
-    State(state): State<AppState>,
-    Json(req): Json<InputRequest>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    with_timeout(state.request_timeout, sony.set_input(&req.uri)).await?;
-
-    Ok(Json(serde_json::json!({ "uri": req.uri })))
-}
-
-#[utoipa::path(
-    get,
-    path = "/system/info",
-    tag = "sony",
-    responses(
-        (status = 200, description = "System information", body = inline(serde_json::Value)),
-        (status = 404, description = "Device not configured", body = ErrorResponse),
-        (status = 504, description = "Request timeout", body = ErrorResponse),
-    )
-)]
-pub(crate) async fn get_system_info(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ServerError> {
-    let sony = state
-        .sony
-        .as_ref()
-        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
-
-    let info = with_timeout(state.request_timeout, sony.get_system_information()).await?;
-
-    Ok(Json(info))
-}
-
 // --- Named Device Handlers (multi-device via config) ---
+
+#[derive(Serialize, ToSchema)]
+pub struct ZoneResponse {
+    /// Zone number (2 or 3)
+    zone: u8,
+    /// Power status ("on" or "off")
+    power: String,
+    /// Volume level
+    volume: String,
+    /// Current input
+    input: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct MainZoneResponse {
+    /// Power status ("on" or "off")
+    power: String,
+    /// Volume level
+    volume: String,
+    /// Mute status ("on" or "off")
+    mute: String,
+    /// Current input
+    input: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SystemSettingsResponse {
+    /// Volume display units ("dB" or "linear")
+    volume_display: Option<String>,
+    /// Display dimmer state
+    dimmer: Option<String>,
+    /// Device name
+    device_name: Option<String>,
+    /// Wired network status
+    wired: Option<String>,
+    /// Wireless network status
+    wireless: Option<String>,
+    /// Internet connectivity status
+    internet: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AudioSettingsResponse {
+    /// Pure Direct mode status
+    pure_direct: Option<String>,
+    /// Current sound field
+    sound_field: Option<String>,
+    /// Front speaker balance
+    front_balance: Option<String>,
+    /// Center speaker level
+    center_level: Option<String>,
+    /// Subwoofer level
+    subwoofer_level: Option<String>,
+    /// Dolby volume level
+    dolby_level: Option<String>,
+    /// Surround speaker level
+    surround_level: Option<String>,
+}
 
 #[utoipa::path(
     get,
@@ -419,12 +175,14 @@ pub(crate) async fn get_power_by_name(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, ServerError> {
+    debug!(device = %name, "Getting power status");
     let sony = state
         .get_sony(&name)
         .await
-        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+        .ok_or_else(|| ServerError::DeviceNotFound(name.clone()))?;
 
     let status = with_timeout(state.request_timeout, sony.get_power_status()).await?;
+    info!(device = %name, status = %status, "Power status retrieved");
 
     Ok(Json(PowerResponse { status }))
 }
@@ -448,19 +206,19 @@ pub(crate) async fn set_power_by_name(
     Path(name): Path<String>,
     Json(req): Json<PowerRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
+    info!(device = %name, active = req.active, "Setting power");
     let sony = state
         .get_sony(&name)
         .await
-        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+        .ok_or_else(|| ServerError::DeviceNotFound(name.clone()))?;
 
     with_timeout(state.request_timeout, sony.set_power(req.active)).await?;
 
+    let new_status = if req.active { "active" } else { "standby" };
+    info!(device = %name, status = %new_status, "Power set successfully");
+
     Ok(Json(PowerResponse {
-        status: if req.active {
-            "active".to_string()
-        } else {
-            "standby".to_string()
-        },
+        status: new_status.to_string(),
     }))
 }
 
@@ -481,10 +239,11 @@ pub(crate) async fn get_volume_by_name(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, ServerError> {
+    debug!(device = %name, "Getting volume");
     let sony = state
         .get_sony(&name)
         .await
-        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+        .ok_or_else(|| ServerError::DeviceNotFound(name.clone()))?;
 
     let info = with_timeout(state.request_timeout, sony.get_volume()).await?;
 
@@ -738,6 +497,171 @@ pub(crate) async fn get_system_info_by_name(
     Ok(Json(info))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{name}/zone",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Main zone status", body = MainZoneResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_main_zone_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let status = with_timeout(state.request_timeout, sony.get_main_zone_status()).await?;
+
+    Ok(Json(MainZoneResponse {
+        power: status.power,
+        volume: status.volume,
+        mute: status.mute,
+        input: status.input,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/zone2",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Zone 2 status", body = ZoneResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_zone2_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let status = with_timeout(state.request_timeout, sony.get_zone2_status()).await?;
+
+    Ok(Json(ZoneResponse {
+        zone: status.zone,
+        power: status.power,
+        volume: status.volume,
+        input: status.input,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/zone3",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Zone 3 status", body = ZoneResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_zone3_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let status = with_timeout(state.request_timeout, sony.get_zone3_status()).await?;
+
+    Ok(Json(ZoneResponse {
+        zone: status.zone,
+        power: status.power,
+        volume: status.volume,
+        input: status.input,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/system/settings",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "System settings", body = SystemSettingsResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_system_settings_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let settings = with_timeout(state.request_timeout, sony.get_system_settings()).await?;
+
+    Ok(Json(SystemSettingsResponse {
+        volume_display: settings.volume_display,
+        dimmer: settings.dimmer,
+        device_name: settings.device_name,
+        wired: settings.network.wired,
+        wireless: settings.network.wireless,
+        internet: settings.network.internet,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/audio/settings",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Audio settings", body = AudioSettingsResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_audio_settings_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let settings = with_timeout(state.request_timeout, sony.get_audio_settings()).await?;
+
+    Ok(Json(AudioSettingsResponse {
+        pure_direct: settings.pure_direct,
+        sound_field: settings.sound_field,
+        front_balance: settings.front_balance,
+        center_level: settings.center_level,
+        subwoofer_level: settings.subwoofer_level,
+        dolby_level: settings.dolby_level,
+        surround_level: settings.surround_level,
+    }))
+}
+
 // --- Helpers ---
 
 async fn with_timeout<T, E>(
@@ -749,7 +673,14 @@ where
 {
     match timeout(duration, future).await {
         Ok(Ok(result)) => Ok(result),
-        Ok(Err(e)) => Err(e.into()),
-        Err(_) => Err(ServerError::Timeout),
+        Ok(Err(e)) => {
+            let err: ServerError = e.into();
+            warn!(error = %err, "Sony API error");
+            Err(err)
+        }
+        Err(_) => {
+            warn!("Sony API timeout after {:?}", duration);
+            Err(ServerError::Timeout)
+        }
     }
 }

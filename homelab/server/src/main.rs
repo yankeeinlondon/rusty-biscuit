@@ -152,25 +152,67 @@ fn load_config() -> Result<AppState, Box<dyn std::error::Error>> {
 
 /// Heartbeat interval for Arcam amplifiers.
 ///
-/// Sends a heartbeat to each configured Arcam amp every 10 minutes to keep
+/// Sends a heartbeat to each configured Arcam amp every 2 minutes to keep
 /// the network interface active during standby. The PA series powers down
 /// its network port after an extended idle period; periodic heartbeats
 /// prevent this.
-const ARCAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10 * 60);
+const ARCAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2 * 60);
+
+/// Query and cache the Arcam model, logging results.
+async fn query_and_cache_model(state: &AppState, host: &str, device_name: &str) {
+    let arcam = Arcam::from(host);
+    match arcam.get_system_model().await {
+        Ok(model) => {
+            tracing::info!(device = %device_name, model = %model, "Arcam model identified");
+            *state.arcam_model.write().await = Some(model);
+            state
+                .arcam_heartbeat_alive
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        Err(e) => {
+            tracing::warn!(device = %device_name, error = %e, "Failed to query Arcam system model");
+        }
+    }
+}
 
 /// Spawns a background task that sends periodic heartbeats to all configured
 /// Arcam amplifiers.
+///
+/// On startup, queries the system model from ALL configured Arcam amps
+/// (both legacy and named devices) and caches the first successful result
+/// in `state.arcam_model`. Each heartbeat cycle updates
+/// `state.arcam_heartbeat_alive` based on success/failure.
 fn spawn_arcam_keepalive(state: AppState) {
     tokio::spawn(async move {
+        // Query model for ALL configured devices at startup
+        // First try named devices from config
+        {
+            let hosts = state.arcam_hosts.read().await;
+            for (name, service) in hosts.iter() {
+                query_and_cache_model(&state, &service.host, name).await;
+            }
+        }
+
+        // Also try legacy device if not already done
+        if state.arcam_hosts.read().await.is_empty()
+            && let Some(host) = &state.arcam_host
+        {
+            query_and_cache_model(&state, host, "legacy").await;
+        }
+
         loop {
             tokio::time::sleep(ARCAM_HEARTBEAT_INTERVAL).await;
 
             let hosts = state.arcam_hosts.read().await;
+            let mut any_alive = false;
+
+            // Heartbeat to named devices
             for (name, service) in hosts.iter() {
                 let arcam = Arcam::from(service.host.as_str());
                 match arcam.heartbeat().await {
                     Ok(true) => {
                         tracing::debug!(device = %name, "Arcam heartbeat: alive");
+                        any_alive = true;
                     }
                     Ok(false) => {
                         tracing::warn!(device = %name, "Arcam heartbeat: unexpected response");
@@ -180,6 +222,27 @@ fn spawn_arcam_keepalive(state: AppState) {
                     }
                 }
             }
+
+            // Also heartbeat to legacy device if no named devices configured
+            if hosts.is_empty() && let Some(host) = &state.arcam_host {
+                let arcam = Arcam::from(host.as_str());
+                match arcam.heartbeat().await {
+                    Ok(true) => {
+                        tracing::debug!(device = "legacy", "Arcam heartbeat: alive");
+                        any_alive = true;
+                    }
+                    Ok(false) => {
+                        tracing::warn!(device = "legacy", "Arcam heartbeat: unexpected response");
+                    }
+                    Err(e) => {
+                        tracing::warn!(device = "legacy", error = %e, "Arcam heartbeat failed");
+                    }
+                }
+            }
+
+            state
+                .arcam_heartbeat_alive
+                .store(any_alive, std::sync::atomic::Ordering::Relaxed);
         }
     });
 }

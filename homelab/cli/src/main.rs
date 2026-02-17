@@ -135,6 +135,13 @@ enum ArcamAction {
     MuteToggle,
     /// Probe: send power query and show raw response bytes
     Probe,
+    /// Get auto shutdown setting
+    AutoShutdown,
+    /// Set auto shutdown (0=off, 1=20min, 2=30min, 3=1hr, 4=2hr)
+    AutoShutdownSet {
+        /// Auto shutdown value: 0=off, 1=20min, 2=30min, 3=1hr, 4=2hr
+        value: u8,
+    },
 }
 
 // =============================================================================
@@ -158,6 +165,10 @@ enum SonyAction {
     /// Playback control commands
     #[command(subcommand)]
     Playback(SonyPlaybackAction),
+
+    /// Native Web API commands (zones, system settings, audio settings)
+    #[command(subcommand)]
+    Native(SonyNativeAction),
 
     /// Debug and introspection commands
     #[command(subcommand)]
@@ -402,6 +413,21 @@ enum SonyDebugAction {
     Probe,
 }
 
+/// Native Web API commands (port 80)
+#[derive(Subcommand)]
+enum SonyNativeAction {
+    /// Get main zone status (power, volume, mute, input)
+    Zone,
+    /// Get zone 2 status
+    Zone2,
+    /// Get zone 3 status
+    Zone3,
+    /// Get system settings (volume display, dimmer, device name, network)
+    SystemSettings,
+    /// Get audio settings (pure direct, sound field, speaker levels)
+    AudioSettings,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SonyEndpoint {
     System,
@@ -570,6 +596,19 @@ async fn run_arcam_action(
 
             println!("{}", styled(format!("<b>Arcam Amp</b> probe {suffix}\n")));
 
+            // System model query
+            let model_cmd = [0x21, 0x01, 0x5E, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&model_cmd).await {
+                Ok(resp) => {
+                    let model = String::from_utf8_lossy(&resp.data).trim().to_string();
+                    println!("{}", format_resp("System model query", &resp));
+                    println!("  model:  {model}");
+                }
+                Err(e) => println!("System model query failed: {e}"),
+            }
+
+            println!();
+
             // Power status query
             let power_cmd = [0x21, 0x01, 0x00, 0x01, 0xF0, 0x0D];
             match arcam.send_command(&power_cmd).await {
@@ -597,20 +636,85 @@ async fn run_arcam_action(
             println!();
 
             // Amplifier mode query
+            // Firmware returns 1-indexed values (not 0-indexed as
+            // documented in SH305E Issue 3): ST=1, BR=2, DM=3.
             let mode_cmd = [0x21, 0x01, 0x61, 0x01, 0xF0, 0x0D];
             match arcam.send_command(&mode_cmd).await {
                 Ok(resp) => {
-                    let mode = match resp.data.first().copied() {
-                        Some(0) => "Stereo",
-                        Some(1) => "Bridged",
-                        Some(2) => "Dual Mono",
+                    let raw_byte = resp.data.first().copied();
+                    let mode = match raw_byte {
+                        Some(1) => "Stereo",
+                        Some(2) => "Bridged",
+                        Some(3) => "Dual Mono",
                         Some(n) => &format!("Unknown ({n})"),
                         None => "No data",
                     };
                     println!("{}", format_resp("Amp mode query", &resp));
                     println!("  mode:   {mode}");
+                    if let Some(b) = raw_byte {
+                        println!("  raw:    0x{b:02X}");
+                    }
                 }
                 Err(e) => println!("Amp mode query failed: {e}"),
+            }
+
+            println!();
+
+            // Auto shutdown query
+            let auto_cmd = [0x21, 0x01, 0x58, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&auto_cmd).await {
+                Ok(resp) => {
+                    let value = resp.data.first().copied().unwrap_or(0);
+                    let label = homelab::arcam::auto_shutdown_label(value);
+                    println!("{}", format_resp("Auto shutdown query", &resp));
+                    println!("  value:  {label}");
+                }
+                Err(e) => println!("Auto shutdown query failed: {e}"),
+            }
+
+            println!();
+
+            // Timeout counter query
+            let timeout_cmd = [0x21, 0x01, 0x55, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&timeout_cmd).await {
+                Ok(resp) => {
+                    let hi = resp.data.first().copied().unwrap_or(0);
+                    let lo = resp.data.get(1).copied().unwrap_or(0);
+                    let secs = u16::from_be_bytes([hi, lo]);
+                    let mins = secs / 60;
+                    let rem = secs % 60;
+                    println!("{}", format_resp("Timeout counter query", &resp));
+                    println!("  secs:   {secs} ({mins}m {rem}s)");
+                }
+                Err(e) => println!("Timeout counter query failed: {e}"),
+            }
+        }
+        ArcamAction::AutoShutdown => {
+            let auto_cmd = [0x21, 0x01, 0x58, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&auto_cmd).await {
+                Ok(resp) => {
+                    let value = resp.data.first().copied().unwrap_or(0);
+                    let label = homelab::arcam::auto_shutdown_label(value);
+                    if json {
+                        println!("{}", json!({ "value": value, "label": label }));
+                    } else {
+                        println!("Auto Shutdown: {} (0x{:02X})", label, value);
+                    }
+                }
+                Err(e) => println!("Auto shutdown query failed: {e}"),
+            }
+        }
+        ArcamAction::AutoShutdownSet { value } => {
+            match arcam.set_auto_shutdown(value).await {
+                Ok(new_value) => {
+                    let label = homelab::arcam::auto_shutdown_label(new_value);
+                    if json {
+                        println!("{}", json!({ "value": new_value, "label": label }));
+                    } else {
+                        println!("Auto Shutdown set to: {} (0x{:02X})", label, new_value);
+                    }
+                }
+                Err(e) => println!("Auto shutdown set failed: {e}"),
             }
         }
     }
@@ -703,6 +807,7 @@ async fn handle_sony(
         SonyAction::Audio(audio) => handle_sony_audio(&receiver, audio, json, &suffix).await,
         SonyAction::Input(input) => handle_sony_input(&receiver, input, json, &suffix).await,
         SonyAction::Playback(pb) => handle_sony_playback(&receiver, pb, json, &suffix).await,
+        SonyAction::Native(native) => handle_sony_native(&receiver, native, json, &suffix).await,
         SonyAction::Debug(debug) => handle_sony_debug(&receiver, debug, json, &suffix).await,
     }
     .wrap_err(err_ctx)
@@ -806,10 +911,10 @@ async fn handle_sony_system(
             }
         }
         SonySystemAction::On => {
-            send_sony_power(&receiver, true, json, suffix).await?;
+            send_sony_power(receiver, true, json, suffix).await?;
         }
         SonySystemAction::Off => {
-            send_sony_power(&receiver, false, json, suffix).await?;
+            send_sony_power(receiver, false, json, suffix).await?;
         }
         SonySystemAction::Info => {
             let info = receiver.get_system_information().await?;
@@ -1397,6 +1502,105 @@ async fn handle_sony_playback(
                 );
             } else {
                 println!("{}", styled(format!("<b>Sony Receiver</b> scanning <b>{dir}</b> {suffix}")));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_sony_native(
+    receiver: &SonyReceiver,
+    action: SonyNativeAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        SonyNativeAction::Zone => {
+            let status = receiver.get_main_zone_status().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> main zone {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Power".into(), status.power.as_str().into()]);
+                table.add_row(vec!["Volume".into(), status.volume.as_str().into()]);
+                table.add_row(vec!["Mute".into(), status.mute.as_str().into()]);
+                table.add_row(vec!["Input".into(), status.input.as_str().into()]);
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::Zone2 => {
+            let status = receiver.get_zone2_status().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> zone 2 {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Power".into(), status.power.as_str().into()]);
+                table.add_row(vec!["Volume".into(), status.volume.as_str().into()]);
+                table.add_row(vec!["Input".into(), status.input.as_str().into()]);
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::Zone3 => {
+            let status = receiver.get_zone3_status().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> zone 3 {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Power".into(), status.power.as_str().into()]);
+                table.add_row(vec!["Volume".into(), status.volume.as_str().into()]);
+                table.add_row(vec!["Input".into(), status.input.as_str().into()]);
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::SystemSettings => {
+            let settings = receiver.get_system_settings().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&settings)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> system settings {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Volume Display".into(), settings.volume_display.as_str().into()]);
+                table.add_row(vec!["Dimmer".into(), settings.dimmer.as_str().into()]);
+                table.add_row(vec!["Device Name".into(), settings.device_name.as_str().into()]);
+                table.add_row(vec!["Wired LAN".into(), settings.network.wired.as_str().into()]);
+                table.add_row(vec!["Wireless LAN".into(), settings.network.wireless.as_str().into()]);
+                table.add_row(vec!["Internet".into(), settings.network.internet.as_str().into()]);
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::AudioSettings => {
+            let settings = receiver.get_audio_settings().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&settings)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> audio settings {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Pure Direct".into(), settings.pure_direct.as_str().into()]);
+                table.add_row(vec!["Sound Field".into(), settings.sound_field.as_str().into()]);
+                table.add_row(vec!["Front Balance".into(), settings.front_balance.as_str().into()]);
+                table.add_row(vec!["Center Level".into(), settings.center_level.as_str().into()]);
+                table.add_row(vec!["Subwoofer Level".into(), settings.subwoofer_level.as_str().into()]);
+                table.add_row(vec!["Dolby Level".into(), settings.dolby_level.as_str().into()]);
+                table.add_row(vec!["Surround Level".into(), settings.surround_level.as_str().into()]);
+                print!("{}", table.display(&Terminal::default()));
             }
         }
     }

@@ -31,6 +31,10 @@ pub enum SonyError {
     /// Response format was unexpected or invalid.
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
+
+    /// Device is powered off (native API requires power).
+    #[error("Device is powered off")]
+    DeviceOff,
 }
 
 // ============================================================================
@@ -341,6 +345,24 @@ pub enum PowerState {
     Unknown,
 }
 
+/// Zone status from the native web API.
+#[derive(Debug, Clone, Serialize)]
+pub struct ZoneStatus {
+    pub zone: u8,
+    pub power: String,
+    pub volume: String,
+    pub input: String,
+}
+
+/// Main zone status from the native web API.
+#[derive(Debug, Clone, Serialize)]
+pub struct MainZoneStatus {
+    pub power: String,
+    pub volume: String,
+    pub mute: String,
+    pub input: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MethodSignature {
     pub name: String,
@@ -418,7 +440,7 @@ impl PlayingContentInfo {
 ///
 /// This provides the user-defined input names, HDMI port assignments,
 /// visibility settings, and sound field presets that the JSON-RPC API
-/// doesn't expose.
+/// doesn't expose. Includes all 18 per-input features.
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeInputConfig {
     pub category: String,
@@ -427,6 +449,50 @@ pub struct NativeInputConfig {
     pub icon: String,
     pub visible: bool,
     pub sound_field: String,
+    pub digital_assign: String,
+    pub input_mode: String,
+    pub subwoofer_level: String,
+    pub subwoofer_lpf: String,
+    pub in_ceiling_mode: bool,
+    pub trigger_1: bool,
+    pub trigger_2: bool,
+    pub trigger_3: bool,
+    pub preset_gain: String,
+    pub av_sync: String,
+}
+
+/// System settings from the native web API (port 80).
+///
+/// These are system-wide settings not available via JSON-RPC.
+/// Returns `null` when a setting is unavailable (e.g., "ERR").
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeSystemSettings {
+    pub volume_display: Option<String>,
+    pub dimmer: Option<String>,
+    pub device_name: Option<String>,
+    pub network: NetworkStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkStatus {
+    pub wired: Option<String>,
+    pub wireless: Option<String>,
+    pub internet: Option<String>,
+}
+
+/// Audio settings from the native web API (port 80).
+///
+/// These are audio settings not available via JSON-RPC.
+/// Returns `null` when a setting is unavailable (e.g., "ERR" in Pure Direct mode).
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeAudioSettings {
+    pub pure_direct: Option<String>,
+    pub sound_field: Option<String>,
+    pub front_balance: Option<String>,
+    pub center_level: Option<String>,
+    pub subwoofer_level: Option<String>,
+    pub dolby_level: Option<String>,
+    pub surround_level: Option<String>,
 }
 
 /// Extract a string from a JSON value that may be a string, object, or null.
@@ -571,12 +637,62 @@ impl SonyReceiver {
 
     // --- NATIVE WEB API (port 80) ---
 
+    /// Check if the receiver is powered on using the native web API.
+    ///
+    /// This queries the native API directly without any pre-checks.
+    /// Returns true if powered on (value is "on"), false if in standby or unreachable.
+    async fn check_power_native(&self) -> Result<bool, SonyError> {
+        let url = format!("http://{}:80/fcgi-bin/request.fcgi", self.host);
+        let payload = json!({
+            "type": "http_get",
+            "packet": [["main.power"]]
+        });
+
+        match self.client.post(&url).json(&payload).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    return Ok(false);
+                }
+                let json_resp: Value = match resp.json().await {
+                    Ok(v) => v,
+                    Err(_) => return Ok(false),
+                };
+
+                if let Some(packets) = json_resp["packet"].as_array() {
+                    for packet in packets {
+                        if let Some(entries) = packet.as_array() {
+                            for entry in entries {
+                                if let (Some("main.power"), Some(value)) =
+                                    (entry["feature"].as_str(), entry["value"].as_str())
+                                {
+                                    return Ok(value == "on");
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(false)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     /// Query features from the receiver's native web API (`/fcgi-bin/request.fcgi`).
     ///
     /// This is a separate API from the JSON-RPC API on the configured port.
     /// It runs on port 80 and provides access to settings that the JSON-RPC
     /// API doesn't expose (e.g. correct power status, input configuration).
+    ///
+    /// Note: The native API typically requires the receiver to be powered on.
+    /// This method checks power state first and returns an error if the device is off.
     async fn native_get(&self, features: &[&str]) -> Result<Vec<(String, String)>, SonyError> {
+        // Use native API to check power state
+        let is_on = self.check_power_native().await?;
+
+        if !is_on {
+            return Err(SonyError::DeviceOff);
+        }
+
         let url = format!("http://{}:80/fcgi-bin/request.fcgi", self.host);
         let feature_list: Vec<&str> = features.to_vec();
         let payload = json!({
@@ -604,6 +720,24 @@ impl SonyReceiver {
         Ok(results)
     }
 
+    /// Set a feature on the receiver's native web API (`/fcgi-bin/request.fcgi`).
+    ///
+    /// This allows setting values for features that the JSON-RPC API doesn't support
+    /// or that require the Native API for reliable updates.
+    pub async fn native_set(&self, feature: &str, value: &str) -> Result<(), SonyError> {
+        let url = format!("http://{}:80/fcgi-bin/request.fcgi", self.host);
+        let payload = json!({
+            "type": "http_set",
+            "packet": [{
+                "feature": feature,
+                "value": value
+            }]
+        });
+
+        self.client.post(&url).json(&payload).send().await?;
+        Ok(())
+    }
+
     // --- SYSTEM ENDPOINT ---
 
     /// Get the power status from the native web API.
@@ -612,28 +746,28 @@ impl SonyReceiver {
     /// in standby. Unlike the JSON-RPC `getPowerStatus`, this correctly
     /// reports the state even with Quick Start / Network Standby enabled.
     pub async fn get_power_status(&self) -> Result<String, SonyError> {
-        let results = self.native_get(&["main.power"]).await?;
-        let value = results
-            .first()
-            .map(|(_, v)| v.as_str())
-            .unwrap_or("unknown");
-
-        // Native API uses "on"/"off", normalize to "active"/"standby"
-        // for compatibility with the rest of the codebase
-        match value {
-            "on" => Ok("active".to_string()),
-            "off" => Ok("standby".to_string()),
-            other => Ok(other.to_string()),
+        // Use native API directly to check power - this already handles
+        // the case where device is off (returns false)
+        let is_on = self.check_power_native().await?;
+        if is_on {
+            Ok("active".to_string())
+        } else {
+            Ok("standby".to_string())
         }
     }
 
     /// Queries input configuration from the native web API.
     ///
     /// Returns user-defined names, HDMI assignments, visibility, icons,
-    /// and sound field presets for all 8 input categories.
+    /// sound field presets, and all 18 per-input features for all 8 input categories.
     pub async fn get_native_inputs(&self) -> Result<Vec<NativeInputConfig>, SonyError> {
         const CATEGORIES: &[&str] = &["GAME", "STB", "BD", "SAT", "VIDEO", "AUX", "TV", "CD"];
-        const FEATURES: &[&str] = &["inputname", "hdmiassign", "show", "icon", "soundfield"];
+        const FEATURES: &[&str] = &[
+            "inputname", "hdmiassign", "show", "icon", "soundfield",
+            "digitalassign", "inputmode", "swlevel", "swlpf",
+            "inceilingmode", "usetrigger1", "usetrigger2", "usetrigger3",
+            "presetgain", "avsync"
+        ];
 
         let feature_list: Vec<String> = CATEGORIES
             .iter()
@@ -672,6 +806,46 @@ impl SonyReceiver {
                 .get(&format!("{cat}.soundfield"))
                 .cloned()
                 .unwrap_or_default();
+            let digital_assign = lookup
+                .get(&format!("{cat}.digitalassign"))
+                .cloned()
+                .unwrap_or_default();
+            let input_mode = lookup
+                .get(&format!("{cat}.inputmode"))
+                .cloned()
+                .unwrap_or_default();
+            let subwoofer_level = lookup
+                .get(&format!("{cat}.swlevel"))
+                .cloned()
+                .unwrap_or_default();
+            let subwoofer_lpf = lookup
+                .get(&format!("{cat}.swlpf"))
+                .cloned()
+                .unwrap_or_default();
+            let in_ceiling_mode = lookup
+                .get(&format!("{cat}.inceilingmode"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let trigger_1 = lookup
+                .get(&format!("{cat}.usetrigger1"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let trigger_2 = lookup
+                .get(&format!("{cat}.usetrigger2"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let trigger_3 = lookup
+                .get(&format!("{cat}.usetrigger3"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let preset_gain = lookup
+                .get(&format!("{cat}.presetgain"))
+                .cloned()
+                .unwrap_or_default();
+            let av_sync = lookup
+                .get(&format!("{cat}.avsync"))
+                .cloned()
+                .unwrap_or_default();
 
             inputs.push(NativeInputConfig {
                 category: cat.to_string(),
@@ -680,13 +854,170 @@ impl SonyReceiver {
                 icon,
                 visible,
                 sound_field,
+                digital_assign,
+                input_mode,
+                subwoofer_level,
+                subwoofer_lpf,
+                in_ceiling_mode,
+                trigger_1,
+                trigger_2,
+                trigger_3,
+                preset_gain,
+                av_sync,
             });
         }
 
         Ok(inputs)
     }
 
-    /// Set receiver power state.
+    /// Queries system settings from the native web API.
+    ///
+    /// Returns system settings including volume display units, dimmer state,
+    /// device name, and network connectivity status.
+    pub async fn get_system_settings(&self) -> Result<NativeSystemSettings, SonyError> {
+        const FEATURES: &[&str] = &[
+            "system.volumedisplay",
+            "system.dimmer",
+            "system.devicename",
+            "system.internetstatus",
+            "system.wiredlan",
+            "system.wirelesslan",
+        ];
+
+        let results = self.native_get(FEATURES).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let to_option = |s: &String| -> Option<String> {
+            if s == "ERR" || s.is_empty() { None } else { Some(s.clone()) }
+        };
+
+        let volume_display = lookup
+            .get("system.volumedisplay")
+            .map(to_option)
+            .unwrap_or_else(|| Some("dB".to_string()));
+        let dimmer = lookup
+            .get("system.dimmer")
+            .map(to_option)
+            .unwrap_or_else(|| Some("off".to_string()));
+        let device_name = lookup.get("system.devicename").map(to_option).unwrap_or_default();
+        let wired = lookup.get("system.wiredlan").map(to_option).unwrap_or_default();
+        let wireless = lookup.get("system.wirelesslan").map(to_option).unwrap_or_default();
+        let internet = lookup.get("system.internetstatus").map(to_option).unwrap_or_default();
+
+        Ok(NativeSystemSettings {
+            volume_display,
+            dimmer,
+            device_name,
+            network: NetworkStatus {
+                wired,
+                wireless,
+                internet,
+            },
+        })
+    }
+
+    /// Queries zone 2 status from the native web API.
+    pub async fn get_zone2_status(&self) -> Result<ZoneStatus, SonyError> {
+        let features = &["zone2.power", "zone2.volume", "zone2.input"];
+        let results = self.native_get(features).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        Ok(ZoneStatus {
+            zone: 2,
+            power: lookup.get("zone2.power").cloned().unwrap_or_default(),
+            volume: lookup.get("zone2.volume").cloned().unwrap_or_default(),
+            input: lookup.get("zone2.input").cloned().unwrap_or_default(),
+        })
+    }
+
+    /// Queries zone 3 status from the native web API.
+    pub async fn get_zone3_status(&self) -> Result<ZoneStatus, SonyError> {
+        let features = &["zone3.power", "zone3.volume", "zone3.input"];
+        let results = self.native_get(features).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        Ok(ZoneStatus {
+            zone: 3,
+            power: lookup.get("zone3.power").cloned().unwrap_or_default(),
+            volume: lookup.get("zone3.volume").cloned().unwrap_or_default(),
+            input: lookup.get("zone3.input").cloned().unwrap_or_default(),
+        })
+    }
+
+    /// Queries main zone status from the native web API.
+    ///
+    /// Returns power, volume, mute, and input for the main zone.
+    pub async fn get_main_zone_status(&self) -> Result<MainZoneStatus, SonyError> {
+        let features = &["main.power", "main.volume", "main.mute", "main.input"];
+        let results = self.native_get(features).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        Ok(MainZoneStatus {
+            power: lookup.get("main.power").cloned().unwrap_or_default(),
+            volume: lookup.get("main.volume").cloned().unwrap_or_default(),
+            mute: lookup.get("main.mute").cloned().unwrap_or_default(),
+            input: lookup.get("main.input").cloned().unwrap_or_default(),
+        })
+    }
+
+    /// Queries audio settings from the native web API.
+    ///
+    /// Returns pure direct mode, sound field, and various speaker level settings.
+    pub async fn get_audio_settings(&self) -> Result<NativeAudioSettings, SonyError> {
+        const FEATURES: &[&str] = &[
+            "audio.puredirect",
+            "audio.soundfield",
+            "audio.frontbalance",
+            "audio.centerlevel",
+            "audio.subwooferlevel",
+            "audio.dolbylevel",
+            "audio.surroundlevel",
+        ];
+
+        let results = self.native_get(FEATURES).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let to_option = |s: &String| -> Option<String> {
+            if s == "ERR" { None } else { Some(s.clone()) }
+        };
+
+        Ok(NativeAudioSettings {
+            pure_direct: lookup.get("audio.puredirect").map(to_option).unwrap_or_default(),
+            sound_field: lookup.get("audio.soundfield").map(to_option).unwrap_or_default(),
+            front_balance: lookup.get("audio.frontbalance").map(to_option).unwrap_or_default(),
+            center_level: lookup.get("audio.centerlevel").map(to_option).unwrap_or_default(),
+            subwoofer_level: lookup.get("audio.subwooferlevel").map(to_option).unwrap_or_default(),
+            dolby_level: lookup.get("audio.dolbylevel").map(to_option).unwrap_or_default(),
+            surround_level: lookup.get("audio.surroundlevel").map(to_option).unwrap_or_default(),
+        })
+    }
+
+/// Set receiver power state.
     ///
     /// Uses `"active"` to power on and `"standby"` to power off. The value
     /// `"off"` is rejected (error 40001) when Quick Start/Network Standby is
