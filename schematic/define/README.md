@@ -17,12 +17,51 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS); supports `FromStr`, `TryFrom<String>` |
-| `AuthStrategy` | Authentication configuration (Bearer, API Key header, API Key query/cookie, Basic, None) |
+| `AuthStrategy` | Authentication configuration (Bearer, API Key header/query/cookie, Basic, None) |
+| `ApiKeyLocation` | Location for API key auth (Query, Cookie) |
+| `UpdateStrategy` | Strategy for updating auth in API variants (NoChange, ChangeTo) |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
 | `FormField` | Form field definition for multipart/URL-encoded requests |
 | `FormFieldKind` | Form field type (Text, File, Files, Json) |
 | `Schema` | Type name and optional module path for code generation |
+| `SchemaObject` | Trait bound for serializable/deserializable types |
+
+### Header and Authentication Types
+
+| Type | Purpose |
+|------|---------|
+| `Headers` | Fluent builder for HTTP headers with auth support |
+| `SensitiveString` | Secure wrapper for passwords/tokens (redacts Debug output) |
+| `EnvList` | Environment variable fallback chain for credentials |
+| `ApiKeyEnv` | API key header configuration with environment source |
+| `EnvMapping` | Complete environment variable mapping for auth credentials |
+| `HeaderError` | Errors from header validation and credential resolution |
+
+### Model Definition Types (for API schema import)
+
+| Type | Purpose |
+|------|---------|
+| `ModelCatalog` | Collection of model definitions with optional module path |
+| `ModelDef` | Union of model types (struct, enum, or alias) |
+| `StructDef` | Structure definition with fields |
+| `EnumDef` | Enumeration definition with variants |
+| `TypeAlias` | Type alias definition |
+| `FieldDef` | Field definition for structs |
+| `EnumVariant` | Variant definition for enums |
+| `TypeRef` | Type reference (primitives, arrays, named types, combinators) |
+| `PrimitiveType` | Basic primitive types |
+
+### Parameter Definition Types (for endpoint import)
+
+| Type | Purpose |
+|------|---------|
+| `EndpointParams` | Collection of endpoint parameters (query, header, cookie) |
+| `ParamDef` | Single parameter definition |
+| `QueryParamType` | Parameter value type |
+| `ParamStyle` | Parameter serialization style |
+| `PaginationStyle` | Common pagination request patterns |
+| `PaginationResponse` | How APIs signal pagination state in responses |
 
 ### WebSocket API Types
 
@@ -129,6 +168,23 @@ let api = RestApi {
 };
 ```
 
+### API Key in Query Parameter or Cookie
+
+For APIs that pass the API key in the query string or as a cookie rather than a header:
+
+```rust
+use schematic_define::{RestApi, AuthStrategy, ApiKeyLocation};
+
+let api = RestApi {
+    auth: AuthStrategy::ApiKeyParam {
+        name: "api_key".to_string(),
+        location: ApiKeyLocation::Query,  // or ApiKeyLocation::Cookie
+    },
+    env_auth: vec!["MY_API_KEY".to_string()],
+    // ...
+};
+```
+
 ### Missing Credentials
 
 If required credentials are not found in the environment, the generated code returns a `SchematicError::MissingCredential` error with the list of env vars that were checked:
@@ -172,6 +228,105 @@ This is useful for:
 - **Testing**: Inject mock credentials without setting env vars
 - **OAuth flows**: Use tokens obtained from OAuth providers
 
+### UpdateStrategy
+
+When creating API variants with the generated `variant()` method, use `UpdateStrategy` to control auth:
+
+```rust
+use schematic_define::{AuthStrategy, UpdateStrategy};
+
+// Keep existing auth strategy
+let strategy = UpdateStrategy::NoChange;
+
+// Change to a different auth strategy
+let strategy = UpdateStrategy::ChangeTo(AuthStrategy::ApiKey {
+    header: "X-API-Key".to_string(),
+});
+```
+
+## Headers Builder
+
+The `Headers` type provides a fluent API for building HTTP headers:
+
+```rust
+use schematic_define::Headers;
+
+// Bearer token authentication
+let headers = Headers::default()
+    .use_bearer_token("my-secret-token")
+    .accept_json()
+    .build()
+    .unwrap();
+
+// Basic authentication
+let headers = Headers::default()
+    .use_basic_auth("username", "password")
+    .build()
+    .unwrap();
+
+// Custom headers
+let headers = Headers::default()
+    .header("X-API-Key", "my-key")
+    .user_agent("MyClient/1.0")
+    .build()
+    .unwrap();
+
+// Check if authorization is set
+assert!(headers.has_authorization());
+```
+
+### Headers Methods
+
+| Method | Description |
+|--------|-------------|
+| `use_bearer_token(token)` | Set Bearer token authentication |
+| `use_basic_auth(user, pass)` | Set Basic authentication |
+| `use_api_key(key, header)` | Set API key in custom header |
+| `content_type(ct)` | Set Content-Type header |
+| `accept(accept)` | Set Accept header |
+| `accept_json()` | Set Accept: application/json |
+| `content_type_json()` | Set Content-Type: application/json |
+| `user_agent(agent)` | Set User-Agent header |
+| `header(name, value)` | Add custom header |
+| `remove(name)` | Remove a header |
+| `with_env_mapping(mapping)` | Configure env var mapping |
+| `from_env()` | Load credentials from environment (permissive) |
+| `try_from_env()` | Load credentials from environment (strict) |
+| `has_authorization()` | Check if auth is set |
+
+### Environment Variable Loading
+
+The `Headers` builder can load credentials from environment variables:
+
+```rust
+use schematic_define::{Headers, EnvMapping, EnvList};
+
+let mapping = EnvMapping {
+    bearer_token: Some(EnvList::from_strs(&["OPENAI_API_KEY", "OPENAI_KEY"])),
+    basic_user: None,
+    basic_pass: None,
+    api_key: None,
+};
+
+let headers = Headers::default()
+    .with_env_mapping(mapping)
+    .from_env();
+```
+
+### SensitiveString
+
+For secure handling of sensitive values:
+
+```rust
+use schematic_define::SensitiveString;
+
+let secret = SensitiveString::from("my-secret-token");
+// Debug output is redacted
+assert_eq!(format!("{:?}", secret), "SensitiveString(\"***\")");
+// Access the actual value
+assert_eq!(secret.as_str(), "my-secret-token");
+```
+
 ## Code Generation Options
 
 `RestApi` includes optional fields to customize generated code:
@@ -207,6 +362,33 @@ let api = RestApi {
 ```
 
 **Note**: The suffix must be alphanumeric. Invalid suffixes (containing spaces, hyphens, etc.) will cause a validation error.
+
+### Environment Variable Mapping
+
+For more control over authentication credentials, use `env_mapping`:
+
+```rust
+use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+
+let api = RestApi {
+    name: "MyApi".to_string(),
+    // Use structured env mapping instead of legacy env_auth/env_username
+    env_mapping: Some(EnvMapping {
+        bearer_token: Some(EnvList::from_strs(&["API_KEY", "TOKEN", "KEY"])),
+        basic_user: Some(EnvList::single("SERVICE_USER")),
+        basic_pass: Some(EnvList::single("SERVICE_PASS")),
+        api_key: None,
+    }),
+    // Legacy fields still work for backward compatibility
+    env_auth: vec![],
+    env_username: None,
+    // ...
+};
+```
+
+The `RestApi::default_env_mapping()` method returns an `EnvMapping` built from:
+1. Explicit `env_mapping` if set
+2. Legacy `env_auth` / `env_username` fields otherwise
 
 ## Request Types
 
@@ -290,12 +472,13 @@ match auth {
     AuthStrategy::None => { /* ... */ }
     AuthStrategy::BearerToken { header } => { /* ... */ }
     AuthStrategy::ApiKey { header } => { /* ... */ }
+    AuthStrategy::ApiKeyParam { name, location } => { /* ... */ }
     AuthStrategy::Basic => { /* ... */ }
     _ => { /* future variants */ }
 }
 ```
 
-This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
+This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`, `QueryParamType`, `ParamStyle`, `PaginationStyle`, `PaginationResponse`, `MessageDirection`, `ParamType`.
 
 ## Response Types
 
@@ -305,6 +488,22 @@ This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest
 | `ApiResponse::Text` | `String` | Plain text endpoints |
 | `ApiResponse::Binary` | `bytes::Bytes` | File downloads, images |
 | `ApiResponse::Empty` | `()` | DELETE, 204 responses |
+
+### ApiResponse Methods
+
+The `ApiResponse` type provides convenience methods:
+
+```rust
+use schematic_define::ApiResponse;
+
+// Check response type
+let response = ApiResponse::json_type("User");
+assert!(response.is_json());
+
+// Create vec response for list endpoints
+let list_response = ApiResponse::json_vec_type("ModelInfo");
+// Equivalent to: ApiResponse::json_type("Vec<ModelInfo>")
+```
 
 ## WebSocket APIs
 
@@ -422,6 +621,8 @@ let api = RestApi {
             description: "Check service health".to_string(),
             request: None,
             response: ApiResponse::json_type("HealthStatus"),
+            headers: vec![],
+            params: None,
         },
         Endpoint {
             id: "GetVersion".to_string(),
@@ -430,6 +631,8 @@ let api = RestApi {
             description: "Get service version".to_string(),
             request: None,
             response: ApiResponse::Text,
+            headers: vec![],
+            params: None,
         },
     ],
 };
@@ -473,6 +676,7 @@ let api = RestApi {
             request: None,
             response: ApiResponse::json_type("User"),
             headers: vec![],
+            params: None,
         },
         // Create a new user (with JSON request body)
         Endpoint {
@@ -483,6 +687,7 @@ let api = RestApi {
             request: Some(ApiRequest::json_type("CreateUserRequest")),
             response: ApiResponse::json_type("User"),
             headers: vec![],
+            params: None,
         },
         // Update a user
         Endpoint {
@@ -493,6 +698,7 @@ let api = RestApi {
             request: Some(ApiRequest::json_type("UpdateUserRequest")),
             response: ApiResponse::json_type("User"),
             headers: vec![],
+            params: None,
         },
         // Delete a user
         Endpoint {
@@ -503,6 +709,7 @@ let api = RestApi {
             request: None,
             response: ApiResponse::Empty,
             headers: vec![],
+            params: None,
         },
     ],
 };
@@ -550,6 +757,7 @@ let api = RestApi {
             ])),
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
+            params: None,
         },
         // Download file - returns binary data
         Endpoint {
@@ -560,6 +768,7 @@ let api = RestApi {
             request: None,
             response: ApiResponse::Binary,
             headers: vec![],
+            params: None,
         },
         // Get file metadata - returns JSON
         Endpoint {
@@ -570,6 +779,7 @@ let api = RestApi {
             request: None,
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
+            params: None,
         },
         // Delete file - returns empty
         Endpoint {
@@ -580,6 +790,7 @@ let api = RestApi {
             request: None,
             response: ApiResponse::Empty,
             headers: vec![],
+            params: None,
         },
     ],
 };
@@ -593,6 +804,83 @@ Paths support template parameters using curly braces. These become fields in the
 // Path: "/users/{user_id}/posts/{post_id}"
 // Generated code will require both `user_id` and `post_id` parameters
 ```
+
+## Endpoint Parameters
+
+For endpoints imported from OpenAPI, you can define query, header, and cookie parameters:
+
+```rust
+use schematic_define::params::{EndpointParams, QueryParamType, ParamStyle};
+
+let params = EndpointParams::default()
+    .with_query_param("state", QueryParamType::String, false, Some("Filter by state"))
+    .with_query_param("limit", QueryParamType::Integer, false, Some("Max results"));
+```
+
+### Endpoint with Pagination
+
+```rust
+use schematic_define::{
+    Endpoint, RestMethod, ApiResponse, ApiRequest,
+    params::{EndpointParams, PaginationStyle, PaginationResponse}
+};
+
+Endpoint {
+    id: "ListUsers".to_string(),
+    method: RestMethod::Get,
+    path: "/users".to_string(),
+    description: "List all users with pagination".to_string(),
+    request: None,
+    response: ApiResponse::json_vec_type("User"),
+    headers: vec![],
+    params: Some(EndpointParams::default()
+        .with_pagination(PaginationStyle::github())
+        .with_response_pagination(PaginationResponse::LinkHeader)),
+}
+```
+
+### Pagination
+
+`PaginationStyle` provides standardized pagination patterns:
+
+```rust
+use schematic_define::params::{EndpointParams, PaginationStyle, PaginationResponse};
+
+// GitHub-style pagination (page + per_page)
+let params = EndpointParams::default()
+    .with_pagination(PaginationStyle::github())
+    .with_response_pagination(PaginationResponse::LinkHeader);
+
+// Cursor-based pagination
+let params = EndpointParams::default()
+    .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20));
+
+// Offset/limit pagination
+let params = EndpointParams::default()
+    .with_pagination(PaginationStyle::offset_limit("offset", "limit", 20, 100));
+```
+
+### QueryParamType Variants
+
+| Variant | Description |
+|---------|-------------|
+| `String` | UTF-8 string |
+| `Integer` | 64-bit signed integer |
+| `Number` | 64-bit floating-point |
+| `Boolean` | true/false |
+| `Array(Box<QueryParamType>)` | Array of inner type |
+| `Enum(Vec<String>)` | Fixed set of allowed values |
+| `Json` | Arbitrary JSON value |
+
+### ParamStyle Variants
+
+| Variant | Description |
+|---------|-------------|
+| `Form` | Default for query params (e.g., `tags=a,b` or `tags=a&tags=b`) |
+| `Simple` | Comma-separated (default for path/header) |
+| `SpaceDelimited` | Space-separated |
+| `PipeDelimited` | Pipe-separated |
+| `DeepObject` | Nested objects (`filter[name]=value`) |
 
 ## Prelude
 
@@ -674,6 +962,26 @@ let qualified = Schema::with_path("User", "crate::models::user");
 assert_eq!(qualified.full_path(), "crate::models::user::User");
 ```
 
+### SchemaObject Trait
+
+The `SchemaObject` trait provides bounds for types that can be used in API schemas:
+
+```rust
+use schematic_define::SchemaObject;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MyRequest {
+    name: String,
+    count: u32,
+}
+
+// MyRequest automatically implements SchemaObject
+fn accepts_schema<T: SchemaObject>(_: T) {}
+```
+
+Required bounds: `Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static`
+
 ### Usage Guide
 
 Use `Schema::new()` when:
@@ -703,6 +1011,75 @@ Recommended methods:
 - `new()` - Constructor requiring all mandatory fields
 - `with_*()` - Builder methods for optional fields
 - `Default` - Implement when all fields have sensible defaults
+
+## Model Definitions
+
+For API specifications imported from OpenAPI, you can define model types:
+
+```rust
+use schematic_define::models::{
+    ModelCatalog, ModelDef, StructDef, EnumDef, TypeAlias,
+    FieldDef, EnumVariant, TypeRef, PrimitiveType
+};
+
+let catalog = ModelCatalog {
+    module_path: Some("my_api::types".to_string()),
+    types: vec![
+        ModelDef::Struct(StructDef {
+            name: "User".to_string(),
+            description: Some("A user in the system".to_string()),
+            fields: vec![
+                FieldDef {
+                    name: "id".to_string(),
+                    serde_rename: None,
+                    description: Some("Unique identifier".to_string()),
+                    required: true,
+                    field_type: TypeRef::Primitive(PrimitiveType::Integer),
+                },
+                FieldDef {
+                    name: "name".to_string(),
+                    serde_rename: None,
+                    description: None,
+                    required: true,
+                    field_type: TypeRef::Primitive(PrimitiveType::String),
+                },
+            ],
+            additional_properties: None,
+        }),
+        ModelDef::Enum(EnumDef {
+            name: "Status".to_string(),
+            description: None,
+            variants: vec![
+                EnumVariant {
+                    name: "Active".to_string(),
+                    value: Some("active".to_string()),
+                    description: None,
+                },
+            ],
+            untagged: false,
+        }),
+        ModelDef::Alias(TypeAlias {
+            name: "UserId".to_string(),
+            description: None,
+            target: TypeRef::Primitive(PrimitiveType::String),
+        }),
+    ],
+};
+```
+
+### TypeRef Variants
+
+| Variant | Description |
+|---------|-------------|
+| `Primitive(PrimitiveType)` | Basic types (String, Integer, Number, Boolean, Bytes, Json) |
+| `Array(Box<TypeRef>)` | Array of inner type |
+| `Map(Box<TypeRef>)` | Map with string keys |
+| `Named(String)` | Reference to named type |
+| `OneOf(Vec<TypeRef>)` | OpenAPI oneOf |
+| `AnyOf(Vec<TypeRef>)` | OpenAPI anyOf |
+| `AllOf(Vec<TypeRef>)` | OpenAPI allOf |
+| `Optional(Box<TypeRef>)` | Optional wrapper |
+| `Unknown` | Unsupported type |
 
 ## Migration from Schema to ApiRequest
 

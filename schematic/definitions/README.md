@@ -16,19 +16,19 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | API | Module | Definition Function | Endpoints | Description |
 |-----|--------|---------------------|-----------|-------------|
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
-| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 14 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
 | Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |
 | Ollama OpenAI | `ollama` | `define_ollama_openai_api()` | 4 | Ollama OpenAI-compatible API |
-| ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 45+ | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
+| ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 35+ | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
-| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 36 | EMQX MQTT Broker REST API with Basic auth |
-| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 38 | EMQX MQTT Broker REST API with Bearer token auth |
-| GitHub | `github` | `define_github_api()` | 14 | GitHub REST API for repos, PRs, issues, releases |
-| GitLab | `gitlab` | `define_gitlab_api()` | 15 | GitLab REST API for repos, MRs, issues, releases |
-| Gitea | `gitea` | `define_gitea_api()` | 14 | Gitea REST API for self-hosted Git forge instances |
+| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
+| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 30+ | EMQX MQTT Broker REST API with Bearer token auth |
+| GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
+| GitLab | `gitlab` | `define_gitlab_api()` | 18 | GitLab REST API for repos, MRs, issues, releases |
+| Gitea | `gitea` | `define_gitea_api()` | 15 | Gitea REST API for self-hosted Git forge instances |
 
 ## Usage
 
@@ -105,7 +105,7 @@ use schematic_definitions::github::define_github_api;
 
 let api = define_github_api();
 assert_eq!(api.name, "GitHub");
-assert_eq!(api.endpoints.len(), 14);
+assert_eq!(api.endpoints.len(), 16);
 ```
 
 ```rust
@@ -113,7 +113,7 @@ use schematic_definitions::gitea::define_gitea_api;
 
 let api = define_gitea_api();
 assert_eq!(api.name, "Gitea");
-assert_eq!(api.endpoints.len(), 14);
+assert_eq!(api.endpoints.len(), 15);
 ```
 
 ```rust
@@ -121,7 +121,7 @@ use schematic_definitions::gitlab::define_gitlab_api;
 
 let api = define_gitlab_api();
 assert_eq!(api.name, "GitLab");
-assert_eq!(api.endpoints.len(), 15);
+assert_eq!(api.endpoints.len(), 18);
 ```
 
 ```rust
@@ -129,7 +129,7 @@ use schematic_definitions::bitbucket::define_bitbucket_api;
 
 let api = define_bitbucket_api();
 assert_eq!(api.name, "Bitbucket");
-assert_eq!(api.endpoints.len(), 14);
+assert_eq!(api.endpoints.len(), 15);
 ```
 
 ## Bitbucket API
@@ -473,6 +473,47 @@ src/
 
 - `schematic-define` - Provides the `RestApi`, `Endpoint`, `AuthStrategy` primitives
 - `serde` - Serialization for response types
+- `schemars` - JSON Schema generation for OpenAPI export
+- `indexmap` - Ordered map for deterministic schema output
+
+## Schema Registry
+
+The `registry` module provides OpenAPI schema generation capabilities:
+
+```rust
+use schematic_definitions::registry::{SchemaRegistry, get_registry};
+use schematic_definitions::openai::Model;
+
+// Create a registry and register types
+let registry = SchemaRegistry::new()
+    .register::<Model>("Model");
+
+// Get schemas in OpenAPI format
+let openapi_schemas = registry.to_openapi_schemas();
+
+// Get a specific schema by name
+let model_schema = registry.get("Model");
+
+// Validate that all response types for an API are registered
+let api = schematic_definitions::openai::define_openai_api();
+registry.validate_completeness(&api).expect("All schemas registered");
+```
+
+### get_registry()
+
+A convenience function to get the pre-built schema registry for supported APIs:
+
+```rust
+use schematic_definitions::registry::get_registry;
+
+// Only OpenAI currently has complete schema registry
+let registry = get_registry("openai");
+```
+
+The registry supports:
+- Schema registration from types implementing `JsonSchema`
+- Conversion to OpenAPI 3.0 schema format
+- Validation that all API response types are registered
 
 ## License
 

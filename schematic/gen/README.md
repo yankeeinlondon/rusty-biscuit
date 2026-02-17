@@ -176,9 +176,13 @@ The generator follows a multi-phase pipeline:
 │  │ Error Type    │ │ Request       │ │ Request Enum          │  │
 │  │ Generation    │ │ Structs       │ │ Generation            │  │
 │  └───────────────┘ └───────────────┘ └───────────────────────┘  │
-│  ┌───────────────┐ ┌───────────────┐                            │
-│  │ API Struct    │ │ Request       │                            │
-│  │ Generation    │ │ Method        │                            │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
+│  │ API Struct    │ │ Request       │ │ Variant Types         │  │
+│  │ Generation    │ │ Method        │ │ (ResponseContext,     │  │
+│  └───────────────┘ └───────────────┘ │  EndpointSpec, etc.)  │  │
+│  ┌───────────────┐ ┌───────────────┐ └───────────────────────┘  │
+│  │ Paginated     │ │ Module Docs   │                            │
+│  │ Trait         │ │ Generation    │                            │
 │  └───────────────┘ └───────────────┘                            │
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -188,6 +192,7 @@ The generator follows a multi-phase pipeline:
 │  - Combine all TokenStreams                                      │
 │  - Add module documentation                                      │
 │  - Add imports and lint attributes                               │
+│  - Generate lib.rs, shared.rs, prelude.rs                       │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -210,6 +215,7 @@ The generator follows a multi-phase pipeline:
 │  - Atomic file writes (temp + rename)                            │
 │  - Create parent directories                                     │
 │  - Generate Cargo.toml for schema package                        │
+│  - Clean up stale .rs files                                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,14 +227,18 @@ The generator produces per-API module files:
 schema/src/
 ├── lib.rs           # Module declarations
 ├── prelude.rs       # Convenient re-exports
-├── shared.rs        # RequestParts, SchematicError, reqwest re-export
+├── shared.rs        # RequestParts, SchematicError, VariantBuilder, Paginated trait, reqwest re-export
 ├── anthropic.rs     # Anthropic API client
 ├── openai.rs        # OpenAI API client
 ├── elevenlabs.rs    # ElevenLabs API client
 ├── huggingface.rs   # HuggingFace Hub API client
 ├── lmstudio.rs      # LM Studio API client
 ├── ollama.rs        # OllamaNative + OllamaOpenAI (combined, shared module)
-└── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
+├── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
+├── bitbucket.rs     # Bitbucket API client
+├── gitea.rs         # Gitea API client
+├── github.rs        # GitHub API client
+└── gitlab.rs        # GitLab API client
 ```
 
 APIs sharing a `module_path` are automatically combined into a single output file.
@@ -243,7 +253,7 @@ automatically cleaned up.
 The CLI supports these API names:
 
 ```
-anthropic, openai, elevenlabs, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+anthropic, bitbucket, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
 ```
 
 ### Module Naming
@@ -278,6 +288,11 @@ For API names with recognized suffixes, the generator can infer the module path:
 | `OllamaNative` | `ollama` (strips "Native" suffix) |
 | `HTTPClient` | `http` (strips "Client" suffix) |
 | `MyService` | `my` (strips "Service" suffix) |
+| `HuggingFaceHub` | `huggingface` (strips "Hub" suffix) |
+| `TestApi` | `test` (strips "Api" suffix) |
+| `AwsSdk` | `aws` (strips "Sdk" suffix) |
+
+The supported suffixes for inference are: `Native`, `Client`, `Service`, `Hub`, `Api`, `Sdk`.
 
 Explicit `module_path` always takes precedence over inference.
 
@@ -743,6 +758,10 @@ Code generation for individual components:
 | `generate_request_enum(&api)` | Creates unified request enum |
 | `generate_api_struct(&api)` | Creates API client struct |
 | `generate_request_method(&api)` | Creates async `request()` method |
+| `generate_request_parts_type()` | Creates `RequestParts` type alias |
+| `generate_variant_types()` | Creates VariantBuilder, ResponseContext, EndpointSpec types |
+| `generate_paginated_trait()` | Creates `Paginated` marker trait |
+| `generate_paginated_impl(&endpoint, suffix)` | Creates `impl Paginated` for paginated endpoints |
 
 ### `output`
 
@@ -751,11 +770,17 @@ Assembly, validation, and file writing:
 | Function | Description |
 |----------|-------------|
 | `assemble_api_code(&api)` | Combines all generators into one `TokenStream` |
+| `assemble_api_module(&api)` | Assembles a single API module |
 | `assemble_combined_api_module(&apis)` | Combines multiple APIs sharing a module path into one `TokenStream` |
+| `assemble_lib_rs(&apis)` | Generates lib.rs with module declarations |
+| `assemble_shared_module()` | Generates shared.rs with common types |
+| `assemble_prelude(&apis)` | Generates prelude.rs with convenient re-exports |
+| `generate_and_write(&api, &dir, dry_run)` | Full pipeline: generate, validate, format, write (single API) |
+| `generate_and_write_all(&apis, &dir, dry_run)` | Full pipeline for multiple APIs |
+| `generate_and_write_standalone(&api, &dir, dry_run, has_types)` | Generates standalone code for imported OpenAPI specs |
 | `validate_code(&tokens)` | Validates generated code with `syn` |
 | `format_code(&file)` | Formats code with `prettyplease` |
 | `write_atomic(&path, &content)` | Atomic file write (temp + rename) |
-| `generate_and_write(&api, &dir, dry_run)` | Full pipeline: generate, validate, format, write |
 
 ### `parser`
 
@@ -803,7 +828,7 @@ Module path inference utilities:
 
 | Function | Description |
 |----------|-------------|
-| `infer_module_path(&name)` | Infers module path from API name (for recognized suffixes) |
+| `infer_module_path(&name)` | Infers module path from API name (for recognized suffixes: Native, Client, Service, Hub, Api, Sdk) |
 
 Generated runtime error types (`SchematicError`):
 
@@ -815,6 +840,7 @@ Generated runtime error types (`SchematicError`):
 | `UnsupportedMethod` | Unknown HTTP method (should never occur) |
 | `SerializationError` | Request body serialization failed |
 | `MissingCredential` | Required auth env vars not found |
+| `InternalError` | Internal runtime error (type mismatch in variant hooks) |
 
 ## Ergonomic Conversions
 
@@ -844,12 +870,58 @@ let req = CreateMessageRequest::from(body);
 let req: CreateMessageRequest = body.into();
 ```
 
+## Pagination Support
+
+The generator supports pagination with the `Paginated` marker trait:
+
+- Endpoints with pagination configured via `EndpointParams::pagination` automatically get `impl Paginated`
+- The `Paginated` trait is defined in `shared.rs` and can be used for generic pagination utilities
+
+```rust
+use schematic_schema::shared::Paginated;
+
+// Generic pagination helper
+fn fetch_all_pages<R: Paginated>(client: &OpenAI) -> Vec<R::Response> {
+    // Implementation that handles pagination automatically
+}
+```
+
 ## Safety Guarantees
 
 - **Validation**: All generated code is parsed with `syn` before writing
 - **Formatting**: Output is consistently formatted with `prettyplease`
 - **Atomic writes**: Uses temp file + rename to prevent partial writes
 - **No panics**: Production code paths use `Result` types, no `unwrap()`/`expect()`
+
+## Variant API (Response Hooks)
+
+The generated clients support creating variant configurations with response hooks:
+
+```rust
+// Create a variant with response hooks
+let variant = client.variant()
+    .base_url("https://staging.example.com/v1")
+    .pre_response_json(|ctx, json| {
+        // Transform JSON before deserialization
+        Ok(json)
+    })
+    .mutate_response::<ListModelsRequest>(|ctx, response| {
+        // Mutate response after deserialization
+        Ok(())
+    })
+    .build();
+```
+
+### Variant Types (in `shared.rs`)
+
+| Type | Description |
+|------|-------------|
+| `ResponseContext` | Metadata about HTTP response (endpoint_id, method, path, url, status, headers) |
+| `EndpointSpec` | Trait associating request types with response types and endpoint IDs |
+| `PreResponseJsonHook` | Type alias for JSON transformation hooks |
+| `AnyResponseMutator` | Type-erased trait for response mutation hooks |
+| `TypedMutator<T, F>` | Concrete wrapper for typed response mutators |
+| `VariantHooks` | Container for all configured hooks and mutators |
 
 ## OpenAPI Import Pipeline
 
