@@ -3,7 +3,7 @@ use clap_complete::CompleteEnv;
 use clap_complete::Shell;
 use sniff::package::enrich_dependency;
 use sniff::programs::ProgramsInfo;
-use sniff::remote::{GitRemote, RemoteRepoProvider};
+use sniff::remote::{DocumentCategory, GitRemote, RemoteReport, RemoteRepoProvider};
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
@@ -530,10 +530,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(remote_ref) = cmd.git_remote() {
             if remote_ref.contains("://") || remote_ref.starts_with("git@") {
                 // URL: contains :// or starts with git@
-                return handle_remote_url(remote_ref, cli.json).await;
+                return handle_remote_url(remote_ref, cli.json, cli.verbose).await;
             } else if is_owner_repo_shorthand(remote_ref) {
                 // owner/repo shorthand: exactly one slash with non-empty parts
-                return handle_shorthand(remote_ref, cli.json).await;
+                return handle_shorthand(remote_ref, cli.json, cli.verbose).await;
             } else {
                 // Git remote name (e.g., "origin")
                 let url =
@@ -543,7 +543,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             remote_ref
                         )
                     })?;
-                return handle_remote_url(&url, cli.json).await;
+                return handle_remote_url(&url, cli.json, cli.verbose).await;
             }
         }
     }
@@ -692,7 +692,11 @@ fn is_owner_repo_shorthand(s: &str) -> bool {
 }
 
 /// Handle `owner/repo` shorthand by probing configured providers.
-async fn handle_shorthand(shorthand: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_shorthand(
+    shorthand: &str,
+    json: bool,
+    verbose: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (owner, repo) = shorthand.split_once('/').expect("already validated");
     let remote = GitRemote::from_shorthand(owner, repo).await?;
     let report = remote.fetch_report(owner, repo).await?;
@@ -700,7 +704,8 @@ async fn handle_shorthand(shorthand: &str, json: bool) -> Result<(), Box<dyn std
     if json {
         output::print_remote_json(&report)?;
     } else {
-        output::print_remote_text(&report);
+        let readme = fetch_readme(&report, &remote, owner, repo, verbose).await;
+        output::print_remote_text(&report, readme.as_deref());
     }
 
     Ok(())
@@ -709,18 +714,48 @@ async fn handle_shorthand(shorthand: &str, json: bool) -> Result<(), Box<dyn std
 /// Handle remote URL inspection (from `sniff git <remote>`).
 ///
 /// Parses the URL, detects the provider, fetches the report, and outputs it.
-async fn handle_remote_url(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_remote_url(
+    url: &str,
+    json: bool,
+    verbose: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
     let remote = GitRemote::from_url(url)?;
     let parsed = GitRemote::parse_url(url)?;
-    let report = remote.fetch_report(&parsed.owner, &parsed.repo).await?;
+    let report = remote
+        .fetch_report(&parsed.owner, &parsed.repo)
+        .await?;
 
     if json {
         output::print_remote_json(&report)?;
     } else {
-        output::print_remote_text(&report);
+        let readme =
+            fetch_readme(&report, &remote, &parsed.owner, &parsed.repo, verbose).await;
+        output::print_remote_text(&report, readme.as_deref());
     }
 
     Ok(())
+}
+
+/// Fetch the README content when verbose mode is enabled.
+///
+/// Looks for the first `DocumentCategory::Readme` entry in the report's
+/// documents and fetches its content via the provider API.
+async fn fetch_readme(
+    report: &RemoteReport,
+    remote: &GitRemote,
+    owner: &str,
+    repo: &str,
+    verbose: u8,
+) -> Option<String> {
+    if verbose == 0 {
+        return None;
+    }
+    let readme_path = report
+        .documents
+        .iter()
+        .find(|d| d.category == DocumentCategory::Readme)
+        .map(|d| d.path.as_str())?;
+    remote.get_file_content(owner, repo, readme_path).await.ok()
 }
 
 /// Resolve a remote name to a URL by looking it up in the local git repository.
@@ -1217,6 +1252,17 @@ mod tests {
             let cli = parse_args(&["git", "https://github.com/owner/repo"]).unwrap();
             if let Some(Commands::Git { remote, .. }) = cli.command {
                 assert_eq!(remote, Some("https://github.com/owner/repo".to_string()));
+            } else {
+                panic!("Expected Git command");
+            }
+        }
+
+        #[test]
+        fn git_remote_with_verbose_flag() {
+            let cli = parse_args(&["git", "origin", "-v"]).unwrap();
+            assert_eq!(cli.verbose, 1);
+            if let Some(Commands::Git { remote, .. }) = cli.command {
+                assert_eq!(remote, Some("origin".to_string()));
             } else {
                 panic!("Expected Git command");
             }

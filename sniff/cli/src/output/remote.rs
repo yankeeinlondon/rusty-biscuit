@@ -5,6 +5,8 @@
 //! categorized lists.
 
 use biscuit_terminal::prelude::*;
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, write_terminal};
 
 use sniff::remote::{
     CiCdInfo, DocumentCategory, DocumentRef, IssueInfo, PullRequestInfo, RemoteReport,
@@ -13,7 +15,10 @@ use sniff::remote::{
 use super::format_number;
 
 /// Print remote report as formatted text using biscuit-terminal components.
-pub fn print_remote_text(report: &RemoteReport) {
+///
+/// When `readme_content` is provided, renders it as markdown after the
+/// standard report output using darkmatter's terminal renderer.
+pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
     let term = Terminal::default();
     let meta = &report.metadata;
 
@@ -112,6 +117,14 @@ pub fn print_remote_text(report: &RemoteReport) {
 
     // === Key URLs ===
     print_key_urls(report, &term);
+
+    // === README ===
+    if let Some(content) = readme_content {
+        println!();
+        let md: Markdown = content.into();
+        let mut stdout = std::io::stdout().lock();
+        let _ = write_terminal(&mut stdout, &md, TerminalOptions::default());
+    }
 }
 
 /// Print document references as a categorized list.
