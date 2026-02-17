@@ -82,6 +82,15 @@ pub enum TtsError {
         path: String,
     },
 
+    /// Cloud provider requires a paid plan for this operation.
+    #[error("{provider} requires a paid subscription for API access to this voice. Options: upgrade at https://elevenlabs.io/pricing, use a cloned/custom voice with --voice <id>, or switch to a free provider (e.g., --provider say)")]
+    PaidPlanRequired {
+        /// The provider that requires a paid plan.
+        provider: String,
+        /// Detail from the API error response.
+        detail: String,
+    },
+
     /// HTTP request to a cloud provider failed.
     #[error("HTTP request failed for '{provider}': {message}")]
     HttpError {
@@ -260,6 +269,19 @@ mod tests {
             error.to_string(),
             "Missing API key for provider 'elevenlabs'"
         );
+    }
+
+    #[test]
+    fn test_paid_plan_required_display() {
+        let error = TtsError::PaidPlanRequired {
+            provider: "ElevenLabs".into(),
+            detail: "payment required".into(),
+        };
+        let msg = error.to_string();
+        assert!(msg.starts_with("ElevenLabs requires a paid subscription"));
+        assert!(msg.contains("elevenlabs.io/pricing"));
+        assert!(msg.contains("--voice <id>"));
+        assert!(msg.contains("--provider say"));
     }
 
     #[test]

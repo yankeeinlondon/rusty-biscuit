@@ -25,7 +25,7 @@ use schematic_schema::elevenlabs::{
     CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
     ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel, VoiceSettings,
 };
-use schematic_schema::shared::reqwest;
+use schematic_schema::shared::{SchematicError, reqwest};
 
 use crate::audio_cache::{CacheKey, write_atomic};
 use crate::errors::TtsError;
@@ -270,6 +270,24 @@ impl ElevenLabsProvider {
         std::env::var("ELEVEN_LABS_API_KEY").is_ok() || std::env::var("ELEVENLABS_API_KEY").is_ok()
     }
 
+    /// Map a `SchematicError` to a `TtsError`, detecting 402 Payment Required.
+    fn map_api_error(e: SchematicError) -> TtsError {
+        if let SchematicError::ApiError {
+            status: 402,
+            ref body,
+        } = e
+        {
+            return TtsError::PaidPlanRequired {
+                provider: "ElevenLabs".into(),
+                detail: body.clone(),
+            };
+        }
+        TtsError::HttpError {
+            provider: "elevenlabs".into(),
+            message: e.to_string(),
+        }
+    }
+
     /// Generate audio to the cache path, returning the path and whether it was a cache hit.
     ///
     /// Speed IS included in the cache key because ElevenLabs bakes speed into the audio.
@@ -326,14 +344,11 @@ impl ElevenLabsProvider {
         let request = CreateSpeechRequest::new(voice_id.to_string(), body);
 
         // Make the API request
-        let audio_bytes =
-            self.client
-                .create_speech(request)
-                .await
-                .map_err(|e| TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: e.to_string(),
-                })?;
+        let audio_bytes = self
+            .client
+            .create_speech(request)
+            .await
+            .map_err(Self::map_api_error)?;
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
@@ -462,14 +477,11 @@ impl ElevenLabsProvider {
         );
 
         // Use the generated client to make the request
-        let audio_bytes =
-            self.client
-                .create_speech(request)
-                .await
-                .map_err(|e| TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: e.to_string(),
-                })?;
+        let audio_bytes = self
+            .client
+            .create_speech(request)
+            .await
+            .map_err(Self::map_api_error)?;
 
         tracing::debug!(
             audio_size = audio_bytes.len(),
@@ -555,6 +567,12 @@ impl ElevenLabsProvider {
                     .text()
                     .await
                     .unwrap_or_else(|_| "unknown".to_string());
+                if status == reqwest::StatusCode::PAYMENT_REQUIRED {
+                    return Err(TtsError::PaidPlanRequired {
+                        provider: "ElevenLabs".into(),
+                        detail: body,
+                    });
+                }
                 return Err(TtsError::HttpError {
                     provider: "elevenlabs".into(),
                     message: format!("API error ({}): {}", status, body),
@@ -615,10 +633,7 @@ impl ElevenLabsProvider {
         self.client
             .request::<Vec<ModelInfo>>(request)
             .await
-            .map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            })
+            .map_err(Self::map_api_error)
     }
 
     /// Create a sound effect from a text description.
@@ -665,10 +680,7 @@ impl ElevenLabsProvider {
             .client
             .create_sound_effect(request)
             .await
-            .map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            })?;
+            .map_err(Self::map_api_error)?;
 
         Ok(audio_bytes.to_vec())
     }
@@ -1155,6 +1167,46 @@ mod tests {
         // 2.0x should clamp to 1.2 (ElevenLabs maximum)
         let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Explicit(2.0)).unwrap();
         assert!((speed - 1.2).abs() < 0.001, "Should clamp to maximum 1.2");
+    }
+
+    // ========================================================================
+    // map_api_error() tests
+    // ========================================================================
+
+    #[test]
+    fn test_map_api_error_402_returns_paid_plan_required() {
+        use schematic_schema::shared::SchematicError;
+
+        let err = SchematicError::ApiError {
+            status: 402,
+            body: "payment required".into(),
+        };
+        let mapped = ElevenLabsProvider::map_api_error(err);
+        match mapped {
+            TtsError::PaidPlanRequired { provider, detail } => {
+                assert_eq!(provider, "ElevenLabs");
+                assert_eq!(detail, "payment required");
+            }
+            other => panic!("Expected PaidPlanRequired, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_map_api_error_non_402_returns_http_error() {
+        use schematic_schema::shared::SchematicError;
+
+        let err = SchematicError::ApiError {
+            status: 500,
+            body: "internal server error".into(),
+        };
+        let mapped = ElevenLabsProvider::map_api_error(err);
+        match mapped {
+            TtsError::HttpError { provider, message } => {
+                assert_eq!(provider, "elevenlabs");
+                assert!(message.contains("500"));
+            }
+            other => panic!("Expected HttpError, got: {other}"),
+        }
     }
 
     // Note: Integration tests requiring API key should use #[ignore]
