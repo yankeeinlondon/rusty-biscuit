@@ -1,21 +1,21 @@
 use std::path::{Path, PathBuf};
 
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::Package;
 use sniff::filesystem::repo::detect_repo;
+use sniff::filesystem::repo::Package;
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
-    color_mode, detect_connection, get_terminal_app, image_support, is_tty, italics_support,
-    osc8_link_support, terminal_height, terminal_width, underline_support,
+    color_depth, color_mode, detect_connection, get_terminal_app, image_support, is_tty,
+    italics_support, osc8_link_support, terminal_height, terminal_width, underline_support,
+    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport,
 };
 use crate::discovery::fonts::{
-    FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
+    detect_nerd_font, font_ligatures, font_name, font_size, FontLigature,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
-    LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
+    detect_linux_distro, detect_os_type, is_ci, LinuxDistro, OsType,
 };
 
 fn new_terminal() -> Terminal {
@@ -801,6 +801,7 @@ mod tests {
             optional_dependencies: None,
             is_updatable: None,
             has_major_update: None,
+            is_excluded: false,
         }];
 
         let cwd = package_path.join("src");
