@@ -1250,14 +1250,45 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         return a.name.localeCompare(b.name);
       }});
       const srcHtml = '<div class="badge-row">' + sorted.map(s =>
-        '<span class="badge' + (s.active ? '' : ' badge-dim') + '">' + s.name + '</span>'
+        '<span class="badge' + (s.active ? ' badge-active' : ' badge-dim') + '" data-category="' + (s.category || '') + '">' + s.name + '</span>'
       ).join('') + '</div>';
-      if (sourcesEl.innerHTML !== srcHtml) sourcesEl.innerHTML = srcHtml;
+      if (sourcesEl.innerHTML !== srcHtml) {{
+        sourcesEl.innerHTML = srcHtml;
+        bindSourceClicks(sourcesEl);
+      }}
       sourcesEl.classList.add('visible');
     }} else {{
       sourcesEl.innerHTML = '';
       sourcesEl.classList.remove('visible');
     }}
+  }}
+
+  function bindSourceClicks(container) {{
+    container.querySelectorAll('.badge[data-category]').forEach(badge => {{
+      badge.addEventListener('click', function() {{
+        const cat = this.dataset.category;
+        if (!cat || this.classList.contains('badge-active')) return;
+        // Optimistic UI: activate this badge, dim all others
+        container.querySelectorAll('.badge').forEach(b => {{
+          b.classList.remove('badge-active');
+          b.classList.add('badge-dim');
+        }});
+        this.classList.remove('badge-dim');
+        this.classList.add('badge-active');
+        // Update lastSonyDetail so poll() respects the lock
+        if (lastSonyDetail && lastSonyDetail.sources) {{
+          lastSonyDetail.sources.forEach(s => {{ s.active = s.category === cat; }});
+        }}
+        sonySourceLock = cat;
+        sonySourceLockExpiry = Date.now() + 10000;
+        // Fire API call
+        fetch('/sony_receiver/' + encodeURIComponent(SONY_DEVICE) + '/source', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ category: cat }})
+        }}).catch(() => {{}});
+      }});
+    }});
   }}
 
   function arcamBadges(detail) {{
