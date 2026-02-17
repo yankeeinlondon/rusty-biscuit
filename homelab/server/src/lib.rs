@@ -1421,6 +1421,17 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         // Still transitioning — keep optimistic state
       }} else {{
         if (sonyLocked) sonyLockClass = null;
+        // Source lock: override active source until server confirms the switch
+        if (sonySourceLock && Date.now() < sonySourceLockExpiry && data.sony.detail && data.sony.detail.sources) {{
+          const confirmed = data.sony.detail.sources.some(s => s.category === sonySourceLock && s.active);
+          if (confirmed) {{
+            sonySourceLock = null;
+          }} else {{
+            data.sony.detail.sources.forEach(s => {{ s.active = s.category === sonySourceLock; }});
+          }}
+        }} else {{
+          sonySourceLock = null;
+        }}
         setDot(document.getElementById("sony-dot"), toClass(data.sony.status));
         setText(document.getElementById("sony-label"), data.sony.label);
         renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);
