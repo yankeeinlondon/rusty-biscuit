@@ -481,18 +481,150 @@ pub struct NetworkStatus {
 }
 
 /// Audio settings from the native web API (port 80).
-///
-/// These are audio settings not available via JSON-RPC.
-/// Returns `null` when a setting is unavailable (e.g., "ERR" in Pure Direct mode).
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeAudioSettings {
-    pub pure_direct: Option<String>,
-    pub sound_field: Option<String>,
-    pub front_balance: Option<String>,
-    pub center_level: Option<String>,
-    pub subwoofer_level: Option<String>,
-    pub dolby_level: Option<String>,
-    pub surround_level: Option<String>,
+    /// Headphone insertion state
+    pub headphones_inserted: bool,
+    /// Current sound field (e.g. "dolby_mode", "2ch_stereo")
+    pub sound_field: String,
+    /// 360 Spatial Sound Mapping
+    pub spatial_sound_360: bool,
+    /// Speaker relocation
+    pub speaker_relocation: bool,
+    /// DSD Native playback
+    pub dsd_native: bool,
+    /// Pure Direct mode
+    pub pure_direct: bool,
+    /// Subwoofer low-pass filter
+    pub subwoofer_lpf: bool,
+    /// A/V sync delay (ms)
+    pub av_sync: String,
+    /// Dual mono mode (e.g. "main", "sub", "main/sub")
+    pub dual_mono: String,
+    /// Dynamic range compression
+    pub dynamic_range_compression: bool,
+    /// Bluetooth mode (e.g. "rx", "tx", "off")
+    pub bluetooth_mode: String,
+}
+
+/// IMAX Enhanced audio configuration from the native web API (port 80).
+///
+/// Requires two native API calls due to the ~16-group packet limit.
+/// Crossover values of `"ERR"` indicate the speaker position is not
+/// configured and are returned as `None`.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeImaxConfig {
+    /// Audio upmixer mode (e.g. "auto", "off")
+    pub upmixer: String,
+    /// Virtualizer mode
+    pub virtualizer: bool,
+    /// IMAX mode (e.g. "auto", "off")
+    pub mode: String,
+    /// HPF crossover frequencies per speaker position (null = not configured)
+    pub crossovers: Vec<ImaxCrossover>,
+    /// Subwoofer low-pass filter frequency
+    pub lpf_subwoofer: Option<String>,
+    /// Subwoofer volume level
+    pub subwoofer_volume: Option<String>,
+    /// Subwoofer bass redirect
+    pub subwoofer_redirect: bool,
+}
+
+/// HPF crossover frequency for a specific speaker position.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImaxCrossover {
+    /// Speaker position (e.g. "Front", "Center", "Surround", "Height1")
+    pub position: String,
+    /// Crossover frequency value (null if position not configured / "ERR")
+    pub value: Option<String>,
+}
+
+/// Network configuration from the native web API (port 80).
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeNetworkConfig {
+    /// Connection type ("wired" or "wireless")
+    pub connection_type: String,
+    /// IPv4 DHCP enabled
+    pub ipv4_dhcp: bool,
+    /// IPv4 address
+    pub ipv4_address: String,
+    /// IPv4 subnet mask
+    pub ipv4_subnet: String,
+    /// IPv4 gateway
+    pub ipv4_gateway: String,
+    /// Primary DNS server
+    pub dns1: String,
+    /// Secondary DNS server
+    pub dns2: Option<String>,
+    /// IPv6 enabled
+    pub ipv6_enabled: bool,
+    /// WiFi SSID (if connected wirelessly)
+    pub wifi_ssid: Option<String>,
+    /// WiFi auth type
+    pub wifi_auth: Option<String>,
+}
+
+/// HDMI configuration from the native web API (port 80).
+///
+/// Requires two native API calls due to the ~16-group packet limit.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeHdmiConfig {
+    /// 4K/8K upscaling mode
+    pub scaling_4k8k: String,
+    /// HDMI CEC control
+    pub cec: bool,
+    /// Standby link mode
+    pub standby_link: String,
+    /// HDMI passthrough mode
+    pub passthrough: String,
+    /// Audio return channel mode (e.g. "earc")
+    pub audio_return_channel: String,
+    /// Audio output target (e.g. "amp")
+    pub audio_out: String,
+    /// Zone 2 audio output
+    pub zone2_audio_out: String,
+    /// Subwoofer level mode
+    pub subwoofer_level: String,
+    /// HDMI output 2 mode (e.g. "zone2")
+    pub out2: String,
+    /// Supported video formats on output A
+    pub video_format_a: String,
+    /// Supported HDR formats on output A
+    pub hdr_format_a: String,
+    /// Other features on output A (e.g. "DSC")
+    pub other_features_a: String,
+    /// Supported video formats on output B
+    pub video_format_b: String,
+    /// Supported HDR formats on output B
+    pub hdr_format_b: String,
+    /// Other features on output B
+    pub other_features_b: String,
+    /// Fast View mode
+    pub fast_view: bool,
+    /// Per-port signal format settings
+    pub port_signal_formats: Vec<HdmiPortSignalFormat>,
+    /// Per-source HDMI assignments
+    pub source_assignments: Vec<HdmiSourceAssignment>,
+    /// Picture-in-picture output 4
+    pub out4_pip: bool,
+}
+
+/// HDMI signal format for a specific port.
+#[derive(Debug, Clone, Serialize)]
+pub struct HdmiPortSignalFormat {
+    /// Port number (1-7)
+    pub port: u8,
+    /// Signal format (e.g. "enhancedformat4k120_8k", "enhancedformat")
+    pub signal_format: String,
+}
+
+/// HDMI assignment for a named source.
+#[derive(Debug, Clone, Serialize)]
+pub struct HdmiSourceAssignment {
+    /// Source name (e.g. "game", "mediabox", "bddvd")
+    pub source: String,
+    /// Signal format for this source
+    pub signal_format: String,
 }
 
 /// Extract a string from a JSON value that may be a string, object, or null.
@@ -683,21 +815,28 @@ impl SonyReceiver {
     /// It runs on port 80 and provides access to settings that the JSON-RPC
     /// API doesn't expose (e.g. correct power status, input configuration).
     ///
-    /// Note: The native API typically requires the receiver to be powered on.
-    /// This method checks power state first and returns an error if the device is off.
+    /// The native API works in both active and standby states. Some features
+    /// may return empty values when the device is off, but the API itself
+    /// remains reachable.
     async fn native_get(&self, features: &[&str]) -> Result<Vec<(String, String)>, SonyError> {
-        // Use native API to check power state
-        let is_on = self.check_power_native().await?;
+        let groups: Vec<Vec<&str>> = features.iter().map(|f| vec![*f]).collect();
+        self.native_get_grouped(&groups).await
+    }
 
-        if !is_on {
-            return Err(SonyError::DeviceOff);
-        }
-
+    /// Query grouped features from the receiver's native web API.
+    ///
+    /// Each inner `Vec` becomes one element in the `packet` array. Features
+    /// that share a namespace (e.g. all `inet4.*` fields) can be grouped
+    /// together for efficiency; the Sony API returns them in the same
+    /// grouping.
+    async fn native_get_grouped(
+        &self,
+        groups: &[Vec<&str>],
+    ) -> Result<Vec<(String, String)>, SonyError> {
         let url = format!("http://{}:80/fcgi-bin/request.fcgi", self.host);
-        let feature_list: Vec<&str> = features.to_vec();
         let payload = json!({
             "type": "http_get",
-            "packet": [feature_list]
+            "packet": groups
         });
 
         let response = self.client.post(&url).json(&payload).send().await?;
@@ -729,12 +868,20 @@ impl SonyReceiver {
         let payload = json!({
             "type": "http_set",
             "packet": [{
+                "id": 0,
                 "feature": feature,
                 "value": value
             }]
         });
 
-        self.client.post(&url).json(&payload).send().await?;
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SonyError::Api(format!(
+                "Native set failed ({status}): {body}"
+            )));
+        }
         Ok(())
     }
 
@@ -769,13 +916,17 @@ impl SonyReceiver {
             "presetgain", "avsync"
         ];
 
-        let feature_list: Vec<String> = CATEGORIES
+        // Group features by category so each inner array is one namespace.
+        // e.g. ["GAME.inputname", "GAME.hdmiassign", ...], ["STB.inputname", ...]
+        let grouped: Vec<Vec<String>> = CATEGORIES
             .iter()
-            .flat_map(|cat| FEATURES.iter().map(move |feat| format!("{cat}.{feat}")))
+            .map(|cat| FEATURES.iter().map(|feat| format!("{cat}.{feat}")).collect())
             .collect();
-
-        let feature_refs: Vec<&str> = feature_list.iter().map(|s| s.as_str()).collect();
-        let results = self.native_get(&feature_refs).await?;
+        let grouped_refs: Vec<Vec<&str>> = grouped
+            .iter()
+            .map(|g| g.iter().map(|s| s.as_str()).collect())
+            .collect();
+        let results = self.native_get_grouped(&grouped_refs).await?;
 
         // Build a lookup map: "GAME.inputname" -> "GAME"
         let mut lookup: std::collections::HashMap<String, String> =
@@ -800,7 +951,7 @@ impl SonyReceiver {
                 .unwrap_or_default();
             let visible = lookup
                 .get(&format!("{cat}.show"))
-                .map(|v| v == "true")
+                .map(|v| v == "on")
                 .unwrap_or(false);
             let sound_field = lookup
                 .get(&format!("{cat}.soundfield"))
@@ -824,19 +975,19 @@ impl SonyReceiver {
                 .unwrap_or_default();
             let in_ceiling_mode = lookup
                 .get(&format!("{cat}.inceilingmode"))
-                .map(|v| v == "true")
+                .map(|v| v == "on")
                 .unwrap_or(false);
             let trigger_1 = lookup
                 .get(&format!("{cat}.usetrigger1"))
-                .map(|v| v == "true")
+                .map(|v| v == "on")
                 .unwrap_or(false);
             let trigger_2 = lookup
                 .get(&format!("{cat}.usetrigger2"))
-                .map(|v| v == "true")
+                .map(|v| v == "on")
                 .unwrap_or(false);
             let trigger_3 = lookup
                 .get(&format!("{cat}.usetrigger3"))
-                .map(|v| v == "true")
+                .map(|v| v == "on")
                 .unwrap_or(false);
             let preset_gain = lookup
                 .get(&format!("{cat}.presetgain"))
@@ -981,17 +1132,19 @@ impl SonyReceiver {
     }
 
     /// Queries audio settings from the native web API.
-    ///
-    /// Returns pure direct mode, sound field, and various speaker level settings.
     pub async fn get_audio_settings(&self) -> Result<NativeAudioSettings, SonyError> {
         const FEATURES: &[&str] = &[
-            "audio.puredirect",
+            "audio.insertheadphones",
             "audio.soundfield",
-            "audio.frontbalance",
-            "audio.centerlevel",
-            "audio.subwooferlevel",
-            "audio.dolbylevel",
-            "audio.surroundlevel",
+            "audio.360ssm",
+            "audio.spkrelocation",
+            "audio.dsdnative",
+            "audio.puredirect",
+            "audio.swlpf",
+            "audio.avsync",
+            "audio.dualmono",
+            "audio.drangecomp",
+            "audio.bluetoothflg",
         ];
 
         let results = self.native_get(FEATURES).await?;
@@ -1002,22 +1155,281 @@ impl SonyReceiver {
             lookup.insert(feature.clone(), value.clone());
         }
 
-        let to_option = |s: &String| -> Option<String> {
-            if s == "ERR" { None } else { Some(s.clone()) }
+        let get = |key: &str| -> String {
+            lookup.get(key).cloned().unwrap_or_default()
+        };
+        let is_on = |key: &str| -> bool {
+            lookup.get(key).map(|v| v == "on").unwrap_or(false)
         };
 
         Ok(NativeAudioSettings {
-            pure_direct: lookup.get("audio.puredirect").map(to_option).unwrap_or_default(),
-            sound_field: lookup.get("audio.soundfield").map(to_option).unwrap_or_default(),
-            front_balance: lookup.get("audio.frontbalance").map(to_option).unwrap_or_default(),
-            center_level: lookup.get("audio.centerlevel").map(to_option).unwrap_or_default(),
-            subwoofer_level: lookup.get("audio.subwooferlevel").map(to_option).unwrap_or_default(),
-            dolby_level: lookup.get("audio.dolbylevel").map(to_option).unwrap_or_default(),
-            surround_level: lookup.get("audio.surroundlevel").map(to_option).unwrap_or_default(),
+            headphones_inserted: is_on("audio.insertheadphones"),
+            sound_field: get("audio.soundfield"),
+            spatial_sound_360: is_on("audio.360ssm"),
+            speaker_relocation: is_on("audio.spkrelocation"),
+            dsd_native: is_on("audio.dsdnative"),
+            pure_direct: is_on("audio.puredirect"),
+            subwoofer_lpf: is_on("audio.swlpf"),
+            av_sync: get("audio.avsync"),
+            dual_mono: get("audio.dualmono"),
+            dynamic_range_compression: is_on("audio.drangecomp"),
+            bluetooth_mode: get("audio.bluetoothflg"),
         })
     }
 
-/// Set receiver power state.
+    /// Queries IMAX Enhanced audio configuration from the native web API.
+    ///
+    /// Makes two native API calls due to the ~16-group packet limit.
+    pub async fn get_imax_config(&self) -> Result<NativeImaxConfig, SonyError> {
+        let groups1: Vec<Vec<&str>> = vec![
+            vec!["audio.upmixer"],
+            vec!["audio.virtualizer"],
+            vec!["imax.hpfCrossoverFront"],
+            vec!["imax.hpfCrossoverCenter"],
+            vec!["imax.hpfCrossoverFrontWide"],
+            vec!["imax.hpfCrossoverSurround"],
+            vec!["imax.hpfCrossoverHeight1"],
+            vec!["imax.hpfCrossoverHeight"],
+            vec!["imax.hpfCrossoverHeight2"],
+            vec!["imax.hpfCrossoverHeight3"],
+        ];
+
+        let groups2: Vec<Vec<&str>> = vec![
+            vec!["imax.hpfCrossoverTopFront"],
+            vec!["imax.hpfCrossoverTopCenter"],
+            vec!["imax.hpfCrossoverTopRear"],
+            vec!["imax.hpfCrossoverButtomFront"],
+            vec!["imax.hpfCrossoverButtomCenter"],
+            vec!["imax.lpfSubwoofer"],
+            vec!["imax.subwooferVolume"],
+            vec!["imax.subwooferRedirect"],
+            vec!["imax.mode"],
+        ];
+
+        let (results1, results2) = tokio::try_join!(
+            self.native_get_grouped(&groups1),
+            self.native_get_grouped(&groups2),
+        )?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in results1.iter().chain(results2.iter()) {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let get = |key: &str| -> String {
+            lookup.get(key).cloned().unwrap_or_default()
+        };
+        let to_option = |key: &str| -> Option<String> {
+            lookup.get(key).and_then(|v| {
+                if v == "ERR" || v.is_empty() { None } else { Some(v.clone()) }
+            })
+        };
+
+        let crossover_positions = [
+            ("Front", "imax.hpfCrossoverFront"),
+            ("Center", "imax.hpfCrossoverCenter"),
+            ("Front Wide", "imax.hpfCrossoverFrontWide"),
+            ("Surround", "imax.hpfCrossoverSurround"),
+            ("Height", "imax.hpfCrossoverHeight"),
+            ("Height 1", "imax.hpfCrossoverHeight1"),
+            ("Height 2", "imax.hpfCrossoverHeight2"),
+            ("Height 3", "imax.hpfCrossoverHeight3"),
+            ("Top Front", "imax.hpfCrossoverTopFront"),
+            ("Top Center", "imax.hpfCrossoverTopCenter"),
+            ("Top Rear", "imax.hpfCrossoverTopRear"),
+            ("Bottom Front", "imax.hpfCrossoverButtomFront"),
+            ("Bottom Center", "imax.hpfCrossoverButtomCenter"),
+        ];
+
+        let crossovers: Vec<ImaxCrossover> = crossover_positions
+            .iter()
+            .map(|(position, key)| ImaxCrossover {
+                position: (*position).to_string(),
+                value: to_option(key),
+            })
+            .collect();
+
+        Ok(NativeImaxConfig {
+            upmixer: get("audio.upmixer"),
+            virtualizer: get("audio.virtualizer") == "on",
+            mode: get("imax.mode"),
+            crossovers,
+            lpf_subwoofer: to_option("imax.lpfSubwoofer"),
+            subwoofer_volume: to_option("imax.subwooferVolume"),
+            subwoofer_redirect: get("imax.subwooferRedirect") == "on",
+        })
+    }
+
+    /// Queries network configuration from the native web API.
+    ///
+    /// Returns IPv4/IPv6 settings, connection type, DNS, and WiFi info.
+    pub async fn get_network_config(&self) -> Result<NativeNetworkConfig, SonyError> {
+        let groups: Vec<Vec<&str>> = vec![
+            vec!["inet6.enabled"],
+            vec![
+                "inet4.dhcp",
+                "inet4.conf_ipaddress",
+                "inet4.conf_subnetmask",
+                "inet4.conf_gateway",
+                "inet4.conf_dns1",
+                "inet4.conf_dns2",
+            ],
+            vec![
+                "network.connectiontype",
+                "ssid.auth",
+                "ssid.name",
+            ],
+        ];
+
+        let results = self.native_get_grouped(&groups).await?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let to_option = |s: &String| -> Option<String> {
+            if s == "NAK" || s.is_empty() { None } else { Some(s.clone()) }
+        };
+
+        Ok(NativeNetworkConfig {
+            connection_type: lookup
+                .get("network.connectiontype")
+                .cloned()
+                .unwrap_or_default(),
+            ipv4_dhcp: lookup
+                .get("inet4.dhcp")
+                .map(|v| v == "on")
+                .unwrap_or(false),
+            ipv4_address: lookup
+                .get("inet4.conf_ipaddress")
+                .cloned()
+                .unwrap_or_default(),
+            ipv4_subnet: lookup
+                .get("inet4.conf_subnetmask")
+                .cloned()
+                .unwrap_or_default(),
+            ipv4_gateway: lookup
+                .get("inet4.conf_gateway")
+                .cloned()
+                .unwrap_or_default(),
+            dns1: lookup
+                .get("inet4.conf_dns1")
+                .cloned()
+                .unwrap_or_default(),
+            dns2: lookup.get("inet4.conf_dns2").and_then(|s| to_option(s)),
+            ipv6_enabled: lookup
+                .get("inet6.enabled")
+                .map(|v| v == "on")
+                .unwrap_or(false),
+            wifi_ssid: lookup.get("ssid.name").and_then(|s| to_option(s)),
+            wifi_auth: lookup.get("ssid.auth").and_then(|s| to_option(s)),
+        })
+    }
+
+    /// Queries HDMI configuration from the native web API.
+    ///
+    /// Makes two native API calls due to the ~16-group packet limit.
+    /// Returns settings, output capabilities, per-port signal formats,
+    /// and per-source assignments.
+    pub async fn get_hdmi_config(&self) -> Result<NativeHdmiConfig, SonyError> {
+        // Request 1: general HDMI settings and output capabilities
+        let groups1: Vec<Vec<&str>> = vec![
+            vec!["hdmi.4k8kscaling"],
+            vec!["hdmi.cec"],
+            vec!["hdmi.standbylink"],
+            vec!["hdmi.passthrough"],
+            vec!["hdmi.audioreturnchannel"],
+            vec!["hdmi.audioout"],
+            vec!["hdmi.zone2audioout"],
+            vec!["hdmi.swlevel"],
+            vec!["hdmi.out2"],
+            vec!["hdmi.videoformata"],
+            vec!["hdmi.hdrformata"],
+            vec!["hdmi.otherfeaturesa"],
+            vec!["hdmi.videoformatb"],
+            vec!["hdmi.hdrformatb"],
+            vec!["hdmi.otherfeaturesb"],
+            vec!["hdmi.fastview"],
+        ];
+
+        // Request 2: per-port signal formats and per-source assignments
+        let groups2: Vec<Vec<&str>> = vec![
+            vec!["hdmi.hdmi1signalformat"],
+            vec!["hdmi.hdmi2signalformat"],
+            vec!["hdmi.hdmi3signalformat"],
+            vec!["hdmi.hdmi4signalformat"],
+            vec!["hdmi.hdmi5signalformat"],
+            vec!["hdmi.hdmi6signalformat"],
+            vec!["hdmi.hdmi7signalformat"],
+            vec!["hdmi.game"],
+            vec!["hdmi.mediabox"],
+            vec!["hdmi.bddvd"],
+            vec!["hdmi.satcatv"],
+            vec!["hdmi.video"],
+            vec!["hdmi.sacdcd"],
+            vec!["hdmi.out4pip"],
+        ];
+
+        let (results1, results2) = tokio::try_join!(
+            self.native_get_grouped(&groups1),
+            self.native_get_grouped(&groups2),
+        )?;
+
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in results1.iter().chain(results2.iter()) {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let get = |key: &str| -> String {
+            lookup.get(key).cloned().unwrap_or_default()
+        };
+
+        let port_signal_formats: Vec<HdmiPortSignalFormat> = (1..=7)
+            .map(|port| HdmiPortSignalFormat {
+                port,
+                signal_format: get(&format!("hdmi.hdmi{port}signalformat")),
+            })
+            .collect();
+
+        let source_keys = [
+            "game", "mediabox", "bddvd", "satcatv", "video", "sacdcd",
+        ];
+        let source_assignments: Vec<HdmiSourceAssignment> = source_keys
+            .iter()
+            .map(|source| HdmiSourceAssignment {
+                source: (*source).to_string(),
+                signal_format: get(&format!("hdmi.{source}")),
+            })
+            .collect();
+
+        Ok(NativeHdmiConfig {
+            scaling_4k8k: get("hdmi.4k8kscaling"),
+            cec: get("hdmi.cec") == "on",
+            standby_link: get("hdmi.standbylink"),
+            passthrough: get("hdmi.passthrough"),
+            audio_return_channel: get("hdmi.audioreturnchannel"),
+            audio_out: get("hdmi.audioout"),
+            zone2_audio_out: get("hdmi.zone2audioout"),
+            subwoofer_level: get("hdmi.swlevel"),
+            out2: get("hdmi.out2"),
+            video_format_a: get("hdmi.videoformata"),
+            hdr_format_a: get("hdmi.hdrformata"),
+            other_features_a: get("hdmi.otherfeaturesa"),
+            video_format_b: get("hdmi.videoformatb"),
+            hdr_format_b: get("hdmi.hdrformatb"),
+            other_features_b: get("hdmi.otherfeaturesb"),
+            fast_view: get("hdmi.fastview") == "on",
+            port_signal_formats,
+            source_assignments,
+            out4_pip: get("hdmi.out4pip") == "on",
+        })
+    }
+
+    /// Set receiver power state.
     ///
     /// Uses `"active"` to power on and `"standby"` to power off. The value
     /// `"off"` is rejected (error 40001) when Quick Start/Network Standby is

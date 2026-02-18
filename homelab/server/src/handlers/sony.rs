@@ -30,6 +30,9 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(get_zone3_by_name))
         .routes(routes!(get_system_settings_by_name))
         .routes(routes!(get_audio_settings_by_name))
+        .routes(routes!(get_imax_config_by_name))
+        .routes(routes!(get_network_config_by_name))
+        .routes(routes!(get_hdmi_config_by_name))
 }
 
 // --- Request/Response DTOs ---
@@ -105,6 +108,114 @@ pub struct SourceResponse {
     sound_field: String,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct NetworkConfigResponse {
+    /// Connection type ("wired" or "wireless")
+    connection_type: String,
+    /// IPv4 DHCP enabled
+    ipv4_dhcp: bool,
+    /// IPv4 address
+    ipv4_address: String,
+    /// IPv4 subnet mask
+    ipv4_subnet: String,
+    /// IPv4 gateway
+    ipv4_gateway: String,
+    /// Primary DNS server
+    dns1: String,
+    /// Secondary DNS server (null if unavailable)
+    dns2: Option<String>,
+    /// IPv6 enabled
+    ipv6_enabled: bool,
+    /// WiFi SSID (null if wired)
+    wifi_ssid: Option<String>,
+    /// WiFi auth type (null if wired)
+    wifi_auth: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct HdmiConfigResponse {
+    /// 4K/8K upscaling mode
+    scaling_4k8k: String,
+    /// HDMI CEC control enabled
+    cec: bool,
+    /// Standby link mode
+    standby_link: String,
+    /// HDMI passthrough mode
+    passthrough: String,
+    /// Audio return channel mode (e.g. "earc")
+    audio_return_channel: String,
+    /// Audio output target (e.g. "amp")
+    audio_out: String,
+    /// Zone 2 audio output
+    zone2_audio_out: String,
+    /// Subwoofer level mode
+    subwoofer_level: String,
+    /// HDMI output 2 mode (e.g. "zone2")
+    out2: String,
+    /// Supported video formats on output A
+    video_format_a: String,
+    /// Supported HDR formats on output A
+    hdr_format_a: String,
+    /// Other features on output A
+    other_features_a: String,
+    /// Supported video formats on output B
+    video_format_b: String,
+    /// Supported HDR formats on output B
+    hdr_format_b: String,
+    /// Other features on output B
+    other_features_b: String,
+    /// Fast View mode enabled
+    fast_view: bool,
+    /// Per-port signal format settings
+    port_signal_formats: Vec<HdmiPortSignalFormatResponse>,
+    /// Per-source HDMI assignments
+    source_assignments: Vec<HdmiSourceAssignmentResponse>,
+    /// Picture-in-picture output 4 enabled
+    out4_pip: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct HdmiPortSignalFormatResponse {
+    /// Port number (1-7)
+    port: u8,
+    /// Signal format (e.g. "enhancedformat4k120_8k")
+    signal_format: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct HdmiSourceAssignmentResponse {
+    /// Source name (e.g. "game", "mediabox")
+    source: String,
+    /// Signal format for this source
+    signal_format: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ImaxConfigResponse {
+    /// Audio upmixer mode (e.g. "auto", "off")
+    upmixer: String,
+    /// Virtualizer enabled
+    virtualizer: bool,
+    /// IMAX mode (e.g. "auto", "off")
+    mode: String,
+    /// HPF crossover frequencies per speaker position
+    crossovers: Vec<ImaxCrossoverResponse>,
+    /// Subwoofer low-pass filter frequency (null if unavailable)
+    lpf_subwoofer: Option<String>,
+    /// Subwoofer volume level (null if unavailable)
+    subwoofer_volume: Option<String>,
+    /// Subwoofer bass redirect enabled
+    subwoofer_redirect: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ImaxCrossoverResponse {
+    /// Speaker position (e.g. "Front", "Center", "Height 1")
+    position: String,
+    /// Crossover frequency value (null if position not configured)
+    value: Option<String>,
+}
+
 // --- Named Device Handlers (multi-device via config) ---
 
 #[derive(Serialize, ToSchema)]
@@ -149,20 +260,28 @@ pub struct SystemSettingsResponse {
 
 #[derive(Serialize, ToSchema)]
 pub struct AudioSettingsResponse {
-    /// Pure Direct mode status
-    pure_direct: Option<String>,
-    /// Current sound field
-    sound_field: Option<String>,
-    /// Front speaker balance
-    front_balance: Option<String>,
-    /// Center speaker level
-    center_level: Option<String>,
-    /// Subwoofer level
-    subwoofer_level: Option<String>,
-    /// Dolby volume level
-    dolby_level: Option<String>,
-    /// Surround speaker level
-    surround_level: Option<String>,
+    /// Headphone insertion state
+    headphones_inserted: bool,
+    /// Current sound field (e.g. "dolby_mode", "2ch_stereo")
+    sound_field: String,
+    /// 360 Spatial Sound Mapping enabled
+    spatial_sound_360: bool,
+    /// Speaker relocation enabled
+    speaker_relocation: bool,
+    /// DSD Native playback enabled
+    dsd_native: bool,
+    /// Pure Direct mode enabled
+    pure_direct: bool,
+    /// Subwoofer low-pass filter enabled
+    subwoofer_lpf: bool,
+    /// A/V sync delay (ms)
+    av_sync: String,
+    /// Dual mono mode (e.g. "main", "sub", "main/sub")
+    dual_mono: String,
+    /// Dynamic range compression enabled
+    dynamic_range_compression: bool,
+    /// Bluetooth mode (e.g. "rx", "tx", "off")
+    bluetooth_mode: String,
 }
 
 #[utoipa::path(
@@ -744,13 +863,158 @@ pub(crate) async fn get_audio_settings_by_name(
     let settings = with_timeout(state.request_timeout, sony.get_audio_settings()).await?;
 
     Ok(Json(AudioSettingsResponse {
-        pure_direct: settings.pure_direct,
+        headphones_inserted: settings.headphones_inserted,
         sound_field: settings.sound_field,
-        front_balance: settings.front_balance,
-        center_level: settings.center_level,
-        subwoofer_level: settings.subwoofer_level,
-        dolby_level: settings.dolby_level,
-        surround_level: settings.surround_level,
+        spatial_sound_360: settings.spatial_sound_360,
+        speaker_relocation: settings.speaker_relocation,
+        dsd_native: settings.dsd_native,
+        pure_direct: settings.pure_direct,
+        subwoofer_lpf: settings.subwoofer_lpf,
+        av_sync: settings.av_sync,
+        dual_mono: settings.dual_mono,
+        dynamic_range_compression: settings.dynamic_range_compression,
+        bluetooth_mode: settings.bluetooth_mode,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/audio/imax",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "IMAX Enhanced audio configuration", body = ImaxConfigResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_imax_config_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let config = with_timeout(state.request_timeout, sony.get_imax_config()).await?;
+
+    Ok(Json(ImaxConfigResponse {
+        upmixer: config.upmixer,
+        virtualizer: config.virtualizer,
+        mode: config.mode,
+        crossovers: config
+            .crossovers
+            .into_iter()
+            .map(|c| ImaxCrossoverResponse {
+                position: c.position,
+                value: c.value,
+            })
+            .collect(),
+        lpf_subwoofer: config.lpf_subwoofer,
+        subwoofer_volume: config.subwoofer_volume,
+        subwoofer_redirect: config.subwoofer_redirect,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/network",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Network configuration", body = NetworkConfigResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_network_config_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let config = with_timeout(state.request_timeout, sony.get_network_config()).await?;
+
+    Ok(Json(NetworkConfigResponse {
+        connection_type: config.connection_type,
+        ipv4_dhcp: config.ipv4_dhcp,
+        ipv4_address: config.ipv4_address,
+        ipv4_subnet: config.ipv4_subnet,
+        ipv4_gateway: config.ipv4_gateway,
+        dns1: config.dns1,
+        dns2: config.dns2,
+        ipv6_enabled: config.ipv6_enabled,
+        wifi_ssid: config.wifi_ssid,
+        wifi_auth: config.wifi_auth,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/hdmi",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "HDMI configuration", body = HdmiConfigResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_hdmi_config_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let config = with_timeout(state.request_timeout, sony.get_hdmi_config()).await?;
+
+    Ok(Json(HdmiConfigResponse {
+        scaling_4k8k: config.scaling_4k8k,
+        cec: config.cec,
+        standby_link: config.standby_link,
+        passthrough: config.passthrough,
+        audio_return_channel: config.audio_return_channel,
+        audio_out: config.audio_out,
+        zone2_audio_out: config.zone2_audio_out,
+        subwoofer_level: config.subwoofer_level,
+        out2: config.out2,
+        video_format_a: config.video_format_a,
+        hdr_format_a: config.hdr_format_a,
+        other_features_a: config.other_features_a,
+        video_format_b: config.video_format_b,
+        hdr_format_b: config.hdr_format_b,
+        other_features_b: config.other_features_b,
+        fast_view: config.fast_view,
+        port_signal_formats: config
+            .port_signal_formats
+            .into_iter()
+            .map(|p| HdmiPortSignalFormatResponse {
+                port: p.port,
+                signal_format: p.signal_format,
+            })
+            .collect(),
+        source_assignments: config
+            .source_assignments
+            .into_iter()
+            .map(|s| HdmiSourceAssignmentResponse {
+                source: s.source,
+                signal_format: s.signal_format,
+            })
+            .collect(),
+        out4_pip: config.out4_pip,
     }))
 }
 

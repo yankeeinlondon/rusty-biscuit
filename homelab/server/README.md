@@ -6,8 +6,8 @@ REST API server for controlling home AV equipment via the homelab library.
 
 This server exposes REST endpoints for:
 
-- **Sony Receiver** - Power, volume, mute, inputs, system info
-- **Arcam Amplifier** - Power, mute, amplifier mode
+- **Sony Receiver** - Power, volume, mute, inputs, sources, zones, audio, IMAX, HDMI, network, system settings
+- **Arcam Amplifier** - Power, mute, amplifier mode, temperature, auto-shutdown, display name
 
 Designed for internal homelab networks (no authentication).
 
@@ -56,12 +56,15 @@ just -f homelab/justfile install-server
 
 ## API Endpoints
 
-### Health
+### Health & Dashboard
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | Live dashboard with SSE status updates |
+| GET | `/status` | JSON status of all devices |
 | GET | `/health` | Basic health check |
 | GET | `/health/devices` | Device configuration status |
+| GET | `/explore` | Scalar API documentation explorer |
 
 ### Sony Receiver Management
 
@@ -75,18 +78,58 @@ just -f homelab/justfile install-server
 
 ### Sony Receiver Control
 
+Basic controls using the Sony JSON-RPC API (port 10000).
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/sony_receiver/{name}/power` | Get power status |
-| POST | `/sony_receiver/{name}/power` | Set power (`{"active": bool}`) |
-| GET | `/sony_receiver/{name}/volume` | Get volume info |
-| POST | `/sony_receiver/{name}/volume` | Set volume (`{"level": 0-100}`) |
-| GET | `/sony_receiver/{name}/mute` | Get mute status |
-| POST | `/sony_receiver/{name}/mute` | Set mute (`{"mute": bool}`) |
-| GET | `/sony_receiver/{name}/inputs` | List available inputs |
-| GET | `/sony_receiver/{name}/input/current` | Get current input |
-| POST | `/sony_receiver/{name}/input` | Set input (`{"uri": "..."}`) |
-| GET | `/sony_receiver/{name}/system/info` | Get system information |
+| GET | `/{name}/power` | Get power status |
+| POST | `/{name}/power` | Set power (`{"active": bool}`) |
+| GET | `/{name}/volume` | Get volume info |
+| POST | `/{name}/volume` | Set volume (`{"level": 0-100}`) |
+| GET | `/{name}/mute` | Get mute status |
+| POST | `/{name}/mute` | Set mute (`{"mute": bool}`) |
+| GET | `/{name}/inputs` | List available inputs (JSON-RPC terminal URIs) |
+| GET | `/{name}/input/current` | Get current input |
+| POST | `/{name}/input` | Set input by URI (`{"uri": "..."}`) |
+| POST | `/{name}/source` | Set input by category name (`{"category": "GAME"}`) |
+| GET | `/{name}/system/info` | Get system information (model, serial, MAC) |
+
+> All Sony receiver paths are prefixed with `/sony_receiver`.
+
+### Sony Receiver Zones
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/{name}/zone` | Main zone status (power, volume, mute, input) |
+| GET | `/{name}/zone2` | Zone 2 status (power, volume, input) |
+| GET | `/{name}/zone3` | Zone 3 status (power, volume, input) |
+
+### Sony Receiver Native API
+
+These endpoints use the Sony native HTTP API (`/fcgi-bin/request.fcgi` on port 80), which provides access to settings the JSON-RPC API doesn't expose. The native API works in both active and standby states.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/{name}/sources` | Input sources with user-defined names, HDMI assignments, visibility |
+| GET | `/{name}/system/settings` | System settings (volume display, dimmer, device name, network) |
+| GET | `/{name}/audio/settings` | Audio settings (sound field, pure direct, DSD, Bluetooth mode, etc.) |
+| GET | `/{name}/audio/imax` | IMAX Enhanced config (crossovers, upmixer, subwoofer, mode) |
+| GET | `/{name}/network` | Network config (IPv4/IPv6, DNS, connection type, WiFi) |
+| GET | `/{name}/hdmi` | HDMI config (CEC, eARC, signal formats, source assignments) |
+
+#### Native API Notes
+
+The Sony STR-AZ7000ES exposes a native HTTP API on port 80 at `/fcgi-bin/request.fcgi` that is separate from the documented JSON-RPC API on port 10000.
+
+Key differences from JSON-RPC:
+
+- **Works in standby** - The native API responds even when the receiver is off (some features may return empty values)
+- **User-defined source names** - The `inputname` feature reveals custom names (e.g. "PS5" for GAME, "AppleTV" for STB)
+- **HDMI configuration** - Per-port signal formats, CEC, eARC, passthrough settings
+- **IMAX Enhanced** - HPF crossover frequencies per speaker position, subwoofer settings
+- **Packet format** - Requests use grouped feature arrays; max ~16 groups per request
+- **Boolean values** - The native API uses `"on"`/`"off"` strings, not `"true"`/`"false"`
+- **Unavailable features** - Return `"ERR"` or `"NAK"` (mapped to `null` in the API)
 
 ### Arcam Amplifier Management
 
@@ -102,13 +145,22 @@ just -f homelab/justfile install-server
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/arcam_amp/{name}/power` | Get power state |
-| POST | `/arcam_amp/{name}/power/on` | Power on |
-| POST | `/arcam_amp/{name}/power/off` | Power off |
-| GET | `/arcam_amp/{name}/mute` | Get mute status |
-| POST | `/arcam_amp/{name}/mute/on` | Mute on |
-| POST | `/arcam_amp/{name}/mute/off` | Mute off |
-| GET | `/arcam_amp/{name}/mode` | Get amplifier mode |
+| GET | `/{name}/status` | Full amplifier status |
+| GET | `/{name}/power` | Get power state |
+| POST | `/{name}/power/on` | Power on |
+| POST | `/{name}/power/off` | Power off |
+| GET | `/{name}/mute` | Get mute status |
+| POST | `/{name}/mute/on` | Mute on |
+| POST | `/{name}/mute/off` | Mute off |
+| GET | `/{name}/mode` | Get amplifier mode |
+| GET | `/{name}/temperature/{sensor_type}` | Get temperature reading |
+| GET | `/{name}/timeout` | Get display timeout |
+| GET | `/{name}/name` | Get display name |
+| PUT | `/{name}/name` | Set display name |
+| GET | `/{name}/auto-shutdown` | Get auto-shutdown setting |
+| PUT | `/{name}/auto-shutdown` | Set auto-shutdown setting |
+
+> All Arcam amplifier paths are prefixed with `/arcam_amp`.
 
 ### Legacy Routes (Deprecated)
 
@@ -148,6 +200,23 @@ curl -X POST http://localhost:3000/sony_receiver/living-room/volume \
 curl -X POST http://localhost:3000/sony_receiver/living-room/mute \
   -H "Content-Type: application/json" \
   -d '{"mute": true}'
+
+# Switch source by category
+curl -X POST http://localhost:3000/sony_receiver/living-room/source \
+  -H "Content-Type: application/json" \
+  -d '{"category": "GAME"}'
+
+# Get user-defined source names
+curl http://localhost:3000/sony_receiver/living-room/sources
+
+# Get HDMI configuration
+curl http://localhost:3000/sony_receiver/living-room/hdmi
+
+# Get network configuration
+curl http://localhost:3000/sony_receiver/living-room/network
+
+# Get IMAX Enhanced settings
+curl http://localhost:3000/sony_receiver/living-room/audio/imax
 
 # Power on Arcam
 curl -X POST http://localhost:3000/arcam_amp/office/power/on
