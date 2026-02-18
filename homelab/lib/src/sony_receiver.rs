@@ -840,7 +840,13 @@ impl SonyReceiver {
         });
 
         let response = self.client.post(&url).json(&payload).send().await?;
-        let json_resp: Value = response.json().await?;
+        let text = response.text().await?;
+        let json_resp: Value = serde_json::from_str(&text).map_err(|e| {
+            let preview: String = text.chars().take(200).collect();
+            SonyError::Api(format!(
+                "Native API returned invalid JSON: {e} — response: {preview}"
+            ))
+        })?;
 
         let mut results = Vec::new();
         if let Some(packets) = json_resp["packet"].as_array() {
@@ -916,17 +922,21 @@ impl SonyReceiver {
             "presetgain", "avsync"
         ];
 
-        // Group features by category so each inner array is one namespace.
-        // e.g. ["GAME.inputname", "GAME.hdmiassign", ...], ["STB.inputname", ...]
-        let grouped: Vec<Vec<String>> = CATEGORIES
-            .iter()
-            .map(|cat| FEATURES.iter().map(|feat| format!("{cat}.{feat}")).collect())
-            .collect();
-        let grouped_refs: Vec<Vec<&str>> = grouped
-            .iter()
-            .map(|g| g.iter().map(|s| s.as_str()).collect())
-            .collect();
-        let results = self.native_get_grouped(&grouped_refs).await?;
+        // Split into batches of 2 categories per request (2 groups × 15 features = 30
+        // features each) to stay within the native API's per-request limits.
+        let mut results = Vec::new();
+        for chunk in CATEGORIES.chunks(2) {
+            let grouped: Vec<Vec<String>> = chunk
+                .iter()
+                .map(|cat| FEATURES.iter().map(|feat| format!("{cat}.{feat}")).collect())
+                .collect();
+            let grouped_refs: Vec<Vec<&str>> = grouped
+                .iter()
+                .map(|g| g.iter().map(|s| s.as_str()).collect())
+                .collect();
+            let batch = self.native_get_grouped(&grouped_refs).await?;
+            results.extend(batch);
+        }
 
         // Build a lookup map: "GAME.inputname" -> "GAME"
         let mut lookup: std::collections::HashMap<String, String> =

@@ -154,12 +154,12 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                             let cat_to_uri = build_category_uri_map(native_inputs, terminals.as_deref());
                             let source_list: Vec<serde_json::Value> = native_inputs
                                 .iter()
+                                .filter(|i| i.visible)
                                 .map(|i| {
-                                    let name = format_source_name(&i.name);
-                                    let name = if name.is_empty() {
+                                    let name = if i.name.is_empty() {
                                         display_name_for_category(&i.category)
                                     } else {
-                                        name
+                                        i.name.clone()
                                     };
                                     let uri = cat_to_uri.get(i.category.as_str());
                                     json!({

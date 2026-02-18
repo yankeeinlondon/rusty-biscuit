@@ -124,12 +124,14 @@ The Sony STR-AZ7000ES exposes a native HTTP API on port 80 at `/fcgi-bin/request
 Key differences from JSON-RPC:
 
 - **Works in standby** - The native API responds even when the receiver is off (some features may return empty values)
-- **User-defined source names** - The `inputname` feature reveals custom names (e.g. "PS5" for GAME, "AppleTV" for STB)
+- **User-defined source names** - The `inputname` feature reveals custom names (e.g. "PS5" for GAME, "AppleTV" for STB). Custom names are displayed as-is on the dashboard; generic fallback names are only used when `inputname` is empty.
+- **Source visibility** - Sources with `show` set to `"off"` are hidden from the dashboard
 - **HDMI configuration** - Per-port signal formats, CEC, eARC, passthrough settings
 - **IMAX Enhanced** - HPF crossover frequencies per speaker position, subwoofer settings
-- **Packet format** - Requests use grouped feature arrays; max ~16 groups per request
+- **Packet format** - Requests use grouped feature arrays; max ~16 groups per request with a per-request feature limit. Large queries (e.g. 8 categories × 15 features) are automatically batched into multiple requests.
 - **Boolean values** - The native API uses `"on"`/`"off"` strings, not `"true"`/`"false"`
 - **Unavailable features** - Return `"ERR"` or `"NAK"` (mapped to `null` in the API)
+- **Set operations** - Use `http_set` with `{"id": N, "feature": "...", "value": "..."}` packets. The `id` field appears to be required but the correct value strategy is still under investigation.
 
 ### Arcam Amplifier Management
 
