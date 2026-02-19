@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sniff::programs::AiCli;
 use std::fmt;
 
 use super::AgenticEvent;
@@ -58,6 +60,18 @@ pub enum Provider {
     /// Roo Code.
     RooCode,
 }
+
+/// Providers in canonical display order for matrix-style reporting.
+pub const PROVIDERS_DISPLAY_ORDER: [Provider; 8] = [
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Gemini,
+    Provider::Goose,
+    Provider::KimiCode,
+    Provider::OpenCode,
+    Provider::QwenCode,
+    Provider::RooCode,
+];
 
 /// Shared provider-native event mappings used by both configurators and adapters.
 ///
@@ -240,6 +254,112 @@ const OPENCODE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
 ];
 
 impl Provider {
+    /// Returns common CLI aliases accepted for this provider.
+    pub fn cli_aliases(&self) -> &'static [&'static str] {
+        match self {
+            Provider::Claude => &["claude"],
+            Provider::Codex => &["codex"],
+            Provider::Gemini => &["gemini"],
+            Provider::Goose => &["goose"],
+            Provider::KimiCode => &["kimi", "kimicode", "kimi_code", "kimi-code"],
+            Provider::OpenCode => &["opencode", "open_code", "open-code"],
+            Provider::QwenCode => &["qwen", "qwencode", "qwen_code", "qwen-code"],
+            Provider::RooCode => &["roo", "roocode", "roo_code", "roo-code"],
+        }
+    }
+
+    /// Parse a provider from a CLI-facing name or alias.
+    pub fn parse_cli_name(input: &str) -> Option<Self> {
+        let normalized = normalize_provider_input(input);
+        if normalized.is_empty() {
+            return None;
+        }
+
+        PROVIDERS_DISPLAY_ORDER.into_iter().find(|provider| {
+            provider.as_slug() == normalized
+                || normalize_provider_input(&provider.to_string()) == normalized
+                || provider.cli_aliases().contains(&normalized.as_str())
+        })
+    }
+
+    /// Fuzzy match a provider from user input (exact/prefix/contains).
+    pub fn fuzzy_match_cli_name(input: &str) -> Option<Self> {
+        let normalized = normalize_provider_input(input);
+        if normalized.is_empty() {
+            return None;
+        }
+
+        if let Some(provider) = Self::parse_cli_name(&normalized) {
+            return Some(provider);
+        }
+
+        // Prefix match
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let display = normalize_provider_input(&provider.to_string());
+            if display.starts_with(&normalized) || provider.as_slug().starts_with(&normalized) {
+                return Some(provider);
+            }
+            if provider
+                .cli_aliases()
+                .iter()
+                .any(|alias| alias.starts_with(&normalized))
+            {
+                return Some(provider);
+            }
+        }
+
+        // Contains match
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let display = normalize_provider_input(&provider.to_string());
+            if display.contains(&normalized) || provider.as_slug().contains(&normalized) {
+                return Some(provider);
+            }
+            if provider
+                .cli_aliases()
+                .iter()
+                .any(|alias| alias.contains(&normalized))
+            {
+                return Some(provider);
+            }
+        }
+
+        None
+    }
+
+    /// Returns the corresponding sniff `AiCli` variant for install detection.
+    pub fn sniff_ai_cli(&self) -> AiCli {
+        match self {
+            Provider::Claude => AiCli::Claude,
+            Provider::Codex => AiCli::Codex,
+            Provider::Gemini => AiCli::GeminiCli,
+            Provider::Goose => AiCli::Goose,
+            Provider::KimiCode => AiCli::KimiCli,
+            Provider::OpenCode => AiCli::Opencode,
+            Provider::QwenCode => AiCli::QwenCli,
+            Provider::RooCode => AiCli::Roo,
+        }
+    }
+
+    /// Detect a provider from raw payload shape.
+    pub fn detect_from_payload(raw: &Value) -> Option<Self> {
+        if raw.get("hook_event_name").is_some() {
+            return Some(Provider::Claude);
+        }
+        if raw.get("type").is_some() && raw.get("thread_id").is_some() {
+            return Some(Provider::Codex);
+        }
+        if raw.get("event_type").is_some() {
+            return Some(Provider::OpenCode);
+        }
+        if raw.get("event_name").is_some() {
+            return Some(Provider::Gemini);
+        }
+        if raw.get("method").is_some() {
+            return Some(Provider::KimiCode);
+        }
+        None
+    }
+
     /// Returns a snake_case identifier suitable for file paths and JSON keys.
     ///
     /// Use this for file system paths, config keys, and anywhere that needs a
@@ -603,6 +723,10 @@ impl Provider {
             },
         })
     }
+}
+
+fn normalize_provider_input(input: &str) -> String {
+    input.trim().to_ascii_lowercase().replace([' ', '-'], "_")
 }
 
 impl fmt::Display for Provider {
@@ -985,5 +1109,83 @@ mod tests {
         assert!(!Provider::KimiCode.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::QwenCode.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::RooCode.supports_event_via_hook(&TurnComplete));
+    }
+
+    #[test]
+    fn parse_cli_name_accepts_aliases() {
+        assert_eq!(Provider::parse_cli_name("claude"), Some(Provider::Claude));
+        assert_eq!(Provider::parse_cli_name("kimi"), Some(Provider::KimiCode));
+        assert_eq!(
+            Provider::parse_cli_name("open-code"),
+            Some(Provider::OpenCode)
+        );
+        assert_eq!(
+            Provider::parse_cli_name("QWEN_CODE"),
+            Some(Provider::QwenCode)
+        );
+        assert_eq!(
+            Provider::parse_cli_name("Roo Code"),
+            Some(Provider::RooCode)
+        );
+        assert_eq!(Provider::parse_cli_name(""), None);
+    }
+
+    #[test]
+    fn fuzzy_match_cli_name_supports_prefix_and_contains() {
+        assert_eq!(
+            Provider::fuzzy_match_cli_name("gemi"),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::fuzzy_match_cli_name("kimi"),
+            Some(Provider::KimiCode)
+        );
+        assert_eq!(
+            Provider::fuzzy_match_cli_name("open"),
+            Some(Provider::OpenCode)
+        );
+        assert_eq!(Provider::fuzzy_match_cli_name("unknown"), None);
+    }
+
+    #[test]
+    fn sniff_ai_cli_maps_all_providers() {
+        assert_eq!(Provider::Claude.sniff_ai_cli(), AiCli::Claude);
+        assert_eq!(Provider::Codex.sniff_ai_cli(), AiCli::Codex);
+        assert_eq!(Provider::Gemini.sniff_ai_cli(), AiCli::GeminiCli);
+        assert_eq!(Provider::Goose.sniff_ai_cli(), AiCli::Goose);
+        assert_eq!(Provider::KimiCode.sniff_ai_cli(), AiCli::KimiCli);
+        assert_eq!(Provider::OpenCode.sniff_ai_cli(), AiCli::Opencode);
+        assert_eq!(Provider::QwenCode.sniff_ai_cli(), AiCli::QwenCli);
+        assert_eq!(Provider::RooCode.sniff_ai_cli(), AiCli::Roo);
+    }
+
+    #[test]
+    fn detect_from_payload_recognizes_known_shapes() {
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"Stop"})),
+            Some(Provider::Claude)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(
+                &serde_json::json!({"type":"turn.completed","thread_id":"t-1"})
+            ),
+            Some(Provider::Codex)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"event_type":"session.idle"})),
+            Some(Provider::OpenCode)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"event_name":"BeforeAgent"})),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"method":"notification"})),
+            Some(Provider::KimiCode)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"unknown":true})),
+            None
+        );
     }
 }

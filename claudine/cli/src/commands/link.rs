@@ -8,10 +8,10 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::events::Provider;
 use claudine::linking::{
-    self, ALL_PROVIDERS, LinkScope, LinkableResource, ResourceFormat, SupportLevel,
+    self, ALL_PROVIDERS, ResourceScope, LinkableResource, ResourceFormat, SupportLevel,
     all_capabilities, capabilities_for,
 };
-use sniff::programs::{InstalledAiClients, enums::AiCli};
+use sniff::programs::InstalledAiClients;
 
 use crate::log;
 
@@ -35,21 +35,6 @@ pub struct LinkArgs {
     pub detailed: bool,
 }
 
-/// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
-fn provider_to_ai_cli(provider: Provider) -> AiCli {
-    match provider {
-        Provider::Claude => AiCli::Claude,
-        Provider::Codex => AiCli::Codex,
-        Provider::Gemini => AiCli::GeminiCli,
-        Provider::Goose => AiCli::Goose,
-        Provider::KimiCode => AiCli::KimiCli,
-        Provider::OpenCode => AiCli::Opencode,
-        Provider::QwenCode => AiCli::QwenCli,
-        Provider::RooCode => AiCli::Roo,
-        _ => AiCli::Claude,
-    }
-}
-
 fn bool_indicator(value: bool) -> TableCellContent {
     if value {
         "\u{2705}".into()
@@ -58,47 +43,13 @@ fn bool_indicator(value: bool) -> TableCellContent {
     }
 }
 
-/// Fuzzy match a user input string to a provider.
-fn fuzzy_match_provider(input: &str) -> Option<Provider> {
-    let input_lower = input.to_lowercase();
-
-    // Try exact match first
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display == input_lower || slug == input_lower {
-            return Some(provider);
-        }
-    }
-
-    // Try prefix match
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display.starts_with(&input_lower) || slug.starts_with(&input_lower) {
-            return Some(provider);
-        }
-    }
-
-    // Try contains match
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display.contains(&input_lower) || slug.contains(&input_lower) {
-            return Some(provider);
-        }
-    }
-
-    None
-}
-
 /// Link skills and commands across providers.
 pub fn run(args: LinkArgs) -> Result<()> {
     // Handle --support flag
     if args.support {
         // If a provider is specified with --support, show detailed view
         if let Some(ref provider_input) = args.provider_arg {
-            match fuzzy_match_provider(provider_input) {
+            match Provider::fuzzy_match_cli_name(provider_input) {
                 Some(provider) => return run_provider_detail(provider),
                 None => {
                     let available: Vec<String> =
@@ -117,7 +68,7 @@ pub fn run(args: LinkArgs) -> Result<()> {
 
     // If just a provider name is given (no --support), show detailed view
     if let Some(ref provider_input) = args.provider_arg {
-        match fuzzy_match_provider(provider_input) {
+        match Provider::fuzzy_match_cli_name(provider_input) {
             Some(provider) => return run_provider_detail(provider),
             None => {
                 let available: Vec<String> = ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
@@ -132,7 +83,7 @@ pub fn run(args: LinkArgs) -> Result<()> {
     }
 
     // Report current link state (read-only)
-    let scope = LinkScope::User;
+    let scope = ResourceScope::User;
     let filter = args.filter.as_deref();
 
     let report = linking::link_skills(scope, filter, true)?;
@@ -170,7 +121,7 @@ fn run_support() -> Result<()> {
 
     for caps in all_capabilities() {
         let provider = caps.provider;
-        let installed = clients.is_installed(provider_to_ai_cli(provider));
+        let installed = clients.is_installed(provider.sniff_ai_cli());
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
@@ -229,7 +180,7 @@ fn format_support_cell(level: SupportLevel, format: Option<ResourceFormat>) -> T
 fn run_provider_detail(provider: Provider) -> Result<()> {
     let term = Terminal::new();
     let clients = InstalledAiClients::new();
-    let installed = clients.is_installed(provider_to_ai_cli(provider));
+    let installed = clients.is_installed(provider.sniff_ai_cli());
     let caps = capabilities_for(provider);
 
     // Header

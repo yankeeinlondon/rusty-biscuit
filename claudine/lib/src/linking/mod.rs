@@ -12,7 +12,7 @@ pub use capabilities::{
 };
 pub use conflict::SkillSyncStatus;
 pub use discovery::DiscoveredSkill;
-pub use paths::{LinkScope, ProviderPaths, ProviderSkillPaths};
+pub use paths::{ResourceScope, ProviderPaths, ProviderSkillPaths};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
 pub use symlink::{LinkResult, relative_path};
 
@@ -27,14 +27,14 @@ use crate::error::Result;
 /// 2. Hashing -- content-hash each skill directory
 /// 3. Analysis -- detect conflicts, candidates, and in-sync state
 /// 4. Linking -- create symlinks for candidates
-pub fn link_skills(scope: LinkScope, filter: Option<&str>, dry_run: bool) -> Result<LinkReport> {
+pub fn link_skills(scope: ResourceScope, filter: Option<&str>, dry_run: bool) -> Result<LinkReport> {
     link_skills_inner(&ProviderSkillPaths::new(), scope, filter, dry_run)
 }
 
 /// Core linking logic, injectable for testing.
 fn link_skills_inner(
     provider_paths: &ProviderSkillPaths,
-    scope: LinkScope,
+    scope: ResourceScope,
     filter: Option<&str>,
     dry_run: bool,
 ) -> Result<LinkReport> {
@@ -72,7 +72,7 @@ fn link_skills_inner(
 fn apply_statuses(
     statuses: Vec<SkillSyncStatus>,
     provider_paths: &ProviderSkillPaths,
-    scope: LinkScope,
+    scope: ResourceScope,
     dry_run: bool,
     report: &mut LinkReport,
     is_command: bool,
@@ -143,7 +143,7 @@ fn apply_statuses(
 /// Link commands across providers that support Markdown commands.
 fn link_commands(
     provider_paths: &ProviderSkillPaths,
-    scope: LinkScope,
+    scope: ResourceScope,
     filter: Option<&str>,
     dry_run: bool,
     report: &mut LinkReport,
@@ -174,7 +174,7 @@ fn link_commands(
 fn resolve_provider_skill_dir(
     paths: &ProviderSkillPaths,
     provider: &str,
-    scope: LinkScope,
+    scope: ResourceScope,
 ) -> std::path::PathBuf {
     let p = match provider {
         "claude" => &paths.claude,
@@ -184,8 +184,8 @@ fn resolve_provider_skill_dir(
         _ => &paths.claude,
     };
     match scope {
-        LinkScope::User => p.user_skills.clone(),
-        LinkScope::Repo => p.repo_skills.clone(),
+        ResourceScope::User => p.user_skills.clone(),
+        ResourceScope::Repo => p.repo_skills.clone(),
     }
 }
 
@@ -193,7 +193,7 @@ fn resolve_provider_skill_dir(
 fn resolve_provider_command_dir(
     paths: &ProviderSkillPaths,
     provider: &str,
-    scope: LinkScope,
+    scope: ResourceScope,
 ) -> Option<std::path::PathBuf> {
     let p = match provider {
         "claude" => &paths.claude,
@@ -201,8 +201,8 @@ fn resolve_provider_command_dir(
         _ => return None,
     };
     match scope {
-        LinkScope::User => p.user_commands.clone(),
-        LinkScope::Repo => p.repo_commands.clone(),
+        ResourceScope::User => p.user_commands.clone(),
+        ResourceScope::Repo => p.repo_commands.clone(),
     }
 }
 
@@ -262,7 +262,7 @@ mod tests {
         let paths = test_paths(tmp.path());
         setup_skill(&paths.claude.user_skills, "my-tool", "# My Tool\n");
 
-        let report = link_skills_inner(&paths, LinkScope::User, None, false).unwrap();
+        let report = link_skills_inner(&paths, ResourceScope::User, None, false).unwrap();
 
         assert!(!report.linked.is_empty());
         let entry = &report.linked[0];
@@ -278,7 +278,7 @@ mod tests {
         let paths = test_paths(tmp.path());
         setup_skill(&paths.claude.user_skills, "dry-test", "# Content\n");
 
-        let report = link_skills_inner(&paths, LinkScope::User, None, true).unwrap();
+        let report = link_skills_inner(&paths, ResourceScope::User, None, true).unwrap();
 
         assert!(!report.linked.is_empty());
         assert!(!paths.codex.user_skills.join("dry-test").exists());
@@ -292,7 +292,7 @@ mod tests {
         setup_skill(&paths.claude.user_skills, "alpha", "# A\n");
         setup_skill(&paths.claude.user_skills, "beta", "# B\n");
 
-        let report = link_skills_inner(&paths, LinkScope::User, Some("alpha"), true).unwrap();
+        let report = link_skills_inner(&paths, ResourceScope::User, Some("alpha"), true).unwrap();
 
         assert_eq!(report.linked.len(), 1);
         assert_eq!(report.linked[0].name, "alpha");

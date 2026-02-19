@@ -1,23 +1,9 @@
 use std::path::Path;
 
-use sniff::programs::{AiCli, InstalledAiClients};
+use sniff::programs::InstalledAiClients;
 
 use crate::error::Result;
 use crate::events::{HookerConfig, Provider};
-
-/// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
-fn provider_to_ai_cli(provider: Provider) -> AiCli {
-    match provider {
-        Provider::Claude => AiCli::Claude,
-        Provider::Codex => AiCli::Codex,
-        Provider::Gemini => AiCli::GeminiCli,
-        Provider::Goose => AiCli::Goose,
-        Provider::KimiCode => AiCli::KimiCli,
-        Provider::OpenCode => AiCli::Opencode,
-        Provider::QwenCode => AiCli::QwenCli,
-        Provider::RooCode => AiCli::Roo,
-    }
-}
 
 /// Result of registering hooks with a provider.
 #[derive(Debug)]
@@ -111,6 +97,6 @@ pub trait AgentConfigurator {
     /// Uses sniff to detect whether the CLI is available on PATH.
     fn is_cli_installed(&self) -> bool {
         let clients = InstalledAiClients::new();
-        clients.is_installed(provider_to_ai_cli(self.provider()))
+        clients.is_installed(self.provider().sniff_ai_cli())
     }
 }

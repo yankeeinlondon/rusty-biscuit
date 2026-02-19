@@ -13,10 +13,11 @@ use claudine::dispatch::loader::load_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{
     AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookAction, HookerConfig, LogTarget,
-    Provider, ReportFormat, detect_environment,
+    NativeEventName, PROVIDERS_DISPLAY_ORDER, Provider, ReportFormat, detect_environment,
+    event_native_mapping_matrix, event_support_matrix,
 };
 use playa::SoundEffect;
-use sniff::programs::{InstalledAiClients, enums::AiCli};
+use sniff::programs::InstalledAiClients;
 
 use crate::log;
 
@@ -42,35 +43,10 @@ pub struct HooksArgs {
     /// Show available template variables for speak/report actions
     #[arg(long)]
     pub variables: bool,
-
 }
 
 /// All supported providers in display order.
-const ALL_PROVIDERS: [Provider; 8] = [
-    Provider::Claude,
-    Provider::Codex,
-    Provider::Gemini,
-    Provider::Goose,
-    Provider::KimiCode,
-    Provider::OpenCode,
-    Provider::QwenCode,
-    Provider::RooCode,
-];
-
-/// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
-fn provider_to_ai_cli(provider: Provider) -> AiCli {
-    match provider {
-        Provider::Claude => AiCli::Claude,
-        Provider::Codex => AiCli::Codex,
-        Provider::Gemini => AiCli::GeminiCli,
-        Provider::Goose => AiCli::Goose,
-        Provider::KimiCode => AiCli::KimiCli,
-        Provider::OpenCode => AiCli::Opencode,
-        Provider::QwenCode => AiCli::QwenCli,
-        Provider::RooCode => AiCli::Roo,
-        _ => AiCli::Claude,
-    }
-}
+const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 
 fn bool_indicator(value: bool) -> TableCellContent {
     if value {
@@ -145,10 +121,8 @@ fn all_enabled_events_for_provider(config: &HookerConfig, provider: Provider) ->
 
 /// Check if an event is supported by a provider (via hook).
 fn is_event_supported(provider: Provider, event_name: &str) -> bool {
-    AgenticEvent::ALL
-        .iter()
-        .find(|e| e.to_string() == event_name)
-        .map(|e| provider.supports_event_via_hook(e))
+    AgenticEvent::from_slug(event_name)
+        .map(|event| provider.supports_event_via_hook(&event))
         .unwrap_or(false)
 }
 
@@ -341,45 +315,6 @@ fn normalize_effect_name(name: &str) -> String {
         .to_lowercase()
 }
 
-/// Fuzzy match a user input string to a provider.
-///
-/// Matching rules (case-insensitive):
-/// 1. Exact match on display name or slug
-/// 2. Prefix match on display name or slug
-/// 3. Contains match anywhere in display name or slug
-fn fuzzy_match_provider(input: &str) -> Option<Provider> {
-    let input_lower = input.to_lowercase();
-
-    // Try exact match first
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display == input_lower || slug == input_lower {
-            return Some(provider);
-        }
-    }
-
-    // Try prefix match
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display.starts_with(&input_lower) || slug.starts_with(&input_lower) {
-            return Some(provider);
-        }
-    }
-
-    // Try contains match
-    for provider in ALL_PROVIDERS {
-        let display = provider.to_string().to_lowercase();
-        let slug = provider.as_slug().to_lowercase();
-        if display.contains(&input_lower) || slug.contains(&input_lower) {
-            return Some(provider);
-        }
-    }
-
-    None
-}
-
 /// Format an action for display in the detailed provider view.
 fn format_action(action: &HookAction) -> String {
     match action {
@@ -436,10 +371,7 @@ fn format_action(action: &HookAction) -> String {
                 }
             }
         },
-        HookAction::FireAndForget {
-            command,
-            args,
-        } => {
+        HookAction::FireAndForget { command, args } => {
             let cmd_str = if let Some(a) = args {
                 format!("{} {}", command, a.join(" "))
             } else {
@@ -484,7 +416,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Result<()> {
     let term = Terminal::new();
     let clients = InstalledAiClients::new();
-    let installed = clients.is_installed(provider_to_ai_cli(provider));
+    let installed = clients.is_installed(provider.sniff_ai_cli());
 
     // Header
     let status_icon = if installed { "✅" } else { "❌" };
@@ -697,7 +629,7 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
 
     // If a provider is specified, show detailed view for that provider
     if let Some(ref provider_input) = args.provider {
-        match fuzzy_match_provider(provider_input) {
+        match Provider::fuzzy_match_cli_name(provider_input) {
             Some(provider) => {
                 let result = run_provider_detail(provider, config.as_ref());
 
@@ -754,7 +686,7 @@ fn run_simple(
     let mut has_unsupported_issues = false;
 
     for provider in ALL_PROVIDERS {
-        let installed = clients.is_installed(provider_to_ai_cli(provider));
+        let installed = clients.is_installed(provider.sniff_ai_cli());
         let configurator = find_configurator(agents, provider);
 
         let hooks_cell: TableCellContent = if !installed {
@@ -894,7 +826,7 @@ fn run_verbose(
     table.layout_mut().left_margin = Margin::Chars(1);
 
     for provider in ALL_PROVIDERS {
-        let installed = clients.is_installed(provider_to_ai_cli(provider));
+        let installed = clients.is_installed(provider.sniff_ai_cli());
         let _configurator = find_configurator(agents, provider);
 
         // Create OSC8 hyperlink for provider name
@@ -975,6 +907,7 @@ const NO_SUPPORT: &str = "❌";
 /// - ❌ NotSupported: Event is not available from this provider
 fn run_support() -> Result<()> {
     let term = Terminal::new();
+    let matrix = event_support_matrix(&ALL_PROVIDERS);
 
     // Build columns: Event name (left-aligned), then one per provider (centered)
     let mut columns = vec![TableColumn::new("Event")];
@@ -986,16 +919,16 @@ fn run_support() -> Result<()> {
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
-    for event in AgenticEvent::ALL {
-        let mut row: Vec<TableCellContent> = vec![event.to_string().into()];
+    for matrix_row in matrix {
+        let mut row: Vec<TableCellContent> = vec![matrix_row.event.to_string().into()];
 
-        for provider in ALL_PROVIDERS {
-            let cell = match provider.event_support_level(&event) {
+        for cell in matrix_row.cells {
+            let rendered = match cell.level {
                 EventSupportLevel::Hook => HOOK_SUPPORT.into(),
                 EventSupportLevel::NonHook => NON_HOOK_SUPPORT.into(),
                 EventSupportLevel::NotSupported => NO_SUPPORT.into(),
             };
-            row.push(cell);
+            row.push(rendered);
         }
 
         table.add_row(row);
@@ -1014,32 +947,17 @@ fn run_support() -> Result<()> {
     Ok(())
 }
 
-/// First group of providers for mapping table (to fit width constraints).
-const MAPPING_GROUP_1: [Provider; 4] = [
-    Provider::Claude,
-    Provider::Codex,
-    Provider::Gemini,
-    Provider::OpenCode,
-];
-
-/// Second group of providers for mapping table.
-const MAPPING_GROUP_2: [Provider; 3] = [Provider::Goose, Provider::KimiCode, Provider::QwenCode];
-
 /// Show native event name mappings for each provider.
 ///
 /// Splits providers into two tables to fit width-constrained terminals.
 fn run_mapping() -> Result<()> {
     let term = Terminal::new();
 
-    // Render first table (Claude, Codex, Gemini, Goose)
-    let table1 = build_mapping_table(&MAPPING_GROUP_1).prefer_cursor_alignment();
-    let rendered1 = table1.fallback_render(&term);
-    log::data(&format!("\n{}", rendered1));
-
-    // Render second table (KimiCode, OpenCode, QwenCode)
-    let table2 = build_mapping_table(&MAPPING_GROUP_2).prefer_cursor_alignment();
-    let rendered2 = table2.fallback_render(&term);
-    log::data(&format!("\n{}", rendered2));
+    for provider_group in ALL_PROVIDERS.chunks(4) {
+        let table = build_mapping_table(provider_group).prefer_cursor_alignment();
+        let rendered = table.fallback_render(&term);
+        log::data(&format!("\n{}", rendered));
+    }
 
     // Show legend
     log::data("");
@@ -1062,14 +980,14 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
-    for event in AgenticEvent::ALL {
-        let mut row: Vec<TableCellContent> = vec![event.to_string().into()];
+    for matrix_row in event_native_mapping_matrix(providers) {
+        let mut row: Vec<TableCellContent> = vec![matrix_row.event.to_string().into()];
 
-        for provider in providers {
-            let cell: TableCellContent = match provider.native_event_name(&event) {
-                None => "".into(),         // Not supported - blank
-                Some("") => "".into(),     // Supported but no specific name
-                Some(name) => name.into(), // Native name
+        for cell in matrix_row.cells {
+            let cell: TableCellContent = match cell.native {
+                NativeEventName::Unsupported => "".into(),
+                NativeEventName::NoSpecificName => "".into(),
+                NativeEventName::Named(name) => name.into(),
             };
             row.push(cell);
         }

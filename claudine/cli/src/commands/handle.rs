@@ -5,7 +5,7 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::debug;
 
-use claudine::events::{Provider, detect_environment};
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider, detect_environment};
 
 /// Arguments for the handle subcommand.
 #[derive(Args)]
@@ -53,37 +53,22 @@ fn resolve_provider(hint: Option<&str>, raw: &Value) -> Result<Provider> {
         return parse_provider(name);
     }
 
-    // Auto-detect from payload structure
-    if raw.get("hook_event_name").is_some() {
-        return Ok(Provider::Claude);
-    }
-    if raw.get("type").is_some() && raw.get("thread_id").is_some() {
-        return Ok(Provider::Codex);
-    }
-    if raw.get("event_type").is_some() {
-        return Ok(Provider::OpenCode);
-    }
-    // Check for Gemini-style events
-    if raw.get("event_name").is_some() {
-        return Ok(Provider::Gemini);
-    }
-    if raw.get("method").is_some() {
-        return Ok(Provider::KimiCode);
+    if let Some(provider) = Provider::detect_from_payload(raw) {
+        return Ok(provider);
     }
 
     bail!("Could not detect provider from payload. Use --provider to specify.")
 }
 
 fn parse_provider(name: &str) -> Result<Provider> {
-    match name.to_lowercase().as_str() {
-        "claude" => Ok(Provider::Claude),
-        "codex" => Ok(Provider::Codex),
-        "gemini" => Ok(Provider::Gemini),
-        "goose" => Ok(Provider::Goose),
-        "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
-        "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
-        "roo" | "roocode" | "roo_code" => Ok(Provider::RooCode),
-        other => bail!("Unknown provider: {other}"),
+    if let Some(provider) = Provider::parse_cli_name(name) {
+        return Ok(provider);
     }
+
+    let supported = PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(Provider::as_slug)
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("Unknown provider: {name}. Supported: {supported}")
 }

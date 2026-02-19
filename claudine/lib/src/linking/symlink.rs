@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::error::{ClaudineError, Result};
 
-use super::paths::LinkScope;
+use super::paths::ResourceScope;
 
 /// Result of a single symlink creation attempt.
 #[derive(Debug)]
@@ -37,7 +37,7 @@ pub enum LinkResult {
 /// - The source has no file name component
 /// - The parent directory cannot be created
 /// - The symlink cannot be created
-pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: LinkScope) -> Result<LinkResult> {
+pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: ResourceScope) -> Result<LinkResult> {
     let skill_name = source.file_name().ok_or_else(|| {
         ClaudineError::LinkingError(format!(
             "source path has no file name: {}",
@@ -67,8 +67,8 @@ pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: LinkScope) -> Re
     {
         let existing_target = fs::read_link(&dest)?;
         let expected = match scope {
-            LinkScope::User => source.to_path_buf(),
-            LinkScope::Repo => {
+            ResourceScope::User => source.to_path_buf(),
+            ResourceScope::Repo => {
                 let parent = dest
                     .parent()
                     .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
@@ -96,8 +96,8 @@ pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: LinkScope) -> Re
 
     // Compute link target
     let link_target = match scope {
-        LinkScope::User => source.to_path_buf(),
-        LinkScope::Repo => {
+        ResourceScope::User => source.to_path_buf(),
+        ResourceScope::Repo => {
             let parent = dest
                 .parent()
                 .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
@@ -210,7 +210,7 @@ mod tests {
         fs::write(source.join("SKILL.md"), "# Skill").unwrap();
         fs::create_dir_all(&dest_dir).unwrap();
 
-        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+        let result = create_skill_link(&source, &dest_dir, ResourceScope::User).unwrap();
 
         match result {
             LinkResult::Linked {
@@ -239,7 +239,7 @@ mod tests {
         fs::write(source.join("SKILL.md"), "# Skill").unwrap();
         fs::create_dir_all(&dest_dir).unwrap();
 
-        let result = create_skill_link(&source, &dest_dir, LinkScope::Repo).unwrap();
+        let result = create_skill_link(&source, &dest_dir, ResourceScope::Repo).unwrap();
 
         match result {
             LinkResult::Linked { link_target, .. } => {
@@ -263,7 +263,7 @@ mod tests {
         fs::create_dir_all(&existing).unwrap();
         fs::write(existing.join("SKILL.md"), "# Existing").unwrap();
 
-        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+        let result = create_skill_link(&source, &dest_dir, ResourceScope::User).unwrap();
 
         match result {
             LinkResult::Skipped { reason } => {
@@ -286,7 +286,7 @@ mod tests {
         // Create the symlink first
         std::os::unix::fs::symlink(&source, dest_dir.join("my-skill")).unwrap();
 
-        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+        let result = create_skill_link(&source, &dest_dir, ResourceScope::User).unwrap();
 
         assert!(matches!(result, LinkResult::AlreadyLinked));
     }
@@ -305,7 +305,7 @@ mod tests {
         // Create a symlink pointing to 'other' instead of 'source'
         std::os::unix::fs::symlink(&other, dest_dir.join("my-skill")).unwrap();
 
-        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+        let result = create_skill_link(&source, &dest_dir, ResourceScope::User).unwrap();
 
         match result {
             LinkResult::Skipped { reason } => {

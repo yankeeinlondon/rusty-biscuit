@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::provider::PROVIDERS_DISPLAY_ORDER;
+
 /// Normalized event names across all supported agentic CLI providers.
 ///
 /// Each variant represents a lifecycle moment that at least 2 of the 8
@@ -64,6 +66,65 @@ impl AgenticEvent {
         AgenticEvent::BeforeCompact,
         AgenticEvent::Notification,
     ];
+
+    /// Parse a canonical snake_case event name.
+    pub fn from_slug(name: &str) -> Option<Self> {
+        match name {
+            "session_start" => Some(AgenticEvent::SessionStart),
+            "session_end" => Some(AgenticEvent::SessionEnd),
+            "before_prompt" => Some(AgenticEvent::BeforePrompt),
+            "before_tool" => Some(AgenticEvent::BeforeTool),
+            "after_tool" => Some(AgenticEvent::AfterTool),
+            "tool_error" => Some(AgenticEvent::ToolError),
+            "permission_request" => Some(AgenticEvent::PermissionRequest),
+            "turn_complete" => Some(AgenticEvent::TurnComplete),
+            "turn_error" => Some(AgenticEvent::TurnError),
+            "subagent_start" => Some(AgenticEvent::SubagentStart),
+            "subagent_stop" => Some(AgenticEvent::SubagentStop),
+            "before_model" => Some(AgenticEvent::BeforeModel),
+            "after_model" => Some(AgenticEvent::AfterModel),
+            "before_compact" => Some(AgenticEvent::BeforeCompact),
+            "notification" => Some(AgenticEvent::Notification),
+            "human_in_the_loop" => Some(AgenticEvent::HumanInTheLoop),
+            _ => None,
+        }
+    }
+
+    /// Parse an event from canonical name or provider-native aliases.
+    pub fn parse_name_or_alias(input: &str) -> Option<Self> {
+        let normalized = normalize_event_identifier(input);
+        if let Some(event) = Self::from_slug(&normalized) {
+            return Some(event);
+        }
+
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            if let Some(event) = provider.event_from_shared_native_name(input) {
+                return Some(event);
+            }
+            if let Some(event) = provider.event_from_shared_native_name(&normalized) {
+                return Some(event);
+            }
+        }
+
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            for event in AgenticEvent::ALL {
+                let Some(native_name) = provider.native_event_name(&event) else {
+                    continue;
+                };
+                if native_name.is_empty() {
+                    continue;
+                }
+                if native_name.eq_ignore_ascii_case(input) {
+                    return Some(event);
+                }
+                if normalize_event_identifier(native_name) == normalized {
+                    return Some(event);
+                }
+            }
+        }
+
+        None
+    }
 
     /// Returns a short abbreviation suitable for table column headers.
     ///
@@ -158,6 +219,31 @@ impl AgenticEvent {
             AgenticEvent::Notification => "(none)",
         }
     }
+}
+
+fn normalize_event_identifier(input: &str) -> String {
+    let mut normalized = String::new();
+    let mut prev_was_lower = false;
+
+    for c in input.chars() {
+        if c == '-' || c == '_' {
+            if !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            prev_was_lower = false;
+        } else if c.is_uppercase() {
+            if prev_was_lower && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            normalized.push(c.to_ascii_lowercase());
+            prev_was_lower = false;
+        } else {
+            normalized.push(c.to_ascii_lowercase());
+            prev_was_lower = c.is_lowercase();
+        }
+    }
+
+    normalized
 }
 
 impl fmt::Display for AgenticEvent {
@@ -262,5 +348,50 @@ mod tests {
                 char_count
             );
         }
+    }
+
+    #[test]
+    fn from_slug_parses_canonical_names() {
+        assert_eq!(
+            AgenticEvent::from_slug("turn_complete"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            AgenticEvent::from_slug("human_in_the_loop"),
+            Some(AgenticEvent::HumanInTheLoop)
+        );
+        assert_eq!(AgenticEvent::from_slug("unknown"), None);
+    }
+
+    #[test]
+    fn parse_name_or_alias_parses_native_names() {
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("Stop"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("PreToolUse"),
+            Some(AgenticEvent::BeforeTool)
+        );
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("permission.ask"),
+            Some(AgenticEvent::PermissionRequest)
+        );
+    }
+
+    #[test]
+    fn parse_name_or_alias_is_case_and_separator_tolerant() {
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("TURN_COMPLETE"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("turn-complete"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            AgenticEvent::parse_name_or_alias("HumanInTheLoop"),
+            Some(AgenticEvent::HumanInTheLoop)
+        );
     }
 }

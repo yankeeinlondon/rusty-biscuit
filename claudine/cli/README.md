@@ -46,6 +46,16 @@ Synchronize skills, commands, and agents across providers via symlinks.
 | `--detailed` | Show detailed output |
 | `--replace-duplicates` | Replace duplicate real directories with symlinks |
 
+### `claudine providers`
+
+Show a compact provider capability matrix with:
+
+- Provider name as an OSC8 link to provider documentation
+- `Skill` support (custom skill definitions)
+- `Slash` support (custom slash command definitions)
+- `Agent` support (custom agent/subagent definitions)
+- `Hooks` count (how many native hook events Claudine can attach to)
+
 ### `claudine sync [flags]`
 
 Re-apply hook registrations to match the current config.
@@ -89,6 +99,7 @@ cli/src/
     ├── handle.rs        → Event processing from stdin
     ├── hooks.rs         → Hook inspection and validation
     ├── link.rs          → Skill synchronization management
+    ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal
     └── init/

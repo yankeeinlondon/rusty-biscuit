@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Scope for skill linking operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkScope {
+pub enum ResourceScope {
     /// User-level (home directory) skills — absolute symlinks.
     User,
     /// Repository-level skills — relative symlinks.
@@ -74,7 +74,7 @@ impl ProviderSkillPaths {
     }
 
     /// Return provider names and their skill paths for the given scope.
-    pub fn for_scope(&self, scope: LinkScope) -> Vec<(&str, &PathBuf)> {
+    pub fn for_scope(&self, scope: ResourceScope) -> Vec<(&str, &PathBuf)> {
         let providers = [
             ("claude", &self.claude),
             ("gemini", &self.gemini),
@@ -86,8 +86,8 @@ impl ProviderSkillPaths {
             .iter()
             .map(|(name, paths)| {
                 let dir = match scope {
-                    LinkScope::User => &paths.user_skills,
-                    LinkScope::Repo => &paths.repo_skills,
+                    ResourceScope::User => &paths.user_skills,
+                    ResourceScope::Repo => &paths.repo_skills,
                 };
                 (*name, dir)
             })
@@ -99,7 +99,7 @@ impl ProviderSkillPaths {
     /// Only returns providers that support Markdown commands
     /// (Claude, OpenCode). Gemini (TOML) and Codex (none)
     /// are excluded.
-    pub fn commands_for_scope(&self, scope: LinkScope) -> Vec<(&str, &PathBuf)> {
+    pub fn commands_for_scope(&self, scope: ResourceScope) -> Vec<(&str, &PathBuf)> {
         let providers: Vec<(&str, &ProviderPaths)> =
             vec![("claude", &self.claude), ("opencode", &self.opencode)];
 
@@ -107,8 +107,8 @@ impl ProviderSkillPaths {
             .into_iter()
             .filter_map(|(name, paths)| {
                 let dir = match scope {
-                    LinkScope::User => paths.user_commands.as_ref()?,
-                    LinkScope::Repo => paths.repo_commands.as_ref()?,
+                    ResourceScope::User => paths.user_commands.as_ref()?,
+                    ResourceScope::Repo => paths.repo_commands.as_ref()?,
                 };
                 Some((name, dir))
             })
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn for_scope_returns_all_providers() {
         let paths = ProviderSkillPaths::new();
-        let user_scope = paths.for_scope(LinkScope::User);
+        let user_scope = paths.for_scope(ResourceScope::User);
         assert_eq!(user_scope.len(), 4);
 
         let names: Vec<&str> = user_scope.iter().map(|(n, _)| *n).collect();
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn commands_for_scope_excludes_gemini_and_codex() {
         let paths = ProviderSkillPaths::new();
-        let cmds = paths.commands_for_scope(LinkScope::User);
+        let cmds = paths.commands_for_scope(ResourceScope::User);
         let names: Vec<&str> = cmds.iter().map(|(n, _)| *n).collect();
         assert!(names.contains(&"claude"));
         assert!(names.contains(&"opencode"));

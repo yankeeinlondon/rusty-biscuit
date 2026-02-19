@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 
-use super::paths::{LinkScope, ProviderSkillPaths};
+use super::paths::{ResourceScope, ProviderSkillPaths};
 
 /// A skill discovered during the scan phase.
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ pub struct DiscoveredSkill {
 /// with `.`) are skipped.
 pub fn discover_skills(
     paths: &ProviderSkillPaths,
-    scope: LinkScope,
+    scope: ResourceScope,
 ) -> Result<Vec<DiscoveredSkill>> {
     let mut skills = Vec::new();
 
@@ -76,7 +76,7 @@ pub fn discover_skills(
 /// file (`.md`). Only providers with Markdown command support are scanned.
 pub fn discover_commands(
     paths: &ProviderSkillPaths,
-    scope: LinkScope,
+    scope: ResourceScope,
 ) -> Result<Vec<DiscoveredSkill>> {
     let mut commands = Vec::new();
 
@@ -164,7 +164,7 @@ mod tests {
         setup_skill(tmp.path(), "claude_skills", "my-skill");
 
         let paths = claude_only_paths(tmp.path().join("claude_skills"));
-        let skills = discover_skills(&paths, LinkScope::User).unwrap();
+        let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "my-skill");
@@ -179,7 +179,7 @@ mod tests {
         setup_skill(tmp.path(), "claude_skills", "visible-skill");
 
         let paths = claude_only_paths(tmp.path().join("claude_skills"));
-        let skills = discover_skills(&paths, LinkScope::User).unwrap();
+        let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "visible-skill");
@@ -193,7 +193,7 @@ mod tests {
         fs::write(no_skill.join("README.md"), "# Not a skill").unwrap();
 
         let paths = claude_only_paths(tmp.path().join("claude_skills"));
-        let skills = discover_skills(&paths, LinkScope::User).unwrap();
+        let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert!(skills.is_empty());
     }
@@ -208,7 +208,7 @@ mod tests {
         std::os::unix::fs::symlink(&source, claude_skills.join("my-skill")).unwrap();
 
         let paths = claude_only_paths(claude_skills);
-        let skills = discover_skills(&paths, LinkScope::User).unwrap();
+        let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
         assert!(skills[0].is_symlink);

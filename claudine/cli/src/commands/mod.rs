@@ -5,5 +5,6 @@ pub mod handle;
 pub mod hooks;
 pub mod init;
 pub mod link;
+pub mod providers;
 pub mod sync;
 pub mod uninstall;

@@ -1,6 +1,5 @@
 //! Interactive init wizard for claudine configuration.
 
-mod defaults;
 mod prompts;
 
 use std::collections::HashMap;
@@ -11,7 +10,8 @@ use color_eyre::eyre::Result;
 
 use claudine::config::{RegistrationResult, SkipReason, detect_agents, discover_agents_full};
 use claudine::events::{
-    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, Provider, ProviderConfig,
+    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, ProviderConfig,
+    quick_start_supported_providers, recommended_sound,
 };
 
 use crate::log;
@@ -96,7 +96,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
         if !actions.is_empty() {
             event_bindings.insert(
-                event.clone(),
+                *event,
                 EventBinding {
                     enabled: true,
                     actions,
@@ -299,12 +299,7 @@ fn default_config() -> HookerConfig {
 
     // Apply to all supported providers that have hook registration
     let mut providers = HashMap::new();
-    for provider in [
-        Provider::Claude,
-        Provider::Codex,
-        Provider::Gemini,
-        Provider::OpenCode,
-    ] {
+    for provider in quick_start_supported_providers() {
         providers.insert(
             provider,
             ProviderConfig {
@@ -331,7 +326,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         EventBinding {
             enabled: true,
             actions: vec![HookAction::SoundEffect {
-                name: defaults::recommended_sound(&AgenticEvent::SessionStart).to_string(),
+                name: recommended_sound(&AgenticEvent::SessionStart).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
@@ -345,7 +340,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         EventBinding {
             enabled: true,
             actions: vec![HookAction::SoundEffect {
-                name: defaults::recommended_sound(&AgenticEvent::TurnComplete).to_string(),
+                name: recommended_sound(&AgenticEvent::TurnComplete).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
@@ -359,7 +354,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         EventBinding {
             enabled: true,
             actions: vec![HookAction::SoundEffect {
-                name: defaults::recommended_sound(&AgenticEvent::ToolError).to_string(),
+                name: recommended_sound(&AgenticEvent::ToolError).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
@@ -373,7 +368,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         EventBinding {
             enabled: true,
             actions: vec![HookAction::SoundEffect {
-                name: defaults::recommended_sound(&AgenticEvent::PermissionRequest).to_string(),
+                name: recommended_sound(&AgenticEvent::PermissionRequest).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],

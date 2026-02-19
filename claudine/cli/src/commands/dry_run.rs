@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 
 use claudine::adapters;
 use claudine::dispatch::template::interpolate;
-use claudine::events::{AgenticEvent, HookAction, Provider, detect_environment};
+use claudine::events::{
+    AgenticEvent, HookAction, PROVIDERS_DISPLAY_ORDER, Provider, detect_environment,
+};
 
 use crate::log;
 
@@ -101,7 +103,9 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                 HookAction::FireAndForget { command, args } => {
                                     let args_str =
                                         args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
-                                    log::data(&format!("  [{i}] FireAndForget: {command} {args_str}"));
+                                    log::data(&format!(
+                                        "  [{i}] FireAndForget: {command} {args_str}"
+                                    ));
                                 }
                                 HookAction::Call {
                                     command,
@@ -147,55 +151,16 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
 
 /// Parse event name from string (supports both canonical and native names).
 fn parse_event(name: &str) -> Result<AgenticEvent> {
-    // Normalize: convert PascalCase to snake_case, handle separators
-    let mut normalized = String::new();
-    let mut prev_was_lower = false;
-
-    for c in name.chars() {
-        if c == '-' || c == '_' {
-            if !normalized.ends_with('_') {
-                normalized.push('_');
-            }
-            prev_was_lower = false;
-        } else if c.is_uppercase() {
-            // Only add underscore if previous char was lowercase (PascalCase boundary)
-            if prev_was_lower && !normalized.ends_with('_') {
-                normalized.push('_');
-            }
-            normalized.push(c.to_ascii_lowercase());
-            prev_was_lower = false;
-        } else {
-            normalized.push(c);
-            prev_was_lower = c.is_lowercase();
-        }
+    if let Some(event) = AgenticEvent::parse_name_or_alias(name) {
+        return Ok(event);
     }
 
-    let event = match normalized.as_str() {
-        "session_start" => AgenticEvent::SessionStart,
-        "session_end" => AgenticEvent::SessionEnd,
-        "before_prompt" | "user_prompt_submit" => AgenticEvent::BeforePrompt,
-        "before_tool" | "pre_tool_use" => AgenticEvent::BeforeTool,
-        "after_tool" | "post_tool_use" => AgenticEvent::AfterTool,
-        "tool_error" | "post_tool_use_failure" => AgenticEvent::ToolError,
-        "permission_request" => AgenticEvent::PermissionRequest,
-        "turn_complete" | "stop" => AgenticEvent::TurnComplete,
-        "turn_error" => AgenticEvent::TurnError,
-        "subagent_start" => AgenticEvent::SubagentStart,
-        "subagent_stop" => AgenticEvent::SubagentStop,
-        "before_model" => AgenticEvent::BeforeModel,
-        "after_model" => AgenticEvent::AfterModel,
-        "before_compact" | "pre_compact" => AgenticEvent::BeforeCompact,
-        "notification" => AgenticEvent::Notification,
-        other => bail!(
-            "Unknown event: {other}\n\n\
-            Available events:\n  \
-            session_start, session_end, before_prompt, before_tool, after_tool,\n  \
-            tool_error, permission_request, turn_complete, turn_error,\n  \
-            subagent_start, subagent_stop, before_model, after_model,\n  \
-            before_compact, notification"
-        ),
-    };
-    Ok(event)
+    let available = AgenticEvent::ALL
+        .iter()
+        .map(AgenticEvent::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("Unknown event: {name}\n\nAvailable events: {available}")
 }
 
 /// Generate a mock payload for testing an event.
@@ -205,31 +170,19 @@ fn mock_payload(provider: Provider, event: &AgenticEvent) -> Value {
         Provider::Codex => mock_codex_payload(event),
         Provider::Gemini => mock_gemini_payload(event),
         Provider::OpenCode => mock_opencode_payload(event),
-        Provider::Goose
-        | Provider::KimiCode
-        | Provider::QwenCode
-        | Provider::RooCode => mock_claude_payload(event),
+        Provider::Goose | Provider::KimiCode | Provider::QwenCode | Provider::RooCode => {
+            mock_claude_payload(event)
+        }
         _ => mock_claude_payload(event),
     }
 }
 
 /// Mock payload in Claude format.
 fn mock_claude_payload(event: &AgenticEvent) -> Value {
-    let hook_event_name = match event {
-        AgenticEvent::SessionStart => "SessionStart",
-        AgenticEvent::SessionEnd => "SessionEnd",
-        AgenticEvent::BeforePrompt => "UserPromptSubmit",
-        AgenticEvent::BeforeTool => "PreToolUse",
-        AgenticEvent::AfterTool => "PostToolUse",
-        AgenticEvent::ToolError => "PostToolUseFailure",
-        AgenticEvent::PermissionRequest => "PermissionRequest",
-        AgenticEvent::TurnComplete => "Stop",
-        AgenticEvent::SubagentStart => "SubagentStart",
-        AgenticEvent::SubagentStop => "SubagentStop",
-        AgenticEvent::BeforeCompact => "PreCompact",
-        AgenticEvent::Notification => "Notification",
-        _ => "Stop", // Fallback for unsupported events
-    };
+    let hook_event_name = Provider::Claude
+        .native_event_name(event)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Stop");
 
     let mut payload = json!({
         "hook_event_name": hook_event_name,
@@ -267,13 +220,10 @@ fn mock_claude_payload(event: &AgenticEvent) -> Value {
 
 /// Mock payload in Codex format.
 fn mock_codex_payload(event: &AgenticEvent) -> Value {
-    let type_field = match event {
-        AgenticEvent::BeforeTool => "item.started",
-        AgenticEvent::AfterTool => "item.completed",
-        AgenticEvent::BeforePrompt => "turn.started",
-        AgenticEvent::TurnError => "turn.failed",
-        _ => "turn.completed",
-    };
+    let type_field = Provider::Codex
+        .native_event_name(event)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("turn.completed");
 
     let mut payload = json!({
         "type": type_field,
@@ -300,15 +250,10 @@ fn mock_codex_payload(event: &AgenticEvent) -> Value {
 
 /// Mock payload in Gemini format.
 fn mock_gemini_payload(event: &AgenticEvent) -> Value {
-    let hook_event_name = match event {
-        AgenticEvent::BeforePrompt => "BeforeAgent",
-        AgenticEvent::BeforeTool => "BeforeTool",
-        AgenticEvent::AfterTool => "AfterTool",
-        AgenticEvent::BeforeModel => "BeforeModel",
-        AgenticEvent::AfterModel => "AfterModel",
-        AgenticEvent::BeforeCompact => "PreCompress",
-        _ => "AfterAgent",
-    };
+    let hook_event_name = Provider::Gemini
+        .native_event_name(event)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("AfterAgent");
 
     json!({
         "hook_event_name": hook_event_name,
@@ -318,21 +263,10 @@ fn mock_gemini_payload(event: &AgenticEvent) -> Value {
 
 /// Mock payload in OpenCode format.
 fn mock_opencode_payload(event: &AgenticEvent) -> Value {
-    let event_type = match event {
-        AgenticEvent::SessionStart => "session.created",
-        AgenticEvent::SessionEnd => "session.deleted",
-        AgenticEvent::BeforePrompt => "chat.message",
-        AgenticEvent::BeforeTool => "tool.execute.before",
-        AgenticEvent::AfterTool => "tool.execute.after",
-        AgenticEvent::PermissionRequest => "permission.ask",
-        AgenticEvent::HumanInTheLoop => "permission.asked",
-        AgenticEvent::TurnError => "session.error",
-        AgenticEvent::BeforeCompact => "session.compacted",
-        AgenticEvent::BeforeModel => "chat.params",
-        AgenticEvent::AfterModel => "experimental.text.complete",
-        AgenticEvent::Notification => "event",
-        _ => "session.idle",
-    };
+    let event_type = Provider::OpenCode
+        .native_event_name(event)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("session.idle");
 
     json!({
         "event_type": event_type,
@@ -348,19 +282,16 @@ fn read_stdin_json() -> Result<Value> {
 }
 
 fn parse_provider(name: &str) -> Result<Provider> {
-    match name.to_lowercase().as_str() {
-        "claude" => Ok(Provider::Claude),
-        "codex" => Ok(Provider::Codex),
-        "gemini" => Ok(Provider::Gemini),
-        "goose" => Ok(Provider::Goose),
-        "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
-        "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
-        "roo" | "roo_code" | "roocode" => Ok(Provider::RooCode),
-        other => bail!(
-            "Unknown provider: {other}\n\nSupported: claude, codex, gemini, goose, kimi, opencode, qwen, roo"
-        ),
+    if let Some(provider) = Provider::parse_cli_name(name) {
+        return Ok(provider);
     }
+
+    let supported = PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(Provider::as_slug)
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("Unknown provider: {name}\n\nSupported: {supported}")
 }
 
 #[cfg(test)]

@@ -69,6 +69,7 @@ Config file: `~/.hooker` (JSON)
     claudine init              # Interactive setup wizard
     claudine sync              # Re-sync hooks with providers
     claudine hooks             # View registered hooks
+    claudine providers         # Skill/slash/agent/hook support table
 
 ## Testing
 

@@ -4,15 +4,12 @@ use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
 use claudine::events::{
-    AgenticEvent, EventSupportLevel, GlobalSettings, HookAction, LogTarget, Provider, TtsSettings,
+    AgenticEvent, EventSupportLevel, GlobalSettings, HookAction, INIT_EVENT_DISPLAY_ORDER,
+    INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, LogTarget, Provider, TtsSettings,
+    default_speak_template, recommended_sound,
 };
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
-
-use super::defaults::{
-    all_events_ordered, default_speak_template, event_description, recommended_events,
-    recommended_sound, tts_providers,
-};
 
 /// Prompt user to select which agents to configure.
 ///
@@ -89,8 +86,7 @@ fn has_hook_support(event: &AgenticEvent, providers: &[Provider]) -> bool {
 ///
 /// Returns the selected events. Pre-selects recommended events.
 pub fn prompt_event_selection(selected_providers: &[Provider]) -> Result<Vec<AgenticEvent>> {
-    let all_events = all_events_ordered();
-    let recommended = recommended_events();
+    let all_events = INIT_EVENT_DISPLAY_ORDER;
 
     // Filter to only events that have hook support from at least one provider
     let hookable_events: Vec<AgenticEvent> = all_events
@@ -112,17 +108,14 @@ pub fn prompt_event_selection(selected_providers: &[Provider]) -> Result<Vec<Age
 
     let options: Vec<String> = hookable_events
         .iter()
-        .map(|e| {
-            let desc = event_description(e);
-            format!("{} - {}", e, desc)
-        })
+        .map(|e| format!("{} - {}", e, e.description()))
         .collect();
 
     let defaults: Vec<usize> = hookable_events
         .iter()
         .enumerate()
         .filter_map(|(i, e)| {
-            if recommended.contains(e) {
+            if INIT_RECOMMENDED_EVENTS.contains(e) {
                 Some(i)
             } else {
                 None
@@ -373,15 +366,18 @@ pub fn prompt_tts_settings() -> Result<Option<TtsSettings>> {
         return Ok(None);
     }
 
-    let providers = tts_providers();
-    let options: Vec<String> = providers.iter().map(|(_, name)| name.to_string()).collect();
+    let providers = INIT_TTS_PROVIDERS;
+    let options: Vec<String> = providers
+        .iter()
+        .map(|provider| provider.display_name.to_string())
+        .collect();
 
     let selected = Select::new("TTS provider:", options).prompt()?;
 
     let provider = providers
         .iter()
-        .find(|(_, name)| name == &selected)
-        .map(|(id, _)| id.to_string());
+        .find(|provider| provider.display_name == selected)
+        .map(|provider| provider.id.to_string());
 
     let voice = Text::new("Voice name (or leave empty for default):")
         .with_default("")

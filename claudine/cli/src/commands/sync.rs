@@ -9,7 +9,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_configurator};
-use claudine::events::Provider;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 use crate::log;
 
@@ -430,15 +430,14 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 }
 
 fn parse_provider(name: &str) -> color_eyre::eyre::Result<Provider> {
-    match name.to_lowercase().as_str() {
-        "claude" => Ok(Provider::Claude),
-        "codex" => Ok(Provider::Codex),
-        "gemini" => Ok(Provider::Gemini),
-        "goose" => Ok(Provider::Goose),
-        "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
-        "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
-        "roo" | "roocode" | "roo_code" => Ok(Provider::RooCode),
-        other => color_eyre::eyre::bail!("Unknown provider: {other}"),
+    if let Some(provider) = Provider::parse_cli_name(name) {
+        return Ok(provider);
     }
+
+    let supported = PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(Provider::as_slug)
+        .collect::<Vec<_>>()
+        .join(", ");
+    color_eyre::eyre::bail!("Unknown provider: {name}. Supported: {supported}")
 }
