@@ -46,6 +46,16 @@ fn styled(text: impl Into<String>) -> String {
     Prose::new(text).fallback_render(&Terminal::default())
 }
 
+/// Formats a boolean as "on" or "off" for table display.
+fn on_off(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
+}
+
+/// Formats an `Option<String>` for table display, showing "N/A" when `None`.
+fn opt_str(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or("N/A")
+}
+
 const COMPLETIONS_HELP: &str = r#"
 SHELL COMPLETIONS
 
@@ -166,7 +176,7 @@ enum SonyAction {
     #[command(subcommand)]
     Playback(SonyPlaybackAction),
 
-    /// Native Web API commands (zones, system settings, audio settings)
+    /// Native Web API commands (zones, settings, IMAX, network, HDMI)
     #[command(subcommand)]
     Native(SonyNativeAction),
 
@@ -424,8 +434,14 @@ enum SonyNativeAction {
     Zone3,
     /// Get system settings (volume display, dimmer, device name, network)
     SystemSettings,
-    /// Get audio settings (pure direct, sound field, speaker levels)
+    /// Get audio settings (sound field, pure direct, spatial sound, Bluetooth mode)
     AudioSettings,
+    /// Get IMAX Enhanced config (crossovers, upmixer, subwoofer, mode)
+    ImaxConfig,
+    /// Get network config (IPv4/IPv6, DNS, connection type, WiFi)
+    NetworkConfig,
+    /// Get HDMI config (CEC, eARC, signal formats, source assignments)
+    HdmiConfig,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1659,14 +1675,155 @@ async fn handle_sony_native(
                     TableColumn::new(""),
                     TableColumn::new(""),
                 ]);
-                table.add_row(vec!["Pure Direct".into(), settings.pure_direct.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Sound Field".into(), settings.sound_field.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Front Balance".into(), settings.front_balance.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Center Level".into(), settings.center_level.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Subwoofer Level".into(), settings.subwoofer_level.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Dolby Level".into(), settings.dolby_level.as_deref().unwrap_or("N/A").into()]);
-                table.add_row(vec!["Surround Level".into(), settings.surround_level.as_deref().unwrap_or("N/A").into()]);
+                table.add_row(vec!["Sound Field".into(), settings.sound_field.as_str().into()]);
+                table.add_row(vec!["Pure Direct".into(), on_off(settings.pure_direct).into()]);
+                table.add_row(vec!["Headphones".into(), on_off(settings.headphones_inserted).into()]);
+                table.add_row(vec!["360 Spatial Sound".into(), on_off(settings.spatial_sound_360).into()]);
+                table.add_row(vec!["Speaker Relocation".into(), on_off(settings.speaker_relocation).into()]);
+                table.add_row(vec!["DSD Native".into(), on_off(settings.dsd_native).into()]);
+                table.add_row(vec!["Subwoofer LPF".into(), on_off(settings.subwoofer_lpf).into()]);
+                table.add_row(vec!["A/V Sync".into(), settings.av_sync.as_str().into()]);
+                table.add_row(vec!["Dual Mono".into(), settings.dual_mono.as_str().into()]);
+                table.add_row(vec!["DRC".into(), on_off(settings.dynamic_range_compression).into()]);
+                table.add_row(vec!["Bluetooth Mode".into(), settings.bluetooth_mode.as_str().into()]);
                 print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::ImaxConfig => {
+            let config = receiver.get_imax_config().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&config)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> IMAX Enhanced config {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Mode".into(), config.mode.as_str().into()]);
+                table.add_row(vec!["Upmixer".into(), config.upmixer.as_str().into()]);
+                table.add_row(vec!["Virtualizer".into(), on_off(config.virtualizer).into()]);
+                table.add_row(vec!["Subwoofer LPF".into(), opt_str(&config.lpf_subwoofer).into()]);
+                table.add_row(vec!["Subwoofer Volume".into(), opt_str(&config.subwoofer_volume).into()]);
+                table.add_row(vec!["Subwoofer Redirect".into(), on_off(config.subwoofer_redirect).into()]);
+
+                let active: Vec<_> = config.crossovers.iter().filter(|c| c.value.is_some()).collect();
+                if !active.is_empty() {
+                    println!();
+                    println!("{}", styled("<b>HPF Crossovers</b>".to_string()));
+                    let mut cross_table = Table::new().with_columns(vec![
+                        TableColumn::new("Position"),
+                        TableColumn::new("Frequency"),
+                    ]);
+                    for c in &active {
+                        cross_table.add_row(vec![
+                            c.position.as_str().into(),
+                            c.value.as_deref().unwrap_or("N/A").into(),
+                        ]);
+                    }
+                    print!("{}", cross_table.display(&Terminal::default()));
+                }
+            }
+        }
+        SonyNativeAction::NetworkConfig => {
+            let config = receiver.get_network_config().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&config)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> network config {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["Connection".into(), config.connection_type.as_str().into()]);
+                table.add_row(vec!["IPv4 DHCP".into(), on_off(config.ipv4_dhcp).into()]);
+                table.add_row(vec!["IPv4 Address".into(), config.ipv4_address.as_str().into()]);
+                table.add_row(vec!["Subnet Mask".into(), config.ipv4_subnet.as_str().into()]);
+                table.add_row(vec!["Gateway".into(), config.ipv4_gateway.as_str().into()]);
+                table.add_row(vec!["DNS 1".into(), config.dns1.as_str().into()]);
+                table.add_row(vec!["DNS 2".into(), opt_str(&config.dns2).into()]);
+                table.add_row(vec!["IPv6".into(), on_off(config.ipv6_enabled).into()]);
+                if let Some(ref ssid) = config.wifi_ssid {
+                    table.add_row(vec!["WiFi SSID".into(), ssid.as_str().into()]);
+                }
+                if let Some(ref auth) = config.wifi_auth {
+                    table.add_row(vec!["WiFi Auth".into(), auth.as_str().into()]);
+                }
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
+        SonyNativeAction::HdmiConfig => {
+            let config = receiver.get_hdmi_config().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&config)?);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> HDMI config {suffix}")));
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new(""),
+                ]);
+                table.add_row(vec!["4K/8K Scaling".into(), config.scaling_4k8k.as_str().into()]);
+                table.add_row(vec!["CEC".into(), on_off(config.cec).into()]);
+                table.add_row(vec!["Standby Link".into(), config.standby_link.as_str().into()]);
+                table.add_row(vec!["Passthrough".into(), config.passthrough.as_str().into()]);
+                table.add_row(vec!["Audio Return".into(), config.audio_return_channel.as_str().into()]);
+                table.add_row(vec!["Audio Out".into(), config.audio_out.as_str().into()]);
+                table.add_row(vec!["Zone 2 Audio Out".into(), config.zone2_audio_out.as_str().into()]);
+                table.add_row(vec!["Subwoofer Level".into(), config.subwoofer_level.as_str().into()]);
+                table.add_row(vec!["Output 2".into(), config.out2.as_str().into()]);
+                table.add_row(vec!["Fast View".into(), on_off(config.fast_view).into()]);
+                table.add_row(vec!["Output 4 PIP".into(), on_off(config.out4_pip).into()]);
+
+                println!();
+                println!("{}", styled("<b>Output Capabilities</b>".to_string()));
+                let mut out_table = Table::new().with_columns(vec![
+                    TableColumn::new(""),
+                    TableColumn::new("Output A"),
+                    TableColumn::new("Output B"),
+                ]);
+                out_table.add_row(vec![
+                    "Video Format".into(),
+                    config.video_format_a.as_str().into(),
+                    config.video_format_b.as_str().into(),
+                ]);
+                out_table.add_row(vec![
+                    "HDR Format".into(),
+                    config.hdr_format_a.as_str().into(),
+                    config.hdr_format_b.as_str().into(),
+                ]);
+                out_table.add_row(vec![
+                    "Other".into(),
+                    config.other_features_a.as_str().into(),
+                    config.other_features_b.as_str().into(),
+                ]);
+                print!("{}", out_table.display(&Terminal::default()));
+
+                println!();
+                println!("{}", styled("<b>Port Signal Formats</b>".to_string()));
+                let mut port_table = Table::new().with_columns(vec![
+                    TableColumn::new("Port"),
+                    TableColumn::new("Signal Format"),
+                ]);
+                for p in &config.port_signal_formats {
+                    port_table.add_row(vec![
+                        format!("HDMI {}", p.port).into(),
+                        p.signal_format.as_str().into(),
+                    ]);
+                }
+                print!("{}", port_table.display(&Terminal::default()));
+
+                println!();
+                println!("{}", styled("<b>Source Assignments</b>".to_string()));
+                let mut src_table = Table::new().with_columns(vec![
+                    TableColumn::new("Source"),
+                    TableColumn::new("Signal Format"),
+                ]);
+                for s in &config.source_assignments {
+                    src_table.add_row(vec![
+                        s.source.as_str().into(),
+                        s.signal_format.as_str().into(),
+                    ]);
+                }
+                print!("{}", src_table.display(&Terminal::default()));
             }
         }
     }

@@ -104,12 +104,17 @@ homey sony debug probe
 
 **Native** — Native Web API (port 80)
 
+These commands use the Sony native HTTP API on port 80, which works in both active and standby states.
+
 ```bash
 homey sony native zone              # Main zone status (power, volume, mute, input)
 homey sony native zone2             # Zone 2 status
 homey sony native zone3             # Zone 3 status
-homey sony native system-settings    # System settings (volume display, dimmer, device name, network)
-homey sony native audio-settings    # Audio settings (pure direct, sound field, speaker levels)
+homey sony native system-settings   # System settings (volume display, dimmer, device name, network)
+homey sony native audio-settings    # Audio settings (sound field, pure direct, spatial sound, Bluetooth mode)
+homey sony native imax-config       # IMAX Enhanced config (crossovers, upmixer, subwoofer, mode)
+homey sony native network-config    # Network config (IPv4/IPv6, DNS, connection type, WiFi)
+homey sony native hdmi-config       # HDMI config (CEC, eARC, signal formats, source assignments)
 ```
 
 ## Global Flags
