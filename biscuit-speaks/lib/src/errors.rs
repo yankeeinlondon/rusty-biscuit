@@ -83,7 +83,9 @@ pub enum TtsError {
     },
 
     /// Cloud provider requires a paid plan for this operation.
-    #[error("{provider} requires a paid subscription for API access to this voice. Options: upgrade at https://elevenlabs.io/pricing, use a cloned/custom voice with --voice <id>, or switch to a free provider (e.g., --provider say)")]
+    #[error(
+        "{provider} requires a paid subscription for API access to this voice. Options: upgrade at https://elevenlabs.io/pricing, use a cloned/custom voice with --voice <id>, or switch to a free provider (e.g., --provider say)"
+    )]
     PaidPlanRequired {
         /// The provider that requires a paid plan.
         provider: String,
