@@ -3,11 +3,11 @@ use axum::{
     extract::{Path, State},
     response::IntoResponse,
 };
-use homelab::arcam::{Arcam, ArcamSystemStatus, ArcamError};
+use homelab::arcam::{Arcam, ArcamError, ArcamSystemStatus};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{warn, debug};
+use tracing::{debug, warn};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -84,13 +84,18 @@ impl From<ArcamSystemStatus> for SystemStatusResponse {
             muted: s.muted,
             model: s.model,
             software_version: s.software_version,
-            amplifier_mode: s.amplifier_mode.map(|m| match m {
-                1 => "Stereo",
-                2 => "Bridged",
-                3 => "DualMono",
-                _ => "Unknown",
-            }.to_string()),
-            auto_shutdown: s.auto_shutdown.map(|v| homelab::arcam::auto_shutdown_label(v).to_string()),
+            amplifier_mode: s.amplifier_mode.map(|m| {
+                match m {
+                    1 => "Stereo",
+                    2 => "Bridged",
+                    3 => "DualMono",
+                    _ => "Unknown",
+                }
+                .to_string()
+            }),
+            auto_shutdown: s
+                .auto_shutdown
+                .map(|v| homelab::arcam::auto_shutdown_label(v).to_string()),
             timeout_counter: s.timeout_counter,
             input_detect: s.input_detect,
             friendly_name: s.friendly_name,
@@ -362,14 +367,20 @@ pub(crate) async fn get_temperature_by_name(
 
     let (sensor_name, temp) = match sensor_type.as_str() {
         "lifter" => {
-            let t = with_timeout(state.request_timeout, arcam.get_lifter_temperature(sensor)).await?;
+            let t =
+                with_timeout(state.request_timeout, arcam.get_lifter_temperature(sensor)).await?;
             ("lifter".to_string(), t)
         }
         "output" => {
-            let t = with_timeout(state.request_timeout, arcam.get_output_temperature(sensor)).await?;
+            let t =
+                with_timeout(state.request_timeout, arcam.get_output_temperature(sensor)).await?;
             ("output".to_string(), t)
         }
-        _ => return Err(ServerError::InvalidParameter("sensor_type must be lifter or output".into())),
+        _ => {
+            return Err(ServerError::InvalidParameter(
+                "sensor_type must be lifter or output".into(),
+            ));
+        }
     };
 
     Ok(Json(TemperatureResponse {
@@ -462,12 +473,15 @@ pub(crate) async fn set_name_by_name(
     Json(req): Json<SetNameRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     if req.name.len() > 10 {
-        return Err(ServerError::InvalidParameter("name must be 10 characters or less".into()));
+        return Err(ServerError::InvalidParameter(
+            "name must be 10 characters or less".into(),
+        ));
     }
 
     let arcam = create_arcam_by_name(&state, &name).await?;
 
-    let name_result = with_timeout(state.request_timeout, arcam.set_friendly_name(&req.name)).await?;
+    let name_result =
+        with_timeout(state.request_timeout, arcam.set_friendly_name(&req.name)).await?;
 
     Ok(Json(NameResponse { name: name_result }))
 }
@@ -556,8 +570,8 @@ async fn create_arcam_by_name(state: &AppState, name: &str) -> Result<Arcam, Ser
         .ok_or_else(|| ServerError::DeviceNotFound(name.to_string()))?;
 
     // Note: Arcam port is hardcoded to 50000 in the library
-    let host = homelab::network::parse_host(&host_str)
-        .map_err(|e| ServerError::InvalidHost(e.0))?;
+    let host =
+        homelab::network::parse_host(&host_str).map_err(|e| ServerError::InvalidHost(e.0))?;
     Ok(Arcam::new(host))
 }
 

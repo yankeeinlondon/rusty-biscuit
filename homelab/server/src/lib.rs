@@ -7,8 +7,13 @@ pub mod error;
 pub mod handlers;
 pub mod state;
 
-use axum::{Json, Router, extract::State, response::Html, routing::{get, put}};
 use axum::response::IntoResponse;
+use axum::{
+    Json, Router,
+    extract::State,
+    response::Html,
+    routing::{get, put},
+};
 use homelab::arcam::Arcam;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -113,11 +118,11 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                 }
                 drop(last);
                 match status.as_str() {
-                "active" => {
-                    // Best-effort instrumentation: volume, current input, native sources
-                    // JSON-RPC calls are sequential (Sony allows one TCP connection);
-                    // native web API (port 80) is a separate connection.
-                    let detail = timeout(state.request_timeout, async {
+                    "active" => {
+                        // Best-effort instrumentation: volume, current input, native sources
+                        // JSON-RPC calls are sequential (Sony allows one TCP connection);
+                        // native web API (port 80) is a separate connection.
+                        let detail = timeout(state.request_timeout, async {
                         let volume = sony.get_volume().await.ok();
                         let input = sony.get_current_input().await.ok();
                         let native = match sony.get_native_inputs().await {
@@ -177,24 +182,24 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                     .await
                     .ok();
 
-                    DeviceStatusJson {
-                        status: "active",
-                        label: "Active".to_string(),
-                        detail,
+                        DeviceStatusJson {
+                            status: "active",
+                            label: "Active".to_string(),
+                            detail,
+                        }
                     }
+                    "standby" => DeviceStatusJson {
+                        status: "standby",
+                        label: "Standby".to_string(),
+                        detail: None,
+                    },
+                    other => DeviceStatusJson {
+                        status: "standby",
+                        label: format!("Power: {other}"),
+                        detail: None,
+                    },
                 }
-                "standby" => DeviceStatusJson {
-                    status: "standby",
-                    label: "Standby".to_string(),
-                    detail: None,
-                },
-                other => DeviceStatusJson {
-                    status: "standby",
-                    label: format!("Power: {other}"),
-                    detail: None,
-                },
-                }
-            },
+            }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "Sony power status error");
                 DeviceStatusJson {
@@ -243,8 +248,7 @@ fn format_source_name(s: &str) -> String {
                 let mut chars = word.chars();
                 match chars.next() {
                     Some(first) => {
-                        let rest: String =
-                            chars.flat_map(|c| c.to_lowercase()).collect();
+                        let rest: String = chars.flat_map(|c| c.to_lowercase()).collect();
                         format!("{first}{rest}")
                     }
                     None => String::new(),
@@ -416,7 +420,11 @@ pub(crate) fn extract_hdmi_port(hdmi_assign: &str) -> Option<u32> {
         return None;
     }
     // Extract trailing digits (handles "IN 1", "in1", "HDMI 2", "IN 7")
-    let digits: String = trimmed.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = trimmed
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     if digits.is_empty() {
         return None;
     }
@@ -461,9 +469,7 @@ fn format_input_name(uri: &str) -> String {
     };
 
     // Extract port number from query (e.g. "port=1")
-    let port = query
-        .split('&')
-        .find_map(|kv| kv.strip_prefix("port="));
+    let port = query.split('&').find_map(|kv| kv.strip_prefix("port="));
 
     match port {
         Some(p) => format!("{name} {p}"),
@@ -473,7 +479,10 @@ fn format_input_name(uri: &str) -> String {
 
 #[cfg(test)]
 mod format_tests {
-    use super::{format_source_name, format_input_name, match_uri_to_category, extract_hdmi_port, display_name_for_category, build_category_uri_map, category_to_logical_uri};
+    use super::{
+        build_category_uri_map, category_to_logical_uri, display_name_for_category,
+        extract_hdmi_port, format_input_name, format_source_name, match_uri_to_category,
+    };
 
     #[test]
     fn hdmi_with_port() {
@@ -505,7 +514,12 @@ mod format_tests {
         assert_eq!(format_input_name("extInput:mediaBox"), "Media Box");
     }
 
-    fn make_source(category: &str, name: &str, hdmi_assign: &str, icon: &str) -> homelab::sony_receiver::NativeInputConfig {
+    fn make_source(
+        category: &str,
+        name: &str,
+        hdmi_assign: &str,
+        icon: &str,
+    ) -> homelab::sony_receiver::NativeInputConfig {
         homelab::sony_receiver::NativeInputConfig {
             category: category.to_string(),
             name: name.to_string(),
@@ -754,8 +768,22 @@ mod format_tests {
         ];
 
         let terminals = vec![
-            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
-            InputSource { title: "HDMI 2".into(), uri: "extInput:hdmi?port=2".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource {
+                title: "HDMI 1".into(),
+                uri: "extInput:hdmi?port=1".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+            InputSource {
+                title: "HDMI 2".into(),
+                uri: "extInput:hdmi?port=2".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
         ];
 
         let map = build_category_uri_map(&native, Some(&terminals));
@@ -786,9 +814,30 @@ mod format_tests {
         ];
 
         let terminals = vec![
-            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
-            InputSource { title: "HDMI 2".into(), uri: "extInput:hdmi?port=2".into(), icon_url: None, connection: None, label: None, active: None },
-            InputSource { title: "HDMI 3".into(), uri: "extInput:hdmi?port=3".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource {
+                title: "HDMI 1".into(),
+                uri: "extInput:hdmi?port=1".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+            InputSource {
+                title: "HDMI 2".into(),
+                uri: "extInput:hdmi?port=2".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+            InputSource {
+                title: "HDMI 3".into(),
+                uri: "extInput:hdmi?port=3".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
         ];
 
         let map = build_category_uri_map(&native, Some(&terminals));
@@ -812,8 +861,22 @@ mod format_tests {
 
         // Terminals with non-HDMI URIs that match by icon
         let terminals = vec![
-            InputSource { title: "Game".into(), uri: "extInput:game".into(), icon_url: None, connection: None, label: None, active: None },
-            InputSource { title: "Media Box".into(), uri: "extInput:mediaBox".into(), icon_url: None, connection: None, label: None, active: None },
+            InputSource {
+                title: "Game".into(),
+                uri: "extInput:game".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+            InputSource {
+                title: "Media Box".into(),
+                uri: "extInput:mediaBox".into(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
         ];
 
         let map = build_category_uri_map(&native, Some(&terminals));
@@ -837,11 +900,16 @@ mod format_tests {
         // When Phase 1 resolves a real HDMI URI, Phase 2 fallback is NOT used
         let native = vec![
             make_source("GAME", "", "in1", ""),
-            make_source("STB", "", "", ""),  // empty hdmi_assign
+            make_source("STB", "", "", ""), // empty hdmi_assign
         ];
-        let terminals = vec![
-            InputSource { title: "HDMI 1".into(), uri: "extInput:hdmi?port=1".into(), icon_url: None, connection: None, label: None, active: None },
-        ];
+        let terminals = vec![InputSource {
+            title: "HDMI 1".into(),
+            uri: "extInput:hdmi?port=1".into(),
+            icon_url: None,
+            connection: None,
+            label: None,
+            active: None,
+        }];
 
         let map = build_category_uri_map(&native, Some(&terminals));
 
@@ -863,7 +931,6 @@ mod format_tests {
         assert_eq!(category_to_logical_uri("CD"), Some("extInput:sacd_cd"));
         assert_eq!(category_to_logical_uri("UNKNOWN"), None);
     }
-
 }
 
 /// Probe the Arcam amplifier and return its status.
@@ -1039,14 +1106,19 @@ async fn get_cached_or_fresh_arcam(state: &AppState) -> DeviceStatusJson {
         fresh
     } else {
         // Return cached data
-        state.arcam_cached_status.read().await.clone().unwrap_or_else(|| {
-            // If no cache yet, return "unknown" state
-            DeviceStatusJson {
-                status: "not_configured",
-                label: "Unknown".to_string(),
-                detail: None,
-            }
-        })
+        state
+            .arcam_cached_status
+            .read()
+            .await
+            .clone()
+            .unwrap_or_else(|| {
+                // If no cache yet, return "unknown" state
+                DeviceStatusJson {
+                    status: "not_configured",
+                    label: "Unknown".to_string(),
+                    detail: None,
+                }
+            })
     }
 }
 
@@ -1109,7 +1181,10 @@ async fn arcam_auto_shutdown_get(State(state): State<AppState>) -> impl IntoResp
 }
 
 /// Set auto-shutdown setting (no name required - uses legacy config)
-async fn arcam_auto_shutdown_set(State(state): State<AppState>, Json(req): Json<SetAutoShutdownRequest>) -> impl IntoResponse {
+async fn arcam_auto_shutdown_set(
+    State(state): State<AppState>,
+    Json(req): Json<SetAutoShutdownRequest>,
+) -> impl IntoResponse {
     if req.value > 4 {
         return Json(json!({ "error": "value must be 0-4" }));
     }

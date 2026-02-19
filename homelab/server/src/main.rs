@@ -1,6 +1,10 @@
 use get_if_addrs::get_if_addrs;
 use homelab::arcam::Arcam;
-use homelab_server::{build_router, config::{self, HomeyConfig}, state::AppState};
+use homelab_server::{
+    build_router,
+    config::{self, HomeyConfig},
+    state::AppState,
+};
 use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -224,7 +228,9 @@ fn spawn_arcam_keepalive(state: AppState) {
             }
 
             // Also heartbeat to legacy device if no named devices configured
-            if hosts.is_empty() && let Some(host) = &state.arcam_host {
+            if hosts.is_empty()
+                && let Some(host) = &state.arcam_host
+            {
                 let arcam = Arcam::from(host.as_str());
                 match arcam.heartbeat().await {
                     Ok(true) => {

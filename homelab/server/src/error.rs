@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use homelab::{arcam::ArcamError, sony_receiver::SonyError};
 use serde::Serialize;

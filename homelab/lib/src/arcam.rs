@@ -14,7 +14,9 @@ pub enum ArcamError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("Invalid response: expected at least 7 bytes (St Zn Cc Ac Dl Data Et), got {0} bytes: {1}")]
+    #[error(
+        "Invalid response: expected at least 7 bytes (St Zn Cc Ac Dl Data Et), got {0} bytes: {1}"
+    )]
     ResponseTooShort(usize, String),
 
     #[error("Invalid response: missing start byte 0x21, got: {0}")]
@@ -403,16 +405,16 @@ async fn get_system_status(ip: &str) -> Result<ArcamSystemStatus, ArcamError> {
                         // Timeout Counter (0x55): 2 bytes big-endian
                         0x55 => {
                             if resp.data.len() >= 2 {
-                                status.timeout_counter = Some(u16::from_be_bytes([
-                                    resp.data[0],
-                                    resp.data[1],
-                                ]));
+                                status.timeout_counter =
+                                    Some(u16::from_be_bytes([resp.data[0], resp.data[1]]));
                             }
                         }
                         // Auto Shutdown (0x58): 1 byte
                         0x58 => status.auto_shutdown = resp.data.first().copied(),
                         // Input Detect (0x5A): 0x00 = no signal, 0x01 = signal present
-                        0x5A => status.input_detect = Some(resp.data.first().copied() == Some(0x01)),
+                        0x5A => {
+                            status.input_detect = Some(resp.data.first().copied() == Some(0x01))
+                        }
                         // System Model (0x5E): ASCII string
                         0x5E => {
                             let model = String::from_utf8_lossy(&resp.data).trim().to_string();
@@ -453,10 +455,10 @@ pub fn auto_shutdown_label(value: u8) -> &'static str {
 /// Returns the timeout in seconds, or 0 if disabled.
 pub fn auto_shutdown_seconds(value: u8) -> u32 {
     match value {
-        0x00 => 0,       // Disabled
-        0x01 => 20 * 60, // 20 min
-        0x02 => 30 * 60, // 30 min
-        0x03 => 60 * 60, // 1 hour
+        0x00 => 0,           // Disabled
+        0x01 => 20 * 60,     // 20 min
+        0x02 => 30 * 60,     // 30 min
+        0x03 => 60 * 60,     // 1 hour
         0x04 => 2 * 60 * 60, // 2 hours
         _ => 0,
     }

@@ -721,11 +721,7 @@ impl SonyReceiver {
             .build()
             .expect("failed to build HTTP client");
 
-        Self {
-            host,
-            port,
-            client,
-        }
+        Self { host, port, client }
     }
 
     /// Send a JSON-RPC command to the receiver and return the response.
@@ -916,10 +912,21 @@ impl SonyReceiver {
     pub async fn get_native_inputs(&self) -> Result<Vec<NativeInputConfig>, SonyError> {
         const CATEGORIES: &[&str] = &["GAME", "STB", "BD", "SAT", "VIDEO", "AUX", "TV", "CD"];
         const FEATURES: &[&str] = &[
-            "inputname", "hdmiassign", "show", "icon", "soundfield",
-            "digitalassign", "inputmode", "swlevel", "swlpf",
-            "inceilingmode", "usetrigger1", "usetrigger2", "usetrigger3",
-            "presetgain", "avsync"
+            "inputname",
+            "hdmiassign",
+            "show",
+            "icon",
+            "soundfield",
+            "digitalassign",
+            "inputmode",
+            "swlevel",
+            "swlpf",
+            "inceilingmode",
+            "usetrigger1",
+            "usetrigger2",
+            "usetrigger3",
+            "presetgain",
+            "avsync",
         ];
 
         // Split into batches of 2 categories per request (2 groups × 15 features = 30
@@ -928,7 +935,12 @@ impl SonyReceiver {
         for chunk in CATEGORIES.chunks(2) {
             let grouped: Vec<Vec<String>> = chunk
                 .iter()
-                .map(|cat| FEATURES.iter().map(|feat| format!("{cat}.{feat}")).collect())
+                .map(|cat| {
+                    FEATURES
+                        .iter()
+                        .map(|feat| format!("{cat}.{feat}"))
+                        .collect()
+                })
                 .collect();
             let grouped_refs: Vec<Vec<&str>> = grouped
                 .iter()
@@ -1054,7 +1066,11 @@ impl SonyReceiver {
         }
 
         let to_option = |s: &String| -> Option<String> {
-            if s == "ERR" || s.is_empty() { None } else { Some(s.clone()) }
+            if s == "ERR" || s.is_empty() {
+                None
+            } else {
+                Some(s.clone())
+            }
         };
 
         let volume_display = lookup
@@ -1065,10 +1081,22 @@ impl SonyReceiver {
             .get("system.dimmer")
             .map(to_option)
             .unwrap_or_else(|| Some("off".to_string()));
-        let device_name = lookup.get("system.devicename").map(to_option).unwrap_or_default();
-        let wired = lookup.get("system.wiredlan").map(to_option).unwrap_or_default();
-        let wireless = lookup.get("system.wirelesslan").map(to_option).unwrap_or_default();
-        let internet = lookup.get("system.internetstatus").map(to_option).unwrap_or_default();
+        let device_name = lookup
+            .get("system.devicename")
+            .map(to_option)
+            .unwrap_or_default();
+        let wired = lookup
+            .get("system.wiredlan")
+            .map(to_option)
+            .unwrap_or_default();
+        let wireless = lookup
+            .get("system.wirelesslan")
+            .map(to_option)
+            .unwrap_or_default();
+        let internet = lookup
+            .get("system.internetstatus")
+            .map(to_option)
+            .unwrap_or_default();
 
         Ok(NativeSystemSettings {
             volume_display,
@@ -1165,12 +1193,8 @@ impl SonyReceiver {
             lookup.insert(feature.clone(), value.clone());
         }
 
-        let get = |key: &str| -> String {
-            lookup.get(key).cloned().unwrap_or_default()
-        };
-        let is_on = |key: &str| -> bool {
-            lookup.get(key).map(|v| v == "on").unwrap_or(false)
-        };
+        let get = |key: &str| -> String { lookup.get(key).cloned().unwrap_or_default() };
+        let is_on = |key: &str| -> bool { lookup.get(key).map(|v| v == "on").unwrap_or(false) };
 
         Ok(NativeAudioSettings {
             headphones_inserted: is_on("audio.insertheadphones"),
@@ -1227,12 +1251,14 @@ impl SonyReceiver {
             lookup.insert(feature.clone(), value.clone());
         }
 
-        let get = |key: &str| -> String {
-            lookup.get(key).cloned().unwrap_or_default()
-        };
+        let get = |key: &str| -> String { lookup.get(key).cloned().unwrap_or_default() };
         let to_option = |key: &str| -> Option<String> {
             lookup.get(key).and_then(|v| {
-                if v == "ERR" || v.is_empty() { None } else { Some(v.clone()) }
+                if v == "ERR" || v.is_empty() {
+                    None
+                } else {
+                    Some(v.clone())
+                }
             })
         };
 
@@ -1285,11 +1311,7 @@ impl SonyReceiver {
                 "inet4.conf_dns1",
                 "inet4.conf_dns2",
             ],
-            vec![
-                "network.connectiontype",
-                "ssid.auth",
-                "ssid.name",
-            ],
+            vec!["network.connectiontype", "ssid.auth", "ssid.name"],
         ];
 
         let results = self.native_get_grouped(&groups).await?;
@@ -1301,7 +1323,11 @@ impl SonyReceiver {
         }
 
         let to_option = |s: &String| -> Option<String> {
-            if s == "NAK" || s.is_empty() { None } else { Some(s.clone()) }
+            if s == "NAK" || s.is_empty() {
+                None
+            } else {
+                Some(s.clone())
+            }
         };
 
         Ok(NativeNetworkConfig {
@@ -1309,10 +1335,7 @@ impl SonyReceiver {
                 .get("network.connectiontype")
                 .cloned()
                 .unwrap_or_default(),
-            ipv4_dhcp: lookup
-                .get("inet4.dhcp")
-                .map(|v| v == "on")
-                .unwrap_or(false),
+            ipv4_dhcp: lookup.get("inet4.dhcp").map(|v| v == "on").unwrap_or(false),
             ipv4_address: lookup
                 .get("inet4.conf_ipaddress")
                 .cloned()
@@ -1325,10 +1348,7 @@ impl SonyReceiver {
                 .get("inet4.conf_gateway")
                 .cloned()
                 .unwrap_or_default(),
-            dns1: lookup
-                .get("inet4.conf_dns1")
-                .cloned()
-                .unwrap_or_default(),
+            dns1: lookup.get("inet4.conf_dns1").cloned().unwrap_or_default(),
             dns2: lookup.get("inet4.conf_dns2").and_then(|s| to_option(s)),
             ipv6_enabled: lookup
                 .get("inet6.enabled")
@@ -1394,9 +1414,7 @@ impl SonyReceiver {
             lookup.insert(feature.clone(), value.clone());
         }
 
-        let get = |key: &str| -> String {
-            lookup.get(key).cloned().unwrap_or_default()
-        };
+        let get = |key: &str| -> String { lookup.get(key).cloned().unwrap_or_default() };
 
         let port_signal_formats: Vec<HdmiPortSignalFormat> = (1..=7)
             .map(|port| HdmiPortSignalFormat {
@@ -1405,9 +1423,7 @@ impl SonyReceiver {
             })
             .collect();
 
-        let source_keys = [
-            "game", "mediabox", "bddvd", "satcatv", "video", "sacdcd",
-        ];
+        let source_keys = ["game", "mediabox", "bddvd", "satcatv", "video", "sacdcd"];
         let source_assignments: Vec<HdmiSourceAssignment> = source_keys
             .iter()
             .map(|source| HdmiSourceAssignment {
@@ -1457,7 +1473,6 @@ impl SonyReceiver {
         .await?;
         Ok(())
     }
-
 
     // --- AUDIO ENDPOINT ---
     pub async fn set_volume(&self, level: u32) -> Result<(), SonyError> {

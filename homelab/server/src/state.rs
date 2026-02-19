@@ -5,7 +5,9 @@
 
 use crate::config::{ArcamAmpService, HomeyConfig, SonyReceiverService};
 use homelab::{network::Host, sony_receiver::SonyReceiver};
-use std::{collections::HashMap, sync::Arc, sync::atomic::AtomicBool, time::Duration, time::Instant};
+use std::{
+    collections::HashMap, sync::Arc, sync::atomic::AtomicBool, time::Duration, time::Instant,
+};
 use tokio::sync::RwLock;
 
 /// Default port for Sony receivers
@@ -187,12 +189,12 @@ impl AppState {
     /// - Auto Shutdown = 20 min: poll every 1260 seconds (21 min)
     pub async fn update_arcam_poll_interval(&self, auto_shutdown_value: u8) {
         let interval_secs = match auto_shutdown_value {
-            0x00 => 60,                           // Off -> 1 minute
-            0x01 => 20 * 60 + 60,                // 20 min + 1 min = 21 min
-            0x02 => 30 * 60 + 60,                // 30 min + 1 min = 31 min
-            0x03 => 60 * 60 + 60,                // 1 hour + 1 min
-            0x04 => 2 * 60 * 60 + 60,            // 2 hours + 1 min
-            _ => 60,                              // Default 1 minute
+            0x00 => 60,               // Off -> 1 minute
+            0x01 => 20 * 60 + 60,     // 20 min + 1 min = 21 min
+            0x02 => 30 * 60 + 60,     // 30 min + 1 min = 31 min
+            0x03 => 60 * 60 + 60,     // 1 hour + 1 min
+            0x04 => 2 * 60 * 60 + 60, // 2 hours + 1 min
+            _ => 60,                  // Default 1 minute
         };
         *self.arcam_poll_interval_secs.write().await = interval_secs;
     }
@@ -426,8 +428,7 @@ fn parse_sony_host(host_str: &str) -> Result<SonyReceiver, ConfigError> {
 
 /// Parse a host string into a Host enum using the library function
 fn parse_host(host_str: &str) -> Result<Host, ConfigError> {
-    homelab::network::parse_host(host_str)
-        .map_err(|e| ConfigError::InvalidHost(e.0))
+    homelab::network::parse_host(host_str).map_err(|e| ConfigError::InvalidHost(e.0))
 }
 
 #[cfg(test)]

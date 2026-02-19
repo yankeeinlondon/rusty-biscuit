@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -620,7 +620,11 @@ async fn resolve_category_to_uri(
         .ok_or_else(|| {
             ServerError::InvalidParameter(format!(
                 "unknown source category \"{category}\", valid: {}",
-                native.iter().map(|n| n.category.as_str()).collect::<Vec<_>>().join(", ")
+                native
+                    .iter()
+                    .map(|n| n.category.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
         })?;
 
@@ -678,7 +682,9 @@ pub(crate) async fn set_source_by_name(
 
     with_timeout(state.request_timeout, sony.set_input(&uri)).await?;
 
-    Ok(Json(serde_json::json!({ "category": category, "uri": uri })))
+    Ok(Json(
+        serde_json::json!({ "category": category, "uri": uri }),
+    ))
 }
 
 #[utoipa::path(
