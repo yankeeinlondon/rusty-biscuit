@@ -223,7 +223,7 @@ lint-fix-ai:
 
 # Use GPT 5.2 codex to commit staged changes
 commit:
-    @echo "Using Opencode with {{BOLD}}gpt-5.2-codex{{RESET}} to {{BOLD}}commit{{RESET}} staged changes"
+    @echo -e "Using Opencode with {{BOLD}}gpt-5.2-codex{{RESET}} to {{BOLD}}commit{{RESET}} staged changes"
     @echo
     @cd .. && opencode run "/commit -f ; remember you must use 'conventional commits' naming conventions and that unless all staged files are strongly related to the same thing be sure to make multiple commits by package or related activity." --model "openai/gpt-5.2-codex"
     @if command -v so-you-say >/dev/null 2>&1; then \
