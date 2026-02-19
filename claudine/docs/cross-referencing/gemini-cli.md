@@ -1,184 +1,370 @@
 ---
-prompt: |-
-  Do a deep dive on Gemini CLI's support for both "slash commands", "skills", and "agents/subagents" (if supported).
-
-  - Describe the directory structure conventions for each standard (both User scope and Repo scope)
-  - What metadata is supported/used/required in:
-      - "skill" documents
-      - "slash command" documents
-      - "agent/subagent" documents
-  - Where does Gemini CLI suggest that "scripts" or "executables" be saved
-  - What "built-in" slash commands come with Gemini CLI
-  - What are some important differences that exist between Gemini CLI's skills and Anthropic/Claude Code's skills?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - What are some important difference that exist between Gemini CLI's slash commands and Anthropic/Claude Code's slash commands?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - If agents/subagents are supported:
-      - What is the interaction model between the orchestrator and the subagent?
-      - What are some best practices in leveraging concurrency and subagents in Gemini CLI?
-
-  ## What is a Skill?
-
- When we refer to "skills" we're talking about the _semi-standard_ which Anthropic created with a base `SKILL.md` file linking to a tree of other resources (docs, scripts) which allows the Agent to selectively choose what content to explore.
+homepage: https://geminicli.com/
+docs: https://geminicli.com/docs/
+skills: https://geminicli.com/docs/cli/skills/
+agent: https://geminicli.com/docs/core/subagents/
+slash: https://geminicli.com/docs/cli/custom-commands/
+scripts: N/A (colocated within skill directories; no dedicated scripts path)
 ---
 
+# Gemini CLI: Skills, Slash Commands, Agents, Scripts
 
-### **1. The "Skill" Standard in Gemini CLI**
+## Skills
 
-Unlike Anthropic's ecosystem, which often treats a "Skill" as a distinct entity to be "loaded" to save context tokens, Gemini CLI does not have a reserved `SKILL.md` parser hardcoded into its binary.
+Gemini CLI supports the Agent Skills open standard (a directory containing a `SKILL.md` file). Skills were introduced experimentally in **v0.23.0 (2026-01-07)** and enabled by default starting with **v0.25.0 (2026-01-20)**.
 
-However, because Gemini 1.5 Pro/Flash has a massive (1M-2M) token window, the implementation of this standard shifts from **"Selective Navigation"** (Claude) to **"Holistic Ingestion"** (Gemini).
+Skills are on-demand expertise modules that the model activates autonomously based on the user's request and the skill's description. Unlike GEMINI.md context files (which are loaded on every prompt), skills are activated only when relevant, conserving context tokens.
 
-#### **Directory Structure Conventions**
+### Activation flow
 
-To implement the `SKILL.md` standard effectively in Gemini CLI, the recommended structure organizes skills as "Context Modules" rather than executable packages.
+1. **Discovery**: At startup, the CLI scans skill directories and injects skill names + descriptions into the system prompt.
+2. **Recognition**: The model identifies a matching skill based on the task and calls the `activate_skill` tool.
+3. **Consent & Loading**: The user approves via a confirmation prompt; the full SKILL.md and folder contents are loaded into context; the skill directory gains file-access permissions.
 
-**Repo Scope:**
+Skills remain active for the duration of the session once loaded.
 
-```text
-.gemini/
-├── modules/ (or "skills/")
-│   ├── react-best-practices/
-│   │   ├── SKILL.md            # Entry point / Map
-│   │   ├── components.md       # Specific guidelines
-│   │   └── hooks.md            # Specific guidelines
-│   └── database-migration/
-│       ├── SKILL.md
-│       └── scripts/
-│           └── verify_schema.sh
+### Directory discovery (user and repo scope)
 
+Skills are discovered from three tiers, with higher-precedence locations overriding lower ones when names collide:
+
+| Tier | Primary path | Alias path |
+|------|-------------|------------|
+| **Workspace** (highest) | `.gemini/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
+| **User** | `~/.gemini/skills/<name>/SKILL.md` | `~/.agents/skills/<name>/SKILL.md` |
+| **Extension** (lowest) | Bundled within installed extensions | -- |
+
+Within each tier, `.agents/skills/` takes priority over `.gemini/skills/`.
+
+Precedence: **Workspace > User > Extension**.
+
+### Claude Code compatibility
+
+Gemini CLI does **not** read `~/.claude/skills/` or `.claude/skills/` directly. However, the `.agents/skills/` alias path provides a cross-platform bridge: both Gemini CLI and Claude Code can discover skills placed in `.agents/skills/` when configured with symlinks. Community tools like [skill-porter](https://github.com/jduncan-rva/skill-porter) automate conversion between the two platforms.
+
+The SKILL.md format itself (YAML frontmatter + Markdown body) is compatible between Claude Code and Gemini CLI. Both platforms read `name` and `description` from frontmatter.
+
+### Skill directory structure
+
+Minimal:
+```
+<skill-name>/SKILL.md
 ```
 
-**User Scope (`~/.gemini/`):**
+Recommended layout:
+```
+<skill-name>/
+├── SKILL.md        # Required: entry point with YAML frontmatter
+├── scripts/        # Optional: executable scripts
+├── references/     # Optional: supporting documentation
+└── assets/         # Optional: templates, images, data files
+```
 
-* Global skills are typically stored in `~/.gemini/docs/` or `~/.gemini/knowledge/`.
-* Gemini CLI users often alias these directories using a system environment variable or a `.gemini/settings.json` path to allow quick references like `@db-skill`.
+### Skill metadata (frontmatter)
+
+`SKILL.md` begins with YAML frontmatter, then Markdown body content.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique identifier; should match directory name; slug format (lowercase, hyphens) |
+| `description` | Yes | Single-line string describing what the skill does and when to use it; this is the primary trigger mechanism |
+
+Gemini CLI **only reads `name` and `description`** from frontmatter. Do not include other fields; while they will not cause errors, they are ignored. This differs from some other CLIs (e.g., Kimi Code) that support `license`, `compatibility`, and `metadata` fields.
+
+Example:
+```yaml
+---
+name: code-reviewer
+description: "Review code for quality, security, and best practices. Use when asked to review, audit, or check code."
+---
+## What I do
+- Analyze code for common anti-patterns
+- Check for security vulnerabilities
+- Suggest improvements with explanations
+```
+
+### Management commands
+
+- `/skills list` -- show all discovered skills with activation status
+- `/skills enable <name>` / `/skills disable <name>` -- toggle individual skills
+- `/skills reload` -- re-scan skill directories
+
+### Built-in skills
+
+As of v0.26.0+, Gemini CLI ships with built-in skills:
+- **skill-creator**: generates new skill directories with proper SKILL.md frontmatter
+- **pr-creator**: assists with pull request creation
+- **codebase_investigator**: analyzes codebases (also functions as a built-in sub-agent)
+
+### Key differences from Claude Code
+
+| Aspect | Gemini CLI | Claude Code |
+|--------|-----------|-------------|
+| **Activation** | Model calls `activate_skill` tool; user confirms | Model reads SKILL.md, selectively follows links |
+| **Context strategy** | Loads entire skill folder contents on activation | Traverses tree progressively, reading sub-documents as needed |
+| **Context window** | 1M+ tokens; encourages loading full skill content | Smaller context; encourages selective traversal |
+| **Discovery paths** | `.gemini/skills/` + `.agents/skills/` | `.claude/skills/` only |
+| **Frontmatter fields** | Only `name` and `description` | `description` (primary); `name` optional |
+| **User consent** | Required before each skill activation | Automatic (no consent prompt) |
+
+### Gotchas
+
+1. **"Lazy reader" effect**: If you reference linked files from SKILL.md (e.g., `[Details](./details.md)`) without the full skill folder being loaded, the model may hallucinate details. Gemini's activation flow loads the entire directory, so ensure all referenced files are within the skill folder.
+
+2. **Description is everything**: Unlike Claude Code where the body of SKILL.md drives selection, Gemini CLI relies heavily on the `description` frontmatter field for deciding when to activate a skill. Write thorough, trigger-phrase-rich descriptions.
+
+3. **No `.claude/skills/` fallback**: Gemini CLI does not scan Claude Code directories. Use `.agents/skills/` symlinks or the extension system to bridge.
 
 ---
 
-### **2. Metadata & Documents**
+## Slash Commands
 
-In the "Skill Tree" pattern, the document acts as the interface between the human's intent and the agent's execution.
+Gemini CLI supports both built-in slash commands (35+) and user-defined custom commands. Custom commands use **TOML format** (`.toml` files), not Markdown.
 
-#### **A. "Skill" Documents (`SKILL.md`)**
+### Built-in slash commands (selection)
 
-In Gemini CLI, this file acts as a **Context Anchor**.
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `/help` | `/?` | Show help and available commands |
+| `/quit` | `/exit` | Exit the CLI |
+| `/clear` | -- | Clear terminal display |
+| `/compress` | -- | Summarize chat context to save tokens |
+| `/chat save <tag>` | -- | Checkpoint conversation |
+| `/chat resume <tag>` | -- | Restore saved conversation |
+| `/resume` | -- | Interactive session browser |
+| `/rewind` | -- | Navigate backward through conversation (also Esc x2) |
+| `/model` | -- | Choose Gemini model |
+| `/settings` | -- | Open settings editor |
+| `/memory` | -- | Manage GEMINI.md context files |
+| `/skills` | -- | Manage agent skills (list/enable/disable/reload) |
+| `/tools` | -- | List available tools |
+| `/mcp` | -- | MCP server management |
+| `/extensions` | -- | List active extensions |
+| `/hooks` | -- | Manage lifecycle hooks |
+| `/stats` | -- | Token usage and session statistics |
+| `/copy` | -- | Copy last output to clipboard |
+| `/init` | -- | Generate tailored GEMINI.md file |
+| `/commands reload` | -- | Reload custom commands from disk |
+| `/bug` | -- | File a GitHub issue |
+| `/vim` | -- | Toggle vim mode |
+| `/docs` | -- | Open documentation in browser |
 
-* **Supported Metadata:** Gemini does not enforce YAML frontmatter for logic, but it *heavily utilizes* standard Markdown links for relationship understanding.
-* **Required Content:**
-* **High-Level Goal:** "This skill helps you generate clean React components."
-* **Map of Resources:** A list of relative links to child documents.
-* **Trigger Phrases:** (Implicit) Keywords that help the model decide *when* to use this info.
+### Custom commands
 
+Custom commands are TOML files placed in:
+- **User scope**: `~/.gemini/commands/*.toml`
+- **Project scope**: `<project-root>/.gemini/commands/*.toml`
 
+Project commands override user commands when names collide.
 
-**Example `SKILL.md` for Gemini:**
-
-```markdown
-# React Component Skill
-
-Use this skill when the user asks to "scaffold a component" or "refactor UI".
-
-## Resources
-- [Component Structure](./structure.md): Rules for folder organization.
-- [Styling Guidelines](./styling.md): Tailwind vs. CSS Modules rules.
-
-## Associated Scripts
-- `scripts/scaffold.sh`: Run this to generate the file boilerplate.
-
-```
-
-#### **B. "Slash Command" Documents (.toml)**
-
-In this pattern, the Slash Command is merely a **pointer** or **shortcut** to load the Skill Tree.
-
-* **Metadata:**
-* `prompt`: Instead of containing the logic, the prompt simply injects the skill file.
-
-
-
-**Example `commands/react.toml`:**
+#### File format
 
 ```toml
-description = "Loads React expertise"
+description = "Run tests with coverage"
 prompt = """
-I am loading the React Skill Tree. Please review the following context and assist the user:
-{{@skills/react-best-practices/SKILL.md}}
+Run the full test suite with coverage. Focus on failing tests and suggest fixes.
+Arguments: {{args}}
 """
-
 ```
 
----
+| Field | Required | Description |
+|-------|----------|-------------|
+| `prompt` | Yes | The prompt text sent to the model; may be multi-line |
+| `description` | No | One-line summary shown in `/help`; auto-generated from filename if omitted |
 
-### **3. Scripts & Executables Location**
+#### Argument handling
 
-When using the Skill Tree standard, Gemini CLI conventions suggest keeping executable logic **colocated with the documentation** rather than in a hidden global bin.
+- **`{{args}}`**: Replaced with user-provided arguments; automatically shell-escaped inside `!{...}` blocks.
+- **No `{{args}}`**: If no placeholder, user arguments are appended to the prompt separated by two newlines.
+- **`!{shell command}`**: Executes a shell command and injects its stdout; requires user confirmation.
+- **`@{path}`**: Injects file/directory content; processed before shell commands and argument substitution; supports multimodal content (images, PDFs, audio, video).
 
-* **Location:** Inside the specific skill folder, typically in a `./scripts/` subdirectory relative to the `SKILL.md` file.
-* **Reasoning:** This allows the `SKILL.md` to reference the script using a relative path (`./scripts/migrate.sh`), which Gemini can resolve easily when it reads the file.
-* **Execution:** The Agent does not "auto-run" these. It reads the `SKILL.md`, sees the reference to the script, and then suggests: *"I see a script at `skills/db/scripts/migrate.sh`. Would you like me to run that using the shell tool?"*
+#### Subdirectory namespacing
 
----
+Subdirectories create namespaced commands using colon separators:
+- `commands/test.toml` -> `/test`
+- `commands/git/commit.toml` -> `/git:commit`
 
-### **4. Gemini CLI vs. Anthropic/Claude Code: Skills**
+### Claude Code compatibility
 
-This is where the divergence in interaction models is most distinct.
+Gemini CLI does **not** read `.claude/commands/` directories. Claude Code uses Markdown files for custom commands; Gemini CLI uses TOML files. There is no automatic migration path.
 
-| Feature | Gemini CLI | Anthropic / Claude Code |
-| --- | --- | --- |
-| **Discovery** | **Explicit.** You generally must `@mention` the skill file or folder to bring it into focus. | **exploratory.** Claude is often set up to "crawl" or "ls" directories to find relevant skill files autonomously. |
-| **Context Strategy** | **"Ingest All."** Due to the 1M+ token window, the standard Gemini pattern is to load the *entire* skill folder (`@skills/react/`) at once. | **"Traverse Tree."** Designed to read the root `SKILL.md`, pick *one* relevant sub-link, and read only that to save tokens. |
-| **File Formats** | **Agnostic.** reads `.md`, `.py`, `.sh` equally well as text context. | **Markdown-Centric.** Heavily optimized for structured Markdown with XML tags. |
+### Key differences from Claude Code
 
-#### **Common Gotchas & Workarounds**
+| Aspect | Gemini CLI | Claude Code |
+|--------|-----------|-------------|
+| **File format** | TOML (`.toml`) | Markdown (`.md`) |
+| **Directory** | `.gemini/commands/` | `.claude/commands/` |
+| **Arguments** | `{{args}}` placeholder | `$ARGUMENTS` placeholder |
+| **Shell execution** | `!{command}` syntax in prompt | Not available in command files |
+| **File injection** | `@{path}` syntax in prompt | Not available in command files |
+| **Hot reload** | `/commands reload` | Requires restart |
 
-* **Gotcha 1: The "Lazy Reader" Effect**
-* *Issue:* If you provide a `SKILL.md` with links like `[Details](./details.md)` but don't explicitly tell Gemini to "read the linked files," it might only read the top-level file and hallucinate the details.
-* *Workaround:* Use the **`@dir`** syntax (e.g., `@skills/my-skill/`) instead of just referencing the single file. This forces the CLI to load the directory content recursively, ensuring all child nodes of the skill tree are in context immediately.
+### Gotchas
 
+1. **TOML, not Markdown**: A common migration mistake. Claude Code `.md` command files will not work in Gemini CLI; they must be rewritten as `.toml` with `prompt = """..."""` syntax.
 
-* **Gotcha 2: Relative Path Confusion**
-* *Issue:* If the `SKILL.md` references a script at `./scripts/run.sh`, but the CLI is running from the project root, the model might try to run `run.sh` without the full path and fail.
-* *Workaround:* In your `SKILL.md`, instruct the model explicitly: *"Always resolve script paths relative to the project root, or navigate to this directory before running scripts."*
+2. **Argument escaping**: Inside `!{...}` blocks, `{{args}}` is automatically shell-escaped. Outside those blocks, it is injected raw. Misplacing `{{args}}` can lead to prompt injection or shell escaping issues.
 
-
-
----
-
-### **5. Gemini CLI vs. Anthropic/Claude Code: Slash Commands**
-
-| Feature | Gemini CLI | Anthropic / Claude Code |
-| --- | --- | --- |
-| **Definition** | **Configuration (`.toml`).** Rigid structure defined in `commands/`. | **Prompt-based.** Often defined loosely in system prompts or `CLAUDE.md`. |
-| **Flexibility** | **Static.** The command template is fixed until you edit the `.toml`. | **Dynamic.** Can often be tweaked on the fly by changing the system prompt text. |
-| **Parameters** | **`{{args}}` Injection.** Simple string replacement. | **Natural Language Parsing.** Can interpret "run tests for the api" and map it to a command intelligently. |
-
-#### **Common Gotchas & Workarounds**
-
-* **Gotcha: Argument Rigidness**
-* *Issue:* Gemini's `.toml` commands blindly inject `{{args}}`. If a user types `/refactor please help me`, the prompt receives "please help me" as the code argument, potentially confusing the model.
-* *Workaround:* Write robust prompt wrappers in your `.toml` file.
-* *Bad:* `Refactor this: {{args}}`
-* *Good:* `The user has provided the following input arguments: "{{args}}". If this looks like a filename, read it. If it is a request, interpret it.`
-
-
-
-
+3. **No cross-tool fallback**: Unlike skills (which have `.agents/` aliases), custom commands have no cross-platform discovery path.
 
 ---
 
-### **6. Agents & Subagents (Revised)**
+## Agents / Subagents
 
-Since Gemini CLI relies on Tool Delegation rather than persistent sub-agent processes:
+Gemini CLI supports sub-agents as an **experimental** feature. Sub-agents are specialized agents that operate within the main session, each with their own system prompt, tool access, and independent context window.
 
-#### **Interaction Model**
+Gemini CLI uses the term **"sub-agent"** (or "subagent") for this concept; Claude Code calls the equivalent mechanism "Task tool" delegation.
 
-1. **Orchestrator (Main Context):** The user prompt + loaded `SKILL.md` defines the "Persona".
-2. **Execution (Ephemeral Subagent):** When the model decides to run a script defined in a Skill, it effectively delegates control to that script.
-3. **Return:** The script's `stdout` is piped back into the Orchestrator's context.
+### Enabling sub-agents
 
-#### **Concurrency Best Practices**
+Sub-agents require explicit opt-in via `settings.json`:
+```json
+{
+  "experimental": {
+    "enableAgents": true
+  }
+}
+```
 
-* **Do not rely on chat-based subagents.** Gemini CLI cannot "chat with itself" in a background thread easily.
-* **"Skill as a Script":** The most robust way to create a "subagent" in Gemini CLI is to write a Python script using the Google GenAI SDK, place it in `skills/my-agent/run.py`, and have the main CLI trigger it. This allows the sub-script to have its own independent loop and context, returning only the final result to the main CLI.
+### Directory structure
 
+Sub-agent definitions are Markdown files (`.md`) with YAML frontmatter:
+- **Project scope**: `.gemini/agents/*.md`
+- **User scope**: `~/.gemini/agents/*.md`
+
+The filename becomes the agent identifier.
+
+### Frontmatter properties
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique identifier; slug format (lowercase, hyphens, underscores) |
+| `description` | Yes | Short explanation visible to the orchestrator for routing decisions |
+| `kind` | No | `"local"` (default) or `"remote"` (for A2A protocol agents) |
+| `tools` | No | Array of tool names the agent can access; omit for default tool access |
+| `model` | No | Model override (e.g., `gemini-2.5-pro`); defaults to session model |
+| `temperature` | No | Sampling temperature (0.0 - 2.0) |
+| `max_turns` | No | Conversation turn limit; defaults to 15 |
+| `timeout_mins` | No | Execution time limit in minutes; defaults to 5 |
+
+The Markdown body (after frontmatter) becomes the agent's system prompt.
+
+Example:
+```yaml
+---
+name: security-reviewer
+description: "Reviews code for security vulnerabilities and suggests fixes"
+tools:
+  - read_file
+  - list_directory
+  - grep
+model: gemini-2.5-pro
+temperature: 0.1
+max_turns: 10
+---
+You are a security expert. Review code for:
+- SQL injection, XSS, CSRF
+- Authentication and authorization flaws
+- Secrets in source code
+Report findings in a structured format. Do NOT modify files.
+```
+
+### Interaction model
+
+1. **Registration**: Sub-agents are exposed to the main agent as callable tools (tool name = agent name).
+2. **Routing**: The orchestrator reads agent descriptions to decide which sub-agent handles which task.
+3. **Delegation**: The main agent invokes the sub-agent tool with a task description and prompt.
+4. **Execution**: The sub-agent runs in an **isolated context** with its own conversation loop, system prompt, and tool access.
+5. **Return**: The sub-agent's final output is returned to the orchestrator as the tool result.
+
+Key properties:
+- **Stateless**: Each invocation is independent; no follow-up messages to a running sub-agent.
+- **Context isolation**: Sub-agents cannot see parent conversation history; prompts must be self-contained.
+- **YOLO mode**: Sub-agents execute tools **without individual user confirmation**. Use restricted `tools` arrays for safety.
+
+### Built-in sub-agents
+
+- **codebase_investigator**: Explores the workspace, analyzes dependencies, and resolves relevant information. Configurable via `settings.json` with `maxNumTurns` and `model` options.
+- **cli_help**: Provides expertise on Gemini CLI commands, configuration, and documentation.
+- **generalist_agent**: Routes tasks to appropriate specialized sub-agents.
+
+### Remote sub-agents (A2A protocol)
+
+Gemini CLI supports the Agent-to-Agent (A2A) protocol for delegating to remote agents:
+
+```yaml
+---
+kind: remote
+name: my-remote-agent
+agent_card_url: https://example.com/agent-card
+---
+```
+
+Management commands: `/agents list`, `/agents refresh`, `/agents enable <name>`, `/agents disable <name>`.
+
+### Key differences from Claude Code
+
+| Aspect | Gemini CLI | Claude Code |
+|--------|-----------|-------------|
+| **Vernacular** | "Sub-agent" | "Task tool" / "Sub-agent" |
+| **Definition format** | Markdown + YAML frontmatter in `.gemini/agents/` | Markdown in `.claude/agents/` |
+| **Feature status** | Experimental (requires `enableAgents`) | Stable (built-in Task tool) |
+| **Tool restrictions** | Per-agent `tools` array in frontmatter | Per-agent tool control |
+| **User confirmation** | YOLO mode (no per-tool confirmation) | Inherits parent session permissions |
+| **Remote agents** | A2A protocol support | Not supported |
+| **Model override** | Per-agent `model` field | Per-agent model selection |
+| **Turn/timeout limits** | `max_turns` (default 15), `timeout_mins` (default 5) | No built-in limits |
+
+### Gotchas
+
+1. **YOLO mode risk**: Sub-agents execute tools without confirmation. Always restrict the `tools` array for agents with access to destructive operations (e.g., `run_shell_command`, `write_file`).
+
+2. **Context isolation**: Sub-agents see nothing from the parent conversation. Include all necessary context in the delegation prompt; do not assume the sub-agent knows what came before.
+
+3. **Experimental instability**: The feature requires `enableAgents` flag and may have stability issues (e.g., hanging on agent creation has been reported in GitHub issue #18064).
+
+---
+
+## Scripts
+
+Gemini CLI does **not** have a dedicated scripts directory convention (no `.gemini/scripts/` equivalent).
+
+Scripts and executables are expected to be **colocated within skill directories**, following the recommended skill structure:
+```
+<skill-name>/
+├── SKILL.md
+└── scripts/
+    ├── verify.sh
+    └── generate.py
+```
+
+The SKILL.md can reference these scripts with relative paths, and the model will suggest executing them via the shell tool when appropriate. Scripts are not auto-executed; user confirmation is required.
+
+For standalone scripts not tied to a skill, Gemini CLI relies on the standard shell tool (`run_shell_command`) and standard project conventions (e.g., `scripts/` at the project root).
+
+### Extensions as script containers
+
+Extensions can bundle scripts alongside MCP servers, commands, and skills. An extension's `gemini-extension.json` manifest provides structured access to bundled executables via MCP tool registration.
+
+---
+
+## Sources
+
+- [Gemini CLI GitHub Repository](https://github.com/google-gemini/gemini-cli)
+- [Gemini CLI Documentation](https://geminicli.com/docs/)
+- [Agent Skills](https://geminicli.com/docs/cli/skills/)
+- [Creating Agent Skills](https://geminicli.com/docs/cli/creating-skills/)
+- [Custom Commands](https://geminicli.com/docs/cli/custom-commands/)
+- [CLI Commands Reference](https://geminicli.com/docs/cli/commands/)
+- [Sub-agents (experimental)](https://geminicli.com/docs/core/subagents/)
+- [Remote Subagents (experimental)](https://geminicli.com/docs/core/remote-agents/)
+- [Extensions Overview](https://geminicli.com/docs/extensions/)
+- [Writing Extensions](https://geminicli.com/docs/extensions/writing-extensions/)
+- [Context Files (GEMINI.md)](https://geminicli.com/docs/cli/gemini-md/)
+- [Gemini CLI Configuration](https://geminicli.com/docs/get-started/configuration/)
+- [Gemini CLI Changelog](https://geminicli.com/docs/changelogs/)
+- [Hooks Overview](https://geminicli.com/docs/hooks/)
+- [v0.23.0 Weekly Update (Skills Preview)](https://github.com/google-gemini/gemini-cli/discussions/16084)
+- [v0.26.0 Weekly Update (Skills + Hooks)](https://github.com/google-gemini/gemini-cli/discussions/17812)
+- [skill-porter (Cross-platform Skill Converter)](https://github.com/jduncan-rva/skill-porter)
+- [Gemini CLI Skillz MCP Extension](https://github.com/intellectronica/gemini-cli-skillz)

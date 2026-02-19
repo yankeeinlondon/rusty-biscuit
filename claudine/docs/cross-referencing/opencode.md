@@ -1,341 +1,301 @@
 ---
-prompt: |-
-  Do a deep dive on OpenCode's support for both "slash commands", "skills", and "agents/subagents" (if supported).
-
-  - Describe the directory structure conventions for each standard (both User scope and Repo scope)
-  - What metadata is supported/used/required in:
-      - "skill" documents
-      - "slash command" documents
-      - "agent/subagent" documents
-  - Where does OpenCode suggest that "scripts" or "executables" be saved
-  - What "built-in" slash commands come with OpenCode
-  - What are some important differences that exist between OpenCode's skills and Anthropic/Claude Code's skills?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - What are some important difference that exist between OpenCode's slash commands and Anthropic/Claude Code's slash commands?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - If agents/subagents are supported:
-      - What is the interaction model between the orchestrator and the subagent?
-      - What are some best practices in leveraging concurrency and subagents in OpenCode?
-  - Provide a Markdown table of key references for more information (be sure to use valid Markdown links to create the hyperlinks)
+homepage: https://opencode.ai
+docs: https://opencode.ai/docs/
+skills: https://opencode.ai/docs/skills/
+agent: https://opencode.ai/docs/agents/
+slash: https://opencode.ai/docs/commands/
+scripts: https://opencode.ai/docs/custom-tools/
 ---
 
+# OpenCode
 
+OpenCode is an open-source AI coding agent by [Anomaly](https://github.com/anomalyco). It is written in TypeScript and provides a TUI, a desktop app, and an IDE extension. The GitHub repository is [anomalyco/opencode](https://github.com/anomalyco/opencode).
 
+Configuration lives in `opencode.json` (project root) and `~/.config/opencode/opencode.json` (global). Both JSON and JSONC are accepted, with a `$schema` reference to `https://opencode.ai/config.json`.
 
-Based on my research, I'll now provide a comprehensive deep dive on OpenCode's support for slash commands, skills, and agents/subagents.
+The `.opencode/` and `~/.config/opencode/` directories use **plural** subdirectory names: `agents/`, `commands/`, `modes/`, `plugins/`, `skills/`, `tools/`, `themes/`. Singular names (e.g. `agent/`) are accepted for backward compatibility.
 
----
+## Skills
 
-## OpenCode Deep Dive: Slash Commands, Skills, and Agents
+OpenCode supports the Agent Skills open standard (`SKILL.md` in a named directory). Skills were introduced in **v1.0.190** (December 22, 2025) via the native `skill` tool with a permission system.
 
-### 1. Directory Structure Conventions
+### Directory Locations
 
-OpenCode supports three main extensibility mechanisms, each with specific directory structure conventions at both **User scope** (global) and **Repo scope** (project-level):
+**Project-local** (searched from cwd up to git worktree root):
 
-| Mechanism | User Scope (Global) | Repo Scope (Project) | Claude-Compatible Fallback |
-|-----------|---------------------|----------------------|----------------------------|
-| **Skills** | `~/.config/opencode/skills/<name>/SKILL.md`<br>`~/.claude/skills/<name>/SKILL.md` | `.opencode/skills/<name>/SKILL.md`<br>`.claude/skills/<name>/SKILL.md` | `.agents/skills/<name>/SKILL.md` |
-| **Slash Commands** | `~/.config/opencode/commands/*.md` | `.opencode/commands/*.md` | ❌ Not supported (GitHub issue #6985) |
-| **Agents/Subagents** | `~/.config/opencode/agents/*.md` | `.opencode/agents/*.md` | ❌ Not applicable |
+- `.opencode/skills/<name>/SKILL.md`
+- `.claude/skills/<name>/SKILL.md`
+- `.agents/skills/<name>/SKILL.md`
 
-**Key Structure Details:**
+**Global**:
 
-- **Skills**: Each skill lives in its own folder with a `SKILL.md` file inside. The folder name must match the `name` field in the frontmatter
-- **Commands**: Markdown files directly in the `commands/` folder; filename becomes the command name (e.g., `test.md` → `/test`)
-- **Agents**: Markdown files directly in the `agents/` folder; filename becomes the agent name (e.g., `review.md` → `@review` agent)
+- `~/.config/opencode/skills/<name>/SKILL.md`
+- `~/.claude/skills/<name>/SKILL.md`
+- `~/.agents/skills/<name>/SKILL.md`
 
-**Scripts/Executables Location:**
-OpenCode suggests storing helper scripts in `.opencode/scripts/` . This is a convention for project-scoped executable utilities that skills or agents can invoke via the `bash` tool. Example:
+OpenCode reads Claude Code's skill directories (both `~/.claude/skills/` and `.claude/skills/`) natively. This can be disabled with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
+
+### How Skills Work
+
+The agent has a built-in `skill` tool. All discovered skill names and descriptions are listed in the tool's description. When the agent decides a skill is relevant, it calls `skill({ name: "skill-name" })` to load the full SKILL.md content on demand (progressive disclosure).
+
+Skills are **not** automatically loaded just by being present -- the agent must explicitly choose to call the `skill` tool based on the description match.
+
+### Frontmatter Properties
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | 1--64 chars, lowercase alphanumeric with single hyphens (`^[a-z0-9]+(-[a-z0-9]+)*$`). Must match directory name. |
+| `description` | Yes | 1--1024 chars. Used by the agent to decide when to load the skill. |
+| `license` | No | SPDX license identifier (e.g. `MIT`). |
+| `compatibility` | No | 1--500 chars describing environment requirements. |
+| `metadata` | No | String-to-string map for custom key-value pairs. |
+
+### Permissions
+
+Skill access is controlled via pattern-based permissions in `opencode.json`:
+
+```json
+{
+  "permission": {
+    "skill": {
+      "*": "allow",
+      "internal-*": "deny",
+      "dangerous-deploy": "ask"
+    }
+  }
+}
+```
+
+Values are `allow` (immediate access), `deny` (hidden from agent), or `ask` (user approval required).
+
+### Best Practices
+
+- Keep `SKILL.md` under 500 lines; move detailed content to linked reference files.
+- Write descriptions in the format: `<what it does>. Use when <specific triggers>`.
+- Skill names must be unique across all discovery locations.
+
+## Slash Commands
+
+OpenCode supports custom slash commands. Custom commands have existed since at least **v0.0.49** (May 2025).
+
+### Directory Locations
+
+- **Project**: `.opencode/commands/*.md`
+- **Global**: `~/.config/opencode/commands/*.md`
+
+The filename becomes the command name (e.g. `test.md` -> `/test`).
+
+### Claude Code Compatibility
+
+OpenCode does **not** natively discover `.claude/commands/` directories. This is tracked in [GitHub issue #6985](https://github.com/anomalyco/opencode/issues/6985) (still open). Users migrating from Claude Code must copy or symlink their command files:
 
 ```bash
-mkdir -p .opencode/scripts
-chmod +x .opencode/scripts/opencode_image_gen.py
+cp -r ~/.claude/commands/* ~/.config/opencode/commands/
 ```
 
----
+There are also frontmatter incompatibilities between the two platforms (Claude Code uses `argument-hint` and `allowed-tools` which OpenCode does not recognize).
 
-### 2. Metadata Support by Document Type
-
-#### **Skill Documents (SKILL.md)**
-
-Required and supported frontmatter fields :
+### Frontmatter Properties
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | ✅ Yes | 1–64 chars, lowercase alphanumeric with single hyphens. Must match directory name |
-| `description` | ✅ Yes | 1–1024 chars, used by agent to choose when to load the skill |
-| `license` | ❌ No | SPDX license identifier (e.g., `MIT`) |
-| `compatibility` | ❌ No | Target platform (e.g., `opencode`) |
-| `metadata` | ❌ No | Free-form key-value map (strings only) for extensibility |
+| `description` | No | Shown in TUI autocomplete. |
+| `template` | No | Prompt template sent to the LLM. If omitted, the Markdown body is used. |
+| `agent` | No | Which agent executes the command (e.g. `build`, `plan`). |
+| `model` | No | Override default model for this command. |
+| `subtask` | No | Forces subagent invocation. |
 
-**Example SKILL.md:**
+### Prompt Placeholders
 
-```yaml
----
-name: git-release
-description: Create consistent releases and changelogs
-license: MIT
-compatibility: opencode
-metadata:
-  audience: maintainers
-  workflow: github
----
-## What I do
-- Draft release notes from merged PRs
-- Propose a version bump
-...
+- `$ARGUMENTS` -- all arguments passed after the command name
+- `$1`, `$2`, `$3` -- individual positional arguments
+- `` !`command` `` -- inline bash command output
+- `@filename` -- file content inclusion
+
+### JSON Alternative
+
+Commands can also be defined in `opencode.json`:
+
+```json
+{
+  "command": {
+    "test": {
+      "template": "Run the test suite and report failures.",
+      "description": "Run tests"
+    }
+  }
+}
 ```
 
-#### **Slash Command Documents (*.md)**
+### Built-in Slash Commands
 
-Supported frontmatter fields :
+| Command | Aliases | Shortcut | Description |
+|---------|---------|----------|-------------|
+| `/compact` | `/summarize` | `ctrl+x c` | Condense the current session |
+| `/connect` | | | Add a provider and configure API keys |
+| `/details` | | `ctrl+x d` | Toggle tool execution detail display |
+| `/editor` | | `ctrl+x e` | Open external editor for message composition |
+| `/exit` | `/quit`, `/q` | `ctrl+x q` | Exit OpenCode |
+| `/export` | | `ctrl+x x` | Export conversation to Markdown |
+| `/help` | | `ctrl+x h` | Show help dialog |
+| `/init` | | `ctrl+x i` | Create or update `AGENTS.md` |
+| `/models` | | `ctrl+x m` | List available models |
+| `/new` | `/clear` | `ctrl+x n` | Start a new session |
+| `/redo` | | `ctrl+x r` | Restore undone message and file changes |
+| `/sessions` | `/resume`, `/continue` | `ctrl+x l` | List and switch between sessions |
+| `/share` | | `ctrl+x s` | Share current session |
+| `/themes` | | `ctrl+x t` | List available themes |
+| `/thinking` | | | Toggle model reasoning block visibility |
+| `/undo` | | `ctrl+x u` | Remove last message and revert file changes |
+| `/unshare` | | | Stop sharing current session |
+
+Slash commands are TUI-only; they cannot be used via `opencode run` on the command line.
+
+## Agents / Subagents
+
+OpenCode has a rich agent system. The task tool for subagent delegation has existed since at least **v0.1.99** (June 2025). Custom agent definitions (markdown-based) have been available since early versions, with `AGENTS.md` support present since **v0.1.55** (June 2025).
+
+### Vernacular
+
+OpenCode uses the terms **agent** (for primary agents) and **subagent** (for delegated workers). Primary agents are switched with the `Tab` key. Subagents are invoked via the `task` tool or `@mention` syntax.
+
+### Directory Locations
+
+- **Project**: `.opencode/agents/*.md`
+- **Global**: `~/.config/opencode/agents/*.md`
+
+The filename becomes the agent identifier.
+
+### Built-in Agents
+
+| Agent | Mode | Description |
+|-------|------|-------------|
+| **Build** | primary | Full tool access for development work (default) |
+| **Plan** | primary | Restricted mode for planning without modifications |
+| **General** | subagent | Multi-step research with broad capabilities |
+| **Explore** | subagent | Fast, read-only codebase exploration |
+| **Compaction** | hidden | System agent for session compaction |
+| **Title** | hidden | System agent for session title generation |
+| **Summary** | hidden | System agent for summarization |
+
+### Frontmatter Properties
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `description` | ❌ No | Shown in TUI command completion |
-| `agent` | ❌ No | Which agent to use (e.g., `build`, `plan`) |
-| `model` | ❌ No | Specific model ID to use for this command |
-| `template` | ❌ No | Alternative to body content (JSON config only) |
+| `description` | Yes | Brief purpose statement. |
+| `mode` | No | `primary`, `subagent`, or `all` (default: `all`). |
+| `model` | No | Override model (e.g. `anthropic/claude-sonnet-4-20250514`). |
+| `temperature` | No | Sampling temperature (0.0--1.0). |
+| `top_p` | No | Response diversity (0.0--1.0). |
+| `tools` | No | Object mapping tool names to booleans (e.g. `write: false`). |
+| `permission` | No | Pattern-based permissions (`ask`, `allow`, `deny`). |
+| `steps` | No | Maximum agentic iterations. |
+| `color` | No | Hex color or theme name for UI display. |
+| `hidden` | No | Boolean -- hide from `@` autocomplete. |
+| `disable` | No | Boolean -- deactivate the agent entirely. |
+| `prompt` | No | Custom system prompt (file path or inline text). |
 
-The **body content** of the markdown file becomes the prompt template executed when the command is invoked.
+### Interaction Model: Orchestrator to Subagent
 
-**Example Command (`test.md`):**
+1. **Primary agent** receives user request and decides to delegate.
+2. **Delegation**: primary agent calls the `task` tool with a target subagent name and prompt.
+3. **Subagent execution**: OpenCode creates a new isolated child session. The subagent has:
+   - A fresh context (no access to parent conversation history).
+   - Its own system prompt, tools, and model configuration.
+   - Independent tool permissions.
+4. **Result return**: the subagent's final text output is returned to the parent as the `task` tool result.
+5. **Continuation**: the primary agent integrates the result.
 
-```yaml
----
-description: Run tests with coverage
-agent: build
-model: anthropic/claude-3-5-sonnet-20241022
----
-Run the full test suite with coverage report and show any failures.
-Focus on the failing tests and suggest fixes.
+Each subagent invocation is **stateless** -- you cannot send follow-up messages to a running subagent.
+
+### Concurrency
+
+OpenCode supports **parallel subagent execution** by issuing multiple `task` tool calls in a single assistant message. There is no true "fire-and-forget" background execution (child sessions are awaited).
+
+Navigate between parent and child sessions using:
+
+- `Leader+Right`: cycle forward (parent -> child1 -> child2 -> parent)
+- `Leader+Left`: cycle backward
+
+### Task Permissions
+
+```json
+{
+  "permission": {
+    "task": {
+      "*": "deny",
+      "code-reviewer": "allow",
+      "deploy-*": "ask"
+    }
+  }
+}
 ```
 
-#### **Agent/Subagent Documents (*.md)**
+Rules evaluate in order; the **last match wins**. Users can manually invoke any subagent via `@mention` regardless of task permissions.
 
-Supported frontmatter fields :
+### Differences from Claude Code
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | ❌ No | Agent identifier (defaults to filename) |
-| `description` | ❌ No | Shown in available agents list |
-| `mode` | ❌ No | `primary`, `subagent`, or `all` (default: `all`) |
-| `model` | ❌ No | Model ID string (e.g., `anthropic/claude-sonnet-4-20250514`) |
-| `temperature` | ❌ No | Sampling temperature (0.0–1.0) |
-| `tools` | ❌ No | Object mapping tool names to boolean (e.g., `write: true`, `bash: false`) |
-| `permission` | ❌ No | Fine-grained permissions (e.g., `skill: {"internal-*": "deny"}`) |
-| `hidden` | ❌ No | Boolean to hide from `@` autocomplete (for internal subagents) |
-| `color` | ❌ No | Hex color or theme name for UI display |
+| Aspect | OpenCode | Claude Code |
+|--------|----------|-------------|
+| **Agent definition** | Markdown files in `agents/` or JSON in `opencode.json` | Markdown files in `agents/` directory |
+| **Mode system** | Explicit `mode` field (`primary` / `subagent` / `all`) | Agents are always subagents invoked via Task tool |
+| **Primary agent switching** | Tab key cycles between primary agents | Single primary agent (Claude itself) |
+| **Delegation tool** | `task` tool (same concept) | `Task` tool |
+| **Context isolation** | Child sessions with independent context | Same isolation model |
+| **Built-in agents** | Build, Plan, General, Explore + hidden system agents | No built-in named agents |
 
-**Example Agent:**
+## Scripts
 
-```yaml
----
-description: Reviews code for quality and best practices
-mode: subagent
-model: anthropic/claude-sonnet-4-20250514
-temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
-permission:
-  task:
-    "*": "deny"
-    "code-reviewer": "allow"
-hidden: false
-color: "#ff6b6b"
----
-You are in code review mode. Focus on:
-- Code quality and best practices
-- Security considerations
-Provide constructive feedback without making direct changes.
+OpenCode does not have a single dedicated "scripts" directory convention. Instead, it provides three extensibility mechanisms for executable code:
+
+### 1. Custom Tools (`tools/` directory)
+
+The primary mechanism for executable code. Tools are defined as TypeScript or JavaScript files that can invoke scripts in any language.
+
+- **Project**: `.opencode/tools/`
+- **Global**: `~/.config/opencode/tools/`
+
+The filename becomes the tool name. Multi-export files use `<filename>_<exportname>` naming.
+
+### 2. Plugins (`plugins/` directory)
+
+Plugins are JS/TS modules that hook into OpenCode's event lifecycle (command, file, message, permission, session, tool events, etc.).
+
+- **Project**: `.opencode/plugins/`
+- **Global**: `~/.config/opencode/plugins/`
+
+Plugins can also be installed from npm via `opencode.json` configuration.
+
+### 3. Skill-bundled Scripts
+
+Skills can include a `scripts/` subdirectory alongside `SKILL.md`. The agent discovers these via the skill content and can execute them through the `bash` tool.
+
+```
+my-skill/
+  SKILL.md
+  scripts/
+    deploy.sh
+    validate.py
 ```
 
----
+## Sources
 
-### 3. Built-in Slash Commands
-
-OpenCode comes with the following built-in slash commands available in the TUI :
-
-| Command | Alias | Description | Keybind |
-|---------|-------|-------------|---------|
-| `/compact` | `/summarize` | Compact the current session (summarize history) | `ctrl+x c` |
-| `/commands` | — | Show all available commands | — |
-| `/models` | — | List available models | `ctrl+x m` |
-| `/agents` | — | List available agents | — |
-| `/status` | — | Show session configuration and token usage | — |
-| `/mcp` | — | Show MCP server status | — |
-| `/init` | — | Create or update `AGENTS.md` file | `ctrl+x i` |
-| `/connect` | — | Add a provider to OpenCode | — |
-| `/new` | `/clear` | Start a new session | `ctrl+x n` |
-| `/sessions` | `/resume`, `/continue` | List and switch between sessions | `ctrl+x l` |
-| `/share` | — | Create shareable conversation link | `ctrl+x s` |
-| `/undo` | — | Undo recent changes (requires Git) | — |
-| `/redo` | — | Redo previously undone changes | `ctrl+x r` |
-| `/export` | — | Export conversation to Markdown | `ctrl+x x` |
-| `/editor` | — | Open external editor for composing | `ctrl+x e` |
-| `/details` | — | Toggle tool execution details | `ctrl+x d` |
-| `/themes` | — | List available themes | `ctrl+x t` |
-| `/help` | — | Show help dialog | `ctrl+x h` |
-| `/exit` | `/quit`, `/q` | Exit OpenCode | `ctrl+x q` |
-
----
-
-### 4. OpenCode Skills vs. Claude Code Skills: Key Differences
-
-| Aspect | OpenCode | Claude Code | Gotcha/Navigation |
-|--------|----------|-------------|-------------------|
-| **Directory Naming** | `skill/` (singular) | `skills/` (plural) | ⚠️ **Gotcha**: OpenCode's glob pattern looks for `skill/**/SKILL.md` but Claude uses `skills/`. OpenCode has compatibility support but the singular/plural mismatch caused discovery issues in earlier versions (fixed in recent versions to check both). **Workaround**: Use symlinks if needed: `ln -s ~/.claude/skills/<name> ~/.config/opencode/skill/<name>`  |
-| **Discovery Scope** | Loads from `.opencode/`, `.claude/`, and `.agents/` directories with upward traversal until git root | Loads from `.claude/` only | ✅ OpenCode is more flexible for monorepos |
-| **Loading Mechanism** | Explicit `skill` tool call required; progressive disclosure (metadata first, full content on demand) | Similar progressive disclosure | ⚠️ **Gotcha**: Skills aren't automatically loaded just by being present; the agent must choose to call `skill({name: "..."})`. Ensure descriptions are clear so agents know when to use them |
-| **Permissions** | Fine-grained pattern-based permissions in `opencode.json` (`allow`/`deny`/`ask`) | Simpler allowlist | ✅ OpenCode offers more granular control |
-| **Metadata Support** | `metadata` map in frontmatter | Similar | ⚠️ Both use the open standard, but verify specific keys are supported |
-
-**Common Gotchas:**
-
-1. **Skill Not Showing Up**: Verify `SKILL.md` is ALL CAPS, frontmatter has `name` and `description`, and the directory name matches the `name` field exactly
-2. **Claude Skills Not Found**: If migrating from Claude Code, ensure skills are in `~/.claude/skills/` (plural), which OpenCode now supports as a fallback
-3. **Permissions Denied**: Check `opencode.json` permission patterns—skills with `deny` are hidden from the agent entirely
-
----
-
-### 5. OpenCode Slash Commands vs. Claude Code Slash Commands
-
-| Aspect | OpenCode | Claude Code | Gotcha/Navigation |
-|--------|----------|-------------|-------------------|
-| **File Location** | `.opencode/commands/*.md` | `.claude/commands/*.md` | ⚠️ **Gotcha**: OpenCode does NOT support `.claude/commands/` compatibility (GitHub issue #6985). You must manually copy or symlink commands when migrating  |
-| **Namespacing** | Supports subdirectories: `.opencode/commands/frontend/component.md` → `/project:frontend:component` | Similar project/user namespace | ✅ Feature parity here |
-| **Arguments** | Use `$ARGUMENTS` placeholder in content | `$ARGUMENTS` placeholder | ✅ Compatible syntax |
-| **Bash Execution** | Use `!` prefix: `!git status` | `!` prefix for bash | ✅ Compatible syntax |
-| **File References** | Use `@` prefix: `@src/utils.js` | `@` prefix for files | ✅ Compatible syntax |
-| **Configuration** | JSON in `opencode.json` OR markdown files | Primarily markdown files | ⚠️ **Gotcha**: OpenCode allows JSON config for commands, which Claude doesn't support. Don't mix both for the same command |
-
-**Common Gotchas:**
-
-1. **Migration Friction**: Unlike skills, commands in `~/.claude/commands/` won't be automatically discovered. **Workaround**: `cp -r ~/.claude/commands/* ~/.config/opencode/commands/`
-2. **Command Not Appearing**: Ensure the `.md` file has valid frontmatter (if any) and the filename matches the intended command name
-3. **Namespace Conflicts**: Project commands take precedence over user commands; use `/project:` or `/user:` prefixes to disambiguate
-
----
-
-### 6. Agents/Subagents Support
-
-#### **Interaction Model: Orchestrator ↔ Subagent**
-
-OpenCode supports a hierarchical agent architecture using the **`task`** tool :
-
-1. **Orchestrator (Primary Agent)**: Receives user request, analyzes intent, decides on delegation strategy
-2. **Delegation**: Orchestrator calls `task` tool with:
-   - `subagent_type`: Target agent name
-   - `description`: Short task summary (3-5 words)
-   - `prompt`: Detailed instructions for the subagent
-3. **Subagent Execution**: OpenCode spins up a **new isolated session** (child session) with:
-   - Fresh context (no access to parent conversation history unless included in prompt)
-   - Subagent's specific system prompt, tools, and model
-   - Independent tool permissions
-4. **Result Return**: Subagent returns final text output → Parent receives it as the `task` tool return value
-5. **Continuation**: Parent integrates results and continues or delegates further
-
-**Key Architectural Points:**
-
-- **Statelessness**: Each subagent invocation is stateless—you cannot send follow-up messages to a running subagent
-- **Context Isolation**: Subagents don't see parent conversation; prompts must be self-contained
-- **Tool Restrictions**: Subagents can have different tool access (e.g., read-only reviewers vs. full-access builders)
-
-**Orchestrator Agent Template:**
-
-```yaml
----
-description: Central dispatch system for routing requests
-mode: primary
-model: anthropic/claude-haiku-4-20250514
-temperature: 0.1
-tools:
-  read: true
-  list: true
-  glob: true
-  grep: true
-  task: true
-  write: false
-  edit: false
-  bash: false
-permission:
-  edit: deny
-  bash:
-    "*": deny
----
-You are The Orchestrator. You NEVER execute tasks yourself. You ALWAYS delegate to subagents.
-## Agent Capability Map
-
-| Agent | Capability | Triggers |
-|-------|------------|----------|
-| @dev | Implementation | "create", "build", "implement" |
-| @review | Code review | "review", "audit", "check" |
-| @explore | Codebase search | "find", "locate", "search" |
-
-## Routing Rules
-1. Explicit requests: Obey direct agent mentions
-2. Research first: Chain @explore -> @dev for vague requests
-3. Parallelize: Use multiple task calls for independent tasks
-```
-
-#### **Concurrency and Best Practices**
-
-OpenCode supports **parallel subagent execution** by issuing multiple `task` tool calls in a single assistant message :
-
-```markdown
-### Delegation
-[Tool call 1: task(subagent_type="code-review", prompt="Review auth.ts for security...")]
-[Tool call 2: task(subagent_type="writer", prompt="Update API docs based on auth.ts...")]
-```
-
-**Best Practices for Concurrency:**
-
-1. **Parallelize Independent Tasks**: Delegate to multiple subagents simultaneously when tasks don't depend on each other (e.g., security review + documentation update)
-
-2. **Chain Dependent Tasks**: Use sequential delegation when later steps need earlier results:
-
-   ```
-   @explore (find files) → @dev (implement changes)
-   ```
-
-3. **Keep Chains Short**: Maximum 3 agents in a chain unless explicitly requested
-
-4. **Prompt Engineering for Subagents**:
-   - Include all necessary context in the prompt (they can't see parent history)
-   - Specify expected return format explicitly
-   - State clearly whether they should write code or just research
-
-5. **Avoid Git Conflicts**: Don't have multiple parallel subagents edit the same files simultaneously
-
-6. **Resource Awareness**: Each subagent consumes API tokens; monitor costs with parallel execution
-
-7. **Use Manifests for Long-Running Work**: For pipelines, use JSON manifests to track state across subagent invocations, enabling resume-from-failure
-
-8. **Mode Configuration**: Set `mode: subagent` for workers, `mode: primary` for orchestrators. Use `hidden: true` for internal helpers
-
-**Concurrency Limitations:**
-
-- Currently, subagent delegation is synchronous from the orchestrator's perspective—it waits for results
-- True "fire-and-forget" background execution is a requested feature (GitHub issue #5886) but not yet implemented
-- Each subagent runs in its own session; there's no shared state between concurrent subagents
-
----
-
-### 7. Key References
-
-| Resource | Description | Link |
-|----------|-------------|------|
-| **OpenCode Official Documentation** | Main docs portal | [https://opencode.ai/docs/](https://opencode.ai/docs/) |
-| **Agent Skills Reference** | SKILL.md specification and metadata | [https://opencode.ai/docs/skills/](https://opencode.ai/docs/skills/) |
-| **Custom Commands Guide** | Slash command creation and frontmatter | [https://opencode.ai/docs/commands/](https://opencode.ai/docs/commands/) |
-| **Agents Configuration** | Agent/subagent setup, modes, and permissions | [https://opencode.ai/docs/agents/](https://opencode.ai/docs/agents/) |
-| **TUI Commands Reference** | Built-in slash commands and keybindings | [https://opencode.ai/docs/tui/](https://opencode.ai/docs/tui/) |
-| **Rules & AGENTS.md** | Project rules and Claude compatibility | [https://opencode.ai/docs/rules/](https://opencode.ai/docs/rules/) |
-| **Orchestrator Guide** | Best practices for agent delegation and routing | [https://gist.github.com/gc-victor/1d3eeb46ddfda5257c08744972e0fc4c](https://gist.github.com/gc-victor/1d3eeb46ddfda5257c08744972e0fc4c) |
-| **GitHub Issue #6177** | Skill discovery path compatibility discussion | [https://github.com/anomalyco/opencode/issues/6177](https://github.com/anomalyco/opencode/issues/6177) |
-| **GitHub Issue #6985** | Claude commands/ compatibility request | [https://github.com/anomalyco/opencode/issues/6985](https://github.com/anomalyco/opencode/issues/6985) |
-| **Agent Skills Open Standard** | Cross-platform skill specification | [https://agentskills.io/](https://agentskills.io/) |
-| **OpenCode vs Claude Code Comparison** | Feature and architecture differences | [https://www.builder.io/blog/opencode-vs-claude-code](https://www.builder.io/blog/opencode-vs-claude-code) |
-| **OpenCode Deep Dive** | Internal architecture and tool system | [https://cefboud.com/posts/coding-agents-internals-opencode-deepdive/](https://cefboud.com/posts/coding-agents-internals-opencode-deepdive/) |
+- [OpenCode Homepage](https://opencode.ai/)
+- [OpenCode Documentation](https://opencode.ai/docs/)
+- [OpenCode GitHub Repository](https://github.com/anomalyco/opencode)
+- [Agent Skills Documentation](https://opencode.ai/docs/skills/)
+- [Agents Documentation](https://opencode.ai/docs/agents/)
+- [Commands Documentation](https://opencode.ai/docs/commands/)
+- [Custom Tools Documentation](https://opencode.ai/docs/custom-tools/)
+- [Plugins Documentation](https://opencode.ai/docs/plugins/)
+- [Tools Documentation](https://opencode.ai/docs/tools/)
+- [Config Documentation](https://opencode.ai/docs/config/)
+- [Rules Documentation](https://opencode.ai/docs/rules/)
+- [TUI Documentation](https://opencode.ai/docs/tui/)
+- [CLI Documentation](https://opencode.ai/docs/cli/)
+- [OpenCode Changelog](https://opencode.ai/changelog)
+- [GitHub Issue #6985 -- .claude/commands/ compatibility](https://github.com/anomalyco/opencode/issues/6985)
+- [GitHub Issue #12604 -- Disable Claude Code sync](https://github.com/anomalyco/opencode/issues/12604)
+- [GitHub Issue #3235 -- Skills support request](https://github.com/anomalyco/opencode/issues/3235)
+- [Release v1.0.190 -- Native skill tool introduced](https://github.com/anomalyco/opencode/releases/tag/v1.0.190)

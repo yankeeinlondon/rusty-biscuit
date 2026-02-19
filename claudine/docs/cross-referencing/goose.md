@@ -1,585 +1,300 @@
 ---
-prompt: |-
-  Do a deep dive on Goose Agentic CLI's support for both "slash commands", "skills", and "agents/subagents" (if supported).
-
-  - Describe the directory structure conventions for each standard (both User scope and Repo scope)
-  - What metadata is supported/used/required in:
-      - "skill" documents
-      - "slash command" documents
-      - "agent/subagent" documents
-  - Where does Goose Agentic CLI suggest that "scripts" or "executables" be saved
-  - What "built-in" slash commands come with Goose Agentic CLI
-  - What are some important differences that exist between Goose Agentic CLI's skills and Anthropic/Claude Code's skills?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - What are some important difference that exist between Goose Agentic CLI's slash commands and Anthropic/Claude Code's slash commands?
-      - Are there any common gotchas that a developer should be aware of? How can these gotcha's be navigated around?
-  - If agents/subagents are supported:
-      - What is the interaction model between the orchestrator and the subagent?
-      - What are some best practices in leveraging concurrency and subagents in Goose Agentic CLI?
-
-  ## What is a Skill?
-
- When we refer to "skills" we're talking about the _semi-standard_ which Anthropic created with a base `SKILL.md` file linking to a tree of other resources (docs, scripts) which allows the Agent to selectively choose what content to explore.
+homepage: https://block.github.io/goose/
+docs: https://block.github.io/goose/docs/
+skills: https://block.github.io/goose/docs/guides/context-engineering/using-skills/
+agent: https://block.github.io/goose/docs/guides/subagents/
+slash: https://block.github.io/goose/docs/guides/goose-cli-commands/
+scripts: null # No dedicated scripts directory; scripts live inside skill directories
 ---
 
+# Goose: Cross-Referencing
 
-Certainly! I will provide a deep dive into Goose Agentic CLI's support for slash commands, skills, and agents/subagents. The main contents of the report are as follows:
+Goose is an open-source, extensible AI agent by Block (formerly Square). It runs locally, supports any LLM provider, and is available as both a CLI and desktop application. Written primarily in Rust with a TypeScript desktop UI. Latest release: v1.25.0 (Feb 18, 2026).
 
-- **Directory Structure Conventions**: Covers user and repo scope directories for skills, slash commands, and agents.
-- **Metadata Specifications**: Details required/optional metadata fields for each document type.
-- **Script Storage Recommendations**: Provides guidance on executable file organization.
-- **Built-in Slash Commands**: Lists default commands and their purposes.
-- **Comparison with Claude Code**: Analyzes differences in skills and slash commands.
-- **Gotchas and Mitigations**: Addresses common issues and solutions.
-- **Subagent Interaction Model**: Explains orchestration patterns and concurrency.
-- **Best Practices**: Offers recommendations for optimal subagent usage.
+## Skills
 
--------
+Goose supports the **Agent Skills open standard** (directory with a `SKILL.md` file). Skills were introduced in **v1.16.0** (Dec 10, 2025) via [PR #5760](https://github.com/block/goose/pull/5760). The built-in Skills extension (enabled by default since v1.25.0; previously required the Summon extension) discovers skills at session startup and injects their names, paths, and descriptions into the system prompt. The agent then decides which skills to load based on the current task.
 
-# Comprehensive Deep Dive into Goose Agentic CLI: Slash Commands, Skills, and Agents/Subagents
+### Directory discovery (priority order)
 
-## 📋 1. Directory Structure Conventions
+Goose checks these directories in order; **later directories override earlier ones** when skill names conflict:
 
-Goose Agentic CLI implements a **hierarchical discovery system** for skills, slash commands, and agents across both user-scope (global) and repository-scope (local) directories. This structure enables both personal workflows across projects and project-specific customizations.
+| Priority | Scope | Directory |
+|----------|-------|-----------|
+| 1 (lowest) | User | `~/.claude/skills/` |
+| 2 | User | `~/.config/agents/skills/` |
+| 3 | User | `~/.config/goose/skills/` |
+| 4 | Repo | `./.claude/skills/` |
+| 5 | Repo | `./.goose/skills/` |
+| 6 (highest) | Repo | `./.agents/skills/` |
 
-### 1.1 Skills Directory Structure
+Discovery of `~/.claude/skills/` and `./.claude/skills/` means **Goose reads Claude Code's skill directories**. The `.agents/skills/` paths (cross-platform portable) were added in v1.18.0 (Dec 19, 2025).
 
-Skills in Goose follow the **Agent Skills open standard** originally developed by Anthropic, which uses a simple directory-based approach with a mandatory `SKILL.md` file. The discovery process checks directories in a specific order, with later directories overriding earlier ones if skill names conflict【turn0search0】.
+### Skill directory structure
 
-```mermaid
-flowchart TD
-    A[Skill Discovery Process] --> B[User Scope<br>Global Skills]
-    A --> C[Repo Scope<br>Project Skills]
-
-    subgraph B [User Scope Directories]
-        B1["~/.claude/skills/<br>Claude-compatible"]
-        B2["~/.config/agents/skills/<br>Cross-platform portable"]
-        B3["~/.config/goose/skills/<br>Goose-specific"]
-    end
-
-    subgraph C [Repo Scope Directories]
-        C1["./.claude/skills/<br>Claude-compatible"]
-        C2["./.goose/skills/<br>Goose-specific"]
-        C3["./.agents/skills/<br>Cross-platform portable"]
-    end
-
-    B --> D{Priority Order}
-    C --> D
-
-    D --> E["Higher priority override<br>lower priority directories"]
-    D --> F["Later directories override<br>earlier ones"]
+Minimal:
+```
+<skill-name>/
+  SKILL.md
 ```
 
-**Recommended Skill Structure**:
-
+Recommended:
 ```
-skill-name/
-├── SKILL.md              # Required: Main instructions with YAML frontmatter
-├── scripts/              # Optional: Executable code or utilities
-├── references/           # Optional: Supporting documentation
-├── assets/               # Optional: Templates, images, data files
-└── tests/                # Optional: Skill validation tests
+<skill-name>/
+  SKILL.md
+  scripts/       # Executable code or utilities
+  references/    # Supporting documentation
+  assets/        # Templates, images, data files
 ```
 
-### 1.2 Slash Commands Directory Structure
+### Skill metadata (frontmatter)
 
-Goose stores custom slash commands in a similar hierarchical system, though with **different base directories**. Commands are typically stored as executable files or configuration files in specific locations:
+`SKILL.md` begins with YAML frontmatter followed by Markdown content.
 
-- **User Scope**:
-    - `~/.config/goose/commands/` - Goose-specific commands
-    - `~/.config/agents/commands/` - Cross-platform portable commands
+**Required fields:**
 
-- **Repository Scope**:
-    - `./.goose/commands/` - Project-specific commands
-    - `./.agents/commands/` - Cross-platform portable commands
+| Field | Rules | Example |
+|-------|-------|---------|
+| `name` | 1-64 chars; lowercase alphanumeric + hyphens; no consecutive hyphens; must match directory name | `code-review` |
+| `description` | 1-1024 chars; describes WHAT it does AND WHEN to use it | `Review code for bugs and style. Use when the user asks for a code review` |
 
-### 1.3 Agents/Subagents Directory Structure
+**Optional fields:**
 
-Subagents are typically defined through **recipe files** (YAML format) rather than traditional directory structures. Recipe files follow a specific naming convention and placement:
+| Field | Description | Example |
+|-------|-------------|---------|
+| `license` | License name or file reference | `Apache-2.0` |
+| `compatibility` | Environment requirements (up to 500 chars) | `Requires python>=3.8, pdfplumber` |
+| `metadata` | Key-value pairs for custom properties | `version: "1.0"` |
+| `allowed-tools` | Space-delimited pre-approved tools (experimental) | `Bash(python:*) Read` |
 
-- **User Scope**:
-    - `~/.config/goose/recipes/` - Personal recipe library
-    - Environment variable: `GOOSE_RECIPE_PATH` can be set to custom directories
+### Activation model
 
-- **Repository Scope**:
-    - `./recipes/` - Project-specific recipes
-    - `./.goose/recipes/` - Alternative project location
+- **Automatic**: Goose activates skills when the user's request matches the skill's `description`.
+- **Explicit**: Users can say "Use the code-review skill" or ask "What skills are available?"
+- **Progressive disclosure**: Discovery (name + description) happens at session start; full content loads on demand.
 
-*Table: Directory Priority Order for Discovery*
+### Best practices (from official docs)
 
-| **Scope** | **Directory** | **Priority** | **Purpose** |
-|-----------|---------------|--------------|-------------|
-| **User** | `~/.claude/skills/` | 1 (lowest) | Claude-compatible skills |
-| **User** | `~/.config/agents/skills/` | 2 | Cross-platform skills |
-| **User** | `~/.config/goose/skills/` | 3 | Goose-specific skills |
-| **Repo** | `./.claude/skills/` | 4 | Claude-compatible project skills |
-| **Repo** | `./.goose/skills/` | 5 | Goose-specific project skills |
-| **Repo** | `./.agents/skills/` | 6 (highest) | Cross-platform project skills |
+- Follow the `<what it does>. Use when <specific triggers>` format for `description`.
+- Keep `SKILL.md` concise; move detailed content to reference files.
+- The `description` field is critical -- vague descriptions lead to unreliable activation.
+- Supporting files (scripts, references) are accessed via the Developer extension's file tools.
 
-## 📝 2. Metadata Specifications
+### Differences from Claude Code skills
 
-### 2.1 Skill Document Metadata
+| Aspect | Goose | Claude Code |
+|--------|-------|-------------|
+| Activation | Automatic based on description matching | Context-based with manual option |
+| Directory priority | Later directories win | Project overrides user |
+| Extra frontmatter | `allowed-tools`, `compatibility` | `description` only required |
+| Cross-platform dirs | `.agents/skills/`, `~/.config/agents/skills/` | Not checked |
+| Integration | Tightly coupled with recipes and subagents | Standalone knowledge units |
 
-Every `SKILL.md` file must contain **YAML frontmatter** with specific required and optional fields. This metadata enables Goose's discovery system and determines when a skill is activated【turn0search6】.
+## Slash Commands
 
-**Required Frontmatter Fields**:
+Goose has two categories of slash commands: **built-in session commands** and **recipe-based custom commands**.
+
+### Built-in slash commands (in interactive session)
+
+Available during `goose session` or `goose run --interactive`. Tab completion via `/` + `<Tab>`.
+
+| Command | Description |
+|---------|-------------|
+| `/?` or `/help` | Display help menu |
+| `/builtin <names>` | Add builtin extensions (comma-separated) |
+| `/clear` | Clear chat history |
+| `/compact` | Summarize conversation to reduce context |
+| `/endplan` | Exit plan mode, return to normal mode |
+| `/exit` or `/quit` | Exit the session |
+| `/extension <command>` | Add stdio extension |
+| `/mode <name>` | Set mode: auto, approve, chat, smart_approve |
+| `/plan <message>` | Enter plan mode with optional message |
+| `/prompt <n> [--info] [key=value...]` | Execute or get info about a prompt |
+| `/prompts [--extension <name>]` | List available prompts |
+| `/recipe [filepath]` | Generate recipe from conversation (saves as YAML) |
+| `/r` | Toggle full tool output display |
+| `/t` or `/t <name>` | Toggle/set theme (light, dark, ansi) |
+
+Slash commands were formalized in **v1.18.0** (Dec 19, 2025) via [PR #5858](https://github.com/block/goose/pull/5858).
+
+### Recipe-based custom slash commands
+
+Recipes can be registered as slash commands in `~/.config/goose/config.yaml`. Once registered, typing `/<command-name>` in the GUI or REPL executes that recipe. Documentation for this feature was added in v1.17.0 via [PR #6075](https://github.com/block/goose/pull/6075).
+
+### Differences from Claude Code slash commands
+
+| Aspect | Goose | Claude Code |
+|--------|-------|-------------|
+| Custom commands | Recipe YAML files registered in config | Markdown files in `.claude/commands/` |
+| Discovery | Config file + built-in | Directory-based (`commands/*.md`) |
+| Format | YAML with extensions, parameters, retry logic | Markdown with optional frontmatter |
+| Reads Claude dirs | No (does not check `.claude/commands/`) | N/A (native) |
+| Parameterization | `{{ variable }}` template syntax with typed params | `$ARGUMENTS` placeholder |
+
+## Agents / Subagents
+
+Goose uses the term **"subagents"** for isolated agent instances that execute tasks independently. Subagents were introduced in **v1.0.30** (Jun 27, 2025) via [PR #2797](https://github.com/block/goose/pull/2797). Subrecipes (YAML-defined subagents) were unified with ad-hoc subagents in v1.13.0-v1.14.0.
+
+### How subagents work
+
+- Subagents are **temporary, isolated Goose instances** that run tasks in their own session.
+- They **do not share** conversation history, memory, or state with the parent session.
+- Results are returned to the parent when the subagent completes.
+- Subagents **cannot spawn their own subagents** (prevents recursion; enforced since v1.14.0).
+
+### Triggering subagents
+
+**Autonomous creation** (default mode):
+- Goose autonomously decides when subagents are beneficial.
+- Requires `auto` permission mode (the default).
+- Disabled in `approve`, `smart_approve`, and `chat` modes.
+
+**Explicit creation** via natural language:
+- "Use a code reviewer to analyze this function for security issues"
+- "Create three HTML templates in parallel"
+- "Use a subagent with only the developer extension to refactor main.py"
+
+### Execution models
+
+| Pattern | Trigger keywords | Behavior |
+|---------|-----------------|----------|
+| Sequential (default) | "first...then", "after" | Tasks run one after another |
+| Parallel | "parallel", "simultaneously", "concurrently", "at the same time" | Tasks run simultaneously |
+
+Failed or timed-out subagents produce no output. In parallel execution, only successful results are returned.
+
+### Configuration
+
+| Setting | Default | Override |
+|---------|---------|---------|
+| Max turns | 25 | `GOOSE_SUBAGENT_MAX_TURNS` env var or natural language |
+| Timeout | 5 minutes | Natural language ("with 20-minute timeout") |
+| Extensions | Inherited from parent | Natural language ("with only developer extension") |
+| Return mode | Full details | "Just give me the summary" |
+
+### Subrecipes (YAML-defined subagents)
+
+Subrecipes are YAML recipe files referenced by a parent recipe. They provide reusable, parameterized subagent definitions.
 
 ```yaml
----
-name: skill-name                    # 1-64 chars, lowercase alphanumeric + hyphens
-description: What this skill does and when to use it  # 1-1024 chars
----
+sub_recipes:
+  - name: "code-reviewer"
+    path: "./review.yaml"
+    values:
+      focus_area: "security"
 ```
 
-**Optional Frontmatter Fields**:
+Key properties of subrecipes:
+- Complete isolation: no shared history, memory, or state.
+- Cannot nest (subrecipes cannot define their own subrecipes).
+- Parameters via `{{ variable }}` template syntax.
+- Pre-set `values` take precedence over context-derived parameters.
+- Parallel execution available for independent subrecipes.
 
-```yaml
----
-license: Apache-2.0                 # License name or reference
-metadata:                           # Key-value pairs for custom properties
-  author: your-name
-  version: "1.0"
-  tags: [deployment, code-review]
-compatibility: Requires python>=3.8, pdfplumber  # Environment requirements
-allowed-tools: Bash(python:*) Read  # Pre-approved tools (experimental)
----
+### Differences from Claude Code
+
+| Aspect | Goose | Claude Code |
+|--------|-------|-------------|
+| Vernacular | "Subagent" / "subrecipe" | "Sub-agent" via Task tool |
+| Definition | Natural language or YAML recipe files | Markdown files in `.claude/agents/` |
+| Triggering | Autonomous (in auto mode) or explicit | Explicit via Task tool only |
+| Isolation | Full: separate session, no shared history | Task tool returns result to orchestrator |
+| Configuration | Env vars, natural language, recipe YAML | Agent markdown with YAML frontmatter |
+| Nesting | Prohibited (single level) | Allowed (can nest Task calls) |
+| Parallel execution | Native keyword triggers | Via concurrent Task tool calls |
+
+## Scripts
+
+Goose does **not** have a dedicated global scripts directory. Scripts are stored inside skill directories.
+
+### Script locations
+
+| Scope | Location | Purpose |
+|-------|----------|---------|
+| Inside a skill | `<skill-name>/scripts/` | Skill-specific executables and utilities |
+| Project | `./.goose/scripts/` (convention, not enforced) | Project-specific utilities |
+
+The official docs recommend placing executable scripts alongside the skill that uses them:
+
 ```
-
-**Field Specifications**:
-
-| **Field** | **Required** | **Rules** | **Example** |
-|-----------|--------------|-----------|-------------|
-| `name` | Yes | 1-64 chars, lowercase alphanumeric + hyphens, no consecutive hyphens, must match directory name | `pdf-processing` |
-| `description` | Yes | 1-1024 chars, must describe WHAT it does AND WHEN to use it | `Extract text and tables from PDF files. Use when working with PDF files or when the user mentions PDFs` |
-| `license` | No | License name or reference to bundled file | `MIT` |
-| `metadata` | No | Key-value pairs for custom properties | `version: "1.0"` |
-| `compatibility` | No | 1-500 chars, environment requirements | `Requires python>=3.8, pdfplumber` |
-| `allowed-tools` | No | Space-delimited list of pre-approved tools | `Bash(python:*) Read` |
-
-**Name Field Rules**:
-
-- **Valid names**: `pdf-processing`, `data-analysis`, `code-review`, `my-skill-v2`
-- **Invalid names**: `PDF-Processing` (uppercase), `-pdf-processing` (starts with hyphen), `pdf--processing` (consecutive hyphens), `pdf_processing` (underscores)
-
-### 2.2 Slash Command Document Metadata
-
-Slash commands in Goose are typically implemented as **executable scripts** or **MCP tools** rather than markdown files. The metadata is derived from the command's implementation:
-
-**For Executable Scripts**:
-
-- **Shebang line**: Specifies the interpreter (e.g., `#!/usr/bin/env python3`)
-- **Help documentation**: Embedded comments or separate documentation files
-- **Command registration**: Through Goose's configuration system
-
-**For MCP-based Commands**:
-
-- **Tool definition**: Includes name, description, and input schema
-- **Extension configuration**: Through `goose configure` or config files
-
-```yaml
-# Example MCP tool definition for slash command
-tools:
-  - name: deploy
-    description: "Deploy application to staging environment"
-    inputSchema:
-      type: object
-      properties:
-        environment:
-          type: string
-          enum: [staging, production]
-          description: "Target deployment environment"
-      required: [environment]
-```
-
-### 2.3 Agent/Subagent Document Metadata
-
-Subagents are defined through **recipe files** with comprehensive metadata:
-
-**Required Recipe Fields**:
-
-```yaml
-id: subagent-id                    # Unique identifier
-version: 1.0.0                     # Semantic version
-title: "Human Readable Title"      # Display name
-description: "What this subagent does"
-```
-
-**Optional Recipe Fields**:
-
-```yaml
-instructions: |                    # Detailed instructions for subagent
-  You are a specialized assistant for...
-activities:                        # High-level activity descriptions
-  - Analyze code structure
-  - Check for security issues
-extensions:                        # Extension configurations
-  - type: builtin
-    name: developer
-    timeout: 300
-parameters:                        # Input parameter definitions
-  - key: focus_area
-    input_type: string
-    requirement: optional
-    description: "Specific area to focus on"
-```
-
-*Table: Metadata Comparison Across Document Types*
-
-| **Metadata Field** | **Skills** | **Slash Commands** | **Subagents** |
-|--------------------|------------|--------------------|---------------|
-| **Name/ID** | Required (`name`) | Derived from executable/tool name | Required (`id`) |
-| **Description** | Required | From help text/tool definition | Required |
-| **Version** | Optional (`metadata.version`) | Not typically used | Required (`version`) |
-| **Author/License** | Optional | Optional | Optional |
-| **Compatibility** | Optional | From environment requirements | From extension requirements |
-| **Parameters** | Not applicable | Command-line arguments | Defined in `parameters` |
-| **Extensions** | Not applicable | MCP tool definitions | Defined in `extensions` |
-
-## 📂 3. Script Storage Recommendations
-
-Goose provides specific guidance on where to store **executable scripts** and supporting files for skills and commands:
-
-### 3.1 Skill-Related Scripts
-
-**Scripts Directory Within Skills**:
-
-- **Location**: `skill-name/scripts/`
-- **Purpose**: Store executable code, utilities, or helper scripts referenced by the skill
-- **Example**: A deployment skill might include scripts for health checks, rollback procedures, etc.
-
-```bash
-# Example skill structure with scripts
 deployment-skill/
-├── SKILL.md
-└── scripts/
-    ├── health-check.sh
-    ├── rollback.sh
-    └── notify.py
+  SKILL.md
+  scripts/
+    health-check.sh
+    rollback.sh
+    notify.py
 ```
 
-### 3.2 Global Script Locations
-
-For **reusable scripts** across multiple skills or commands:
-
-- **User scripts**: `~/.config/goose/scripts/`
-- **Project scripts**: `./.goose/scripts/` or `./scripts/`
-- **Environment variables**: Can be referenced in skills using `{{SCRIPT_DIR}}`
-
-### 3.3 Slash Command Executables
-
-Custom slash commands should be stored in:
-
-- **User commands**: `~/.config/goose/commands/`
-- **Project commands**: `./.goose/commands/`
-- **System PATH**: For globally available commands
-
-**Best Practices**:
-
-- **Make scripts executable**: `chmod +x script.sh`
-- **Use shebang lines**: Specify interpreter (`#!/usr/bin/env python3`)
-- **Include help documentation**: Add comments or separate `.md` files
-- **Organize by purpose**: Group related scripts in subdirectories
-
-## ⚙️ 4. Built-in Slash Commands
-
-Goose includes several **built-in slash commands** that provide essential functionality during sessions. These are available without additional configuration【turn0search9】.
-
-| **Command** | **Description** | **Usage Example** |
-|-------------|-----------------|------------------|
-| `/prompts` | List all available prompts in current session | `/prompts` |
-| `/prompt` | Use a specific prompt by name | `/prompt code-review` |
-| `/compact` | Compact conversation history to reduce token usage | `/compact` |
-| `/clear` | Clear entire conversation history | `/clear` |
-| `/session` | Start or resume interactive chat sessions | `goose session` |
-| `/configure` | Configure goose settings | `goose configure` |
-| `/info` | Show goose information including version and config | `goose info` |
-| `/update` | Update goose to newer version | `goose update` |
-| `/completion` | Generate shell completion scripts | `goose completion bash` |
-
-**Extension-Related Commands**:
-
-- `/extension` - Manage extensions (list, enable, disable)
-- `/mcp` - Configure MCP servers and tools
-- `/recipe` - Execute or manage recipes
-
-**Session Management Commands**:
-
-- `/fork` - Create a new duplicate session with copied history
-- `/resume` - Resume a previous session by ID
-- `/name` - Give a human-readable name to current session
-
-## 🔍 5. Comparison with Anthropic/Claude Code's Skills and Slash Commands
-
-### 5.1 Skills Comparison
-
-**Similarities**:
-
-- Both use the **Agent Skills open standard** with `SKILL.md` files and YAML frontmatter【turn0search7】
-- Both implement **hierarchical discovery** across global and project directories
-- Both support **progressive disclosure** (discovery → activation → full loading)【turn0search6】
-- Both allow **cross-skill references** using `[See: skill-name]` notation【turn0search7】
-
-**Key Differences**:
-
-| **Aspect** | **Goose** | **Claude Code** |
-|------------|-----------|-----------------|
-| **Primary Use Case** | Workflow automation and task execution | Knowledge reference and guidance |
-| **Activation Model** | Automatic activation based on description matching | Manual activation through explicit commands |
-| **Integration** | Tightly integrated with recipes and subagents | Primarily standalone knowledge units |
-| **Execution Model** | Can execute code and run commands | Focus on informational guidance |
-| **Tool Access** | Direct access to extensions and MCP tools | Limited tool access through Claude Code's capabilities |
-
-**Important Gotchas and Mitigations**:
-
-- **Gotcha**: **Description sensitivity** - Goose's automatic activation relies heavily on the `description` field, making it more sensitive to vague descriptions than Claude Code.
-    - **Mitigation**: Follow the `<what it does>. Use when <specific triggers>` format with concrete examples and trigger words【turn0search6】
-
-- **Gotcha**: **Token budget differences** - Goose may load skills more aggressively, potentially exceeding token limits faster than Claude Code.
-    - **Mitigation**: Keep `SKILL.md` under 500 lines and move detailed content to reference files【turn0search6】
-
-- **Gotcha**: **Tool execution expectations** - Goose skills can execute code, while Claude Code skills are primarily informational.
-    - **Mitigation**: Clearly document which skills include executable code and which are informational-only
-
-- **Gotcha**: **Recipe interaction** - Goose skills can be integrated with recipes in ways not possible in Claude Code.
-    - **Mitigation**: Design skills to work both standalone and within recipe contexts
-
-### 5.2 Slash Commands Comparison
-
-**Similarities**:
-
-- Both use **command-line interfaces** for interaction
-- Both support **parameter passing** and options
-- Both implement **help systems** and documentation
-
-**Key Differences**:
-
-| **Aspect** | **Goose** | **Claude Code** |
-|------------|-----------|-----------------|
-| **Command Registration** | Through MCP servers and configuration | Through Claude Code's command system |
-| **Extensibility** | Highly extensible through MCP | More limited extension model |
-| **Integration with Skills** | Tight integration with skills and recipes | Less integrated with skills |
-| **Custom Commands** | Full support for custom commands via MCP | Limited support for custom commands |
-| **Permission Model** | Configurable permission modes | More restrictive permission model |
-
-**Important Gotchas and Mitigations**:
-
-- **Gotcha**: **Command discovery differences** - Goose's slash commands are discovered through MCP servers, while Claude Code's are built-in.
-    - **Mitigation**: Use `goose configure` to properly register MCP-based commands and ensure they're discoverable
-
-- **Gotcha**: **Parameter handling variations** - Goose commands may use different parameter naming conventions than Claude Code.
-    - **Mitigation**: Follow Goose's flag naming conventions (`--session-id`, `-n, --name`, etc.)【turn0search1】
-
-- **Gotcha**: **Permission requirements** - Goose's autonomous mode may execute commands without approval, unlike Claude Code.
-    - **Mitigation**: Use permission modes (manual, smart approval) for sensitive operations【turn0search10】
-
-- **Gotcha**: **Output format differences** - Goose commands may return structured output differently than Claude Code.
-    - **Mitigation**: Use the `-f, --format` option to specify desired output format (JSON, Markdown, etc.)【turn0search1】
-
-## 🤖 6. Agents/Subagents Support
-
-Goose provides **robust support for subagents** with a flexible interaction model between orchestrators and subagents. This enables parallel task execution, specialized processing, and context isolation.
-
-### 6.1 Subagent Interaction Model
-
-The interaction model follows a **hierarchical delegation pattern** where the main orchestrator spawns and manages subagent instances:
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant Orchestrator as Main Agent
-    participant Subagent1 as Subagent 1
-    participant Subagent2 as Subagent 2
-
-    User->>Orchestrator: Request task with parallel execution
-    Orchestrator->>Orchestrator: Analyze task requirements
-    Orchestrator->>Subagent1: Spawn with instructions
-    Orchestrator->>Subagent2: Spawn with instructions
-    Subagent1->>Subagent1: Execute specialized task
-    Subagent2->>Subagent2: Execute specialized task
-    Subagent1-->>Orchestrator: Return results
-    Subagent2-->>Orchestrator: Return results
-    Orchestrator->>Orchestrator: Aggregate results
-    Orchestrator-->>User: Present consolidated output
-```
-
-**Autonomous Subagent Creation**:
-
-- Goose can **autonomously decide** to use subagents when beneficial
-- Requires **autonomous permission mode** (default)
-- Disabled in manual approval, smart approval, and chat-only modes【turn0search19】
-
-**Explicit Subagent Creation**:
-
-- Users can **explicitly request** subagents through natural language
-- Examples:
-    - "Use a code reviewer to analyze this function for security issues"
-    - "Create three HTML templates in parallel"
-    - "Research quantum computing developments and summarize findings"
-
-### 6.2 Internal vs. External Subagents
-
-**Internal Subagents**:
-
-- Spawn **Goose instances** using current session's context and extensions
-- Configured through **direct prompts** or **recipe files**
-- Faster startup and lower overhead
-
-**External Subagents**:
-
-- Independent processes with separate configurations
-- Useful for **strict isolation** or **different permission models**
-- Higher overhead but greater separation
-
-### 6.3 Concurrency Models
-
-Goose supports **two primary concurrency patterns** for subagent execution:
-
-| **Pattern** | **Description** | **Trigger Keywords** | **Example** |
-|-------------|-----------------|---------------------|-------------|
-| **Sequential** | Tasks execute one after another | "first...then", "after", "then" | "First analyze the code, then generate documentation" |
-| **Parallel** | Tasks execute simultaneously | "parallel", "simultaneously", "at the same time", "concurrently" | "Create three HTML templates in parallel" |
-
-**Hybrid Approaches**:
-
-- Can mix sequential and parallel execution in complex workflows
-- Example: "First run these two subagents in parallel, then process their results with a third subagent"
-
-**Failure Handling**:
-
-- **Sequential execution**: Stops on first failure
-- **Parallel execution**: Continues with successful tasks; failed tasks return no output
-- **Timeout**: Default 5-minute timeout per subagent; configurable
-
-## 🚀 7. Best Practices for Subagent Usage
-
-### 7.1 Subagent Design Patterns
-
-**1. Specialized Processing**:
-
-- Create subagents for **specific domains** (security, performance, documentation)
-- Use **recipes** to define specialized instructions and extension access
-- Example: Code reviewer subagent with only developer extension【turn0search19】
-
-**2. Parallel Task Execution**:
-
-- Use for **embarrassingly parallel** tasks (generating multiple files, testing different scenarios)
-- Implement **result aggregation** in orchestrator
-- Consider **timeout handling** for long-running tasks
-
-**3. Hierarchical Delegation**:
-
-- Create **multi-level subagent hierarchies** for complex workflows
-- Use **sub-recipes** to define reusable subagent configurations
-- Example: Orchestrator → Research subagents → Analysis subagents
-
-### 7.2 Concurrency Best Practices
-
-**1. Task Granularity**:
-
-- **Balance granularity** between too many small tasks (overhead) and too few large tasks (limited parallelism)
-- Ideal task size: **10-30 seconds** of execution time
-- Monitor execution times to optimize task sizing
-
-**2. Resource Management**:
-
-- Be aware of **rate limits** on external APIs and services
-- Implement **backoff strategies** for failed tasks
-- Consider **caching** results for expensive operations
-
-**3. Error Handling**:
-
-- Design **fault-tolerant workflows** that can handle partial failures
-- Implement **retry logic** for transient failures
-- Use **circuit breakers** for consistently failing tasks
-
-**4. Result Aggregation**:
-
-- Design **clear aggregation strategies** before spawning subagents
-- Consider **intermediate results** for long-running workflows
-- Implement **progress reporting** for user feedback
-
-### 7.3 Permission and Security Considerations
-
-**1. Permission Modes**:
-
-- Use **autonomous mode** for trusted environments
-- Use **manual approval** for sensitive operations
-- Use **smart approval** for balanced approach (approve per extension/tool)
-
-**2. Extension Access**:
-
-- **Restrict extension access** for subagents when possible
-- Use **recipe configurations** to limit tool access
-- Example: Create subagent with only developer extension for code refactoring【turn0search19】
-
-**3. Data Isolation**:
-
-- Use **separate working directories** for file operations
-- Implement **proper cleanup** for temporary files
-- Consider **sand boxing** for untrusted code execution
-
-### 4. Monitoring and Debugging
-
-**1. Execution Tracking**:
-
-- Use **structured logging** for subagent execution
-- Monitor **execution times** and resource usage
-- Track **success/failure rates** for optimization
-
-**2. Debugging**:
-
-- Use **verbose mode** (`-v, --verbose`) for detailed execution information【turn0search1】
-- Implement **checkpointing** for long-running workflows
-- Use **session names** for better organization and tracking
-
-**3. Performance Optimization**:
-
-- Profile subagent execution to identify bottlenecks
-- Consider **caching strategies** for expensive operations
-- Optimize **context passing** between orchestrator and subagents
-
-## 📊 8. Comparison Summary and Quick Reference
-
-*Table: Goose vs. Claude Code Feature Comparison*
-
-| **Feature** | **Goose** | **Claude Code** |
-|-------------|-----------|-----------------|
-| **Skills Standard** | Agent Skills open standard | Agent Skills open standard |
-| **Skill Activation** | Automatic based on description | Manual through commands |
-| **Recipe Support** | Native support with parameter passing | Limited support |
-| **Subagents** | Full support with parallel execution | Limited support |
-| **Slash Commands** | Built-in + MCP-extensible | Built-in only |
-| **Permission Models** | Autonomous, manual, smart approval, chat-only | More restrictive |
-| **MCP Integration** | Native MCP server support | Through Claude Code |
-| **CLI First** | Yes (primary interface) | No (GUI first) |
-| **Cross-platform** | Yes (Linux, macOS, Windows) | Yes (through Electron) |
-
-*Table: Metadata Quick Reference*
-
-| **Document Type** | **Required Metadata** | **Optional Metadata** | **Key Fields** |
-|------------------|------------------------|-----------------------|----------------|
-| **Skills** | `name`, `description` | `license`, `metadata`, `compatibility`, `allowed-tools` | `name` (1-64 chars, lowercase, hyphens) |
-| **Slash Commands** | None (from implementation) | Help text, parameter definitions | Command name, description |
-| **Subagents** | `id`, `version`, `title`, `description` | `instructions`, `activities`, `extensions`, `parameters` | `id` (unique identifier), `version` (semantic versioning) |
-
-## ✅ 9. Conclusion and Recommendations
-
-Goose Agentic CLI provides a **comprehensive and flexible system** for managing skills, slash commands, and subagents that goes beyond simple code assistance to enable full workflow automation. Its key strengths include:
-
-1. **Standards-based approach** - Using the Agent Skills open standard ensures compatibility and portability across different AI coding agents【turn0search7】
-
-2. **Hierarchical discovery** - The well-designed directory structure enables both personal and project-specific customizations with clear priority rules
-
-3. **Robust subagent system** - Support for parallel execution, specialized processing, and hierarchical delegation enables complex automation workflows
-
-4. **Extensible architecture** - Integration with MCP servers and a rich extension ecosystem provides almost limitless capabilities
-
-**Recommendations for Developers**:
-
-- **Start with skills** - Begin by creating skills for repetitive workflows and specialized knowledge domains
-- **Leverage recipes** - Use recipes to parameterize and reuse common subagent configurations
-- **Design for automation** - Think beyond single-use prompts to create reusable, composable automation components
-- **Plan for concurrency** - Design workflows that can take advantage of parallel subagent execution where appropriate
-- **Monitor and iterate** - Use Goose's logging and session management to optimize your workflows over time
-
-The primary differences from Claude Code—automatic skill activation, native subagent support, and deeper CLI integration—make Goose particularly well-suited for **automation-focused workflows** and **development environments** where reproducibility and scalability are important. By following the conventions and best practices outlined in this deep dive, developers can create powerful, reusable AI automation systems that significantly boost productivity.
+Best practices:
+- Make scripts executable (`chmod +x`).
+- Use shebang lines (`#!/usr/bin/env python3`).
+- Include help documentation in comments or separate `.md` files.
+
+## Context Files (Goosehints)
+
+While not directly equivalent to Claude Code skills or commands, Goose has its own context file system that provides persistent instructions:
+
+| File | Scope | Purpose |
+|------|-------|---------|
+| `AGENTS.md` | Repo root | Project context (checked first by default) |
+| `.goosehints` | Directory hierarchy | Project/directory-specific hints |
+| `~/.config/goose/.goosehints` | Global | Global hints for all sessions |
+
+Configuration:
+- `CONTEXT_FILE_NAMES` env var overrides the default `["AGENTS.md", ".goosehints"]`.
+- `.goosehints` files are combined hierarchically from repo root to current directory.
+- `@file.md` syntax in hints auto-includes file content; plain references are optional.
+- Requires the Developer extension to be enabled.
+
+## Recipes (Reusable Workflows)
+
+Recipes are Goose's primary reusable workflow mechanism. Introduced in **v1.0.18** (Apr 16, 2025) via [PR #2115](https://github.com/block/goose/pull/2115).
+
+### Recipe format
+
+YAML files (`.yaml` only; `.yml` not supported by CLI).
+
+**Required fields:**
+- `title`: Short descriptive name.
+- `description`: Detailed explanation.
+- At least one of `instructions` or `prompt`.
+
+**Optional fields:**
+
+| Field | Purpose |
+|-------|---------|
+| `version` | Format version (default: `"1.0.0"`) |
+| `extensions` | MCP server/extension requirements |
+| `parameters` | Dynamic input definitions with `{{ variable }}` syntax |
+| `settings` | Provider, model, temperature, max_turns overrides |
+| `response` | JSON schema for structured output validation |
+| `retry` | Automatic retry with shell command validation |
+| `sub_recipes` | References to subrecipe files |
+| `activities` | Desktop-only clickable buttons and info boxes |
+
+### Recipe locations
+
+- `GOOSE_RECIPE_PATH` env var (custom directories).
+- `GOOSE_RECIPE_GITHUB_REPO` (GitHub repository).
+- Current working directory.
+- `~/.config/goose/` (saved recipes).
+
+## Sources
+
+- [Goose Homepage](https://block.github.io/goose/)
+- [Goose GitHub Repository](https://github.com/block/goose)
+- [Using Skills](https://block.github.io/goose/docs/guides/context-engineering/using-skills/)
+- [Subagents Guide](https://block.github.io/goose/docs/guides/subagents/)
+- [CLI Commands Reference](https://block.github.io/goose/docs/guides/goose-cli-commands/)
+- [Recipe Reference Guide](https://block.github.io/goose/docs/guides/recipes/recipe-reference/)
+- [Sub-Recipes for Specialized Tasks](https://block.github.io/goose/docs/guides/recipes/subrecipes)
+- [Shareable Recipes](https://block.github.io/goose/docs/guides/recipes/session-recipes/)
+- [Configuration Files](https://block.github.io/goose/docs/guides/config-files/)
+- [Context Engineering](https://block.github.io/goose/docs/guides/context-engineering/)
+- [Providing Hints to Goose](https://block.github.io/goose/docs/guides/context-engineering/using-goosehints)
+- [3 Principles for Designing Agent Skills (Block Engineering Blog)](https://engineering.block.xyz/blog/3-principles-for-designing-agent-skills)
+- [GitHub Discussion #5761: Implement skills.md](https://github.com/block/goose/discussions/5761)
+- [v1.16.0 Release Notes (Skills introduced)](https://github.com/block/goose/releases/tag/v1.16.0)
+- [v1.0.30 Release Notes (Subagents introduced)](https://github.com/block/goose/releases/tag/v1.0.30)
+- [v1.0.18 Release Notes (Recipes introduced)](https://github.com/block/goose/releases/tag/v1.0.18)
+- [v1.18.0 Release Notes (Slash commands formalized)](https://github.com/block/goose/releases/tag/v1.18.0)
