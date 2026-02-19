@@ -31,7 +31,8 @@ The final step is then to create a subagent to review the design document at @cl
 - the Review Agent will be passed the file path to the design document
 - and asked to follow the instructions defined in `### Subagent Review`
 
-Once the review is complete you are done. You should tell the user to look at the result in @claudine/docs/unified-events.md
+Once the review is complete you are done. You should tell the user to look at the result in @claudine/docs/unified-events.md and the review suggestions in @claudine/docs/unified-events-review.md
+
 
 ### Subagent Design
 
@@ -97,4 +98,16 @@ You must return to the orchestrator who called you:
 - your task is to review the design in two passes:
     - Pass 1: Idiomatic Rust and Ergonomics
         - you will look over all design elements looking for ways in which the code blocks could be more ergonomic
-        - you will make sure
+        - you will make sure that the individual/vendor specific design elements fluidly map into the unified variant in both directions
+        - you will enforce that all design elements are using idiomatic Rust
+        - if you see an obvious ways to improve performance without adding much complexity make the adjustment
+    - Pass 2: Review of details
+        - you will iterate over all docs found in @claudine/docs/hooks
+        - each document has detailed information about a specific vendor/Agentic CLI
+        - your task is to validate that these details are aligned to the design
+- After each pass you should:
+    - inform the orchestrator of your progress as a summary of the changes you made
+    - update the document @claudine/docs/unified-events-review.md with all review suggestions
+- After both reviews are complete you should tell the orchestrator that the review has completed and point to the review recommendations document.
+
+
