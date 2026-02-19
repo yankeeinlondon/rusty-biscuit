@@ -1280,10 +1280,12 @@ pub fn write_terminal<W: std::io::Write>(
                         &text,
                         style,
                         emit_italic,
-                        in_strikethrough,
-                        in_mark,
-                        in_emphasis,
-                        in_strong,
+                        TableCellInlineState {
+                            in_strikethrough,
+                            in_mark,
+                            in_emphasis,
+                            in_strong,
+                        },
                         &table_terminal,
                     ));
                 } else {
@@ -1662,14 +1664,19 @@ fn render_table_link(
     }
 }
 
-fn render_table_cell_text(
-    text: &str,
-    style: Style,
-    emit_italic: bool,
+#[derive(Debug, Clone, Copy)]
+struct TableCellInlineState {
     in_strikethrough: bool,
     in_mark: bool,
     in_emphasis: bool,
     in_strong: bool,
+}
+
+fn render_table_cell_text(
+    text: &str,
+    style: Style,
+    emit_italic: bool,
+    state: TableCellInlineState,
     terminal: &Terminal,
 ) -> String {
     if text.is_empty() {
@@ -1677,31 +1684,31 @@ fn render_table_cell_text(
     }
 
     // Keep mark/highlight rendering on Darkmatter's style path.
-    if in_mark {
-        return emit_prose_text(text, style, emit_italic, in_strikethrough, true, None);
+    if state.in_mark {
+        return emit_prose_text(text, style, emit_italic, state.in_strikethrough, true, None);
     }
 
     // Use Prose selectively for semantic inline style serialization in table cells.
     // This keeps table layout logic in biscuit-terminal while Darkmatter owns markdown parsing.
-    if in_strong || in_emphasis || in_strikethrough {
+    if state.in_strong || state.in_emphasis || state.in_strikethrough {
         let mut serialized = String::new();
-        if in_strong {
+        if state.in_strong {
             serialized.push_str("<bold>");
         }
-        if in_emphasis && emit_italic {
+        if state.in_emphasis && emit_italic {
             serialized.push_str("<italic>");
         }
-        if in_strikethrough {
+        if state.in_strikethrough {
             serialized.push_str("<strikethrough>");
         }
         serialized.push_str(text);
-        if in_strikethrough {
+        if state.in_strikethrough {
             serialized.push_str("</strikethrough>");
         }
-        if in_emphasis && emit_italic {
+        if state.in_emphasis && emit_italic {
             serialized.push_str("</italic>");
         }
-        if in_strong {
+        if state.in_strong {
             serialized.push_str("</bold>");
         }
 
@@ -1713,7 +1720,14 @@ fn render_table_cell_text(
         }
     }
 
-    emit_prose_text(text, style, emit_italic, in_strikethrough, false, None)
+    emit_prose_text(
+        text,
+        style,
+        emit_italic,
+        state.in_strikethrough,
+        false,
+        None,
+    )
 }
 
 /// Renders a buffered markdown table via `biscuit-terminal::Table`.

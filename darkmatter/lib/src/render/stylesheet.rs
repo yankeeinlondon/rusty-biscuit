@@ -1518,8 +1518,7 @@ fn is_json5_identifier(value: &str) -> bool {
 }
 
 fn is_valid_property_name(name: &str) -> bool {
-    if name.starts_with("--") {
-        let rest = &name[2..];
+    if let Some(rest) = name.strip_prefix("--") {
         return !rest.is_empty() && rest.chars().all(|ch| is_css_ident_char(ch, true));
     }
 

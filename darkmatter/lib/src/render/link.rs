@@ -1407,7 +1407,7 @@ fn base64_encode(input: &[u8]) -> String {
 
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     let input = input.trim();
-    if input.is_empty() || input.len() % 4 != 0 {
+    if input.is_empty() || !input.len().is_multiple_of(4) {
         return None;
     }
 

@@ -1769,8 +1769,8 @@ mod tests {
 
         // The blank `>` line may gain a trailing space from fix_blockquote_line,
         // so check for both forms.
-        let has_separator = cleaned.contains(">\n> — Wikipedia")
-            || cleaned.contains("> \n> — Wikipedia");
+        let has_separator =
+            cleaned.contains(">\n> — Wikipedia") || cleaned.contains("> \n> — Wikipedia");
         assert!(
             has_separator,
             "Blank blockquote separator before attribution should be preserved, got:\n{:?}",

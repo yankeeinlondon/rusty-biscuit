@@ -81,7 +81,7 @@ pub enum ImageRefError {
 }
 
 /// Browser image decoding hint values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageDecoding {
     /// Synchronously decode.
@@ -89,13 +89,8 @@ pub enum ImageDecoding {
     /// Asynchronously decode.
     Async,
     /// Let the browser decide.
+    #[default]
     Auto,
-}
-
-impl Default for ImageDecoding {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl fmt::Display for ImageDecoding {
@@ -132,7 +127,7 @@ impl TryFrom<String> for ImageDecoding {
 }
 
 /// Browser image fetch priority hints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FetchPriority {
     /// High fetch priority.
@@ -140,13 +135,8 @@ pub enum FetchPriority {
     /// Low fetch priority.
     Low,
     /// Automatic fetch priority.
+    #[default]
     Auto,
-}
-
-impl Default for FetchPriority {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl fmt::Display for FetchPriority {
@@ -183,19 +173,14 @@ impl TryFrom<String> for FetchPriority {
 }
 
 /// Browser image loading strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageLoading {
     /// Eager loading.
+    #[default]
     Eager,
     /// Lazy loading.
     Lazy,
-}
-
-impl Default for ImageLoading {
-    fn default() -> Self {
-        Self::Eager
-    }
 }
 
 impl fmt::Display for ImageLoading {
@@ -1604,7 +1589,7 @@ fn base64_encode(input: &[u8]) -> String {
 
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     let input = input.trim();
-    if input.is_empty() || input.len() % 4 != 0 {
+    if input.is_empty() || !input.len().is_multiple_of(4) {
         return None;
     }
 
