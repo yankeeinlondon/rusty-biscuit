@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Detected once at session start via `sniff::detect_with_config`
 /// and cached for the session lifetime. Attached to every `EventMeta`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EnvironmentContext {
     /// Operating system information.
     #[serde(default)]
@@ -30,7 +30,7 @@ pub struct EnvironmentContext {
 }
 
 /// Operating system identification.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OsContext {
     /// OS family: "macos", "linux", "windows", etc.
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct OsContext {
 }
 
 /// Hardware summary relevant to event handling.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HardwareContext {
     /// CPU architecture: "x86_64", "aarch64", etc.
     #[serde(default)]
@@ -87,7 +87,7 @@ pub struct HardwareContext {
 }
 
 /// Git repository state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitContext {
     /// Absolute path to the repository root.
     pub repo_root: PathBuf,
@@ -151,7 +151,7 @@ pub struct GitContext {
 }
 
 /// Project and monorepo structure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoContext {
     /// Whether this project is a monorepo.
     #[serde(default)]

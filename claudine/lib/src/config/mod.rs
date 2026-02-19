@@ -7,6 +7,7 @@ mod goose;
 mod kimicode;
 mod opencode;
 mod qwen;
+mod roo;
 mod trait_def;
 
 pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
@@ -34,6 +35,7 @@ use goose::GooseConfigurator;
 use kimicode::KimiCodeConfigurator;
 use opencode::OpenCodeConfigurator;
 use qwen::QwenConfigurator;
+use roo::RooConfigurator;
 
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
@@ -61,7 +63,7 @@ impl AgentInfo {
 
 /// Discover all supported agents with rich availability information.
 ///
-/// Returns information about all 6 supported providers, including whether
+/// Returns information about all supported providers, including whether
 /// their config exists and whether their binary is on PATH.
 pub fn discover_agents_full() -> Vec<AgentInfo> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
@@ -104,6 +106,11 @@ pub fn discover_agents_full() -> Vec<AgentInfo> {
             home.join(".qwen").join("settings.json"),
             AiCli::QwenCli,
         ),
+        (
+            Provider::RooCode,
+            home.join(".roo").join("settings.json"),
+            AiCli::Roo,
+        ),
     ];
 
     providers
@@ -142,6 +149,7 @@ pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
         Provider::KimiCode => Box::new(KimiCodeConfigurator),
         Provider::OpenCode => Box::new(OpenCodeConfigurator),
         Provider::QwenCode => Box::new(QwenConfigurator),
+        Provider::RooCode => Box::new(RooConfigurator),
     }
 }
 
@@ -201,6 +209,11 @@ pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
         agents.push((Provider::KimiCode, Box::new(KimiCodeConfigurator)));
     }
 
+    // Roo Code: ~/.roo/settings.json
+    if home.join(".roo").join("settings.json").exists() {
+        agents.push((Provider::RooCode, Box::new(RooConfigurator)));
+    }
+
     agents
 }
 
@@ -216,9 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_agents_full_returns_all_seven() {
+    fn discover_agents_full_returns_all_eight() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 7);
+        assert_eq!(agents.len(), 8);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -229,6 +242,7 @@ mod tests {
         assert!(providers.contains(&Provider::KimiCode));
         assert!(providers.contains(&Provider::OpenCode));
         assert!(providers.contains(&Provider::QwenCode));
+        assert!(providers.contains(&Provider::RooCode));
     }
 
     #[test]

@@ -1,44 +1,56 @@
 use regex::Regex;
+#[cfg(test)]
 use tracing::warn;
 
 use crate::events::{AgenticEvent, EventMeta};
 
+/// Check if an event matches using a precompiled regex.
+pub fn matches_with_regex(matcher: Option<&Regex>, meta: &EventMeta) -> bool {
+    let matcher = match matcher {
+        Some(regex) => regex,
+        None => return true,
+    };
+
+    match meta.event {
+        AgenticEvent::BeforeTool | AgenticEvent::AfterTool | AgenticEvent::ToolError => {
+            match &meta.tool_name {
+                Some(name) => matcher.is_match(name),
+                None => false,
+            }
+        }
+        AgenticEvent::Notification => match &meta.notification_type {
+            Some(ntype) => matcher.is_match(ntype),
+            None => false,
+        },
+        // For all other events, matcher has no field to match against
+        _ => true,
+    }
+}
+
 /// Check if an event matches using an explicit pattern string.
 ///
-/// This is used by both the default binding matcher and by provider
-/// override matcher strings.
+/// Prefer [`matches_with_regex`] in runtime code so regex compilation is
+/// performed at config-load time.
+#[cfg(test)]
 pub fn matches_with_pattern(pattern: Option<&str>, meta: &EventMeta) -> bool {
     let pattern = match pattern {
         Some(p) => p,
         None => return true,
     };
 
-    let re = match Regex::new(pattern) {
-        Ok(r) => r,
-        Err(e) => {
+    let regex = match Regex::new(pattern) {
+        Ok(regex) => regex,
+        Err(error) => {
             warn!(
                 %pattern,
-                %e,
+                %error,
                 "Invalid regex in event matcher, skipping binding"
             );
             return false;
         }
     };
 
-    match meta.event {
-        AgenticEvent::BeforeTool | AgenticEvent::AfterTool | AgenticEvent::ToolError => {
-            match &meta.tool_name {
-                Some(name) => re.is_match(name),
-                None => false,
-            }
-        }
-        AgenticEvent::Notification => match &meta.notification_type {
-            Some(ntype) => re.is_match(ntype),
-            None => false,
-        },
-        // For all other events, matcher has no field to match against
-        _ => true,
-    }
+    matches_with_regex(Some(&regex), meta)
 }
 
 #[cfg(test)]

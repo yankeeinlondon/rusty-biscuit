@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::events::{AgenticEvent, HookerConfig, Provider};
+use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::claudine_command;
@@ -125,7 +125,11 @@ impl AgentConfigurator for OpenCodeConfigurator {
         let event_count = provider_config
             .events
             .keys()
-            .filter(|e| to_opencode_native(e).is_some())
+            .filter(|e| {
+                Provider::OpenCode
+                    .registration_native_event_name(e)
+                    .is_some()
+            })
             .count();
         Ok(RegistrationResult::Registered { event_count })
     }
@@ -173,7 +177,10 @@ impl OpenCodeConfigurator {
                 p.events
                     .iter()
                     .filter(|(event, binding)| {
-                        binding.enabled && to_opencode_native(event).is_some()
+                        binding.enabled
+                            && Provider::OpenCode
+                                .registration_native_event_name(event)
+                                .is_some()
                     })
                     .map(|(event, _)| event.to_string())
                     .collect()
@@ -191,7 +198,7 @@ fn generate_bridge(provider_config: &crate::events::ProviderConfig) -> String {
         .keys()
         .filter_map(|event| {
             // Skip events that OpenCode doesn't support
-            let opencode_name = to_opencode_native(event)?;
+            let opencode_name = Provider::OpenCode.registration_native_event_name(event)?;
             let snake = event.to_string();
             Some(format!("  \"{opencode_name}\": \"{snake}\""))
         })
@@ -202,45 +209,6 @@ fn generate_bridge(provider_config: &crate::events::ProviderConfig) -> String {
     BRIDGE_TEMPLATE
         .replace("{{CLAUDINE_BIN}}", &claudine_bin)
         .replace("{{EVENT_MAP_ENTRIES}}", &map_block)
-}
-
-/// Map Claudine events to OpenCode native event type names.
-///
-/// OpenCode uses dot-notation event types like "session.idle", "permission.asked".
-/// Note: Tool hooks (tool.execute.before/after) and chat hooks are separate hook
-/// types, not events - they require different hook implementations.
-///
-/// Returns `None` for events that OpenCode doesn't support via the event hook.
-fn to_opencode_native(event: &AgenticEvent) -> Option<String> {
-    match event {
-        // Session lifecycle events
-        AgenticEvent::SessionStart => Some("session.created".to_string()),
-        AgenticEvent::SessionEnd => Some("session.deleted".to_string()),
-        AgenticEvent::TurnComplete => Some("session.idle".to_string()),
-        AgenticEvent::TurnError => Some("session.error".to_string()),
-        AgenticEvent::BeforeCompact => Some("session.compacted".to_string()),
-
-        // Permission events
-        AgenticEvent::PermissionRequest => Some("permission.asked".to_string()),
-        AgenticEvent::HumanInTheLoop => Some("permission.asked".to_string()),
-
-        // Notification event
-        AgenticEvent::Notification => Some("tui.toast.show".to_string()),
-
-        // These require separate hook implementations, not the event hook:
-        // - BeforePrompt -> chat.message hook
-        // - BeforeTool -> tool.execute.before hook
-        // - AfterTool -> tool.execute.after hook
-        // - BeforeModel -> chat.params hook
-        AgenticEvent::BeforePrompt
-        | AgenticEvent::BeforeTool
-        | AgenticEvent::AfterTool
-        | AgenticEvent::BeforeModel
-        | AgenticEvent::AfterModel
-        | AgenticEvent::ToolError
-        | AgenticEvent::SubagentStart
-        | AgenticEvent::SubagentStop => None,
-    }
 }
 
 /// Resolve the opencode.json config path.
@@ -300,7 +268,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::events::{EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
 
     use super::*;
 
@@ -502,5 +470,18 @@ mod tests {
         // opencode.json should be completely unchanged
         let content = fs::read_to_string(&opencode).unwrap();
         assert_eq!(content, original_content);
+    }
+
+    #[test]
+    fn bridge_uses_shared_permission_mappings() {
+        let config = test_config(vec![
+            AgenticEvent::PermissionRequest,
+            AgenticEvent::HumanInTheLoop,
+        ]);
+        let provider_config = config.providers.get(&Provider::OpenCode).unwrap();
+
+        let source = generate_bridge(provider_config);
+        assert!(source.contains("\"permission.ask\": \"permission_request\""));
+        assert!(source.contains("\"permission.asked\": \"human_in_the_loop\""));
     }
 }

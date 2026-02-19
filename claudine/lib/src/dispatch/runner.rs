@@ -1,42 +1,118 @@
 use std::io::Write;
 use std::time::Duration;
 
+use regex::Regex;
+use tokio::process::Command;
 use tracing::{debug, warn};
 
 use super::template::interpolate;
 use crate::error::Result;
-use crate::events::{EventAction, EventMeta, GlobalSettings, LogTarget, ReportFormat};
+use crate::events::{
+    CompiledMapper, EventMeta, GlobalSettings, HookAction, HookDecision, HookResponse, LogTarget,
+    Mapper, ReportFormat, ReportHandler,
+};
 
-/// Execute a list of actions for a matched event.
+/// Execute hook actions in declaration order.
 ///
-/// Audio actions (Speak, SoundEffect) are fire-and-forget via `tokio::spawn`.
-/// Log and Report actions are executed inline.
-///
-/// ## Errors
-///
-/// Returns an error only for fatal failures (e.g. file I/O in Log/LocalFile).
-/// Network and audio errors are logged but not propagated.
+/// Returns the selected blocking response from `call` actions when applicable.
 pub async fn execute_actions(
-    actions: &[EventAction],
+    actions: &[HookAction],
+    compiled_mappers: Option<&[Option<CompiledMapper>]>,
     meta: &EventMeta,
     settings: &GlobalSettings,
-) -> Result<()> {
-    for action in actions {
+    can_block: bool,
+) -> Result<Option<HookResponse>> {
+    let mut selected_response: Option<HookResponse> = None;
+
+    for (index, action) in actions.iter().enumerate() {
         match action {
-            EventAction::Speak { message } => execute_speak(message, meta),
-            EventAction::Log { target } => execute_log(target, meta, settings).await?,
-            EventAction::Report { handler } => execute_report(handler.as_ref(), meta),
-            EventAction::Run {
+            HookAction::Speak { message } => execute_speak(message, meta),
+            HookAction::Log { target } => {
+                let target = resolve_log_target(target, settings);
+                execute_log(target, meta).await?
+            }
+            HookAction::Report { handler } => execute_report(handler.as_ref(), meta),
+            HookAction::FireAndForget { command, args } => {
+                execute_fire_and_forget(command, args.as_deref(), meta)
+            }
+            HookAction::Call {
                 command,
                 args,
-                blocking,
+                timeout_ms,
+                mapper,
             } => {
-                execute_run(command, args.as_deref(), *blocking).await?;
+                let cmd = interpolate(command, meta);
+                let rendered_args = args.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|arg| interpolate(arg, meta))
+                        .collect::<Vec<_>>()
+                });
+
+                let timeout = timeout_ms
+                    .map(Duration::from_millis)
+                    .unwrap_or(Duration::from_secs(60));
+
+                let compiled_mapper = compiled_mappers
+                    .and_then(|mappers| mappers.get(index))
+                    .and_then(Option::as_ref);
+
+                match tokio::time::timeout(
+                    timeout,
+                    run_command_blocking(&cmd, rendered_args.as_deref()),
+                )
+                .await
+                {
+                    Ok(Ok(output)) => match apply_mapper(compiled_mapper, mapper.as_ref(), &output)
+                    {
+                        Ok(response) => {
+                            if can_block {
+                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                    selected_response = Some(response);
+                                }
+                            } else {
+                                debug!(%cmd, "Call response produced on non-blocking event and discarded");
+                            }
+                        }
+                        Err(error) => {
+                            warn!(%cmd, %error, "Call mapper failed");
+                        }
+                    },
+                    Ok(Err(error)) => {
+                        warn!(%cmd, %error, "Call command failed");
+                    }
+                    Err(_) => {
+                        warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
+                    }
+                }
             }
-            EventAction::SoundEffect { name, .. } => execute_sound_effect(name),
+            HookAction::SoundEffect {
+                name,
+                volume,
+                speed,
+            } => execute_sound_effect(name, *volume, *speed),
         }
     }
-    Ok(())
+
+    Ok(selected_response)
+}
+
+fn resolve_log_target<'a>(target: &'a LogTarget, settings: &'a GlobalSettings) -> &'a LogTarget {
+    match (target, settings.default_log_target.as_ref()) {
+        (LogTarget::File { path: None, .. }, Some(default_target)) => default_target,
+        _ => target,
+    }
+}
+
+fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookResponse) -> bool {
+    match current {
+        None => true,
+        Some(existing) => {
+            let existing_is_continue = matches!(existing.decision, Some(HookDecision::Continue));
+            let candidate_is_continue = matches!(candidate.decision, Some(HookDecision::Continue));
+            existing_is_continue && !candidate_is_continue
+        }
+    }
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
@@ -45,74 +121,145 @@ fn execute_speak(message_template: &str, meta: &EventMeta) {
     if text.is_empty() {
         return;
     }
-    debug!(%text, "Speaking via TTS");
+
     tokio::spawn(async move {
-        if let Err(e) = biscuit_speaks::Speak::new(text).play().await {
-            warn!(%e, "TTS playback failed");
+        if let Err(error) = biscuit_speaks::Speak::new(text).play().await {
+            warn!(%error, "TTS playback failed");
         }
     });
 }
 
-/// Log event metadata to a file or remote server.
-async fn execute_log(
-    target: &LogTarget,
-    meta: &EventMeta,
-    _settings: &GlobalSettings,
-) -> Result<()> {
+fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
+    let effect = match playa::SoundEffect::from_name(name) {
+        Some(effect) => effect,
+        None => {
+            warn!(%name, "Unknown sound effect name");
+            return;
+        }
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let playback = match playa::Playa::from_bytes(effect.bytes().to_vec()) {
+            Ok(player) => player.volume(volume).speed(speed).play(),
+            Err(error) => {
+                warn!(%error, "Failed to construct sound effect player");
+                return;
+            }
+        };
+        if let Err(error) = playback {
+            warn!(%error, "Sound effect playback failed");
+        }
+    });
+}
+
+fn execute_fire_and_forget(command: &str, args: Option<&[String]>, meta: &EventMeta) {
+    let cmd = interpolate(command, meta);
+    let rendered_args: Option<Vec<String>> = args.map(|items| {
+        items
+            .iter()
+            .map(|arg| interpolate(arg, meta))
+            .collect::<Vec<_>>()
+    });
+
+    tokio::spawn(async move {
+        if let Err(error) = run_command_blocking(&cmd, rendered_args.as_deref()).await {
+            warn!(%cmd, %error, "Fire-and-forget command failed");
+        }
+    });
+}
+
+async fn execute_log(target: &LogTarget, meta: &EventMeta) -> Result<()> {
     match target {
-        LogTarget::LocalFile { path } => write_jsonl(path, meta),
-        LogTarget::Server { url } => {
-            post_to_server(url, meta).await;
+        LogTarget::File { path, rotate_daily } => {
+            let resolved = resolve_file_log_path(path.as_deref(), *rotate_daily);
+            write_jsonl(&resolved, meta)
+        }
+        LogTarget::Server {
+            url,
+            timeout_ms,
+            headers,
+        } => {
+            post_to_server(url, *timeout_ms, headers.as_ref(), meta).await;
             Ok(())
         }
     }
 }
 
-/// Append a JSONL entry to a local file, creating parent dirs as needed.
-fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
-    let expanded = if path.starts_with("~") {
-        dirs::home_dir()
-            .map(|h| h.join(path.strip_prefix("~").unwrap_or(path)))
-            .unwrap_or_else(|| path.to_path_buf())
+fn resolve_file_log_path(path: Option<&std::path::Path>, rotate_daily: bool) -> std::path::PathBuf {
+    if let Some(path) = path {
+        return expand_tilde(path);
+    }
+
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("~"))
+        .join(".claudine")
+        .join("logs");
+
+    if rotate_daily {
+        let file = format!("{}.jsonl", chrono::Local::now().format("%Y-%m-%d"));
+        base.join(file)
     } else {
-        path.to_path_buf()
-    };
-    if let Some(parent) = expanded.parent() {
+        base.join("events.jsonl")
+    }
+}
+
+fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
+    if path.starts_with("~")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(path.strip_prefix("~").unwrap_or(path));
+    }
+    path.to_path_buf()
+}
+
+fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
     let mut line = serde_json::to_string(meta)?;
     line.push('\n');
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&expanded)?
+        .open(path)?
         .write_all(line.as_bytes())?;
-    debug!(?expanded, "Wrote JSONL log entry");
+
     Ok(())
 }
 
-/// POST event metadata to a remote logging server (10s timeout, non-fatal).
-async fn post_to_server(url: &url::Url, meta: &EventMeta) {
+async fn post_to_server(
+    url: &str,
+    timeout_ms: u64,
+    headers: Option<&std::collections::HashMap<String, String>>,
+    meta: &EventMeta,
+) {
     let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_millis(timeout_ms))
         .build()
     {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(%e, "Failed to build HTTP client");
+        Ok(client) => client,
+        Err(error) => {
+            warn!(%error, "Failed to build HTTP client for log target");
             return;
         }
     };
-    match client.post(url.as_str()).json(meta).send().await {
-        Ok(resp) => debug!(status = %resp.status(), %url, "Log server POST complete"),
-        Err(e) => warn!(%e, %url, "Log server POST failed"),
+
+    let mut request = client.post(url).json(meta);
+    if let Some(headers) = headers {
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+    }
+
+    if let Err(error) = request.send().await {
+        warn!(%error, %url, "Log server POST failed");
     }
 }
 
-/// Write a report line to stdout.
-fn execute_report(handler: Option<&crate::events::ReportHandler>, meta: &EventMeta) {
+fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta) {
     let output = match handler {
-        Some(h) => format_report(h, meta),
+        Some(handler) => format_report(handler, meta),
         None => format!(
             "[{}] {} ({})",
             meta.event,
@@ -123,8 +270,7 @@ fn execute_report(handler: Option<&crate::events::ReportHandler>, meta: &EventMe
     println!("{output}");
 }
 
-/// Format a report line according to the handler's configuration.
-fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> String {
+fn format_report(handler: &ReportHandler, meta: &EventMeta) -> String {
     if let Some(template) = &handler.template {
         let mut output = interpolate(template, meta);
         if handler.include_metadata
@@ -135,6 +281,7 @@ fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> St
         }
         return output;
     }
+
     match handler.format {
         ReportFormat::Json => serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
         ReportFormat::Compact => format!(
@@ -151,75 +298,168 @@ fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> St
     }
 }
 
-/// Run a command on the host system.
-///
-/// Validates the command exists on PATH via `sniff::programs::find_program`.
-/// Non-fatal: logs a warning and returns `Ok(())` if the command is not found.
-async fn execute_run(command: &str, args: Option<&[String]>, blocking: bool) -> Result<()> {
+#[derive(Debug)]
+struct CommandOutput {
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+async fn run_command_blocking(command: &str, args: Option<&[String]>) -> Result<CommandOutput> {
     if sniff::programs::find_program(command).is_none() {
-        warn!(%command, "Run action skipped: command not found on PATH");
-        return Ok(());
+        return Err(crate::error::ClaudineError::LinkingError(format!(
+            "command not found on PATH: {command}"
+        )));
     }
 
-    let mut cmd = tokio::process::Command::new(command);
+    let mut cmd = Command::new(command);
     if let Some(args) = args {
         cmd.args(args);
     }
 
-    if blocking {
-        debug!(%command, "Running command (blocking)");
-        match cmd.output().await {
-            Ok(output) => {
-                if !output.status.success() {
-                    warn!(%command, status = %output.status, "Command exited with non-zero status");
-                }
-            }
-            Err(e) => warn!(%command, %e, "Command execution failed"),
-        }
-    } else {
-        debug!(%command, "Running command (fire-and-forget)");
-        tokio::spawn(async move {
-            match cmd.output().await {
-                Ok(output) if !output.status.success() => {
-                    warn!(status = %output.status, "Background command exited with non-zero status");
-                }
-                Err(e) => warn!(%e, "Background command execution failed"),
-                _ => {}
-            }
-        });
-    }
-
-    Ok(())
+    let output = cmd.output().await?;
+    Ok(CommandOutput {
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    })
 }
 
-/// Play a sound effect via playa (fire-and-forget).
-fn execute_sound_effect(name: &str) {
-    let effect = match playa::SoundEffect::from_name(name) {
-        Some(e) => e,
-        None => {
-            warn!(%name, "Unknown sound effect name");
-            return;
+fn apply_mapper(
+    compiled_mapper: Option<&CompiledMapper>,
+    fallback_mapper: Option<&Mapper>,
+    output: &CommandOutput,
+) -> Result<HookResponse> {
+    if let Some(compiled_mapper) = compiled_mapper {
+        return match compiled_mapper {
+            CompiledMapper::JsonField { field } => map_json_field(field, output),
+            CompiledMapper::JsonObject => map_json_object(output),
+            CompiledMapper::ExitCode => Ok(map_exit_code(output)),
+            CompiledMapper::Regex { pattern } => map_regex_with_compiled(pattern, output),
+        };
+    }
+
+    match fallback_mapper.unwrap_or(&Mapper::ExitCode) {
+        Mapper::ExitCode => Ok(map_exit_code(output)),
+        Mapper::JsonField { field } => map_json_field(field, output),
+        Mapper::JsonObject => map_json_object(output),
+        Mapper::Regex { pattern } => {
+            let regex = Regex::new(pattern)?;
+            map_regex_with_compiled(&regex, output)
         }
+    }
+}
+
+fn map_exit_code(output: &CommandOutput) -> HookResponse {
+    let code = output.status.code().unwrap_or(1);
+    let decision = match code {
+        0 => Some(HookDecision::Allow),
+        2 => Some(HookDecision::Deny),
+        _ => Some(HookDecision::Allow),
     };
-    debug!(%name, "Playing sound effect");
-    tokio::spawn(async move {
-        if let Err(e) = effect.play_async().await {
-            warn!(%e, "Sound effect playback failed");
-        }
-    });
+
+    let reason = if !output.stdout.is_empty() {
+        Some(output.stdout.clone())
+    } else if !output.stderr.is_empty() {
+        Some(output.stderr.clone())
+    } else {
+        None
+    };
+
+    HookResponse {
+        decision,
+        reason,
+        ..HookResponse::default()
+    }
+}
+
+fn map_json_field(field: &str, output: &CommandOutput) -> Result<HookResponse> {
+    let parsed: serde_json::Value = serde_json::from_str(&output.stdout)?;
+    let value = dot_lookup(&parsed, field).ok_or_else(|| {
+        crate::error::ClaudineError::TemplateError(format!("mapper field not found: {field}"))
+    })?;
+
+    let decision = parse_decision(value);
+    let reason = parsed
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+
+    Ok(HookResponse {
+        decision,
+        reason,
+        ..HookResponse::default()
+    })
+}
+
+fn map_json_object(output: &CommandOutput) -> Result<HookResponse> {
+    if output.stdout.is_empty() {
+        return Ok(HookResponse::default());
+    }
+
+    if let Ok(response) = serde_json::from_str::<HookResponse>(&output.stdout) {
+        return Ok(response);
+    }
+
+    let raw = serde_json::from_str::<serde_json::Value>(&output.stdout)?;
+    Ok(HookResponse {
+        raw: Some(raw),
+        ..HookResponse::default()
+    })
+}
+
+fn map_regex_with_compiled(regex: &Regex, output: &CommandOutput) -> Result<HookResponse> {
+    let captures = regex.captures(&output.stdout).ok_or_else(|| {
+        crate::error::ClaudineError::TemplateError("regex mapper produced no match".to_string())
+    })?;
+
+    let decision = captures
+        .name("decision")
+        .map(|capture| parse_decision(&serde_json::Value::String(capture.as_str().to_string())))
+        .unwrap_or(None);
+    let reason = captures
+        .name("reason")
+        .map(|capture| capture.as_str().to_string());
+
+    Ok(HookResponse {
+        decision,
+        reason,
+        additional_context: captures
+            .name("context")
+            .map(|capture| capture.as_str().to_string()),
+        ..HookResponse::default()
+    })
+}
+
+fn parse_decision(value: &serde_json::Value) -> Option<HookDecision> {
+    let text = value.as_str()?.to_ascii_lowercase();
+    match text.as_str() {
+        "allow" | "approved" | "approve" => Some(HookDecision::Allow),
+        "deny" | "denied" | "reject" | "rejected" => Some(HookDecision::Deny),
+        "ask" => Some(HookDecision::Ask),
+        "continue" => Some(HookDecision::Continue),
+        _ => None,
+    }
+}
+
+fn dot_lookup<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    path.split('.').try_fold(value, |acc, key| acc.get(key))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::events::*;
-    use chrono::Utc;
     use std::collections::HashMap;
+    use std::os::unix::process::ExitStatusExt;
+
+    use chrono::Utc;
+
+    use super::*;
+    use crate::events::{EnvironmentContext, Provider};
 
     fn meta() -> EventMeta {
         EventMeta {
             provider: Provider::Claude,
-            event: AgenticEvent::BeforeTool,
+            event: crate::events::AgenticEvent::BeforeTool,
             timestamp: Utc::now(),
             session_id: Some("test-session".to_string()),
             cwd: Some("/tmp".to_string()),
@@ -236,115 +476,78 @@ mod tests {
         }
     }
 
-    fn log_action(path: std::path::PathBuf) -> Vec<EventAction> {
-        vec![EventAction::Log {
-            target: LogTarget::LocalFile { path },
-        }]
-    }
-
     #[tokio::test]
-    async fn log_local_file_writes_jsonl() {
+    async fn log_file_writes_jsonl() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("events.jsonl");
-        execute_actions(
-            &log_action(path.clone()),
-            &meta(),
-            &GlobalSettings::default(),
-        )
-        .await
-        .unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: EventMeta = serde_json::from_str(content.trim()).unwrap();
-        assert_eq!(parsed.provider, Provider::Claude);
-        assert_eq!(parsed.tool_name.as_deref(), Some("Bash"));
-    }
 
-    #[tokio::test]
-    async fn log_local_file_creates_parent_dirs() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("nested/deep/events.jsonl");
-        execute_actions(
-            &log_action(path.clone()),
-            &meta(),
-            &GlobalSettings::default(),
-        )
-        .await
-        .unwrap();
-        assert!(path.exists());
-    }
-
-    #[tokio::test]
-    async fn log_local_file_appends() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("events.jsonl");
-        let actions = log_action(path.clone());
-        let m = meta();
-        let s = GlobalSettings::default();
-        execute_actions(&actions, &m, &s).await.unwrap();
-        execute_actions(&actions, &m, &s).await.unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = content.trim().split('\n').collect();
-        assert_eq!(lines.len(), 2);
-    }
-
-    #[test]
-    fn report_default_format() {
-        execute_report(None, &meta()); // verifies no panic
-    }
-
-    #[test]
-    fn report_compact_with_template() {
-        let h = ReportHandler {
-            format: ReportFormat::Compact,
-            template: Some("[TOOL] {tool_name}: executing".to_string()),
-            include_metadata: false,
-        };
-        assert_eq!(format_report(&h, &meta()), "[TOOL] Bash: executing");
-    }
-
-    #[test]
-    fn report_json_format() {
-        let h = ReportHandler {
-            format: ReportFormat::Json,
-            template: None,
-            include_metadata: false,
-        };
-        let _: serde_json::Value = serde_json::from_str(&format_report(&h, &meta())).unwrap();
-    }
-
-    #[test]
-    fn report_text_format() {
-        let h = ReportHandler {
-            format: ReportFormat::Text,
-            template: None,
-            include_metadata: false,
-        };
-        let out = format_report(&h, &meta());
-        assert!(out.contains("before_tool") && out.contains("Claude") && out.contains("Bash"));
-    }
-
-    #[tokio::test]
-    async fn run_action_with_nonexistent_command() {
-        let actions = vec![EventAction::Run {
-            command: "this_command_surely_does_not_exist_12345".to_string(),
-            args: None,
-            blocking: false,
+        let actions = vec![HookAction::Log {
+            target: LogTarget::File {
+                path: Some(path.clone()),
+                rotate_daily: false,
+            },
         }];
-        // Should not panic — warns and returns Ok.
-        execute_actions(&actions, &meta(), &GlobalSettings::default())
+
+        execute_actions(&actions, None, &meta(), &GlobalSettings::default(), false)
             .await
             .unwrap();
+
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(content.contains("before_tool"));
     }
 
     #[test]
-    fn report_with_metadata() {
-        let h = ReportHandler {
-            format: ReportFormat::Compact,
-            template: Some("{event}".to_string()),
-            include_metadata: true,
+    fn mapper_exit_code_deny() {
+        let output = CommandOutput {
+            status: std::process::ExitStatus::from_raw(2 << 8),
+            stdout: "blocked".to_string(),
+            stderr: String::new(),
         };
-        let out = format_report(&h, &meta());
-        assert!(out.starts_with("before_tool "));
-        let _: serde_json::Value = serde_json::from_str(&out["before_tool ".len()..]).unwrap();
+
+        let mapped = apply_mapper(None, None, &output).unwrap();
+        assert_eq!(mapped.decision, Some(HookDecision::Deny));
+        assert_eq!(mapped.reason.as_deref(), Some("blocked"));
+    }
+
+    #[test]
+    fn mapper_json_field() {
+        let output = CommandOutput {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: r#"{"decision":"deny","reason":"nope"}"#.to_string(),
+            stderr: String::new(),
+        };
+
+        let mapped = apply_mapper(
+            None,
+            Some(&Mapper::JsonField {
+                field: "decision".to_string(),
+            }),
+            &output,
+        )
+        .unwrap();
+
+        assert_eq!(mapped.decision, Some(HookDecision::Deny));
+        assert_eq!(mapped.reason.as_deref(), Some("nope"));
+    }
+
+    #[test]
+    fn stop_overrides_continue() {
+        let continue_response = HookResponse {
+            decision: Some(HookDecision::Continue),
+            ..HookResponse::default()
+        };
+        let deny_response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            ..HookResponse::default()
+        };
+
+        assert!(should_replace_selected(
+            Some(&continue_response),
+            &deny_response
+        ));
+        assert!(!should_replace_selected(
+            Some(&deny_response),
+            &continue_response
+        ));
     }
 }

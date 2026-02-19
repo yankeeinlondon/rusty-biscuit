@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::AgenticEvent;
+
 /// Level of event support for a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventSupportLevel {
@@ -37,6 +39,7 @@ impl EventSupportLevel {
 /// Supported agentic CLI providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Provider {
     /// Claude Code (Anthropic).
     Claude,
@@ -52,7 +55,189 @@ pub enum Provider {
     OpenCode,
     /// Qwen Code CLI (Alibaba).
     QwenCode,
+    /// Roo Code.
+    RooCode,
 }
+
+/// Shared provider-native event mappings used by both configurators and adapters.
+///
+/// This is the canonical source for event-name mappings that appear in both:
+/// - `config/*` registration logic (`AgenticEvent -> native_name`)
+/// - `adapters/*` parse logic (`native_name -> AgenticEvent`)
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SharedNativeEventMapping {
+    pub(crate) event: AgenticEvent,
+    pub(crate) native_name: &'static str,
+    pub(crate) parse_aliases: &'static [&'static str],
+}
+
+const CLAUDE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionStart,
+        native_name: "SessionStart",
+        parse_aliases: &["SessionStart"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionEnd,
+        native_name: "SessionEnd",
+        parse_aliases: &["SessionEnd"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforePrompt,
+        native_name: "UserPromptSubmit",
+        parse_aliases: &["UserPromptSubmit"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeTool,
+        native_name: "PreToolUse",
+        parse_aliases: &["PreToolUse"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::AfterTool,
+        native_name: "PostToolUse",
+        parse_aliases: &["PostToolUse"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::ToolError,
+        native_name: "PostToolUseFailure",
+        parse_aliases: &["PostToolUseFailure"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::PermissionRequest,
+        native_name: "PermissionRequest",
+        parse_aliases: &["PermissionRequest"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::HumanInTheLoop,
+        native_name: "HumanInTheLoop",
+        parse_aliases: &["HumanInTheLoop"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::TurnComplete,
+        native_name: "Stop",
+        parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::SubagentStart,
+        native_name: "SubagentStart",
+        parse_aliases: &["SubagentStart"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::SubagentStop,
+        native_name: "SubagentStop",
+        parse_aliases: &["SubagentStop"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeCompact,
+        native_name: "PreCompact",
+        parse_aliases: &["PreCompact"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::Notification,
+        native_name: "Notification",
+        parse_aliases: &["Notification"],
+    },
+];
+
+const GEMINI_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionStart,
+        native_name: "SessionStart",
+        parse_aliases: &["SessionStart"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionEnd,
+        native_name: "SessionEnd",
+        parse_aliases: &["SessionEnd"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforePrompt,
+        native_name: "BeforeAgent",
+        parse_aliases: &["BeforeAgent"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::TurnComplete,
+        native_name: "AfterAgent",
+        parse_aliases: &["AfterAgent"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeModel,
+        native_name: "BeforeModel",
+        parse_aliases: &["BeforeModel", "BeforeToolSelection"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::AfterModel,
+        native_name: "AfterModel",
+        parse_aliases: &["AfterModel"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeTool,
+        native_name: "BeforeTool",
+        parse_aliases: &["BeforeTool"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::AfterTool,
+        native_name: "AfterTool",
+        parse_aliases: &["AfterTool"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeCompact,
+        native_name: "PreCompress",
+        parse_aliases: &["PreCompress"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::Notification,
+        native_name: "Notification",
+        parse_aliases: &["Notification"],
+    },
+];
+
+const OPENCODE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionStart,
+        native_name: "session.created",
+        parse_aliases: &["session.created"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::SessionEnd,
+        native_name: "session.deleted",
+        parse_aliases: &["session.deleted"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::TurnComplete,
+        native_name: "session.idle",
+        parse_aliases: &["session.idle"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::TurnError,
+        native_name: "session.error",
+        parse_aliases: &["session.error"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeCompact,
+        native_name: "session.compacted",
+        parse_aliases: &[
+            "session.compacted",
+            "session.compacting",
+            "experimental.session.compacting",
+        ],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::PermissionRequest,
+        native_name: "permission.ask",
+        parse_aliases: &["permission.ask"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::HumanInTheLoop,
+        native_name: "permission.asked",
+        parse_aliases: &["permission.asked"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::Notification,
+        native_name: "tui.toast.show",
+        parse_aliases: &["tui.toast.show", "event"],
+    },
+];
 
 impl Provider {
     /// Returns a snake_case identifier suitable for file paths and JSON keys.
@@ -68,6 +253,7 @@ impl Provider {
             Provider::KimiCode => "kimi_code",
             Provider::OpenCode => "open_code",
             Provider::QwenCode => "qwen_code",
+            Provider::RooCode => "roo_code",
         }
     }
 
@@ -93,6 +279,7 @@ impl Provider {
                 | Provider::Gemini
                 | Provider::OpenCode
                 | Provider::QwenCode
+                | Provider::RooCode
         )
     }
 
@@ -106,7 +293,45 @@ impl Provider {
             Provider::KimiCode => "https://moonshotai.github.io/kimi-cli/en/",
             Provider::OpenCode => "https://github.com/opencode-ai/opencode",
             Provider::QwenCode => "https://qwenlm.github.io/qwen-code-docs/",
+            Provider::RooCode => "https://github.com/RooVetGit/Roo-Code",
         }
+    }
+
+    /// Shared native mappings for providers that currently deduplicate
+    /// configurator registration and adapter parsing through one source.
+    pub(crate) fn shared_native_mappings(&self) -> &'static [SharedNativeEventMapping] {
+        match self {
+            Provider::Claude => CLAUDE_SHARED_NATIVE_MAPPINGS,
+            Provider::Gemini => GEMINI_SHARED_NATIVE_MAPPINGS,
+            Provider::OpenCode => OPENCODE_SHARED_NATIVE_MAPPINGS,
+            _ => &[],
+        }
+    }
+
+    /// Returns the native name used by configurators for hook registration.
+    pub(crate) fn registration_native_event_name(
+        &self,
+        event: &AgenticEvent,
+    ) -> Option<&'static str> {
+        self.shared_native_mappings()
+            .iter()
+            .find(|entry| entry.event == *event)
+            .map(|entry| entry.native_name)
+    }
+
+    /// Maps a provider-native event name back to a canonical `AgenticEvent`.
+    pub(crate) fn event_from_shared_native_name(&self, native_name: &str) -> Option<AgenticEvent> {
+        self.shared_native_mappings().iter().find_map(|entry| {
+            if entry
+                .parse_aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(native_name))
+            {
+                Some(entry.event)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the level of support for the given event.
@@ -182,8 +407,16 @@ impl Provider {
             // Qwen Code: Limited events via stream-json output
             // No native support for HumanInTheLoop
             Provider::QwenCode => match event {
-                TurnComplete | TurnError | AfterModel | Notification => NonHook,
+                TurnComplete | TurnError | AfterModel | Notification | PermissionRequest => NonHook,
                 _ => NotSupported, // Including HumanInTheLoop
+            },
+
+            // Roo Code: rich event emitter + stream-json, all observational.
+            Provider::RooCode => match event {
+                SessionStart | SessionEnd | BeforeTool | AfterTool | ToolError | HumanInTheLoop
+                | TurnComplete | TurnError | SubagentStart | SubagentStop | BeforeModel
+                | AfterModel | Notification => NonHook,
+                BeforePrompt | PermissionRequest | BeforeCompact => NotSupported,
             },
         }
     }
@@ -216,6 +449,10 @@ impl Provider {
 
         if !self.supports_event(event) {
             return None;
+        }
+
+        if let Some(name) = self.registration_native_event_name(event) {
+            return Some(name);
         }
 
         Some(match self {
@@ -335,7 +572,7 @@ impl Provider {
                 BeforeTool => "",
                 AfterTool => "",
                 ToolError => "",
-                PermissionRequest => "",
+                PermissionRequest => "CanUseTool",
                 HumanInTheLoop => "",
                 TurnComplete => "result",
                 TurnError => "result",
@@ -345,6 +582,24 @@ impl Provider {
                 AfterModel => "assistant",
                 BeforeCompact => "",
                 Notification => "system",
+            },
+            Provider::RooCode => match event {
+                SessionStart => "TaskCreated",
+                SessionEnd => "TaskAborted",
+                BeforePrompt => "",
+                BeforeTool => "ToolUseOutput",
+                AfterTool => "ToolResultOutput",
+                ToolError => "TaskToolFailed",
+                PermissionRequest => "",
+                HumanInTheLoop => "WaitingForInput",
+                TurnComplete => "TaskCompleted",
+                TurnError => "Error",
+                SubagentStart => "TaskSpawned",
+                SubagentStop => "TaskDelegationCompleted",
+                BeforeModel => "StreamingStarted",
+                AfterModel => "StreamingEnded",
+                BeforeCompact => "",
+                Notification => "ModeChanged",
             },
         })
     }
@@ -360,6 +615,7 @@ impl fmt::Display for Provider {
             Provider::KimiCode => "Kimi Code",
             Provider::OpenCode => "OpenCode",
             Provider::QwenCode => "Qwen Code",
+            Provider::RooCode => "Roo Code",
         };
         f.write_str(name)
     }
@@ -388,6 +644,7 @@ mod tests {
             (Provider::KimiCode, "kimi_code"),
             (Provider::OpenCode, "open_code"),
             (Provider::QwenCode, "qwen_code"),
+            (Provider::RooCode, "roo_code"),
         ];
         for (variant, expected) in cases {
             let json = serde_json::to_value(&variant).unwrap();
@@ -404,6 +661,7 @@ mod tests {
         assert_eq!(Provider::KimiCode.to_string(), "Kimi Code");
         assert_eq!(Provider::OpenCode.to_string(), "OpenCode");
         assert_eq!(Provider::QwenCode.to_string(), "Qwen Code");
+        assert_eq!(Provider::RooCode.to_string(), "Roo Code");
     }
 
     #[test]
@@ -422,6 +680,7 @@ mod tests {
         assert!(Provider::Gemini.supports_skills());
         assert!(Provider::OpenCode.supports_skills());
         assert!(Provider::QwenCode.supports_skills()); // Experimental but supported
+        assert!(Provider::RooCode.supports_skills());
         // Providers without skill discovery
         assert!(!Provider::Goose.supports_skills());
         assert!(!Provider::KimiCode.supports_skills());
@@ -436,6 +695,7 @@ mod tests {
         assert_eq!(Provider::KimiCode.as_slug(), "kimi_code");
         assert_eq!(Provider::OpenCode.as_slug(), "open_code");
         assert_eq!(Provider::QwenCode.as_slug(), "qwen_code");
+        assert_eq!(Provider::RooCode.as_slug(), "roo_code");
     }
 
     #[test]
@@ -449,6 +709,7 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
+            Provider::RooCode,
         ] {
             let url = provider.docs_url();
             assert!(
@@ -574,11 +835,12 @@ mod tests {
     fn supports_event_qwencode() {
         use crate::events::AgenticEvent::*;
         // Qwen Code has limited event support via stream-json output
-        // Supported: TurnComplete, TurnError, AfterModel, Notification
+        // Supported: TurnComplete, TurnError, AfterModel, Notification, PermissionRequest
         assert!(Provider::QwenCode.supports_event(&TurnComplete));
         assert!(Provider::QwenCode.supports_event(&TurnError));
         assert!(Provider::QwenCode.supports_event(&AfterModel));
         assert!(Provider::QwenCode.supports_event(&Notification));
+        assert!(Provider::QwenCode.supports_event(&PermissionRequest));
         // Not supported: most events (no native hook system yet)
         assert!(!Provider::QwenCode.supports_event(&SessionStart));
         assert!(!Provider::QwenCode.supports_event(&SessionEnd));
@@ -586,11 +848,23 @@ mod tests {
         assert!(!Provider::QwenCode.supports_event(&BeforeTool));
         assert!(!Provider::QwenCode.supports_event(&AfterTool));
         assert!(!Provider::QwenCode.supports_event(&ToolError));
-        assert!(!Provider::QwenCode.supports_event(&PermissionRequest));
         assert!(!Provider::QwenCode.supports_event(&SubagentStart));
         assert!(!Provider::QwenCode.supports_event(&SubagentStop));
         assert!(!Provider::QwenCode.supports_event(&BeforeModel));
         assert!(!Provider::QwenCode.supports_event(&BeforeCompact));
+    }
+
+    #[test]
+    fn supports_event_roocode() {
+        use crate::events::AgenticEvent::*;
+
+        assert!(Provider::RooCode.supports_event(&SessionStart));
+        assert!(Provider::RooCode.supports_event(&BeforeTool));
+        assert!(Provider::RooCode.supports_event(&AfterModel));
+        assert!(Provider::RooCode.supports_event(&HumanInTheLoop));
+        assert!(!Provider::RooCode.supports_event(&BeforePrompt));
+        assert!(!Provider::RooCode.supports_event(&PermissionRequest));
+        assert!(!Provider::RooCode.supports_event(&BeforeCompact));
     }
 
     #[test]
@@ -669,7 +943,27 @@ mod tests {
         );
         assert_eq!(Provider::QwenCode.event_support_level(&AfterModel), NonHook);
         assert_eq!(
+            Provider::QwenCode.event_support_level(&PermissionRequest),
+            NonHook
+        );
+        assert_eq!(
             Provider::QwenCode.event_support_level(&BeforeTool),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn event_support_level_roocode_all_non_hook() {
+        use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
+
+        assert_eq!(
+            Provider::RooCode.event_support_level(&TurnComplete),
+            NonHook
+        );
+        assert_eq!(Provider::RooCode.event_support_level(&BeforeTool), NonHook);
+        assert_eq!(
+            Provider::RooCode.event_support_level(&BeforePrompt),
             NotSupported
         );
     }
@@ -690,5 +984,6 @@ mod tests {
         assert!(!Provider::Goose.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::KimiCode.supports_event_via_hook(&TurnComplete));
         assert!(!Provider::QwenCode.supports_event_via_hook(&TurnComplete));
+        assert!(!Provider::RooCode.supports_event_via_hook(&TurnComplete));
     }
 }

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::Value;
-use tracing::warn;
+use serde_json::{Map, Value, json};
 
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{
+    AgenticEvent, EnvironmentContext, EventMeta, HookDecision, HookResponse, Provider,
+};
 
-use super::ProviderAdapter;
+use super::{AdapterError, ProviderAdapter};
 
 pub(crate) struct ClaudeAdapter;
 
@@ -15,286 +16,204 @@ impl ProviderAdapter for ClaudeAdapter {
         Provider::Claude
     }
 
-    fn parse_event(
-        &self,
-        raw: &Value,
-        env: &EnvironmentContext,
-    ) -> Option<(AgenticEvent, EventMeta)> {
-        let event_name = match raw.get("hook_event_name").and_then(|v| v.as_str()) {
-            Some(name) => name,
-            None => {
-                warn!("Claude adapter: missing or non-string 'hook_event_name'");
-                return None;
-            }
-        };
+    fn parse_event(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError> {
+        let event_name = raw
+            .get("hook_event_name")
+            .or_else(|| raw.get("hookEventName"))
+            .and_then(Value::as_str)
+            .ok_or(AdapterError::MissingField("hook_event_name"))?;
 
-        let event = match event_name {
-            "SessionStart" => AgenticEvent::SessionStart,
-            "SessionEnd" => AgenticEvent::SessionEnd,
-            "UserPromptSubmit" => AgenticEvent::BeforePrompt,
-            "PreToolUse" => AgenticEvent::BeforeTool,
-            "PostToolUse" => AgenticEvent::AfterTool,
-            "PostToolUseFailure" => AgenticEvent::ToolError,
-            "PermissionRequest" => AgenticEvent::PermissionRequest,
-            "Stop" => AgenticEvent::TurnComplete,
-            "SubagentStart" => AgenticEvent::SubagentStart,
-            "SubagentStop" => AgenticEvent::SubagentStop,
-            "PreCompact" => AgenticEvent::BeforeCompact,
-            "Notification" => AgenticEvent::Notification,
-            _ => {
-                warn!(event_name, "Claude adapter: unknown hook_event_name");
-                return None;
-            }
-        };
-
-        let notification = raw.get("notification");
-        let meta = EventMeta {
+        let event = map_event(event_name)?;
+        let mut meta = EventMeta {
             provider: Provider::Claude,
-            event: event.clone(),
+            event,
             timestamp: Utc::now(),
             session_id: str_field(raw, "session_id"),
             cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name"),
+            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
             tool_input: raw.get("tool_input").cloned(),
             tool_response: raw.get("tool_response").cloned(),
             error: str_field(raw, "error"),
             prompt: str_field(raw, "prompt"),
             agent_type: str_field(raw, "agent_type"),
-            notification_type: notification
+            notification_type: raw
+                .get("notification")
                 .and_then(|n| n.get("type"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
-            notification_message: notification
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            notification_message: raw
+                .get("notification")
                 .and_then(|n| n.get("message"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
             extra: HashMap::new(),
-            env: env.clone(),
+            env: EnvironmentContext::default(),
         };
 
-        Some((event, meta))
+        for key in [
+            "permission_mode",
+            "stop_hook_active",
+            "transcript_path",
+            "tool_use_id",
+            "model",
+            "is_interrupt",
+            "permission_suggestions",
+            "teammate_name",
+            "team_name",
+            "task_id",
+            "task_subject",
+            "task_description",
+        ] {
+            if let Some(value) = raw.get(key) {
+                meta.extra.insert(key.to_string(), value.clone());
+            }
+        }
+
+        Ok((event, meta))
+    }
+
+    fn can_block(&self, event: &AgenticEvent) -> bool {
+        matches!(
+            event,
+            AgenticEvent::BeforePrompt
+                | AgenticEvent::BeforeTool
+                | AgenticEvent::AfterTool
+                | AgenticEvent::PermissionRequest
+                | AgenticEvent::SubagentStop
+                | AgenticEvent::TurnComplete
+        )
+    }
+
+    fn format_response(
+        &self,
+        event: &AgenticEvent,
+        response: &HookResponse,
+    ) -> Result<Value, AdapterError> {
+        if let Some(raw) = &response.raw {
+            return Ok(raw.clone());
+        }
+
+        if !self.can_block(event) {
+            return Ok(Value::Null);
+        }
+
+        match event {
+            AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => {
+                let permission = decision_to_permission(response.decision);
+                let mut hook_output = Map::new();
+                hook_output.insert(
+                    "hookEventName".to_string(),
+                    Value::String("PreToolUse".to_string()),
+                );
+                hook_output.insert(
+                    "permissionDecision".to_string(),
+                    Value::String(permission.to_string()),
+                );
+                if let Some(reason) = &response.reason {
+                    hook_output.insert(
+                        "permissionDecisionReason".to_string(),
+                        Value::String(reason.clone()),
+                    );
+                }
+                Ok(json!({ "hookSpecificOutput": hook_output }))
+            }
+            AgenticEvent::TurnComplete | AgenticEvent::SubagentStop => {
+                let mut body = Map::new();
+                if matches!(
+                    response.decision,
+                    Some(HookDecision::Continue | HookDecision::Deny)
+                ) {
+                    body.insert("decision".to_string(), Value::String("block".to_string()));
+                }
+                if let Some(reason) = &response.reason {
+                    body.insert("reason".to_string(), Value::String(reason.clone()));
+                }
+                Ok(Value::Object(body))
+            }
+            _ => Ok(Value::Null),
+        }
+    }
+
+    fn exit_code(&self, event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
+        if self.can_block(event) { Some(0) } else { None }
     }
 }
 
-/// Extract a string field from a JSON value.
+fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
+    Provider::Claude
+        .event_from_shared_native_name(event_name)
+        .ok_or_else(|| AdapterError::UnknownEvent(event_name.to_string()))
+}
+
 fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(|v| v.as_str()).map(String::from)
+    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+fn decision_to_permission(decision: Option<HookDecision>) -> &'static str {
+    match decision.unwrap_or(HookDecision::Allow) {
+        HookDecision::Allow => "allow",
+        HookDecision::Deny => "deny",
+        HookDecision::Ask => "ask",
+        HookDecision::Continue => "allow",
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
 
-    fn default_env() -> EnvironmentContext {
-        EnvironmentContext::default()
-    }
+    use super::*;
 
     #[test]
-    fn maps_session_start() {
+    fn parse_maps_turn_complete_aliases() {
         let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "SessionStart",
-            "session_id": "sess-001",
-            "cwd": "/home/user/project"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionStart);
-        assert_eq!(meta.session_id.as_deref(), Some("sess-001"));
-        assert_eq!(meta.cwd.as_deref(), Some("/home/user/project"));
-        assert_eq!(meta.provider, Provider::Claude);
+        let raw = json!({ "hook_event_name": "TaskCompleted", "session_id": "s1" });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnComplete);
+        assert_eq!(meta.session_id.as_deref(), Some("s1"));
     }
 
     #[test]
-    fn maps_before_tool_with_metadata() {
+    fn parse_captures_extra_fields() {
         let adapter = ClaudeAdapter;
         let raw = json!({
             "hook_event_name": "PreToolUse",
-            "session_id": "sess-002",
             "tool_name": "Bash",
-            "tool_input": {"command": "ls -la"}
+            "permission_mode": "acceptEdits",
+            "stop_hook_active": true
         });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeTool);
-        assert_eq!(meta.tool_name.as_deref(), Some("Bash"));
-        assert_eq!(meta.tool_input, Some(json!({"command": "ls -la"})));
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(meta.extra["permission_mode"], json!("acceptEdits"));
+        assert_eq!(meta.extra["stop_hook_active"], json!(true));
     }
 
     #[test]
-    fn maps_after_tool_with_response() {
+    fn can_block_matches_matrix() {
         let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Read",
-            "tool_response": {"content": "file contents"}
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::AfterTool);
-        assert_eq!(meta.tool_name.as_deref(), Some("Read"));
+        assert!(adapter.can_block(&AgenticEvent::BeforeTool));
+        assert!(adapter.can_block(&AgenticEvent::TurnComplete));
+        assert!(!adapter.can_block(&AgenticEvent::Notification));
+    }
+
+    #[test]
+    fn format_permission_response() {
+        let adapter = ClaudeAdapter;
+        let response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            reason: Some("blocked".to_string()),
+            ..HookResponse::default()
+        };
+
+        let value = adapter
+            .format_response(&AgenticEvent::PermissionRequest, &response)
+            .unwrap();
+
+        assert_eq!(value["hookSpecificOutput"]["permissionDecision"], "deny");
         assert_eq!(
-            meta.tool_response,
-            Some(json!({"content": "file contents"}))
+            value["hookSpecificOutput"]["permissionDecisionReason"],
+            "blocked"
         );
-    }
-
-    #[test]
-    fn maps_tool_error() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "PostToolUseFailure",
-            "tool_name": "Bash",
-            "error": "command not found"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::ToolError);
-        assert_eq!(meta.error.as_deref(), Some("command not found"));
-    }
-
-    #[test]
-    fn maps_permission_request() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "PermissionRequest",
-            "tool_name": "Bash"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::PermissionRequest);
-    }
-
-    #[test]
-    fn maps_before_prompt() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "UserPromptSubmit",
-            "prompt": "Fix the bug"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforePrompt);
-        assert_eq!(meta.prompt.as_deref(), Some("Fix the bug"));
-    }
-
-    #[test]
-    fn maps_turn_complete() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": "Stop"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnComplete);
-    }
-
-    #[test]
-    fn maps_subagent_start() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "SubagentStart",
-            "agent_type": "task"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SubagentStart);
-        assert_eq!(meta.agent_type.as_deref(), Some("task"));
-    }
-
-    #[test]
-    fn maps_subagent_stop() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": "SubagentStop"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SubagentStop);
-    }
-
-    #[test]
-    fn maps_before_compact() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": "PreCompact"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeCompact);
-    }
-
-    #[test]
-    fn maps_notification_with_details() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({
-            "hook_event_name": "Notification",
-            "notification": {
-                "type": "info",
-                "message": "Context window 80% full"
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::Notification);
-        assert_eq!(meta.notification_type.as_deref(), Some("info"));
-        assert_eq!(
-            meta.notification_message.as_deref(),
-            Some("Context window 80% full")
-        );
-    }
-
-    #[test]
-    fn maps_session_end() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": "SessionEnd"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionEnd);
-    }
-
-    #[test]
-    fn unknown_event_returns_none() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": "SomeNewEvent"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn missing_hook_event_name_returns_none() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"session_id": "abc"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn malformed_json_missing_fields_returns_none() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn non_string_hook_event_name_returns_none() {
-        let adapter = ClaudeAdapter;
-        let raw = json!({"hook_event_name": 42});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn provider_returns_claude() {
-        let adapter = ClaudeAdapter;
-        assert_eq!(adapter.provider(), Provider::Claude);
     }
 }

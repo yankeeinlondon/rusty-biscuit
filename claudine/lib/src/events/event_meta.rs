@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::agentric_event::AgenticEvent;
+use super::agentic_event::AgenticEvent;
 use super::environment::EnvironmentContext;
 use super::provider::Provider;
 
@@ -13,7 +13,7 @@ use super::provider::Provider;
 /// Provider adapters populate this from their native event payloads.
 /// The `extra` map carries provider-specific fields that don't fit
 /// the common schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventMeta {
     /// Which agent provider fired the event.
     pub provider: Provider,

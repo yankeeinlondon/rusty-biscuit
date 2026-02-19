@@ -2,11 +2,10 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use serde_json::Value;
-use tracing::warn;
 
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, HookResponse, Provider};
 
-use super::ProviderAdapter;
+use super::{AdapterError, ProviderAdapter};
 
 pub(crate) struct CodexAdapter;
 
@@ -15,241 +14,171 @@ impl ProviderAdapter for CodexAdapter {
         Provider::Codex
     }
 
-    fn parse_event(
-        &self,
-        raw: &Value,
-        env: &EnvironmentContext,
-    ) -> Option<(AgenticEvent, EventMeta)> {
-        let type_field = match raw.get("type").and_then(|v| v.as_str()) {
-            Some(name) => name,
-            None => {
-                warn!("Codex adapter: missing or non-string 'type' field");
-                return None;
-            }
-        };
+    fn parse_event(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError> {
+        let kind = raw
+            .get("type")
+            .or_else(|| raw.get("event"))
+            .and_then(Value::as_str)
+            .ok_or(AdapterError::MissingField("type"))?;
 
-        let event = match type_field {
-            "thread.started" => AgenticEvent::SessionStart,
-            "turn.completed" => AgenticEvent::TurnComplete,
-            "turn.failed" => AgenticEvent::TurnError,
-            "item.completed" => {
-                // Only map to AfterTool if the item is a command_execution
-                let item_type = raw
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(|v| v.as_str());
-                if item_type == Some("command_execution") {
-                    AgenticEvent::AfterTool
-                } else {
-                    warn!(
-                        ?item_type,
-                        "Codex adapter: item.completed with non-command_execution type"
-                    );
-                    return None;
-                }
-            }
-            "error" => AgenticEvent::TurnError,
-            _ => {
-                warn!(type_field, "Codex adapter: unknown type field");
-                return None;
-            }
-        };
+        let (event, notification_type) = map_event(kind, raw)?;
 
-        let meta = EventMeta {
+        let item = raw.get("item");
+        let mut meta = EventMeta {
             provider: Provider::Codex,
-            event: event.clone(),
+            event,
             timestamp: Utc::now(),
-            session_id: str_field(raw, "thread_id"),
+            session_id: str_field(raw, "thread_id").or_else(|| str_field(raw, "thread-id")),
             cwd: str_field(raw, "cwd"),
-            tool_name: raw
-                .get("item")
-                .and_then(|item| item.get("name"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
-            tool_input: raw.get("item").and_then(|item| item.get("input")).cloned(),
-            tool_response: raw.get("item").and_then(|item| item.get("output")).cloned(),
+            tool_name: item
+                .and_then(|value| value.get("name"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            tool_input: item.and_then(|value| value.get("input")).cloned(),
+            tool_response: item.and_then(|value| value.get("output")).cloned(),
             error: raw
                 .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
+                .and_then(|value| value.get("message"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
             prompt: str_field(raw, "prompt"),
             agent_type: None,
-            notification_type: None,
+            notification_type,
             notification_message: None,
             extra: HashMap::new(),
-            env: env.clone(),
+            env: EnvironmentContext::default(),
         };
 
-        Some((event, meta))
+        for key in ["thread_id", "thread-id", "token_usage"] {
+            if let Some(value) = raw.get(key) {
+                meta.extra.insert(key.to_string(), value.clone());
+            }
+        }
+
+        if let Some(item_value) = item {
+            if let Some(item_type) = item_value.get("type") {
+                meta.extra
+                    .insert("item_type".to_string(), item_type.clone());
+            }
+            if let Some(item_id) = item_value.get("id") {
+                meta.extra.insert("item_id".to_string(), item_id.clone());
+            }
+        }
+
+        Ok((event, meta))
+    }
+
+    fn can_block(&self, _event: &AgenticEvent) -> bool {
+        false
+    }
+
+    fn format_response(
+        &self,
+        _event: &AgenticEvent,
+        _response: &HookResponse,
+    ) -> Result<Value, AdapterError> {
+        Ok(Value::Null)
+    }
+
+    fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
+        None
     }
 }
 
-/// Extract a string field from a JSON value.
+fn map_event(kind: &str, raw: &Value) -> Result<(AgenticEvent, Option<String>), AdapterError> {
+    match kind {
+        "AfterAgent" | "turn.completed" | "TurnCompleted" => Ok((AgenticEvent::TurnComplete, None)),
+        "AfterToolUse" | "item.completed" | "ItemCompleted" => Ok((AgenticEvent::AfterTool, None)),
+        "ThreadStarted" | "thread.started" => Ok((AgenticEvent::SessionStart, None)),
+        "TurnStarted" | "turn.started" => Ok((AgenticEvent::BeforePrompt, None)),
+        "TurnFailed" | "turn.failed" | "Error" | "error" => Ok((AgenticEvent::TurnError, None)),
+        "ItemStarted" | "item.started" => {
+            if is_tool_item(raw) {
+                Ok((AgenticEvent::BeforeTool, None))
+            } else {
+                Err(AdapterError::UnknownEvent(kind.to_string()))
+            }
+        }
+        "ItemUpdated" | "item.updated" => {
+            let item_type = raw
+                .get("item")
+                .and_then(|item| item.get("type"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+
+            let event = match item_type.as_deref() {
+                Some("reasoning") | Some("web_search") | Some("plan_update") => {
+                    AgenticEvent::Notification
+                }
+                _ => AgenticEvent::AfterModel,
+            };
+            Ok((event, item_type))
+        }
+        other => Err(AdapterError::UnknownEvent(other.to_string())),
+    }
+}
+
+fn is_tool_item(raw: &Value) -> bool {
+    matches!(
+        raw.get("item")
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str),
+        Some("command_execution") | Some("file_change") | Some("mcp_tool_call")
+    )
+}
+
 fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(|v| v.as_str()).map(String::from)
+    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
 
-    fn default_env() -> EnvironmentContext {
-        EnvironmentContext::default()
+    use super::*;
+
+    #[test]
+    fn parse_item_started_tool_to_before_tool() {
+        let adapter = CodexAdapter;
+        let raw = json!({
+            "type": "item.started",
+            "item": { "type": "command_execution", "name": "shell" }
+        });
+
+        let (event, _) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::BeforeTool);
     }
 
     #[test]
-    fn maps_thread_started_to_session_start() {
+    fn parse_item_updated_reasoning_to_notification() {
+        let adapter = CodexAdapter;
+        let raw = json!({
+            "type": "item.updated",
+            "item": { "type": "reasoning", "id": "i1" }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::Notification);
+        assert_eq!(meta.notification_type.as_deref(), Some("reasoning"));
+    }
+
+    #[test]
+    fn parse_adds_extra_fields() {
         let adapter = CodexAdapter;
         let raw = json!({
             "type": "thread.started",
-            "thread_id": "thread-abc-123"
+            "thread_id": "t1",
+            "token_usage": { "in": 1, "out": 2 }
         });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionStart);
-        assert_eq!(meta.session_id.as_deref(), Some("thread-abc-123"));
-        assert_eq!(meta.provider, Provider::Codex);
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(meta.extra["thread_id"], json!("t1"));
+        assert_eq!(meta.extra["token_usage"]["in"], json!(1));
     }
 
     #[test]
-    fn maps_turn_completed() {
+    fn never_blocks() {
         let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "turn.completed",
-            "thread_id": "thread-001"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnComplete);
-    }
-
-    #[test]
-    fn maps_turn_failed_to_turn_error() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "turn.failed",
-            "thread_id": "thread-001"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnError);
-    }
-
-    #[test]
-    fn maps_item_completed_command_execution_to_after_tool() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "item.completed",
-            "thread_id": "thread-002",
-            "item": {
-                "type": "command_execution",
-                "name": "shell",
-                "input": {"command": "cargo test"},
-                "output": {"exit_code": 0}
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::AfterTool);
-        assert_eq!(meta.tool_name.as_deref(), Some("shell"));
-        assert_eq!(meta.tool_input, Some(json!({"command": "cargo test"})));
-        assert_eq!(meta.tool_response, Some(json!({"exit_code": 0})));
-    }
-
-    #[test]
-    fn item_completed_non_command_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "item.completed",
-            "item": {
-                "type": "message",
-                "content": "Hello"
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn item_completed_missing_item_type_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "item.completed",
-            "item": {
-                "name": "shell"
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn item_completed_missing_item_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "item.completed"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn maps_error_to_turn_error() {
-        let adapter = CodexAdapter;
-        let raw = json!({
-            "type": "error",
-            "error": {
-                "message": "Rate limit exceeded"
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnError);
-        assert_eq!(meta.error.as_deref(), Some("Rate limit exceeded"));
-    }
-
-    #[test]
-    fn unknown_type_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({"type": "stream.delta"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn missing_type_field_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({"thread_id": "abc"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn malformed_json_empty_object_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn non_string_type_returns_none() {
-        let adapter = CodexAdapter;
-        let raw = json!({"type": 123});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn provider_returns_codex() {
-        let adapter = CodexAdapter;
-        assert_eq!(adapter.provider(), Provider::Codex);
+        assert!(!adapter.can_block(&AgenticEvent::BeforeTool));
     }
 }

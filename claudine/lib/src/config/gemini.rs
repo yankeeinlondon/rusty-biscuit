@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::{AgenticEvent, HookerConfig, Provider};
+use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
@@ -87,7 +87,11 @@ impl AgentConfigurator for GeminiConfigurator {
             .events
             .iter()
             .filter(|(_, binding)| binding.enabled)
-            .filter_map(|(event, _)| to_gemini_native(event))
+            .filter_map(|(event, _)| {
+                Provider::Gemini
+                    .registration_native_event_name(event)
+                    .map(str::to_string)
+            })
             .collect();
 
         // First pass: remove claudine hooks for events NOT in config
@@ -111,7 +115,7 @@ impl AgentConfigurator for GeminiConfigurator {
                 continue;
             }
             // Skip events that Gemini doesn't support
-            let Some(native_name) = to_gemini_native(event) else {
+            let Some(native_name) = Provider::Gemini.registration_native_event_name(event) else {
                 continue;
             };
 
@@ -123,7 +127,9 @@ impl AgentConfigurator for GeminiConfigurator {
                 "description": format!("Claudine handler for {snake}")
             });
 
-            let existing = hooks.entry(&native_name).or_insert_with(|| json!([]));
+            let existing = hooks
+                .entry(native_name.to_string())
+                .or_insert_with(|| json!([]));
             if let Some(arr) = existing.as_array_mut() {
                 // Remove existing Claudine entries
                 arr.retain(|entry| !is_claudine_hook(entry));
@@ -228,40 +234,18 @@ impl GeminiConfigurator {
             .map(|p| {
                 p.events
                     .iter()
-                    .filter(|(event, binding)| binding.enabled && to_gemini_native(event).is_some())
+                    .filter(|(event, binding)| {
+                        binding.enabled
+                            && Provider::Gemini
+                                .registration_native_event_name(event)
+                                .is_some()
+                    })
                     .map(|(event, _)| event.to_string())
                     .collect()
             })
             .unwrap_or_default();
 
         Ok(registered == expected)
-    }
-}
-
-/// Map Claudine event names to Gemini CLI native hook names.
-///
-/// Returns `None` for events that Gemini doesn't support natively.
-/// Unsupported events: ToolError, PermissionRequest, HumanInTheLoop,
-/// TurnError, SubagentStart, SubagentStop.
-fn to_gemini_native(event: &AgenticEvent) -> Option<String> {
-    match event {
-        AgenticEvent::BeforePrompt => Some("BeforeAgent".to_string()),
-        AgenticEvent::TurnComplete => Some("AfterAgent".to_string()),
-        AgenticEvent::BeforeCompact => Some("PreCompress".to_string()),
-        AgenticEvent::SessionStart => Some("SessionStart".to_string()),
-        AgenticEvent::SessionEnd => Some("SessionEnd".to_string()),
-        AgenticEvent::BeforeTool => Some("BeforeTool".to_string()),
-        AgenticEvent::AfterTool => Some("AfterTool".to_string()),
-        AgenticEvent::Notification => Some("Notification".to_string()),
-        AgenticEvent::BeforeModel => Some("BeforeModel".to_string()),
-        AgenticEvent::AfterModel => Some("AfterModel".to_string()),
-        // Unsupported events - Gemini doesn't have these hook types
-        AgenticEvent::ToolError
-        | AgenticEvent::PermissionRequest
-        | AgenticEvent::HumanInTheLoop
-        | AgenticEvent::TurnError
-        | AgenticEvent::SubagentStart
-        | AgenticEvent::SubagentStop => None,
     }
 }
 
@@ -299,7 +283,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::events::{EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
 
     use super::*;
 
@@ -411,26 +395,41 @@ mod tests {
     #[test]
     fn event_name_mapping() {
         assert_eq!(
-            to_gemini_native(&AgenticEvent::BeforePrompt),
-            Some("BeforeAgent".to_string())
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::BeforePrompt),
+            Some("BeforeAgent")
         );
         assert_eq!(
-            to_gemini_native(&AgenticEvent::TurnComplete),
-            Some("AfterAgent".to_string())
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::TurnComplete),
+            Some("AfterAgent")
         );
         assert_eq!(
-            to_gemini_native(&AgenticEvent::BeforeCompact),
-            Some("PreCompress".to_string())
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::BeforeCompact),
+            Some("PreCompress")
         );
     }
 
     #[test]
     fn unsupported_events_return_none() {
-        assert_eq!(to_gemini_native(&AgenticEvent::ToolError), None);
-        assert_eq!(to_gemini_native(&AgenticEvent::PermissionRequest), None);
-        assert_eq!(to_gemini_native(&AgenticEvent::TurnError), None);
-        assert_eq!(to_gemini_native(&AgenticEvent::SubagentStart), None);
-        assert_eq!(to_gemini_native(&AgenticEvent::SubagentStop), None);
+        assert_eq!(
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::ToolError),
+            None
+        );
+        assert_eq!(
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::PermissionRequest),
+            None
+        );
+        assert_eq!(
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::TurnError),
+            None
+        );
+        assert_eq!(
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::SubagentStart),
+            None
+        );
+        assert_eq!(
+            Provider::Gemini.registration_native_event_name(&AgenticEvent::SubagentStop),
+            None
+        );
     }
 
     #[test]

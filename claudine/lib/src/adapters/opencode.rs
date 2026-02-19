@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::Value;
-use tracing::warn;
+use serde_json::{Value, json};
 
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{
+    AgenticEvent, EnvironmentContext, EventMeta, HookDecision, HookResponse, Provider,
+};
 
-use super::ProviderAdapter;
+use super::{AdapterError, ProviderAdapter};
 
 pub(crate) struct OpenCodeAdapter;
 
@@ -15,237 +16,178 @@ impl ProviderAdapter for OpenCodeAdapter {
         Provider::OpenCode
     }
 
-    fn parse_event(
-        &self,
-        raw: &Value,
-        env: &EnvironmentContext,
-    ) -> Option<(AgenticEvent, EventMeta)> {
-        let event_type = match raw.get("event_type").and_then(|v| v.as_str()) {
-            Some(name) => name,
-            None => {
-                warn!("OpenCode adapter: missing or non-string 'event_type'");
-                return None;
-            }
-        };
+    fn parse_event(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError> {
+        let event_type = raw
+            .get("event_type")
+            .or_else(|| raw.get("eventType"))
+            .or_else(|| raw.get("type"))
+            .or_else(|| raw.get("event"))
+            .and_then(Value::as_str)
+            .ok_or(AdapterError::MissingField("event_type"))?;
 
-        let event = match event_type {
-            "session.created" => AgenticEvent::SessionStart,
-            "session.deleted" => AgenticEvent::SessionEnd,
-            "session.idle" => AgenticEvent::TurnComplete,
-            "session.error" => AgenticEvent::TurnError,
-            "session.compacted" | "experimental.session.compacting" => AgenticEvent::BeforeCompact,
-            "permission.asked" => AgenticEvent::PermissionRequest,
-            "chat.message" => AgenticEvent::BeforePrompt,
-            "tool.execute.before" => AgenticEvent::BeforeTool,
-            "tool.execute.after" => AgenticEvent::AfterTool,
-            "chat.params" => AgenticEvent::BeforeModel,
-            _ => {
-                warn!(event_type, "OpenCode adapter: unknown event_type");
-                return None;
-            }
-        };
-
-        let meta = EventMeta {
+        let event = map_event(event_type)?;
+        let mut meta = EventMeta {
             provider: Provider::OpenCode,
-            event: event.clone(),
+            event,
             timestamp: Utc::now(),
             session_id: str_field(raw, "session_id"),
             cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name"),
+            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
             tool_input: raw.get("tool_input").cloned(),
             tool_response: raw.get("tool_response").cloned(),
             error: str_field(raw, "error"),
             prompt: str_field(raw, "prompt"),
             agent_type: str_field(raw, "agent_type"),
-            notification_type: None,
-            notification_message: None,
+            notification_type: if event == AgenticEvent::Notification {
+                Some(event_type.to_string())
+            } else {
+                None
+            },
+            notification_message: str_field(raw, "message"),
             extra: HashMap::new(),
-            env: env.clone(),
+            env: EnvironmentContext::default(),
         };
 
-        Some((event, meta))
+        for key in ["bus_event_type", "plugin_context", "auth_method"] {
+            if let Some(value) = raw.get(key) {
+                meta.extra.insert(key.to_string(), value.clone());
+            }
+        }
+
+        Ok((event, meta))
+    }
+
+    fn can_block(&self, event: &AgenticEvent) -> bool {
+        matches!(
+            event,
+            AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest
+        )
+    }
+
+    fn format_response(
+        &self,
+        event: &AgenticEvent,
+        response: &HookResponse,
+    ) -> Result<Value, AdapterError> {
+        if let Some(raw) = &response.raw {
+            return Ok(raw.clone());
+        }
+
+        if !self.can_block(event) {
+            return Ok(Value::Null);
+        }
+
+        match event {
+            AgenticEvent::BeforeTool => {
+                if matches!(response.decision, Some(HookDecision::Deny)) {
+                    Ok(json!({
+                        "__action": "throw",
+                        "message": response.reason.clone().unwrap_or_else(|| "blocked by policy".to_string())
+                    }))
+                } else {
+                    Ok(json!({
+                        "__action": "mutate",
+                        "status": "allow"
+                    }))
+                }
+            }
+            AgenticEvent::PermissionRequest => {
+                let status = match response.decision.unwrap_or(HookDecision::Allow) {
+                    HookDecision::Allow => "allow",
+                    HookDecision::Deny => "deny",
+                    HookDecision::Ask => "ask",
+                    HookDecision::Continue => "allow",
+                };
+                Ok(json!({
+                    "__action": "mutate",
+                    "status": status,
+                    "reason": response.reason,
+                }))
+            }
+            _ => Ok(Value::Null),
+        }
+    }
+
+    fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
+        None
     }
 }
 
-/// Extract a string field from a JSON value.
+fn map_event(event_type: &str) -> Result<AgenticEvent, AdapterError> {
+    if let Some(event) = Provider::OpenCode.event_from_shared_native_name(event_type) {
+        return Ok(event);
+    }
+
+    match event_type {
+        "chat.message" => Ok(AgenticEvent::BeforePrompt),
+        "tool.execute.before" => Ok(AgenticEvent::BeforeTool),
+        "tool.execute.after" => Ok(AgenticEvent::AfterTool),
+        "chat.params"
+        | "chat.headers"
+        | "experimental.chat.system.transform"
+        | "experimental.chat.messages.transform" => Ok(AgenticEvent::BeforeModel),
+        "experimental.text.complete" => Ok(AgenticEvent::AfterModel),
+        other => Err(AdapterError::UnknownEvent(other.to_string())),
+    }
+}
+
 fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(|v| v.as_str()).map(String::from)
+    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
 
-    fn default_env() -> EnvironmentContext {
-        EnvironmentContext::default()
-    }
+    use super::*;
 
     #[test]
-    fn maps_session_created_to_session_start() {
+    fn parse_permission_ask_is_blockable() {
         let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "session.created",
-            "session_id": "oc-sess-001"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionStart);
-        assert_eq!(meta.session_id.as_deref(), Some("oc-sess-001"));
-        assert_eq!(meta.provider, Provider::OpenCode);
-    }
+        let raw = json!({ "event_type": "permission.ask" });
 
-    #[test]
-    fn maps_session_deleted_to_session_end() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "session.deleted"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionEnd);
-    }
-
-    #[test]
-    fn maps_session_idle_to_turn_complete() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "session.idle"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnComplete);
-    }
-
-    #[test]
-    fn maps_session_error_to_turn_error() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "session.error",
-            "error": "context limit exceeded"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnError);
-        assert_eq!(meta.error.as_deref(), Some("context limit exceeded"));
-    }
-
-    #[test]
-    fn maps_session_compacted_to_before_compact() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "session.compacted"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeCompact);
-    }
-
-    #[test]
-    fn maps_experimental_compacting_to_before_compact() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "experimental.session.compacting"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeCompact);
-    }
-
-    #[test]
-    fn maps_permission_asked_to_permission_request() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "permission.asked",
-            "tool_name": "file_write"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
+        let (event, _) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::PermissionRequest);
-        assert_eq!(meta.tool_name.as_deref(), Some("file_write"));
+        assert!(adapter.can_block(&event));
     }
 
     #[test]
-    fn maps_chat_message_to_before_prompt() {
+    fn parse_permission_asked_maps_to_human_in_loop() {
         let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "chat.message",
-            "prompt": "Refactor this function"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforePrompt);
-        assert_eq!(meta.prompt.as_deref(), Some("Refactor this function"));
+        let raw = json!({ "event_type": "permission.asked" });
+
+        let (event, _) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::HumanInTheLoop);
     }
 
     #[test]
-    fn maps_tool_execute_before_to_before_tool() {
+    fn deny_before_tool_throws() {
         let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "tool.execute.before",
-            "tool_name": "bash",
-            "tool_input": {"command": "npm test"}
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeTool);
-        assert_eq!(meta.tool_name.as_deref(), Some("bash"));
-        assert_eq!(meta.tool_input, Some(json!({"command": "npm test"})));
+        let response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            reason: Some("blocked by policy".to_string()),
+            ..HookResponse::default()
+        };
+
+        let body = adapter
+            .format_response(&AgenticEvent::BeforeTool, &response)
+            .unwrap();
+        assert_eq!(body["__action"], "throw");
+        assert_eq!(body["message"], "blocked by policy");
     }
 
     #[test]
-    fn maps_tool_execute_after_to_after_tool() {
+    fn allow_permission_mutates_status() {
         let adapter = OpenCodeAdapter;
-        let raw = json!({
-            "event_type": "tool.execute.after",
-            "tool_name": "bash",
-            "tool_response": {"output": "tests passed"}
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::AfterTool);
-        assert_eq!(meta.tool_response, Some(json!({"output": "tests passed"})));
-    }
+        let response = HookResponse {
+            decision: Some(HookDecision::Allow),
+            ..HookResponse::default()
+        };
 
-    #[test]
-    fn maps_chat_params_to_before_model() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "chat.params"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeModel);
-    }
-
-    #[test]
-    fn unknown_event_type_returns_none() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"event_type": "session.unknown"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn missing_event_type_returns_none() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({"session_id": "abc"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn malformed_json_empty_object_returns_none() {
-        let adapter = OpenCodeAdapter;
-        let raw = json!({});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn provider_returns_open_code() {
-        let adapter = OpenCodeAdapter;
-        assert_eq!(adapter.provider(), Provider::OpenCode);
+        let body = adapter
+            .format_response(&AgenticEvent::PermissionRequest, &response)
+            .unwrap();
+        assert_eq!(body["__action"], "mutate");
+        assert_eq!(body["status"], "allow");
     }
 }

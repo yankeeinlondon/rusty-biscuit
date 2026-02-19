@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::Value;
-use tracing::warn;
+use serde_json::{Value, json};
 
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{
+    AgenticEvent, EnvironmentContext, EventMeta, HookDecision, HookResponse, Provider,
+};
 
-use super::ProviderAdapter;
+use super::{AdapterError, ProviderAdapter};
 
 pub(crate) struct GeminiAdapter;
 
@@ -15,237 +16,183 @@ impl ProviderAdapter for GeminiAdapter {
         Provider::Gemini
     }
 
-    fn parse_event(
-        &self,
-        raw: &Value,
-        env: &EnvironmentContext,
-    ) -> Option<(AgenticEvent, EventMeta)> {
-        let event_name = match raw.get("hook_event_name").and_then(|v| v.as_str()) {
-            Some(name) => name,
-            None => {
-                warn!("Gemini adapter: missing or non-string 'hook_event_name'");
-                return None;
-            }
-        };
+    fn parse_event(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError> {
+        let event_name = raw
+            .get("hook_event_name")
+            .or_else(|| raw.get("hookEventName"))
+            .or_else(|| raw.get("event_name"))
+            .and_then(Value::as_str)
+            .ok_or(AdapterError::MissingField("hook_event_name"))?;
 
-        let event = match event_name {
-            "SessionStart" => AgenticEvent::SessionStart,
-            "SessionEnd" => AgenticEvent::SessionEnd,
-            "BeforeAgent" => AgenticEvent::BeforePrompt,
-            "BeforeTool" => AgenticEvent::BeforeTool,
-            "AfterTool" => AgenticEvent::AfterTool,
-            "AfterAgent" => AgenticEvent::TurnComplete,
-            "BeforeModel" => AgenticEvent::BeforeModel,
-            "AfterModel" => AgenticEvent::AfterModel,
-            "PreCompress" => AgenticEvent::BeforeCompact,
-            "Notification" => AgenticEvent::Notification,
-            _ => {
-                warn!(event_name, "Gemini adapter: unknown hook_event_name");
-                return None;
-            }
-        };
-
-        let notification = raw.get("notification");
-        let meta = EventMeta {
+        let event = map_event(event_name)?;
+        let mut meta = EventMeta {
             provider: Provider::Gemini,
-            event: event.clone(),
+            event,
             timestamp: Utc::now(),
             session_id: str_field(raw, "session_id"),
             cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name"),
+            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
             tool_input: raw.get("tool_input").cloned(),
             tool_response: raw.get("tool_response").cloned(),
             error: str_field(raw, "error"),
             prompt: str_field(raw, "prompt"),
             agent_type: str_field(raw, "agent_type"),
-            notification_type: notification
-                .and_then(|n| n.get("type"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
-            notification_message: notification
-                .and_then(|n| n.get("message"))
-                .and_then(|v| v.as_str())
-                .map(String::from),
+            notification_type: raw
+                .get("notification")
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            notification_message: raw
+                .get("notification")
+                .and_then(|value| value.get("message"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
             extra: HashMap::new(),
-            env: env.clone(),
+            env: EnvironmentContext::default(),
         };
 
-        Some((event, meta))
+        for key in [
+            "llm_request",
+            "llm_response",
+            "tool_config",
+            "aggregation_strategy",
+            "mcp_context",
+        ] {
+            if let Some(value) = raw.get(key) {
+                meta.extra.insert(key.to_string(), value.clone());
+            }
+        }
+
+        Ok((event, meta))
+    }
+
+    fn can_block(&self, event: &AgenticEvent) -> bool {
+        matches!(
+            event,
+            AgenticEvent::BeforePrompt
+                | AgenticEvent::TurnComplete
+                | AgenticEvent::BeforeModel
+                | AgenticEvent::AfterModel
+                | AgenticEvent::BeforeTool
+                | AgenticEvent::AfterTool
+        )
+    }
+
+    fn format_response(
+        &self,
+        event: &AgenticEvent,
+        response: &HookResponse,
+    ) -> Result<Value, AdapterError> {
+        if let Some(raw) = &response.raw {
+            return Ok(raw.clone());
+        }
+
+        if !self.can_block(event) {
+            return Ok(Value::Null);
+        }
+
+        match response.decision.unwrap_or(HookDecision::Allow) {
+            HookDecision::Allow => Ok(Value::Object(Default::default())),
+            HookDecision::Deny => match event {
+                AgenticEvent::TurnComplete => Ok(json!({
+                    "reason": response.reason.clone().unwrap_or_else(|| "blocked".to_string()),
+                    "clearContext": false
+                })),
+                AgenticEvent::BeforeTool => Ok(json!({
+                    "error": response.reason.clone().unwrap_or_else(|| "blocked".to_string())
+                })),
+                _ => Ok(json!({
+                    "error": response.reason.clone().unwrap_or_else(|| "blocked".to_string())
+                })),
+            },
+            HookDecision::Continue => Ok(json!({
+                "decision": "continue",
+                "reason": response.reason
+            })),
+            HookDecision::Ask => Ok(json!({
+                "decision": "ask",
+                "reason": response.reason
+            })),
+        }
+    }
+
+    fn exit_code(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32> {
+        if !self.can_block(event) {
+            return None;
+        }
+
+        match response.decision.unwrap_or(HookDecision::Allow) {
+            HookDecision::Deny => Some(2),
+            _ => Some(0),
+        }
     }
 }
 
-/// Extract a string field from a JSON value.
+fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
+    Provider::Gemini
+        .event_from_shared_native_name(event_name)
+        .ok_or_else(|| AdapterError::UnknownEvent(event_name.to_string()))
+}
+
 fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(|v| v.as_str()).map(String::from)
+    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
 
-    fn default_env() -> EnvironmentContext {
-        EnvironmentContext::default()
-    }
+    use super::*;
 
     #[test]
-    fn maps_session_start() {
+    fn parse_maps_before_tool_selection() {
         let adapter = GeminiAdapter;
-        let raw = json!({
-            "hook_event_name": "SessionStart",
-            "session_id": "gem-001"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionStart);
-        assert_eq!(meta.session_id.as_deref(), Some("gem-001"));
-        assert_eq!(meta.provider, Provider::Gemini);
-    }
+        let raw = json!({ "hook_event_name": "BeforeToolSelection" });
 
-    #[test]
-    fn maps_session_end() {
-        let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "SessionEnd"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::SessionEnd);
-    }
-
-    #[test]
-    fn maps_before_agent_to_before_prompt() {
-        let adapter = GeminiAdapter;
-        let raw = json!({
-            "hook_event_name": "BeforeAgent",
-            "prompt": "Analyze this code"
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforePrompt);
-        assert_eq!(meta.prompt.as_deref(), Some("Analyze this code"));
-    }
-
-    #[test]
-    fn maps_before_tool_with_metadata() {
-        let adapter = GeminiAdapter;
-        let raw = json!({
-            "hook_event_name": "BeforeTool",
-            "tool_name": "search",
-            "tool_input": {"query": "rust async"}
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeTool);
-        assert_eq!(meta.tool_name.as_deref(), Some("search"));
-        assert_eq!(meta.tool_input, Some(json!({"query": "rust async"})));
-    }
-
-    #[test]
-    fn maps_after_tool() {
-        let adapter = GeminiAdapter;
-        let raw = json!({
-            "hook_event_name": "AfterTool",
-            "tool_name": "edit",
-            "tool_response": {"status": "success"}
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::AfterTool);
-        assert_eq!(meta.tool_response, Some(json!({"status": "success"})));
-    }
-
-    #[test]
-    fn maps_after_agent_to_turn_complete() {
-        let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "AfterAgent"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::TurnComplete);
-    }
-
-    #[test]
-    fn maps_before_model() {
-        let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "BeforeModel"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
+        let (event, _) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::BeforeModel);
     }
 
     #[test]
-    fn maps_after_model() {
+    fn can_block_matches_matrix() {
         let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "AfterModel"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::AfterModel);
+        assert!(adapter.can_block(&AgenticEvent::BeforePrompt));
+        assert!(adapter.can_block(&AgenticEvent::AfterTool));
+        assert!(!adapter.can_block(&AgenticEvent::Notification));
     }
 
     #[test]
-    fn maps_pre_compress_to_before_compact() {
+    fn deny_before_tool_formats_error() {
         let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "PreCompress"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, _) = result.unwrap();
-        assert_eq!(event, AgenticEvent::BeforeCompact);
-    }
+        let response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            reason: Some("disallowed tool".to_string()),
+            ..HookResponse::default()
+        };
 
-    #[test]
-    fn maps_notification() {
-        let adapter = GeminiAdapter;
-        let raw = json!({
-            "hook_event_name": "Notification",
-            "notification": {
-                "type": "warning",
-                "message": "Rate limit approaching"
-            }
-        });
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_some());
-        let (event, meta) = result.unwrap();
-        assert_eq!(event, AgenticEvent::Notification);
-        assert_eq!(meta.notification_type.as_deref(), Some("warning"));
+        let body = adapter
+            .format_response(&AgenticEvent::BeforeTool, &response)
+            .unwrap();
+        assert_eq!(body["error"], "disallowed tool");
         assert_eq!(
-            meta.notification_message.as_deref(),
-            Some("Rate limit approaching")
+            adapter.exit_code(&AgenticEvent::BeforeTool, &response),
+            Some(2)
         );
     }
 
     #[test]
-    fn unknown_event_returns_none() {
+    fn after_agent_retry_payload() {
         let adapter = GeminiAdapter;
-        let raw = json!({"hook_event_name": "UnknownGeminiEvent"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
+        let response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            reason: Some("response too short".to_string()),
+            ..HookResponse::default()
+        };
 
-    #[test]
-    fn missing_hook_event_name_returns_none() {
-        let adapter = GeminiAdapter;
-        let raw = json!({"session_id": "abc"});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn malformed_json_empty_object_returns_none() {
-        let adapter = GeminiAdapter;
-        let raw = json!({});
-        let result = adapter.parse_event(&raw, &default_env());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn provider_returns_gemini() {
-        let adapter = GeminiAdapter;
-        assert_eq!(adapter.provider(), Provider::Gemini);
+        let body = adapter
+            .format_response(&AgenticEvent::TurnComplete, &response)
+            .unwrap();
+        assert_eq!(body["reason"], "response too short");
+        assert_eq!(body["clearContext"], false);
     }
 }

@@ -3,11 +3,12 @@ use std::fmt;
 
 /// Normalized event names across all supported agentic CLI providers.
 ///
-/// Each variant represents a lifecycle moment that at least 2 of the 5
+/// Each variant represents a lifecycle moment that at least 2 of the 8
 /// supported providers expose. Provider adapters map their native events
 /// to the appropriate variant.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AgenticEvent {
     /// Agent session started, resumed, or cleared.
     SessionStart,

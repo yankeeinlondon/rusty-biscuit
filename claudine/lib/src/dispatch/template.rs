@@ -2,15 +2,19 @@ use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::Regex;
+use tracing::warn;
 
 use crate::events::EventMeta;
 
-/// Compiled regex matching `{placeholder}` patterns.
+/// Compiled regex matching Handlebars-style `{{placeholder}}` patterns.
 ///
-/// Captures the inner name which must be lowercase ASCII letters,
-/// underscores, and dots (for `env.*` placeholders).
-static PLACEHOLDER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{([a-z_.]+)\}").expect("placeholder regex is valid"));
+/// Captures the inner expression for variable lookup.
+static HANDLEBARS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").expect("placeholder regex is valid"));
+
+/// Legacy single-brace placeholder key validation.
+static LEGACY_KEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").expect("legacy key regex is valid"));
 
 /// Category of template variables for display grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,9 +232,9 @@ impl TemplateVariable {
         }
     }
 
-    /// Returns the placeholder with braces (e.g., "{provider}").
+    /// Returns the placeholder with Handlebars braces (e.g., "{{provider}}").
     pub fn placeholder(&self) -> String {
-        format!("{{{}}}", self.key())
+        format!("{{{{{}}}}}", self.key())
     }
 
     /// All template variables in definition order.
@@ -279,11 +283,11 @@ impl TemplateVariable {
             .filter(|v| v.category() == VariableCategory::Event)
     }
 
-    /// Context variables only (env.* prefix - runtime-detected system/repo context).
+    /// Context variables only (`os.*`, `hardware.*`, `git.*`, `project.*`).
     ///
-    /// Note: These use the `env.*` prefix for brevity, but they are NOT shell
-    /// environment variables. They are auto-detected context about the OS,
-    /// hardware, git state, and project structure.
+    /// These are auto-detected context values about the OS, hardware, git
+    /// state, and project structure. Shell environment variables are resolved
+    /// separately via `{{env.VAR_NAME}}`.
     pub fn context_variables() -> impl Iterator<Item = &'static TemplateVariable> {
         Self::all()
             .iter()
@@ -378,12 +382,15 @@ impl TemplateVariable {
     }
 }
 
-/// Interpolate `{placeholder}` patterns in a template string using event metadata.
+/// Interpolate `{{placeholder}}` patterns in a template string using event metadata.
 ///
 /// Supported placeholders are defined in [`TemplateVariable`]. Use
 /// [`TemplateVariable::all()`] to enumerate all available variables.
 ///
 /// Unknown placeholders are left as-is. `None` optional fields render as empty string.
+///
+/// Legacy single-brace placeholders (for example `{tool_name}`) are rewritten
+/// to `{{tool_name}}` for transitional compatibility and emit a warning.
 ///
 /// ## Examples
 ///
@@ -401,27 +408,124 @@ impl TemplateVariable {
 /// #     notification_type: None, notification_message: None,
 /// #     extra: HashMap::new(), env: EnvironmentContext::default(),
 /// # };
-/// let result = interpolate("Provider is {provider}", &meta);
+/// let result = interpolate("Provider is {{provider}}", &meta);
 /// assert_eq!(result, "Provider is claude");
 /// ```
 pub fn interpolate(template: &str, meta: &EventMeta) -> String {
-    PLACEHOLDER_RE
-        .replace_all(template, |caps: &regex::Captures| {
-            let key = &caps[1];
-            resolve_placeholder(key, meta)
+    let rewritten = rewrite_legacy_single_brace_placeholders(template);
+
+    HANDLEBARS_RE
+        .replace_all(rewritten.as_ref(), |caps: &regex::Captures| {
+            let full = caps
+                .get(0)
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let expr = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+            resolve_expression(expr, meta).unwrap_or(Cow::Owned(full))
         })
         .into_owned()
 }
 
-/// Resolve a single placeholder key to its replacement string.
+/// Resolve a single Handlebars expression to its replacement string.
 ///
-/// Returns a `Cow::Owned` for known keys (value or empty string for `None`),
-/// or the original `{key}` text for unknown keys.
-fn resolve_placeholder<'a>(key: &str, meta: &'a EventMeta) -> Cow<'a, str> {
-    match TemplateVariable::from_key(key) {
-        Some(var) => var.resolve(meta),
-        None => Cow::Owned(format!("{{{key}}}")),
+/// Returns `None` for unknown/malformed expressions so callers can preserve
+/// the original token unchanged.
+fn resolve_expression<'a>(expression: &str, meta: &'a EventMeta) -> Option<Cow<'a, str>> {
+    let expression = expression.trim();
+
+    if let Some(env_key) = expression.strip_prefix("env.") {
+        return resolve_env_expression(env_key);
     }
+
+    TemplateVariable::from_key(expression).map(|variable| variable.resolve(meta))
+}
+
+fn resolve_env_expression(expression: &str) -> Option<Cow<'static, str>> {
+    let (name_part, default) = if let Some((name, fallback)) = expression.split_once('|') {
+        (name.trim(), parse_default_literal(fallback.trim())?)
+    } else {
+        (expression.trim(), String::new())
+    };
+
+    if name_part.is_empty() {
+        return None;
+    }
+
+    match std::env::var(name_part) {
+        Ok(value) => Some(Cow::Owned(value)),
+        Err(std::env::VarError::NotPresent) => Some(Cow::Owned(default)),
+        Err(std::env::VarError::NotUnicode(_)) => Some(Cow::Owned(default)),
+    }
+}
+
+fn parse_default_literal(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    let inner = trimmed.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.to_string())
+}
+
+fn rewrite_legacy_single_brace_placeholders(template: &str) -> Cow<'_, str> {
+    let mut output = String::with_capacity(template.len());
+    let mut chars = template.chars().peekable();
+    let mut rewrote = false;
+
+    while let Some(ch) = chars.next() {
+        if ch != '{' {
+            output.push(ch);
+            continue;
+        }
+
+        if matches!(chars.peek(), Some('{')) {
+            output.push('{');
+            output.push('{');
+            chars.next();
+            continue;
+        }
+
+        let mut inner = String::new();
+        let mut found_closing = false;
+
+        for next in chars.by_ref() {
+            if next == '}' {
+                found_closing = true;
+                break;
+            }
+            inner.push(next);
+        }
+
+        if found_closing {
+            let key = inner.trim();
+            if is_legacy_placeholder_key(key) {
+                output.push_str("{{");
+                output.push_str(key);
+                output.push_str("}}");
+                rewrote = true;
+            } else {
+                output.push('{');
+                output.push_str(&inner);
+                output.push('}');
+            }
+        } else {
+            output.push('{');
+            output.push_str(&inner);
+            break;
+        }
+    }
+
+    if rewrote {
+        warn!(
+            template = %template,
+            "legacy single-brace template placeholders are deprecated; use {{...}}"
+        );
+        Cow::Owned(output)
+    } else {
+        Cow::Borrowed(template)
+    }
+}
+
+fn is_legacy_placeholder_key(key: &str) -> bool {
+    LEGACY_KEY_RE.is_match(key)
 }
 
 /// Convert an `Option<String>` to a `Cow`, rendering `None` as empty string.
@@ -512,14 +616,14 @@ mod tests {
     #[test]
     fn provider_placeholder() {
         let meta = sample_meta();
-        assert_eq!(interpolate("Hello {provider}", &meta), "Hello claude");
+        assert_eq!(interpolate("Hello {{provider}}", &meta), "Hello claude");
     }
 
     #[test]
     fn tool_name_and_git_branch() {
         let meta = sample_meta();
         assert_eq!(
-            interpolate("{tool_name} on {git.branch}", &meta),
+            interpolate("{{tool_name}} on {{git.branch}}", &meta),
             "Bash on main"
         );
     }
@@ -527,14 +631,14 @@ mod tests {
     #[test]
     fn unknown_placeholder_left_as_is() {
         let meta = sample_meta();
-        assert_eq!(interpolate("{unknown_field}", &meta), "{unknown_field}");
+        assert_eq!(interpolate("{{unknown_field}}", &meta), "{{unknown_field}}");
     }
 
     #[test]
     fn none_optional_renders_empty() {
         let mut meta = sample_meta();
         meta.tool_name = None;
-        assert_eq!(interpolate("Tool: {tool_name}", &meta), "Tool: ");
+        assert_eq!(interpolate("Tool: {{tool_name}}", &meta), "Tool: ");
     }
 
     #[test]
@@ -549,20 +653,20 @@ mod tests {
     #[test]
     fn event_display() {
         let meta = sample_meta();
-        assert_eq!(interpolate("{event}", &meta), "before_tool");
+        assert_eq!(interpolate("{{event}}", &meta), "before_tool");
     }
 
     #[test]
     fn hardware_cores() {
         let meta = sample_meta();
-        assert_eq!(interpolate("{hardware.cores}", &meta), "16");
+        assert_eq!(interpolate("{{hardware.cores}}", &meta), "16");
     }
 
     #[test]
     fn multiple_context_placeholders() {
         let meta = sample_meta();
         assert_eq!(
-            interpolate("{os.type} {hardware.arch}", &meta),
+            interpolate("{{os.type}} {{hardware.arch}}", &meta),
             "macos aarch64"
         );
     }
@@ -570,22 +674,46 @@ mod tests {
     #[test]
     fn git_repo_name() {
         let meta = sample_meta();
-        assert_eq!(interpolate("{git.repo_name}", &meta), "rusty-biscuit");
+        assert_eq!(interpolate("{{git.repo_name}}", &meta), "rusty-biscuit");
     }
 
     #[test]
     fn git_repo_org() {
         let meta = sample_meta();
-        assert_eq!(interpolate("{git.repo_org}", &meta), "anthropics");
+        assert_eq!(interpolate("{{git.repo_org}}", &meta), "anthropics");
     }
 
     #[test]
     fn git_repo_name_and_org_combined() {
         let meta = sample_meta();
         assert_eq!(
-            interpolate("{git.repo_org}/{git.repo_name}", &meta),
+            interpolate("{{git.repo_org}}/{{git.repo_name}}", &meta),
             "anthropics/rusty-biscuit"
         );
+    }
+
+    #[test]
+    fn env_variable_resolution() {
+        let meta = sample_meta();
+        let expected = std::env::var("HOME").unwrap_or_default();
+        let rendered = interpolate("{{env.HOME}}", &meta);
+        assert_eq!(rendered, expected);
+    }
+
+    #[test]
+    fn env_variable_default_is_used_when_not_present() {
+        let meta = sample_meta();
+        let rendered = interpolate(
+            "{{env.CLAUDINE_TEMPLATE_TEST_MISSING | \"fallback\"}}",
+            &meta,
+        );
+        assert_eq!(rendered, "fallback");
+    }
+
+    #[test]
+    fn legacy_single_brace_template_is_rewritten() {
+        let meta = sample_meta();
+        assert_eq!(interpolate("Tool {tool_name}", &meta), "Tool Bash");
     }
 
     // Tests for TemplateVariable enum
@@ -624,8 +752,8 @@ mod tests {
 
     #[test]
     fn placeholder_format() {
-        assert_eq!(TemplateVariable::Provider.placeholder(), "{provider}");
-        assert_eq!(TemplateVariable::EnvBranch.placeholder(), "{git.branch}");
+        assert_eq!(TemplateVariable::Provider.placeholder(), "{{provider}}");
+        assert_eq!(TemplateVariable::EnvBranch.placeholder(), "{{git.branch}}");
     }
 
     #[test]

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::agentric_event::AgenticEvent;
-use super::event_action::{EventAction, LogTarget};
+use super::agentic_event::AgenticEvent;
+use super::hook_action::{HookAction, LogTarget};
 use super::provider::Provider;
 
 /// Root configuration loaded from `~/.hooker`.
@@ -12,6 +12,7 @@ use super::provider::Provider;
 /// set of event bindings. This allows different providers to have different
 /// events configured with different actions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HookerConfig {
     /// Schema version for forward compatibility.
     pub version: String,
@@ -27,6 +28,7 @@ pub struct HookerConfig {
 
 /// Configuration for a single provider.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Event bindings for this provider.
     #[serde(default)]
@@ -35,6 +37,7 @@ pub struct ProviderConfig {
 
 /// Global settings that apply to all event bindings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GlobalSettings {
     /// Default log target used when an event's `Log` action
     /// doesn't specify its own target.
@@ -49,6 +52,7 @@ pub struct GlobalSettings {
 
 /// TTS configuration forwarded to biscuit-speaks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TtsSettings {
     /// Preferred TTS provider (e.g., "say", "espeak", "elevenlabs").
     #[serde(default)]
@@ -65,6 +69,7 @@ pub struct TtsSettings {
 
 /// Configuration for a single event binding.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EventBinding {
     /// Whether this binding is active. Defaults to `true`.
     #[serde(default = "default_true")]
@@ -72,7 +77,7 @@ pub struct EventBinding {
 
     /// Actions to execute when this event fires.
     #[serde(default)]
-    pub actions: Vec<EventAction>,
+    pub actions: Vec<HookAction>,
 
     /// Optional filter: only fire for events matching this regex
     /// against the tool name, notification type, or session source.
@@ -111,8 +116,9 @@ mod tests {
             "version": "1.0",
             "settings": {
                 "default_log_target": {
-                    "type": "local_file",
-                    "path": "~/.claudine/events.jsonl"
+                    "type": "file",
+                    "path": "~/.claudine/events.jsonl",
+                    "rotate_daily": false
                 },
                 "tts": {
                     "provider": "say",
@@ -170,7 +176,7 @@ mod tests {
                                     "type": "report",
                                     "handler": {
                                         "format": "compact",
-                                        "template": "[TOOL] {tool_name}: executing"
+                                        "template": "[TOOL] {{tool_name}}: executing"
                                     }
                                 }
                             ]
@@ -222,7 +228,7 @@ mod tests {
             AgenticEvent::TurnComplete,
             EventBinding {
                 enabled: true,
-                actions: vec![EventAction::Speak {
+                actions: vec![HookAction::Speak {
                     message: "done".to_string(),
                 }],
                 matcher: None,

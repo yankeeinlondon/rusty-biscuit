@@ -54,6 +54,10 @@ pub enum ClaudineError {
     #[error("invalid URL: {0}")]
     UrlError(#[from] url::ParseError),
 
+    /// Provider adapter parse/format error.
+    #[error("adapter error: {0}")]
+    Adapter(#[from] crate::adapters::AdapterError),
+
     /// Provider does not support automatic config creation.
     #[error("config creation not supported for provider: {provider}")]
     ConfigCreationNotSupported {

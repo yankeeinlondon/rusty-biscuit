@@ -1,44 +1,196 @@
 mod claude;
 mod codex;
 mod gemini;
+mod goose;
+mod kimicode;
 mod opencode;
+mod qwen;
+mod roo;
 
 use serde_json::Value;
 
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{AgenticEvent, EventMeta, HookResponse, Provider};
+
+/// Adapter-level parse/format errors.
+#[derive(Debug, thiserror::Error)]
+pub enum AdapterError {
+    /// Required field was missing from payload.
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+
+    /// Payload field had unexpected type.
+    #[error("invalid field type for `{field}`; expected {expected}")]
+    InvalidFieldType {
+        /// JSON field name.
+        field: &'static str,
+        /// Expected JSON type.
+        expected: &'static str,
+    },
+
+    /// Event name is not recognized for this provider.
+    #[error("unknown event `{0}`")]
+    UnknownEvent(String),
+
+    /// Invalid response for this provider/event.
+    #[error("response not supported for provider={provider:?}, event={event:?}")]
+    ResponseNotSupported {
+        /// Provider.
+        provider: Provider,
+        /// Event.
+        event: AgenticEvent,
+    },
+
+    /// Generic adapter parse/format failure.
+    #[error("adapter error: {0}")]
+    Message(String),
+}
 
 /// Trait for provider-specific event adapters.
-///
-/// Each adapter translates raw provider JSON into normalized
-/// `AgenticEvent` + `EventMeta` pairs.
-pub trait ProviderAdapter {
+pub trait ProviderAdapter: Send + Sync {
     /// Which provider this adapter handles.
     fn provider(&self) -> Provider;
 
-    /// Parse a raw provider event payload into a normalized event.
-    ///
-    /// Returns `None` for unknown or unsupported event types.
+    /// Parse raw provider JSON into normalized event + metadata.
     fn parse_event(
         &self,
         raw: &Value,
-        env: &EnvironmentContext,
-    ) -> Option<(AgenticEvent, EventMeta)>;
+    ) -> std::result::Result<(AgenticEvent, EventMeta), AdapterError>;
+
+    /// Whether this provider/event pair supports blocking response semantics.
+    fn can_block(&self, event: &AgenticEvent) -> bool;
+
+    /// Convert unified hook response into provider-native response payload.
+    fn format_response(
+        &self,
+        event: &AgenticEvent,
+        response: &HookResponse,
+    ) -> std::result::Result<Value, AdapterError>;
+
+    /// Exit code to use for shell-driven providers.
+    fn exit_code(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32>;
 }
 
-/// Create the appropriate adapter for a given provider.
-///
-/// ## Panics
-///
-/// Panics if called with `Provider::Goose`, `Provider::KimiCode`, or
-/// `Provider::QwenCode` as these providers do not yet have adapter implementations.
-pub fn adapter_for(provider: Provider) -> Box<dyn ProviderAdapter> {
+static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
+static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
+static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
+static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
+static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
+static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
+static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
+
+/// Returns the adapter singleton for a provider.
+pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
     match provider {
-        Provider::Claude => Box::new(claude::ClaudeAdapter),
-        Provider::Codex => Box::new(codex::CodexAdapter),
-        Provider::Gemini => Box::new(gemini::GeminiAdapter),
-        Provider::Goose => unimplemented!("Goose adapter not yet implemented"),
-        Provider::KimiCode => unimplemented!("Kimi Code adapter not yet implemented"),
-        Provider::OpenCode => Box::new(opencode::OpenCodeAdapter),
-        Provider::QwenCode => unimplemented!("Qwen Code adapter not yet implemented"),
+        Provider::Claude => &CLAUDE_ADAPTER,
+        Provider::Codex => &CODEX_ADAPTER,
+        Provider::Gemini => &GEMINI_ADAPTER,
+        Provider::Goose => &GOOSE_ADAPTER,
+        Provider::KimiCode => &KIMI_ADAPTER,
+        Provider::OpenCode => &OPENCODE_ADAPTER,
+        Provider::QwenCode => &QWEN_ADAPTER,
+        Provider::RooCode => &ROO_ADAPTER,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn raw_for_native(provider: Provider, native_name: &str) -> Value {
+        match provider {
+            Provider::Claude => json!({ "hook_event_name": native_name }),
+            Provider::Gemini => json!({ "hook_event_name": native_name }),
+            Provider::OpenCode => json!({ "event_type": native_name }),
+            _ => json!({ "event": native_name }),
+        }
+    }
+
+    #[test]
+    fn adapter_factory_returns_matching_provider() {
+        let providers = [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ];
+
+        for provider in providers {
+            let adapter = adapter_for(provider);
+            assert_eq!(adapter.provider(), provider);
+        }
+    }
+
+    #[test]
+    fn blockable_events_are_supported_by_provider() {
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ] {
+            let adapter = adapter_for(provider);
+            for event in crate::events::AgenticEvent::ALL {
+                if adapter.can_block(&event) {
+                    assert!(
+                        provider.supports_event(&event),
+                        "adapter for {provider} marks {event} as blockable but provider does not support it"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_native_mappings_are_hook_supported() {
+        for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
+            for mapping in provider.shared_native_mappings() {
+                assert!(
+                    provider.supports_event_via_hook(&mapping.event),
+                    "shared mapping marks {provider}/{:?} but provider is not hook-supported",
+                    mapping.event
+                );
+                assert_eq!(
+                    provider.registration_native_event_name(&mapping.event),
+                    Some(mapping.native_name),
+                    "shared registration mapping mismatch for {provider}/{:?}",
+                    mapping.event
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn adapters_conform_to_shared_native_mappings() {
+        for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
+            let adapter = adapter_for(provider);
+
+            for mapping in provider.shared_native_mappings() {
+                for alias in mapping.parse_aliases {
+                    let raw = raw_for_native(provider, alias);
+                    let (event, _) = adapter.parse_event(&raw).unwrap_or_else(|err| {
+                        panic!(
+                            "adapter parse failed for provider={provider}, alias={alias}, expected={:?}: {err}",
+                            mapping.event
+                        )
+                    });
+
+                    assert_eq!(
+                        event, mapping.event,
+                        "adapter mapping mismatch for provider={provider}, alias={alias}"
+                    );
+                }
+            }
+        }
     }
 }

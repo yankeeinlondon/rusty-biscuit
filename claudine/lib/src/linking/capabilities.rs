@@ -346,6 +346,7 @@ pub fn capabilities_for(provider: Provider) -> ProviderCapabilities {
         Provider::KimiCode => kimicode_capabilities(),
         Provider::OpenCode => opencode_capabilities(),
         Provider::QwenCode => qwencode_capabilities(),
+        Provider::RooCode => roocode_capabilities(),
     }
 }
 
@@ -359,11 +360,12 @@ pub fn all_capabilities() -> Vec<ProviderCapabilities> {
         kimicode_capabilities(),
         opencode_capabilities(),
         qwencode_capabilities(),
+        roocode_capabilities(),
     ]
 }
 
 /// All providers in display order.
-pub const ALL_PROVIDERS: [Provider; 7] = [
+pub const ALL_PROVIDERS: [Provider; 8] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Gemini,
@@ -371,6 +373,7 @@ pub const ALL_PROVIDERS: [Provider; 7] = [
     Provider::KimiCode,
     Provider::OpenCode,
     Provider::QwenCode,
+    Provider::RooCode,
 ];
 
 // ============================================================================
@@ -517,6 +520,18 @@ fn qwencode_capabilities() -> ProviderCapabilities {
     }
 }
 
+fn roocode_capabilities() -> ProviderCapabilities {
+    ProviderCapabilities {
+        provider: Provider::RooCode,
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".roo/skills", ".roo/skills")
+            .with_note("Roo skills are compatible with markdown skill bundles"),
+        commands: ResourceSupport::limited().with_note("Built-in command surface"),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".roo/agents", ".roo/agents"),
+        scripts: ResourceSupport::full(ResourceFormat::Executable, ".roo/scripts", ".roo/scripts"),
+        skill_frontmatter: SkillFrontmatter::standard().with_allowed_tools(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,7 +547,7 @@ mod tests {
     #[test]
     fn all_capabilities_returns_all_providers() {
         let caps = all_capabilities();
-        assert_eq!(caps.len(), 7);
+        assert_eq!(caps.len(), 8);
     }
 
     #[test]

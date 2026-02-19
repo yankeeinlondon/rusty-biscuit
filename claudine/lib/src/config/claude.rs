@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::{AgenticEvent, HookerConfig, Provider};
+use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
@@ -87,7 +87,11 @@ impl AgentConfigurator for ClaudeConfigurator {
             .events
             .iter()
             .filter(|(_, binding)| binding.enabled)
-            .filter_map(|(event, _)| to_claude_native(event))
+            .filter_map(|(event, _)| {
+                Provider::Claude
+                    .registration_native_event_name(event)
+                    .map(str::to_string)
+            })
             .collect();
 
         // First pass: remove claudine hooks for events NOT in config
@@ -112,7 +116,7 @@ impl AgentConfigurator for ClaudeConfigurator {
                 continue;
             }
             // Skip events that Claude Code doesn't support
-            let Some(native_name) = to_claude_native(event) else {
+            let Some(native_name) = Provider::Claude.registration_native_event_name(event) else {
                 continue;
             };
 
@@ -126,7 +130,9 @@ impl AgentConfigurator for ClaudeConfigurator {
             }]);
 
             // Merge with existing hooks for this event
-            let existing = hooks.entry(&native_name).or_insert_with(|| json!([]));
+            let existing = hooks
+                .entry(native_name.to_string())
+                .or_insert_with(|| json!([]));
             if let Some(arr) = existing.as_array_mut() {
                 // Remove any existing Claudine entries first
                 arr.retain(|entry| !is_claudine_hook_group(entry));
@@ -240,7 +246,10 @@ impl ClaudeConfigurator {
                     .iter()
                     .filter(|(event, binding)| {
                         // Only count enabled events that Claude supports
-                        binding.enabled && to_claude_native(event).is_some()
+                        binding.enabled
+                            && Provider::Claude
+                                .registration_native_event_name(event)
+                                .is_some()
                     })
                     .map(|(event, _)| event.to_string())
                     .collect()
@@ -248,30 +257,6 @@ impl ClaudeConfigurator {
             .unwrap_or_default();
 
         Ok(registered == expected)
-    }
-}
-
-/// Map Claudine event names to Claude Code native hook names.
-///
-/// Returns `None` for events that Claude Code doesn't support natively.
-/// Unsupported events: BeforeModel, AfterModel, TurnError.
-fn to_claude_native(event: &AgenticEvent) -> Option<String> {
-    match event {
-        AgenticEvent::BeforeTool => Some("PreToolUse".to_string()),
-        AgenticEvent::AfterTool => Some("PostToolUse".to_string()),
-        AgenticEvent::ToolError => Some("PostToolUseFailure".to_string()),
-        AgenticEvent::BeforePrompt => Some("UserPromptSubmit".to_string()),
-        AgenticEvent::TurnComplete => Some("Stop".to_string()),
-        AgenticEvent::BeforeCompact => Some("PreCompact".to_string()),
-        AgenticEvent::SessionStart => Some("SessionStart".to_string()),
-        AgenticEvent::SessionEnd => Some("SessionEnd".to_string()),
-        AgenticEvent::PermissionRequest => Some("PermissionRequest".to_string()),
-        AgenticEvent::HumanInTheLoop => Some("HumanInTheLoop".to_string()),
-        AgenticEvent::SubagentStart => Some("SubagentStart".to_string()),
-        AgenticEvent::SubagentStop => Some("SubagentStop".to_string()),
-        AgenticEvent::Notification => Some("Notification".to_string()),
-        // Unsupported events - Claude Code doesn't have these hook types
-        AgenticEvent::BeforeModel | AgenticEvent::AfterModel | AgenticEvent::TurnError => None,
     }
 }
 
@@ -348,7 +333,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::events::{EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
 
     use super::*;
 
@@ -586,40 +571,49 @@ mod tests {
     #[test]
     fn event_name_mapping() {
         assert_eq!(
-            to_claude_native(&AgenticEvent::BeforeTool),
-            Some("PreToolUse".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::BeforeTool),
+            Some("PreToolUse")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::AfterTool),
-            Some("PostToolUse".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::AfterTool),
+            Some("PostToolUse")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::ToolError),
-            Some("PostToolUseFailure".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::ToolError),
+            Some("PostToolUseFailure")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::BeforePrompt),
-            Some("UserPromptSubmit".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::BeforePrompt),
+            Some("UserPromptSubmit")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::TurnComplete),
-            Some("Stop".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::TurnComplete),
+            Some("Stop")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::BeforeCompact),
-            Some("PreCompact".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::BeforeCompact),
+            Some("PreCompact")
         );
         assert_eq!(
-            to_claude_native(&AgenticEvent::SessionStart),
-            Some("SessionStart".to_string())
+            Provider::Claude.registration_native_event_name(&AgenticEvent::SessionStart),
+            Some("SessionStart")
         );
     }
 
     #[test]
     fn unsupported_events_return_none() {
-        assert_eq!(to_claude_native(&AgenticEvent::BeforeModel), None);
-        assert_eq!(to_claude_native(&AgenticEvent::AfterModel), None);
-        assert_eq!(to_claude_native(&AgenticEvent::TurnError), None);
+        assert_eq!(
+            Provider::Claude.registration_native_event_name(&AgenticEvent::BeforeModel),
+            None
+        );
+        assert_eq!(
+            Provider::Claude.registration_native_event_name(&AgenticEvent::AfterModel),
+            None
+        );
+        assert_eq!(
+            Provider::Claude.registration_native_event_name(&AgenticEvent::TurnError),
+            None
+        );
     }
 
     #[test]

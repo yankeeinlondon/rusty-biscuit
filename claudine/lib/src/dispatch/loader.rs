@@ -1,16 +1,81 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use regex::Regex;
 use tracing::{debug, info, warn};
 
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::{HookerConfig, Provider};
+use crate::events::{
+    AgenticEvent, CompiledMapper, GlobalSettings, HookAction, HookerConfig, Mapper, Provider,
+};
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".hooker", ".hook-config"];
 
 /// Repo-level config file name.
 const REPO_CONFIG_NAME: &str = ".hooker";
+
+/// Runtime configuration with precompiled matcher and mapper regexes.
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    settings: GlobalSettings,
+    providers: HashMap<Provider, RuntimeProviderConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeProviderConfig {
+    events: HashMap<AgenticEvent, RuntimeEventBinding>,
+}
+
+/// Event binding ready for dispatch without per-event regex compilation.
+#[derive(Debug, Clone)]
+pub struct RuntimeEventBinding {
+    enabled: bool,
+    actions: Vec<HookAction>,
+    matcher: Option<Regex>,
+    compiled_mappers: Vec<Option<CompiledMapper>>,
+}
+
+impl RuntimeConfig {
+    /// Get global settings.
+    pub fn settings(&self) -> &GlobalSettings {
+        &self.settings
+    }
+
+    /// Get an event binding for a specific provider and event.
+    pub fn get_binding(
+        &self,
+        provider: Provider,
+        event: &AgenticEvent,
+    ) -> Option<&RuntimeEventBinding> {
+        self.providers
+            .get(&provider)
+            .and_then(|provider_config| provider_config.events.get(event))
+    }
+}
+
+impl RuntimeEventBinding {
+    /// Whether the binding is enabled.
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Actions to execute for this binding.
+    pub fn actions(&self) -> &[HookAction] {
+        &self.actions
+    }
+
+    /// Precompiled matcher regex for this binding.
+    pub fn matcher(&self) -> Option<&Regex> {
+        self.matcher.as_ref()
+    }
+
+    /// Per-action compiled mapper metadata aligned with [`Self::actions`].
+    pub fn compiled_mappers(&self) -> &[Option<CompiledMapper>] {
+        &self.compiled_mappers
+    }
+}
 
 /// Load and merge Claudine configuration.
 ///
@@ -40,6 +105,111 @@ pub fn load_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<Hook
                     .join(USER_CONFIG_NAMES[0])
             });
             Err(ClaudineError::ConfigNotFound(path))
+        }
+    }
+}
+
+/// Load configuration and compile regex-based runtime structures.
+///
+/// This compiles:
+/// - Event matchers from `EventBinding.matcher`
+/// - Call action regex mappers from `Mapper::Regex`
+///
+/// Invalid regex patterns fail at load time with contextual error messages.
+pub fn load_runtime_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<RuntimeConfig> {
+    let config = load_config(user, repo_root)?;
+    compile_runtime_config(config)
+}
+
+fn compile_runtime_config(config: HookerConfig) -> Result<RuntimeConfig> {
+    let HookerConfig {
+        version: _,
+        settings,
+        providers,
+    } = config;
+
+    let mut runtime_providers = HashMap::new();
+
+    for (provider, provider_config) in providers {
+        let mut runtime_events = HashMap::new();
+
+        for (event, binding) in provider_config.events {
+            let matcher = binding
+                .matcher
+                .as_deref()
+                .map(|pattern| {
+                    Regex::new(pattern).map_err(|error| {
+                        ClaudineError::TemplateError(format!(
+                            "invalid matcher regex for provider={provider} event={event}: {error} ({pattern})"
+                        ))
+                    })
+                })
+                .transpose()?;
+
+            let compiled_mappers = binding
+                .actions
+                .iter()
+                .map(|action| compile_action_mapper(action, provider, event))
+                .collect::<Result<Vec<_>>>()?;
+
+            runtime_events.insert(
+                event,
+                RuntimeEventBinding {
+                    enabled: binding.enabled,
+                    actions: binding.actions,
+                    matcher,
+                    compiled_mappers,
+                },
+            );
+        }
+
+        runtime_providers.insert(
+            provider,
+            RuntimeProviderConfig {
+                events: runtime_events,
+            },
+        );
+    }
+
+    Ok(RuntimeConfig {
+        settings,
+        providers: runtime_providers,
+    })
+}
+
+fn compile_action_mapper(
+    action: &HookAction,
+    provider: Provider,
+    event: AgenticEvent,
+) -> Result<Option<CompiledMapper>> {
+    let HookAction::Call { mapper, .. } = action else {
+        return Ok(None);
+    };
+
+    mapper
+        .as_ref()
+        .map(|mapper| compile_mapper(mapper, provider, event))
+        .transpose()
+}
+
+fn compile_mapper(
+    mapper: &Mapper,
+    provider: Provider,
+    event: AgenticEvent,
+) -> Result<CompiledMapper> {
+    match mapper {
+        Mapper::JsonField { field } => Ok(CompiledMapper::JsonField {
+            field: field.clone(),
+        }),
+        Mapper::JsonObject => Ok(CompiledMapper::JsonObject),
+        Mapper::ExitCode => Ok(CompiledMapper::ExitCode),
+        Mapper::Regex { pattern } => {
+            let compiled = Regex::new(pattern).map_err(|error| {
+                ClaudineError::TemplateError(format!(
+                    "invalid mapper regex for provider={provider} event={event}: {error} ({pattern})"
+                ))
+            })?;
+            Ok(CompiledMapper::Regex { pattern: compiled })
         }
     }
 }
@@ -230,7 +400,7 @@ mod tests {
     fn speak_binding(msg: &str) -> EventBinding {
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::Speak {
+            actions: vec![HookAction::Speak {
                 message: msg.to_string(),
             }],
             matcher: None,
@@ -303,7 +473,7 @@ mod tests {
         let claude = &loaded.providers[&Provider::Claude];
         assert_eq!(claude.events.len(), 1); // Only session_start, no turn_complete
         match &claude.events[&AgenticEvent::SessionStart].actions[0] {
-            EventAction::Speak { message } => assert_eq!(message, "repo session"),
+            HookAction::Speak { message } => assert_eq!(message, "repo session"),
             _ => panic!("Expected Speak"),
         }
     }
@@ -351,8 +521,9 @@ mod tests {
         let user = HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings {
-                default_log_target: Some(LogTarget::LocalFile {
-                    path: PathBuf::from("/tmp/user.jsonl"),
+                default_log_target: Some(LogTarget::File {
+                    path: Some(PathBuf::from("/tmp/user.jsonl")),
+                    rotate_daily: false,
                 }),
                 tts: Some(TtsSettings {
                     provider: Some("say".to_string()),
@@ -377,7 +548,7 @@ mod tests {
         let merged = merge_configs(user, repo);
         assert!(matches!(
             &merged.settings.default_log_target,
-            Some(LogTarget::LocalFile { .. })
+            Some(LogTarget::File { .. })
         ));
         let tts = merged.settings.tts.unwrap();
         assert_eq!(tts.provider.as_deref(), Some("espeak"));
@@ -523,5 +694,141 @@ mod tests {
         // This test just verifies the function doesn't panic
         let path = user_config_path();
         assert!(path.to_string_lossy().contains(".hooker"));
+    }
+
+    #[test]
+    fn load_runtime_config_precompiles_matcher_and_mapper_regex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {
+                "claude": {
+                    "events": {
+                        "before_tool": {
+                            "enabled": true,
+                            "matcher": "Bash|Edit",
+                            "actions": [
+                                {
+                                    "type": "call",
+                                    "command": "echo",
+                                    "args": ["allow because safe"],
+                                    "mapper": {
+                                        "type": "regex",
+                                        "pattern": "(?P<decision>allow|deny)\\s+because\\s+(?P<reason>.*)"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let path = tmp.path().join(".hooker");
+        std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let runtime = load_runtime_config(Some(&path), None).unwrap();
+        let binding = runtime
+            .get_binding(Provider::Claude, &AgenticEvent::BeforeTool)
+            .expect("missing runtime binding");
+
+        assert!(binding.matcher().is_some());
+        assert_eq!(binding.actions().len(), 1);
+        assert_eq!(binding.compiled_mappers().len(), 1);
+        assert!(binding.compiled_mappers()[0].is_some());
+    }
+
+    #[test]
+    fn load_runtime_config_fails_on_invalid_matcher_regex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {
+                "claude": {
+                    "events": {
+                        "before_tool": {
+                            "enabled": true,
+                            "matcher": "[invalid(",
+                            "actions": [
+                                { "type": "speak", "message": "hello" }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let path = tmp.path().join(".hooker");
+        std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let error = load_runtime_config(Some(&path), None).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid matcher regex"));
+        assert!(message.contains("before_tool"));
+    }
+
+    #[test]
+    fn load_runtime_config_fails_on_invalid_mapper_regex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {
+                "claude": {
+                    "events": {
+                        "before_tool": {
+                            "enabled": true,
+                            "actions": [
+                                {
+                                    "type": "call",
+                                    "command": "echo",
+                                    "mapper": {
+                                        "type": "regex",
+                                        "pattern": "[invalid("
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let path = tmp.path().join(".hooker");
+        std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let error = load_runtime_config(Some(&path), None).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid mapper regex"));
+        assert!(message.contains("before_tool"));
+    }
+
+    #[test]
+    fn load_config_fails_fast_on_unknown_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let json = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {
+                "claude": {
+                    "events": {
+                        "session_start": {
+                            "enabled": true,
+                            "actions": [],
+                            "legacy_field": true
+                        }
+                    }
+                }
+            }
+        });
+        let path = tmp.path().join(".hooker");
+        std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let error = load_config(Some(&path), None).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("unknown field"));
+        assert!(message.contains("legacy_field"));
     }
 }
