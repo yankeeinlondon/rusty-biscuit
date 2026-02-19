@@ -157,6 +157,32 @@ impl SupportLevel {
     }
 }
 
+/// Compatibility metadata for resource frontmatter/config fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourcePropertySchema {
+    /// Properties required by the provider for this resource type.
+    pub required: &'static [&'static str],
+    /// Properties optionally recognized by the provider.
+    pub optional: &'static [&'static str],
+    /// Source doc used to derive this schema metadata.
+    pub source_doc: &'static str,
+}
+
+impl ResourcePropertySchema {
+    /// Build a schema descriptor from required/optional fields.
+    pub const fn new(
+        required: &'static [&'static str],
+        optional: &'static [&'static str],
+        source_doc: &'static str,
+    ) -> Self {
+        Self {
+            required,
+            optional,
+            source_doc,
+        }
+    }
+}
+
 /// Support details for a specific resource type.
 #[derive(Debug, Clone)]
 pub struct ResourceSupport {
@@ -172,6 +198,8 @@ pub struct ResourceSupport {
     pub also_reads_from: Vec<PathBuf>,
     /// Notes about this resource support
     pub notes: Option<&'static str>,
+    /// Required/optional property metadata from cross-referencing docs.
+    pub properties: Option<ResourcePropertySchema>,
 }
 
 impl ResourceSupport {
@@ -184,6 +212,7 @@ impl ResourceSupport {
             user_path: Some(PathBuf::from(user_path)),
             also_reads_from: vec![],
             notes: None,
+            properties: None,
         }
     }
 
@@ -196,6 +225,7 @@ impl ResourceSupport {
             user_path: Some(PathBuf::from(user_path)),
             also_reads_from: vec![],
             notes: None,
+            properties: None,
         }
     }
 
@@ -208,6 +238,7 @@ impl ResourceSupport {
             user_path: None,
             also_reads_from: vec![],
             notes: None,
+            properties: None,
         }
     }
 
@@ -220,6 +251,7 @@ impl ResourceSupport {
             user_path: None,
             also_reads_from: vec![],
             notes: None,
+            properties: None,
         }
     }
 
@@ -233,6 +265,27 @@ impl ResourceSupport {
     pub fn with_note(mut self, note: &'static str) -> Self {
         self.notes = Some(note);
         self
+    }
+
+    /// Add compatibility metadata from cross-reference docs.
+    pub fn with_properties(mut self, schema: ResourcePropertySchema) -> Self {
+        self.properties = Some(schema);
+        self
+    }
+
+    /// Required properties for this provider/resource combination.
+    pub fn required_properties(&self) -> &'static [&'static str] {
+        self.properties.map(|schema| schema.required).unwrap_or(&[])
+    }
+
+    /// Optional properties for this provider/resource combination.
+    pub fn optional_properties(&self) -> &'static [&'static str] {
+        self.properties.map(|schema| schema.optional).unwrap_or(&[])
+    }
+
+    /// Source doc where property metadata was derived from.
+    pub fn property_source_doc(&self) -> Option<&'static str> {
+        self.properties.map(|schema| schema.source_doc)
     }
 }
 
@@ -334,6 +387,16 @@ impl ProviderCapabilities {
     pub fn support_level(&self, resource: LinkableResource) -> SupportLevel {
         self.support_for(resource).level
     }
+
+    /// Required property names for the given resource type.
+    pub fn required_properties_for(&self, resource: LinkableResource) -> &'static [&'static str] {
+        self.support_for(resource).required_properties()
+    }
+
+    /// Optional property names for the given resource type.
+    pub fn optional_properties_for(&self, resource: LinkableResource) -> &'static [&'static str] {
+        self.support_for(resource).optional_properties()
+    }
 }
 
 /// Get capabilities for a specific provider.
@@ -380,16 +443,196 @@ pub const ALL_PROVIDERS: [Provider; 8] = [
 // Provider-specific capability definitions
 // ============================================================================
 
+const CLAUDE_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &[
+        "name",
+        "description",
+        "argument-hint",
+        "disable-model-invocation",
+        "user-invocable",
+        "allowed-tools",
+        "model",
+        "context",
+        "agent",
+        "hooks",
+    ],
+    "claudine/docs/cross-referencing/claude-code.md",
+);
+const CLAUDE_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &[
+        "name",
+        "description",
+        "argument-hint",
+        "disable-model-invocation",
+        "user-invocable",
+        "allowed-tools",
+        "model",
+        "context",
+        "agent",
+        "hooks",
+    ],
+    "claudine/docs/cross-referencing/claude-code.md",
+);
+const CLAUDE_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &[
+        "tools",
+        "disallowedTools",
+        "model",
+        "permissionMode",
+        "maxTurns",
+        "skills",
+        "mcpServers",
+        "hooks",
+        "memory",
+    ],
+    "claudine/docs/cross-referencing/claude-code.md",
+);
+
+const CODEX_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &["license", "compatibility", "metadata"],
+    "claudine/docs/cross-referencing/codex.md",
+);
+const CODEX_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &["description", "argument-hint"],
+    "claudine/docs/cross-referencing/codex.md",
+);
+
+const GEMINI_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &[],
+    "claudine/docs/cross-referencing/gemini-cli.md",
+);
+const GEMINI_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["prompt"],
+    &["description"],
+    "claudine/docs/cross-referencing/gemini-cli.md",
+);
+const GEMINI_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &[
+        "kind",
+        "tools",
+        "model",
+        "temperature",
+        "max_turns",
+        "timeout_mins",
+    ],
+    "claudine/docs/cross-referencing/gemini-cli.md",
+);
+
+const GOOSE_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &["license", "compatibility", "metadata", "allowed-tools"],
+    "claudine/docs/cross-referencing/goose.md",
+);
+const GOOSE_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["title", "description"],
+    &[
+        "instructions",
+        "prompt",
+        "extensions",
+        "parameters",
+        "sub_recipes",
+    ],
+    "claudine/docs/cross-referencing/goose.md",
+);
+
+const KIMI_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &[
+        "name",
+        "description",
+        "license",
+        "compatibility",
+        "metadata",
+        "type",
+    ],
+    "claudine/docs/cross-referencing/kimi-code.md",
+);
+const KIMI_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "system_prompt_path", "tools"],
+    &["extend", "system_prompt_args", "exclude_tools", "subagents"],
+    "claudine/docs/cross-referencing/kimi-code.md",
+);
+
+const OPENCODE_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &["license", "compatibility", "metadata"],
+    "claudine/docs/cross-referencing/opencode.md",
+);
+const OPENCODE_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &["description", "template", "agent", "model", "subtask"],
+    "claudine/docs/cross-referencing/opencode.md",
+);
+const OPENCODE_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["description"],
+    &[
+        "mode",
+        "model",
+        "temperature",
+        "top_p",
+        "tools",
+        "permission",
+        "steps",
+        "color",
+        "hidden",
+        "disable",
+        "prompt",
+    ],
+    "claudine/docs/cross-referencing/opencode.md",
+);
+
+const QWEN_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &[],
+    "claudine/docs/cross-referencing/qwen-cli.md",
+);
+const QWEN_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &["description"],
+    "claudine/docs/cross-referencing/qwen-cli.md",
+);
+const QWEN_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &["tools", "color"],
+    "claudine/docs/cross-referencing/qwen-cli.md",
+);
+
+const ROO_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["name", "description"],
+    &[],
+    "claudine/docs/cross-referencing/roo-code.md",
+);
+const ROO_COMMAND_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &[],
+    &["description", "argument-hint", "mode"],
+    "claudine/docs/cross-referencing/roo-code.md",
+);
+const ROO_AGENT_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
+    &["slug", "name", "roleDefinition", "groups"],
+    &["description", "whenToUse", "customInstructions"],
+    "claudine/docs/cross-referencing/roo-code.md",
+);
+
 fn claude_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Claude,
-        skills: ResourceSupport::full(ResourceFormat::Markdown, ".claude/skills", ".claude/skills"),
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".claude/skills", ".claude/skills")
+            .with_properties(CLAUDE_SKILL_SCHEMA),
         commands: ResourceSupport::full(
             ResourceFormat::Markdown,
             ".claude/commands",
             ".claude/commands",
-        ),
-        agents: ResourceSupport::full(ResourceFormat::Markdown, ".claude/agents", ".claude/agents"),
+        )
+        .with_properties(CLAUDE_COMMAND_SCHEMA),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".claude/agents", ".claude/agents")
+            .with_properties(CLAUDE_AGENT_SCHEMA),
         scripts: ResourceSupport::none().with_note("Scripts are stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::full(),
     }
@@ -399,12 +642,18 @@ fn codex_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Codex,
         skills: ResourceSupport::full(ResourceFormat::Markdown, ".codex/skills", ".codex/skills")
-            .with_also_reads(vec![".claude/skills", ".agents/skills"]),
-        commands: ResourceSupport::full(
+            .with_also_reads(vec![".claude/skills", ".agents/skills"])
+            .with_properties(CODEX_SKILL_SCHEMA),
+        // Codex custom prompts are deprecated but still supported.
+        // Keep metadata so capability-driven linking can make explicit decisions.
+        // TODO: remove when Codex fully drops prompt files.
+        commands: ResourceSupport::custom_format(
             ResourceFormat::Markdown,
-            ".codex/commands",
-            ".codex/commands",
-        ),
+            ".codex/prompts",
+            ".codex/prompts",
+        )
+        .with_note("Deprecated custom prompts; prefer skills")
+        .with_properties(CODEX_COMMAND_SCHEMA),
         agents: ResourceSupport::full(ResourceFormat::Markdown, ".codex/agents", ".codex/agents"),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
@@ -419,15 +668,22 @@ fn gemini_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Gemini,
         skills: ResourceSupport::full(ResourceFormat::Markdown, ".gemini/skills", ".gemini/skills")
-            .with_note("Also supports .gemini/modules/ as context modules"),
+            .with_note("Also supports .gemini/modules/ as context modules")
+            .with_properties(GEMINI_SKILL_SCHEMA),
         commands: ResourceSupport::custom_format(
             ResourceFormat::Toml,
             ".gemini/commands",
             ".gemini/commands",
         )
-        .with_note("Uses TOML format with {{args}} placeholder"),
-        agents: ResourceSupport::limited()
-            .with_note("Tool delegation only, no dedicated agent files"),
+        .with_note("Uses TOML format with {{args}} placeholder")
+        .with_properties(GEMINI_COMMAND_SCHEMA),
+        agents: ResourceSupport::custom_format(
+            ResourceFormat::Markdown,
+            ".gemini/agents",
+            ".gemini/agents",
+        )
+        .with_note("Sub-agent markdown definitions are experimental")
+        .with_properties(GEMINI_AGENT_SCHEMA),
         scripts: ResourceSupport::none().with_note("Scripts stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::standard(),
     }
@@ -441,7 +697,8 @@ fn goose_capabilities() -> ProviderCapabilities {
             ".goose/skills",
             ".config/goose/skills",
         )
-        .with_also_reads(vec![".claude/skills", ".agents/skills"]),
+        .with_also_reads(vec![".claude/skills", ".agents/skills"])
+        .with_properties(GOOSE_SKILL_SCHEMA),
         commands: ResourceSupport::custom_format(ResourceFormat::Mcp, "", "")
             .with_note("MCP-based commands, not file-based"),
         agents: ResourceSupport::custom_format(
@@ -449,7 +706,8 @@ fn goose_capabilities() -> ProviderCapabilities {
             ".goose/recipes",
             ".config/goose/recipes",
         )
-        .with_note("Recipe YAML files with specific schema"),
+        .with_note("Recipe YAML files with specific schema")
+        .with_properties(GOOSE_AGENT_SCHEMA),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
             ".goose/scripts",
@@ -467,10 +725,16 @@ fn kimicode_capabilities() -> ProviderCapabilities {
             ".kimi/skills",
             ".config/agents/skills",
         )
-        .with_also_reads(vec![".claude/skills", ".agents/skills", ".codex/skills"]),
+        .with_also_reads(vec![".claude/skills", ".agents/skills", ".codex/skills"])
+        .with_properties(KIMI_SKILL_SCHEMA),
         commands: ResourceSupport::limited().with_note("Built-in slash commands only"),
-        agents: ResourceSupport::custom_format(ResourceFormat::Yaml, "", "")
-            .with_note("YAML agent files loaded via --agent-file flag"),
+        agents: ResourceSupport::custom_format(
+            ResourceFormat::Yaml,
+            ".kimi/agents",
+            ".kimi/agents",
+        )
+        .with_note("YAML agent files loaded via --agent-file flag")
+        .with_properties(KIMI_AGENT_SCHEMA),
         scripts: ResourceSupport::none().with_note("Scripts stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::extended(),
     }
@@ -484,17 +748,20 @@ fn opencode_capabilities() -> ProviderCapabilities {
             ".opencode/skills",
             ".config/opencode/skills",
         )
-        .with_also_reads(vec![".claude/skills", ".agents/skills"]),
+        .with_also_reads(vec![".claude/skills", ".agents/skills"])
+        .with_properties(OPENCODE_SKILL_SCHEMA),
         commands: ResourceSupport::full(
             ResourceFormat::Markdown,
             ".opencode/commands",
             ".config/opencode/commands",
-        ),
+        )
+        .with_properties(OPENCODE_COMMAND_SCHEMA),
         agents: ResourceSupport::full(
             ResourceFormat::Markdown,
             ".opencode/agents",
             ".config/opencode/agents",
-        ),
+        )
+        .with_properties(OPENCODE_AGENT_SCHEMA),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
             ".opencode/scripts",
@@ -508,9 +775,17 @@ fn qwencode_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::QwenCode,
         skills: ResourceSupport::full(ResourceFormat::Markdown, ".qwen/skills", ".qwen/skills")
-            .with_note("Skills support is experimental"),
-        commands: ResourceSupport::limited().with_note("Built-in slash commands only"),
-        agents: ResourceSupport::full(ResourceFormat::Markdown, ".qwen/agents", ".qwen/agents"),
+            .with_note("Skills support is experimental")
+            .with_properties(QWEN_SKILL_SCHEMA),
+        commands: ResourceSupport::full(
+            ResourceFormat::Markdown,
+            ".qwen/commands",
+            ".qwen/commands",
+        )
+        .with_note("Markdown custom commands; TOML remains deprecated fallback")
+        .with_properties(QWEN_COMMAND_SCHEMA),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".qwen/agents", ".qwen/agents")
+            .with_properties(QWEN_AGENT_SCHEMA),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
             ".qwen/scripts",
@@ -524,9 +799,17 @@ fn roocode_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::RooCode,
         skills: ResourceSupport::full(ResourceFormat::Markdown, ".roo/skills", ".roo/skills")
-            .with_note("Roo skills are compatible with markdown skill bundles"),
-        commands: ResourceSupport::limited().with_note("Built-in command surface"),
-        agents: ResourceSupport::full(ResourceFormat::Markdown, ".roo/agents", ".roo/agents"),
+            .with_note("Roo skills are compatible with markdown skill bundles")
+            .with_properties(ROO_SKILL_SCHEMA),
+        commands: ResourceSupport::full(ResourceFormat::Markdown, ".roo/commands", ".roo/commands")
+            .with_properties(ROO_COMMAND_SCHEMA),
+        agents: ResourceSupport::custom_format(
+            ResourceFormat::Yaml,
+            ".roomodes",
+            ".roo/custom_modes.yaml",
+        )
+        .with_note("Mode definitions via .roomodes/custom_modes.yaml")
+        .with_properties(ROO_AGENT_SCHEMA),
         scripts: ResourceSupport::full(ResourceFormat::Executable, ".roo/scripts", ".roo/scripts"),
         skill_frontmatter: SkillFrontmatter::standard().with_allowed_tools(),
     }
@@ -593,9 +876,17 @@ mod tests {
     }
 
     #[test]
-    fn qwencode_commands_are_limited() {
+    fn qwencode_commands_are_markdown() {
         let caps = capabilities_for(Provider::QwenCode);
-        assert_eq!(caps.commands.level, SupportLevel::Limited);
+        assert_eq!(caps.commands.level, SupportLevel::Full);
+        assert_eq!(caps.commands.format, Some(ResourceFormat::Markdown));
+    }
+
+    #[test]
+    fn roocode_commands_are_markdown() {
+        let caps = capabilities_for(Provider::RooCode);
+        assert_eq!(caps.commands.level, SupportLevel::Full);
+        assert_eq!(caps.commands.format, Some(ResourceFormat::Markdown));
     }
 
     #[test]
@@ -681,5 +972,22 @@ mod tests {
         assert!(SupportLevel::CustomFormat.allows_custom());
         assert!(!SupportLevel::Limited.allows_custom());
         assert!(!SupportLevel::None.allows_custom());
+    }
+
+    #[test]
+    fn capability_metadata_exposes_required_and_optional_fields() {
+        let caps = capabilities_for(Provider::OpenCode);
+        assert_eq!(
+            caps.required_properties_for(LinkableResource::Skill),
+            &["name", "description"]
+        );
+        assert!(
+            caps.optional_properties_for(LinkableResource::Skill)
+                .contains(&"metadata")
+        );
+        assert_eq!(
+            caps.skills.property_source_doc(),
+            Some("claudine/docs/cross-referencing/opencode.md")
+        );
     }
 }
