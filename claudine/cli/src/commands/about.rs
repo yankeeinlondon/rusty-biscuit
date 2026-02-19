@@ -64,7 +64,7 @@ so Claude, Codex, Gemini, and OpenCode all share the same knowledge base.
 
 ## Configuration
 
-Config file: `~/.hooker` (JSON)
+Config file: `~/.claudine/config.json` (JSON)
 
     claudine init              # Interactive setup wizard
     claudine sync              # Re-sync hooks with providers

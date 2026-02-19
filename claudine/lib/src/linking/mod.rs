@@ -1,3 +1,4 @@
+mod canonical;
 mod capabilities;
 mod conflict;
 mod discovery;
@@ -6,6 +7,10 @@ mod paths;
 mod report;
 mod symlink;
 
+pub use canonical::{
+    CanonicalSelection, canonical_provider, preference_prompt_count, ranked_provider_preferences,
+    select_canonical_provider, set_canonical_provider,
+};
 pub use capabilities::{
     ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourcePropertySchema,
     ResourceSupport, SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,

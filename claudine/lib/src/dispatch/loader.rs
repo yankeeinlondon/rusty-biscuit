@@ -11,10 +11,10 @@ use crate::events::{
 };
 
 /// Candidate file names for user-level configuration.
-const USER_CONFIG_NAMES: &[&str] = &[".hooker", ".hook-config"];
+const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
 
 /// Repo-level config file name.
-const REPO_CONFIG_NAME: &str = ".hooker";
+const REPO_CONFIG_NAME: &str = ".claudine/config.json";
 
 /// Runtime configuration with precompiled matcher and mapper regexes.
 #[derive(Debug, Clone)]
@@ -79,8 +79,9 @@ impl RuntimeEventBinding {
 
 /// Load and merge Claudine configuration.
 ///
-/// Resolves `~/.hooker` or `~/.hook-config` (user) then merges with
-/// `.hooker` (repo). Repo-level provider/event bindings replace user-level.
+/// Resolves `~/.claudine/config.json` (user) then merges with
+/// `.claudine/config.json` (repo).
+/// Repo-level provider/event bindings replace user-level.
 /// Settings merge field-by-field.
 ///
 /// ## Errors
@@ -89,7 +90,7 @@ impl RuntimeEventBinding {
 /// expected location.
 pub fn load_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<HookerConfig> {
     let user_config = load_user_config(user)?;
-    let repo_config = load_repo_config(repo_root);
+    let repo_config = load_repo_config(repo_root)?;
 
     match (user_config, repo_config) {
         (Some(user_cfg), Some(repo_cfg)) => {
@@ -220,7 +221,7 @@ fn compile_mapper(
 /// Otherwise, search the home directory for known config filenames.
 fn load_user_config(explicit: Option<&Path>) -> Result<Option<HookerConfig>> {
     if let Some(path) = explicit {
-        if path.exists() {
+        if path.is_file() {
             let content = std::fs::read_to_string(path)?;
             let config: HookerConfig = serde_json::from_str(&content)?;
             debug!(?path, "Loaded user config");
@@ -239,7 +240,7 @@ fn load_user_config(explicit: Option<&Path>) -> Result<Option<HookerConfig>> {
 
     for name in USER_CONFIG_NAMES {
         let path = home.join(name);
-        if path.exists() {
+        if path.is_file() {
             let content = std::fs::read_to_string(&path)?;
             let config: HookerConfig = serde_json::from_str(&content)?;
             debug!(?path, "Loaded user config");
@@ -252,34 +253,40 @@ fn load_user_config(explicit: Option<&Path>) -> Result<Option<HookerConfig>> {
 
 /// Attempt to load the repo-level config.
 ///
-/// Looks for `.hooker` in the given repo root. Returns `None` if
+/// Looks for `.claudine/config.json` in the given repo root. Returns `None` if
 /// no repo root is provided or the file doesn't exist.
-fn load_repo_config(repo_root: Option<&Path>) -> Option<HookerConfig> {
-    let root = repo_root?;
+///
+/// Repo config must explicitly define `settings.linking.canonical_provider`.
+fn load_repo_config(repo_root: Option<&Path>) -> Result<Option<HookerConfig>> {
+    let Some(root) = repo_root else {
+        return Ok(None);
+    };
     let path = root.join(REPO_CONFIG_NAME);
 
-    if !path.exists() {
-        return None;
+    if !path.is_file() {
+        return Ok(None);
     }
 
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(?path, %e, "Failed to read repo config");
-            return None;
-        }
-    };
+    let content = std::fs::read_to_string(&path)?;
+    let raw: serde_json::Value = serde_json::from_str(&content)?;
+    validate_repo_linking_config(&raw, &path)?;
+    let config: HookerConfig = serde_json::from_value(raw)?;
+    debug!(?path, "Loaded repo config");
+    Ok(Some(config))
+}
 
-    match serde_json::from_str(&content) {
-        Ok(config) => {
-            debug!(?path, "Loaded repo config");
-            Some(config)
-        }
-        Err(e) => {
-            warn!(?path, %e, "Failed to parse repo config");
-            None
-        }
+fn validate_repo_linking_config(raw: &serde_json::Value, path: &Path) -> Result<()> {
+    if raw
+        .pointer("/settings/linking/canonical_provider")
+        .is_some()
+    {
+        return Ok(());
     }
+
+    Err(ClaudineError::ConfigValidation(format!(
+        "repo config {} must define settings.linking.canonical_provider",
+        path.display()
+    )))
 }
 
 /// Get the path to the user config file.
@@ -290,7 +297,7 @@ pub fn user_config_path() -> PathBuf {
 
     for name in USER_CONFIG_NAMES {
         let path = home.join(name);
-        if path.exists() {
+        if path.is_file() {
             return path;
         }
     }
@@ -301,7 +308,8 @@ pub fn user_config_path() -> PathBuf {
 
 /// Save the configuration to the user config file.
 ///
-/// Writes the config to `~/.hooker` (or existing config location) using atomic writes.
+/// Writes the config to `~/.claudine/config.json` (or existing config location)
+/// using atomic writes.
 ///
 /// ## Errors
 ///
@@ -367,6 +375,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
             .default_log_target
             .or(user.settings.default_log_target),
         tts: repo.settings.tts.or(user.settings.tts),
+        linking: repo.settings.linking.or(user.settings.linking),
     };
 
     HookerConfig {
@@ -385,6 +394,9 @@ mod tests {
 
     fn write_cfg(dir: &Path, name: &str, config: &HookerConfig) -> PathBuf {
         let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(config).unwrap()).unwrap();
         path
     }
@@ -418,7 +430,7 @@ mod tests {
             .insert(AgenticEvent::SessionStart, speak_binding("hello"));
         config.providers.insert(Provider::Claude, claude_config);
 
-        let path = write_cfg(tmp.path(), ".hooker", &config);
+        let path = write_cfg(tmp.path(), ".claudine/config.json", &config);
 
         let loaded = load_config(Some(&path), None).unwrap();
         assert_eq!(loaded.version, "1.0");
@@ -460,12 +472,19 @@ mod tests {
         let repo_dir = tmp.path().join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         let mut repo_config = empty_cfg();
+        repo_config.settings.linking = Some(LinkingSettings {
+            preference: vec![],
+            canonical_provider: CanonicalProviderSettings {
+                repo_skill: Some(Provider::Claude),
+                ..CanonicalProviderSettings::default()
+            },
+        });
         let mut claude_repo = ProviderConfig::default();
         claude_repo
             .events
             .insert(AgenticEvent::SessionStart, speak_binding("repo session"));
         repo_config.providers.insert(Provider::Claude, claude_repo);
-        write_cfg(&repo_dir, ".hooker", &repo_config);
+        write_cfg(&repo_dir, ".claudine/config.json", &repo_config);
 
         let loaded = load_config(Some(&user_path), Some(&repo_dir)).unwrap();
 
@@ -501,12 +520,19 @@ mod tests {
         let repo_dir = tmp.path().join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         let mut repo_config = empty_cfg();
+        repo_config.settings.linking = Some(LinkingSettings {
+            preference: vec![],
+            canonical_provider: CanonicalProviderSettings {
+                repo_skill: Some(Provider::Gemini),
+                ..CanonicalProviderSettings::default()
+            },
+        });
         let mut gemini_repo = ProviderConfig::default();
         gemini_repo
             .events
             .insert(AgenticEvent::BeforeTool, speak_binding("gemini tool"));
         repo_config.providers.insert(Provider::Gemini, gemini_repo);
-        write_cfg(&repo_dir, ".hooker", &repo_config);
+        write_cfg(&repo_dir, ".claudine/config.json", &repo_config);
 
         let loaded = load_config(Some(&user_path), Some(&repo_dir)).unwrap();
 
@@ -530,6 +556,7 @@ mod tests {
                     voice: Some("Samantha".to_string()),
                     rate: None,
                 }),
+                linking: None,
             },
             providers: HashMap::new(),
         };
@@ -542,6 +569,7 @@ mod tests {
                     voice: None,
                     rate: Some(1.5),
                 }),
+                linking: None,
             },
             providers: HashMap::new(),
         };
@@ -562,6 +590,13 @@ mod tests {
         std::fs::create_dir_all(&repo_dir).unwrap();
 
         let mut config = empty_cfg();
+        config.settings.linking = Some(LinkingSettings {
+            preference: vec![],
+            canonical_provider: CanonicalProviderSettings {
+                repo_skill: Some(Provider::Claude),
+                ..CanonicalProviderSettings::default()
+            },
+        });
         let mut claude_config = ProviderConfig::default();
         claude_config.events.insert(
             AgenticEvent::BeforeTool,
@@ -572,7 +607,7 @@ mod tests {
             },
         );
         config.providers.insert(Provider::Claude, claude_config);
-        write_cfg(&repo_dir, ".hooker", &config);
+        write_cfg(&repo_dir, ".claudine/config.json", &config);
 
         let loaded = load_config(Some(&tmp.path().join("nope")), Some(&repo_dir)).unwrap();
         assert!(loaded.providers.contains_key(&Provider::Claude));
@@ -580,6 +615,73 @@ mod tests {
             loaded.providers[&Provider::Claude]
                 .events
                 .contains_key(&AgenticEvent::BeforeTool)
+        );
+    }
+
+    #[test]
+    fn load_config_fails_when_repo_missing_canonical_provider() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_path = write_cfg(tmp.path(), "user-config", &empty_cfg());
+        let repo_dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+
+        let repo_json = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "linking": {
+                    "preference": ["claude", "codex"]
+                }
+            },
+            "providers": {}
+        });
+        let repo_config_path = repo_dir.join(".claudine/config.json");
+        if let Some(parent) = repo_config_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &repo_config_path,
+            serde_json::to_string_pretty(&repo_json).unwrap(),
+        )
+        .unwrap();
+
+        let error = load_config(Some(&user_path), Some(&repo_dir)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("settings.linking.canonical_provider"));
+    }
+
+    #[test]
+    fn load_config_accepts_repo_when_canonical_provider_key_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_path = write_cfg(tmp.path(), "user-config", &empty_cfg());
+        let repo_dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+
+        let repo_json = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "linking": {
+                    "canonical_provider": {
+                        "repo_skill": "claude"
+                    }
+                }
+            },
+            "providers": {}
+        });
+        let repo_config_path = repo_dir.join(".claudine/config.json");
+        if let Some(parent) = repo_config_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &repo_config_path,
+            serde_json::to_string_pretty(&repo_json).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_config(Some(&user_path), Some(&repo_dir)).unwrap();
+        let linking = loaded.settings.linking.expect("missing linking settings");
+        assert_eq!(
+            linking.canonical_provider.repo_skill,
+            Some(Provider::Claude)
         );
     }
 
@@ -693,7 +795,7 @@ mod tests {
     fn user_config_path_returns_default_when_none_exists() {
         // This test just verifies the function doesn't panic
         let path = user_config_path();
-        assert!(path.to_string_lossy().contains(".hooker"));
+        assert!(path.to_string_lossy().contains(".claudine"));
     }
 
     #[test]
@@ -725,7 +827,10 @@ mod tests {
             }
         });
 
-        let path = tmp.path().join(".hooker");
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
 
         let runtime = load_runtime_config(Some(&path), None).unwrap();
@@ -760,7 +865,10 @@ mod tests {
             }
         });
 
-        let path = tmp.path().join(".hooker");
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
 
         let error = load_runtime_config(Some(&path), None).unwrap_err();
@@ -796,7 +904,10 @@ mod tests {
             }
         });
 
-        let path = tmp.path().join(".hooker");
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
 
         let error = load_runtime_config(Some(&path), None).unwrap_err();
@@ -823,7 +934,10 @@ mod tests {
                 }
             }
         });
-        let path = tmp.path().join(".hooker");
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
 
         let error = load_config(Some(&path), None).unwrap_err();

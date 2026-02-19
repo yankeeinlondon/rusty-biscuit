@@ -33,15 +33,10 @@ pub fn run(args: UninstallArgs) -> Result<()> {
     if !args.keep_config {
         // Remove config files
         if let Some(home) = dirs::home_dir() {
-            let hooker_path = home.join(".hooker");
-            if hooker_path.exists() {
-                std::fs::remove_file(&hooker_path)?;
-                log::message(&format!("  Removed {}", hooker_path.display()));
-            }
-            let hook_config_path = home.join(".hook-config");
-            if hook_config_path.exists() {
-                std::fs::remove_file(&hook_config_path)?;
-                log::message(&format!("  Removed {}", hook_config_path.display()));
+            let config_path = home.join(".claudine").join("config.json");
+            if config_path.exists() {
+                std::fs::remove_file(&config_path)?;
+                log::message(&format!("  Removed {}", config_path.display()));
             }
         }
     }

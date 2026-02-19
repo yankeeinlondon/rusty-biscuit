@@ -10,7 +10,10 @@ mod provider;
 mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
-pub use config::{EventBinding, GlobalSettings, HookerConfig, ProviderConfig, TtsSettings};
+pub use config::{
+    CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig, LinkingSettings,
+    ProviderConfig, TtsSettings,
+};
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
 };

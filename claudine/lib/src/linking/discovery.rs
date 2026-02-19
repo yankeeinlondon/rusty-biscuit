@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use crate::error::Result;
 use crate::events::Provider;
 
-use super::paths::{ProviderPaths, ProviderSkillPaths, ResourceScope};
+#[cfg(test)]
+use super::paths::ProviderPaths;
+use super::paths::{ProviderSkillPaths, ResourceScope};
 
 /// A resource discovered during the scan phase.
 #[derive(Debug, Clone)]

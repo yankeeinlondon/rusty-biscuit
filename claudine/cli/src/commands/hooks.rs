@@ -235,7 +235,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
     log::data("");
     if has_fixable {
         let hint = Prose::new(
-            "{{dim}}Edit {{blue}}~/.hooker{{reset}}{{dim}} to apply suggested fixes{{reset}}",
+            "{{dim}}Edit {{blue}}~/.claudine/config.json{{reset}}{{dim}} to apply suggested fixes{{reset}}",
         );
         log::data(&format!(" {}", hint.render(Some(100))));
     }

@@ -83,16 +83,16 @@ mod tests {
             Provider::Gemini,
             LinkableResource::Command
         ));
-        assert!(!supports_custom_resource(
-            Provider::KimiCode,
-            LinkableResource::Command
-        ));
-        assert!(!supports_custom_resource(
+        assert!(supports_custom_resource(
             Provider::QwenCode,
             LinkableResource::Command
         ));
-        assert!(!supports_custom_resource(
+        assert!(supports_custom_resource(
             Provider::RooCode,
+            LinkableResource::Command
+        ));
+        assert!(!supports_custom_resource(
+            Provider::KimiCode,
             LinkableResource::Command
         ));
     }
@@ -107,7 +107,7 @@ mod tests {
             Provider::KimiCode,
             LinkableResource::Agent
         ));
-        assert!(!supports_custom_resource(
+        assert!(supports_custom_resource(
             Provider::Gemini,
             LinkableResource::Agent
         ));

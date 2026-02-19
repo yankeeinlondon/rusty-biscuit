@@ -46,7 +46,7 @@ pub async fn dispatch(
     let config = match loader::load_runtime_config(None, None) {
         Ok(config) => config,
         Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
-            debug!("No hooker config found, skipping dispatch");
+            debug!("No .claudine config found, skipping dispatch");
             return Ok(DispatchOutcome::default());
         }
         Err(error) => return Err(error),
@@ -189,7 +189,10 @@ mod tests {
             },
         };
 
-        let path = tmp.path().join(".hooker");
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
 
         let loaded = loader::load_config(Some(&path), None).unwrap();

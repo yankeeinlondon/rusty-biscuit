@@ -6,7 +6,7 @@ use super::agentic_event::AgenticEvent;
 use super::hook_action::{HookAction, LogTarget};
 use super::provider::Provider;
 
-/// Root configuration loaded from `~/.hooker`.
+/// Root configuration loaded from `~/.claudine/config.json`.
 ///
 /// The config is organized per-provider, with each provider having its own
 /// set of event bindings. This allows different providers to have different
@@ -48,6 +48,10 @@ pub struct GlobalSettings {
     /// Passed through to biscuit-speaks.
     #[serde(default)]
     pub tts: Option<TtsSettings>,
+
+    /// Link strategy settings used for canonical provider selection and ordering.
+    #[serde(default)]
+    pub linking: Option<LinkingSettings>,
 }
 
 /// TTS configuration forwarded to biscuit-speaks.
@@ -65,6 +69,41 @@ pub struct TtsSettings {
     /// Speech rate multiplier (1.0 = normal).
     #[serde(default)]
     pub rate: Option<f32>,
+}
+
+/// Link strategy settings persisted in user/repo config.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LinkingSettings {
+    /// Ordered provider preference used for canonical candidate ranking.
+    #[serde(default)]
+    pub preference: Vec<Provider>,
+
+    /// Persisted canonical providers per `(scope, resource)` slot.
+    #[serde(default)]
+    pub canonical_provider: CanonicalProviderSettings,
+}
+
+/// Canonical provider slots for each scope/resource pair.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalProviderSettings {
+    #[serde(default)]
+    pub user_skill: Option<Provider>,
+    #[serde(default)]
+    pub user_command: Option<Provider>,
+    #[serde(default)]
+    pub user_agent: Option<Provider>,
+    #[serde(default)]
+    pub user_script: Option<Provider>,
+    #[serde(default)]
+    pub repo_skill: Option<Provider>,
+    #[serde(default)]
+    pub repo_command: Option<Provider>,
+    #[serde(default)]
+    pub repo_agent: Option<Provider>,
+    #[serde(default)]
+    pub repo_script: Option<Provider>,
 }
 
 /// Configuration for a single event binding.
@@ -323,6 +362,35 @@ mod tests {
         let settings = GlobalSettings::default();
         assert!(settings.default_log_target.is_none());
         assert!(settings.tts.is_none());
+        assert!(settings.linking.is_none());
+    }
+
+    #[test]
+    fn linking_settings_round_trip() {
+        let mut config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings::default(),
+            providers: HashMap::new(),
+        };
+        config.settings.linking = Some(LinkingSettings {
+            preference: vec![Provider::Codex, Provider::Claude],
+            canonical_provider: CanonicalProviderSettings {
+                user_skill: Some(Provider::Codex),
+                repo_skill: Some(Provider::Claude),
+                ..CanonicalProviderSettings::default()
+            },
+        });
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        let restored: HookerConfig = serde_json::from_str(&serialized).unwrap();
+        let linking = restored.settings.linking.unwrap();
+
+        assert_eq!(linking.preference, vec![Provider::Codex, Provider::Claude]);
+        assert_eq!(linking.canonical_provider.user_skill, Some(Provider::Codex));
+        assert_eq!(
+            linking.canonical_provider.repo_skill,
+            Some(Provider::Claude)
+        );
     }
 
     #[test]

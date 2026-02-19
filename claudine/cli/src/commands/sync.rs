@@ -418,7 +418,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
                 log::data("");
                 let hint = Prose::new(
-                    "<dim>These events won't fire. Use --fix to remove them, or edit ~/.hooker manually.</dim>",
+                    "<dim>These events won't fire. Use --fix to remove them, or edit ~/.claudine/config.json manually.</dim>",
                 );
                 log::data(&hint.fallback_render(&term));
                 log::data("");

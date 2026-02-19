@@ -8,6 +8,7 @@ use claudine::events::{
     INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, LogTarget, Provider, TtsSettings,
     default_speak_template, recommended_sound,
 };
+use claudine::linking::preference_prompt_count;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -69,6 +70,47 @@ pub fn prompt_agent_selection(agents: &[AgentInfo]) -> Result<Vec<AgentInfo>> {
     }
 
     Ok(result)
+}
+
+/// Prompt user for ranked provider preferences based on installed provider count.
+///
+/// Returns only the explicitly ranked providers. Remaining installed providers
+/// should be appended alphabetically by the caller.
+pub fn prompt_provider_preferences(installed_providers: &[Provider]) -> Result<Vec<Provider>> {
+    let mut installed = installed_providers.to_vec();
+    installed.sort_by_key(|provider| provider.to_string());
+    installed.dedup();
+
+    let prompt_count = preference_prompt_count(installed.len());
+    if prompt_count == 0 {
+        return Ok(installed);
+    }
+
+    let prompt_labels = [
+        "Select your favorite agentic CLI:",
+        "Select your second favorite agentic CLI:",
+        "Select your third favorite agentic CLI:",
+    ];
+
+    let mut remaining = installed;
+    let mut ranked = Vec::new();
+
+    for prompt in prompt_labels.into_iter().take(prompt_count) {
+        let options: Vec<String> = remaining
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
+        let selected = Select::new(prompt, options.clone())
+            .with_help_message("Used for canonical provider ordering")
+            .prompt()?;
+        let index = options
+            .iter()
+            .position(|option| option == &selected)
+            .expect("selected provider exists in options");
+        ranked.push(remaining.remove(index));
+    }
+
+    Ok(ranked)
 }
 
 /// Check if an event has hook-based support from at least one of the given providers.
@@ -417,6 +459,7 @@ pub fn prompt_global_settings() -> Result<GlobalSettings> {
     Ok(GlobalSettings {
         default_log_target,
         tts,
+        linking: None,
     })
 }
 
@@ -431,16 +474,16 @@ pub enum GitignoreChoice {
 /// Prompt for .gitignore handling in repo mode.
 pub fn prompt_gitignore_choice() -> Result<GitignoreChoice> {
     let options = vec![
-        "Add .hooker to .gitignore",
-        "Commit .hooker to the repository",
+        "Add .claudine/ to .gitignore",
+        "Commit .claudine/config.json",
         "Do nothing",
     ];
 
-    let selected = Select::new("How should .hooker be handled?", options).prompt()?;
+    let selected = Select::new("How should .claudine config be handled?", options).prompt()?;
 
     Ok(match selected {
-        "Add .hooker to .gitignore" => GitignoreChoice::AddToGitignore,
-        "Commit .hooker to the repository" => GitignoreChoice::CommitIt,
+        "Add .claudine/ to .gitignore" => GitignoreChoice::AddToGitignore,
+        "Commit .claudine/config.json" => GitignoreChoice::CommitIt,
         _ => GitignoreChoice::DoNothing,
     })
 }

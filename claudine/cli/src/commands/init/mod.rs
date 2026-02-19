@@ -8,10 +8,16 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine::config::{RegistrationResult, SkipReason, detect_agents, discover_agents_full};
+use claudine::config::{
+    AgentInfo, RegistrationResult, SkipReason, detect_agents, discover_agents_full,
+};
 use claudine::events::{
-    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, ProviderConfig,
-    quick_start_supported_providers, recommended_sound,
+    AgenticEvent, CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig,
+    LinkingSettings, Provider, ProviderConfig, quick_start_supported_providers, recommended_sound,
+};
+use claudine::linking::{
+    CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
+    select_canonical_provider, set_canonical_provider,
 };
 
 use crate::log;
@@ -44,12 +50,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
     // Phase 0: Check for existing global config in repo mode
     if repo_scope {
-        let global_hooker = dirs::home_dir()
-            .map(|h| h.join(".hooker"))
-            .unwrap_or_else(|| PathBuf::from("~/.hooker"));
+        let global_config = dirs::home_dir()
+            .map(|h| h.join(".claudine").join("config.json"))
+            .unwrap_or_else(|| PathBuf::from("~/.claudine/config.json"));
 
-        if !global_hooker.exists() {
-            log::warn("No global ~/.hooker config found.");
+        if !global_config.exists() {
+            log::warn("No global ~/.claudine/config.json found.");
             log::message("Consider running `claudine init` first to set up global defaults.");
             log::message("");
         }
@@ -69,6 +75,10 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("");
     log::message(&format!("Selected {} agent(s)", selected_agents.len()));
     log::message("");
+
+    let installed_providers = installed_provider_list(&all_agents);
+    let ranked_preferences = prompts::prompt_provider_preferences(&installed_providers)?;
+    let preference = ranked_provider_preferences(&installed_providers, &ranked_preferences);
 
     // Phase 2: Event Selection
     log::message("Phase 2: Event Selection");
@@ -116,7 +126,21 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     // Phase 4: Global Settings
     log::message("Phase 4: Global Settings");
     log::message("-------------------------");
-    let settings = prompts::prompt_global_settings()?;
+    let mut settings = prompts::prompt_global_settings()?;
+    let scope = if repo_scope {
+        ResourceScope::Repo
+    } else {
+        ResourceScope::User
+    };
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    let repo_root = std::env::current_dir()?;
+    settings.linking = build_linking_settings(
+        scope,
+        &installed_providers,
+        &preference,
+        &home_dir,
+        &repo_root,
+    );
 
     // Build final config with per-provider configuration
     let mut providers = HashMap::new();
@@ -143,15 +167,19 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     // Determine config path
     let config_path = if repo_scope {
         let cwd = std::env::current_dir()?;
-        cwd.join(".hooker")
+        cwd.join(".claudine").join("config.json")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".hooker")
+            .join(".claudine")
+            .join("config.json")
     };
 
     // Write config file
     let json = serde_json::to_string_pretty(&config)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&config_path, &json)?;
     log::message(&format!("Wrote config to {}", config_path.display()));
 
@@ -213,20 +241,24 @@ fn handle_repo_gitignore() -> Result<()> {
                 String::new()
             };
 
-            if !content.lines().any(|l| l.trim() == ".hooker") {
+            let has_entry = content
+                .lines()
+                .map(str::trim)
+                .any(|line| line == ".claudine/" || line == ".claudine");
+            if !has_entry {
                 let new_content = if content.is_empty() || content.ends_with('\n') {
-                    format!("{}.hooker\n", content)
+                    format!("{}.claudine/\n", content)
                 } else {
-                    format!("{}\n.hooker\n", content)
+                    format!("{}\n.claudine/\n", content)
                 };
                 std::fs::write(&gitignore_path, new_content)?;
-                log::message("Added .hooker to .gitignore");
+                log::message("Added .claudine/ to .gitignore");
             } else {
-                log::message(".hooker already in .gitignore");
+                log::message(".claudine/ already in .gitignore");
             }
         }
         prompts::GitignoreChoice::CommitIt => {
-            log::message(".hooker will be committed to the repository");
+            log::message(".claudine/config.json will be committed to the repository");
         }
         prompts::GitignoreChoice::DoNothing => {
             log::message("No .gitignore changes made");
@@ -242,20 +274,24 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     log::message("");
 
     // Build default config
-    let config = default_config();
+    let config = default_config(repo_scope)?;
 
     // Determine config path
     let config_path = if repo_scope {
         let cwd = std::env::current_dir()?;
-        cwd.join(".hooker")
+        cwd.join(".claudine").join("config.json")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".hooker")
+            .join(".claudine")
+            .join("config.json")
     };
 
     // Write config file
     let json = serde_json::to_string_pretty(&config)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&config_path, &json)?;
     log::message(&format!("  Wrote config to {}", config_path.display()));
 
@@ -293,9 +329,30 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     Ok(())
 }
 
-fn default_config() -> HookerConfig {
+fn default_config(repo_scope: bool) -> Result<HookerConfig> {
     // Create default event bindings
     let default_events = create_default_events();
+
+    let scope = if repo_scope {
+        ResourceScope::Repo
+    } else {
+        ResourceScope::User
+    };
+    let all_agents = discover_agents_full();
+    let installed_providers = installed_provider_list(&all_agents);
+    let preference = ranked_provider_preferences(&installed_providers, &[]);
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    let repo_root = std::env::current_dir()?;
+    let settings = GlobalSettings {
+        linking: build_linking_settings(
+            scope,
+            &installed_providers,
+            &preference,
+            &home_dir,
+            &repo_root,
+        ),
+        ..GlobalSettings::default()
+    };
 
     // Apply to all supported providers that have hook registration
     let mut providers = HashMap::new();
@@ -308,11 +365,55 @@ fn default_config() -> HookerConfig {
         );
     }
 
-    HookerConfig {
+    Ok(HookerConfig {
         version: "1.0".to_string(),
-        settings: GlobalSettings::default(),
+        settings,
         providers,
+    })
+}
+
+fn installed_provider_list(agents: &[AgentInfo]) -> Vec<Provider> {
+    let mut providers: Vec<Provider> = agents
+        .iter()
+        .filter(|agent| agent.is_available())
+        .map(|agent| agent.provider)
+        .collect();
+    providers.sort_by_key(|provider| provider.to_string());
+    providers.dedup();
+    providers
+}
+
+fn build_linking_settings(
+    scope: ResourceScope,
+    installed_providers: &[Provider],
+    preference: &[Provider],
+    home_dir: &std::path::Path,
+    repo_root: &std::path::Path,
+) -> Option<LinkingSettings> {
+    if installed_providers.is_empty() {
+        return None;
     }
+
+    let preference = ranked_provider_preferences(installed_providers, preference);
+    let mut canonical_provider = CanonicalProviderSettings::default();
+
+    for resource in LinkableResource::ALL {
+        if let CanonicalSelection::Selected { provider, .. } = select_canonical_provider(
+            scope,
+            resource,
+            installed_providers,
+            &preference,
+            home_dir,
+            repo_root,
+        ) {
+            set_canonical_provider(&mut canonical_provider, scope, resource, provider);
+        }
+    }
+
+    Some(LinkingSettings {
+        preference,
+        canonical_provider,
+    })
 }
 
 fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {

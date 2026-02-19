@@ -23,6 +23,10 @@ pub enum ClaudineError {
     #[error("config not found: {0}")]
     ConfigNotFound(PathBuf),
 
+    /// Configuration file failed semantic validation.
+    #[error("config validation error: {0}")]
+    ConfigValidation(String),
+
     /// Requested provider is not available or not detected.
     #[error("provider not available: {0}")]
     ProviderNotAvailable(String),

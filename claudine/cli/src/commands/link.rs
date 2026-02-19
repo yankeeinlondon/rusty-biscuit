@@ -8,7 +8,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::events::Provider;
 use claudine::linking::{
-    self, ALL_PROVIDERS, ResourceScope, LinkableResource, ResourceFormat, SupportLevel,
+    self, ALL_PROVIDERS, LinkableResource, ResourceFormat, ResourceScope, SupportLevel,
     all_capabilities, capabilities_for,
 };
 use sniff::programs::InstalledAiClients;
