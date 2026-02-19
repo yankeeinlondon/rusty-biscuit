@@ -181,7 +181,12 @@ mod github_tests {
         assert_eq!(metadata.forks, Some(5));
         assert!(!metadata.archived);
         assert!(metadata.license.is_some());
-        assert_eq!(metadata.topics, vec!["testing", "rust"]);
+        assert_eq!(
+            metadata.topics,
+            vec![
+                "testing", "rust"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -207,10 +212,14 @@ mod github_tests {
         assert!(!documents.is_empty());
 
         // Check that we have expected document categories
-        let readme_count = documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
-        let docs_folder_count = documents.iter().filter(|d| d.category == DocumentCategory::DocsFolder).count();
-        let source_doc_count = documents.iter().filter(|d| d.category == DocumentCategory::SourceDoc).count();
-        let other_count = documents.iter().filter(|d| d.category == DocumentCategory::Other).count();
+        let readme_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let docs_folder_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::DocsFolder).count();
+        let source_doc_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::SourceDoc).count();
+        let other_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::Other).count();
 
         assert!(readme_count >= 1, "Should have at least one README");
         assert!(docs_folder_count >= 1, "Should have at least one docs folder doc");
@@ -277,7 +286,8 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases = provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases =
+            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v1.0.0");
@@ -334,7 +344,10 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::InvalidCredentials { provider, .. } => {
+            SniffError::InvalidCredentials {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected InvalidCredentials error, got: {:?}", other),
@@ -355,7 +368,11 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RemoteApi { provider, status, message } => {
+            SniffError::RemoteApi {
+                provider,
+                status,
+                message,
+            } => {
                 assert_eq!(provider, "GitHub");
                 assert_eq!(status, 404);
                 assert_eq!(message, "Not found");
@@ -378,7 +395,10 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -399,7 +419,10 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -540,7 +563,8 @@ mod gitlab_tests {
         let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count = documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -596,7 +620,8 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases = provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases =
+            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v2.0.0");
@@ -641,7 +666,10 @@ mod gitlab_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials { provider, .. } => {
+            SniffError::MissingCredentials {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitLab");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -662,7 +690,11 @@ mod gitlab_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RemoteApi { provider, status, .. } => {
+            SniffError::RemoteApi {
+                provider,
+                status,
+                ..
+            } => {
                 assert_eq!(provider, "GitLab");
                 assert_eq!(status, 404);
             }
@@ -684,7 +716,10 @@ mod gitlab_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitLab");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -833,7 +868,8 @@ mod gitea_tests {
         let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count = documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -887,7 +923,8 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases = provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases =
+            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v1.5.0");
@@ -936,7 +973,10 @@ mod gitea_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials { provider, .. } => {
+            SniffError::MissingCredentials {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "Gitea");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -957,7 +997,11 @@ mod gitea_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RemoteApi { provider, status, .. } => {
+            SniffError::RemoteApi {
+                provider,
+                status,
+                ..
+            } => {
                 assert_eq!(provider, "Gitea");
                 assert_eq!(status, 404);
             }
@@ -979,7 +1023,10 @@ mod gitea_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "Gitea");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -1152,7 +1199,8 @@ mod bitbucket_tests {
         let documents = provider.list_documents("test-workspace", "test-repo").await.unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count = documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count =
+            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -1162,7 +1210,9 @@ mod bitbucket_tests {
 
         Mock::given(method("GET"))
             .and(path_regex(r"/repositories/test-workspace/test-repo/pullrequests.*"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_pull_requests_fixture()))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(bitbucket_pull_requests_fixture()),
+            )
             .mount(&server)
             .await;
 
@@ -1224,7 +1274,8 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases = provider.get_tags_and_releases("test-workspace", "test-repo").await.unwrap();
+        let tags_and_releases =
+            provider.get_tags_and_releases("test-workspace", "test-repo").await.unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v3.0.0");
@@ -1275,7 +1326,10 @@ mod bitbucket_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials { provider, .. } => {
+            SniffError::MissingCredentials {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "Bitbucket");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -1296,7 +1350,11 @@ mod bitbucket_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RemoteApi { provider, status, .. } => {
+            SniffError::RemoteApi {
+                provider,
+                status,
+                ..
+            } => {
                 assert_eq!(provider, "Bitbucket");
                 assert_eq!(status, 404);
             }
@@ -1318,7 +1376,10 @@ mod bitbucket_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "Bitbucket");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -1351,17 +1412,26 @@ mod shorthand_tests {
                 // If it succeeds, it found the repo on some provider
                 assert_eq!(remote.provider(), GitProvider::GitHub);
             }
-            Err(SniffError::ShorthandNotFound { providers_tried, .. }) => {
+            Err(SniffError::ShorthandNotFound {
+                providers_tried,
+                ..
+            }) => {
                 assert!(
                     providers_tried.contains("GitHub"),
                     "GitHub should be in tried providers, got: {}",
                     providers_tried
                 );
             }
-            Err(SniffError::InvalidCredentials { provider, .. }) => {
+            Err(SniffError::InvalidCredentials {
+                provider,
+                ..
+            }) => {
                 assert_eq!(provider, "GitHub");
             }
-            Err(SniffError::RateLimited { provider, .. }) => {
+            Err(SniffError::RateLimited {
+                provider,
+                ..
+            }) => {
                 assert_eq!(provider, "GitHub");
             }
             Err(_) => {

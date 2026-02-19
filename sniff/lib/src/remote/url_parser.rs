@@ -65,7 +65,9 @@ pub fn parse_remote_url(url: &str) -> Result<ParsedRemoteUrl, SniffError> {
         return Ok(parsed);
     }
 
-    Err(SniffError::UnsupportedProvider { url: url.to_string() })
+    Err(SniffError::UnsupportedProvider {
+        url: url.to_string(),
+    })
 }
 
 /// Try to parse an SSH-style remote URL.
@@ -134,9 +136,7 @@ fn try_parse_ssh(url: &str) -> Option<ParsedRemoteUrl> {
 /// - `https://github.com/owner/repo.git`
 /// - `http://github.com/owner/repo` (also supported)
 fn try_parse_https(url: &str) -> Option<ParsedRemoteUrl> {
-    let without_protocol = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
+    let without_protocol = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
 
     // Split host and path
     let slash_pos = without_protocol.find('/')?;
@@ -358,8 +358,7 @@ mod tests {
 
     #[test]
     fn gitlab_https_nested_groups() {
-        let parsed =
-            parse_remote_url("https://gitlab.com/group/subgroup/project").unwrap();
+        let parsed = parse_remote_url("https://gitlab.com/group/subgroup/project").unwrap();
         assert_eq!(parsed.provider, GitProvider::GitLab);
         assert_eq!(parsed.owner, "group/subgroup");
         assert_eq!(parsed.repo, "project");
@@ -367,8 +366,7 @@ mod tests {
 
     #[test]
     fn gitlab_https_deeply_nested_groups() {
-        let parsed =
-            parse_remote_url("https://gitlab.com/a/b/c/d/repo.git").unwrap();
+        let parsed = parse_remote_url("https://gitlab.com/a/b/c/d/repo.git").unwrap();
         assert_eq!(parsed.provider, GitProvider::GitLab);
         assert_eq!(parsed.owner, "a/b/c/d");
         assert_eq!(parsed.repo, "repo");
@@ -396,10 +394,7 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::GitLab);
         assert_eq!(parsed.owner, "team");
         assert_eq!(parsed.repo, "project");
-        assert_eq!(
-            parsed.base_url,
-            Some("https://gitlab.example.com/api/v4".to_string())
-        );
+        assert_eq!(parsed.base_url, Some("https://gitlab.example.com/api/v4".to_string()));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -442,10 +437,7 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "org");
         assert_eq!(parsed.repo, "project");
-        assert_eq!(
-            parsed.base_url,
-            Some("https://gitea.example.com/api/v1".to_string())
-        );
+        assert_eq!(parsed.base_url, Some("https://gitea.example.com/api/v1".to_string()));
     }
 
     #[test]
@@ -462,10 +454,7 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "forgejo");
         assert_eq!(parsed.repo, "forgejo");
-        assert_eq!(
-            parsed.base_url,
-            Some("https://codeberg.org/api/v1".to_string())
-        );
+        assert_eq!(parsed.base_url, Some("https://codeberg.org/api/v1".to_string()));
     }
 
     #[test]
@@ -482,10 +471,7 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "dev");
         assert_eq!(parsed.repo, "app");
-        assert_eq!(
-            parsed.base_url,
-            Some("https://code.mycompany.com/api/v1".to_string())
-        );
+        assert_eq!(parsed.base_url, Some("https://code.mycompany.com/api/v1".to_string()));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

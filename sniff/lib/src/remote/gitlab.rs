@@ -11,7 +11,7 @@
 //! - Full metadata requires the `GetProject` endpoint (future iteration)
 
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use schematic_schema::gitlab::*;
 use schematic_schema::shared::SchematicError;
 
@@ -116,18 +116,23 @@ fn encode_project_id(owner: &str, repo: &str) -> String {
 /// - Other HTTP errors -> `RemoteApi`
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
-        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
+        SchematicError::MissingCredential {
+            env_vars,
+        } => SniffError::MissingCredentials {
             provider: "GitLab".to_string(),
             env_var: env_vars.join(" or "),
         },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
+        SchematicError::ApiError {
+            status: 401,
+            body,
+        } => SniffError::MissingCredentials {
             provider: "GitLab".to_string(),
-            env_var: format!(
-                "GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN (API returned 401: {})",
-                body
-            ),
+            env_var: format!("GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN (API returned 401: {})", body),
         },
-        SchematicError::ApiError { status: 403, body } => {
+        SchematicError::ApiError {
+            status: 403,
+            body,
+        } => {
             // Check if this is a rate limit error
             if body.to_lowercase().contains("rate limit") {
                 SniffError::RateLimited {
@@ -142,16 +147,25 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
                 }
             }
         }
-        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
+        SchematicError::ApiError {
+            status: 429,
+            ..
+        } => SniffError::RateLimited {
             provider: "GitLab".to_string(),
             retry_after: None,
         },
-        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
+        SchematicError::ApiError {
+            status: 404,
+            ..
+        } => SniffError::RemoteApi {
             provider: "GitLab".to_string(),
             status: 404,
             message: "Not found".to_string(),
         },
-        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
+        SchematicError::ApiError {
+            status,
+            body,
+        } => SniffError::RemoteApi {
             provider: "GitLab".to_string(),
             status,
             message: body,
@@ -236,11 +250,8 @@ impl RemoteRepoProvider for GitLabRemote {
         // This is a mitigation documented in phase0-audit.md.
         let project_id = encode_project_id(owner, repo);
         let request = ListRepositoryTreeRequest::new(&project_id);
-        let _tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let _tree: Vec<TreeItem> =
+            self.client.request(request).await.map_err(map_schematic_error)?;
 
         // Without GetProject, we can only return minimal metadata.
         // Full metadata would require adding GetProject to schematic-definitions.
@@ -250,22 +261,22 @@ impl RemoteRepoProvider for GitLabRemote {
         Ok(RepoMetadata {
             name: repo.to_string(),
             full_name,
-            description: None, // Requires GetProject
-            private: false,    // Requires GetProject (assume public if accessible)
+            description: None,                  // Requires GetProject
+            private: false,                     // Requires GetProject (assume public if accessible)
             default_branch: "main".to_string(), // Requires GetProject; assume "main"
-            language: None,    // Requires GetProject
-            stars: None,       // Requires GetProject
-            forks: None,       // Requires GetProject
-            open_issues: None, // Requires GetProject
-            archived: false,   // Requires GetProject
-            created_at: None,  // Requires GetProject
-            updated_at: None,  // Requires GetProject
-            pushed_at: None,   // Requires GetProject
-            license: None,     // Requires GetProject
-            topics: Vec::new(), // Requires GetProject
-            has_issues: None,  // Requires GetProject
-            has_wiki: None,    // Requires GetProject
-            homepage: None,    // Requires GetProject
+            language: None,                     // Requires GetProject
+            stars: None,                        // Requires GetProject
+            forks: None,                        // Requires GetProject
+            open_issues: None,                  // Requires GetProject
+            archived: false,                    // Requires GetProject
+            created_at: None,                   // Requires GetProject
+            updated_at: None,                   // Requires GetProject
+            pushed_at: None,                    // Requires GetProject
+            license: None,                      // Requires GetProject
+            topics: Vec::new(),                 // Requires GetProject
+            has_issues: None,                   // Requires GetProject
+            has_wiki: None,                     // Requires GetProject
+            homepage: None,                     // Requires GetProject
             html_url,
         })
     }
@@ -286,11 +297,8 @@ impl RemoteRepoProvider for GitLabRemote {
     ) -> Result<Vec<DocumentRef>, SniffError> {
         let project_id = encode_project_id(owner, repo);
         let request = ListRepositoryTreeRequest::new(&project_id);
-        let tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tree: Vec<TreeItem> =
+            self.client.request(request).await.map_err(map_schematic_error)?;
 
         let documents: Vec<DocumentRef> = tree
             .into_iter()
@@ -318,20 +326,14 @@ impl RemoteRepoProvider for GitLabRemote {
         let encoded_path = urlencoding::encode(path);
         // Use "HEAD" as default ref (GitLab API accepts this for default branch)
         let request = GetRepositoryFileRequest::new(&project_id, &*encoded_path, "HEAD");
-        let file: FileContent = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let file: FileContent = self.client.request(request).await.map_err(map_schematic_error)?;
 
         // GitLab returns Base64-encoded content
-        let decoded = BASE64
-            .decode(&file.content)
-            .map_err(|e| SniffError::RemoteApi {
-                provider: "GitLab".to_string(),
-                status: 0,
-                message: format!("Base64 decode error: {}", e),
-            })?;
+        let decoded = BASE64.decode(&file.content).map_err(|e| SniffError::RemoteApi {
+            provider: "GitLab".to_string(),
+            status: 0,
+            message: format!("Base64 decode error: {}", e),
+        })?;
 
         String::from_utf8(decoded).map_err(|e| SniffError::RemoteApi {
             provider: "GitLab".to_string(),
@@ -347,11 +349,8 @@ impl RemoteRepoProvider for GitLabRemote {
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         let project_id = encode_project_id(owner, repo);
         let request = ListMergeRequestsRequest::new(&project_id);
-        let mrs: Vec<MergeRequest> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let mrs: Vec<MergeRequest> =
+            self.client.request(request).await.map_err(map_schematic_error)?;
 
         Ok(mrs
             .into_iter()
@@ -374,11 +373,7 @@ impl RemoteRepoProvider for GitLabRemote {
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
         let project_id = encode_project_id(owner, repo);
         let request = ListIssuesRequest::new(&project_id);
-        let issues: Vec<Issue> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let issues: Vec<Issue> = self.client.request(request).await.map_err(map_schematic_error)?;
 
         // GitLab issues API doesn't include merge requests (unlike GitHub)
         Ok(issues
@@ -407,19 +402,13 @@ impl RemoteRepoProvider for GitLabRemote {
 
         // Fetch tags
         let tags_request = ListTagsRequest::new(&project_id);
-        let tags: Vec<Tag> = self
-            .client
-            .request(tags_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tags: Vec<Tag> =
+            self.client.request(tags_request).await.map_err(map_schematic_error)?;
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(&project_id);
-        let releases: Vec<Release> = self
-            .client
-            .request(releases_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let releases: Vec<Release> =
+            self.client.request(releases_request).await.map_err(map_schematic_error)?;
 
         // Convert tags - GitLab provides message for annotated tags
         let tag_infos: Vec<TagInfo> = tags
@@ -444,8 +433,8 @@ impl RemoteRepoProvider for GitLabRemote {
                 ReleaseInfo {
                     name: Some(release.name),
                     tag_name: release.tag_name,
-                    draft: false,       // GitLab releases are always published
-                    prerelease: false,  // GitLab doesn't have prerelease concept
+                    draft: false,      // GitLab releases are always published
+                    prerelease: false, // GitLab doesn't have prerelease concept
                     published_at: Some(release.released_at),
                     html_url,
                 }
@@ -461,16 +450,12 @@ impl RemoteRepoProvider for GitLabRemote {
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError> {
         let project_id = encode_project_id(owner, repo);
         let request = ListRepositoryTreeRequest::new(&project_id);
-        let tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tree: Vec<TreeItem> =
+            self.client.request(request).await.map_err(map_schematic_error)?;
 
         // Look for GitLab CI configuration file
-        let has_gitlab_ci = tree
-            .iter()
-            .any(|entry| entry.path == ".gitlab-ci.yml" && entry.item_type == "blob");
+        let has_gitlab_ci =
+            tree.iter().any(|entry| entry.path == ".gitlab-ci.yml" && entry.item_type == "blob");
 
         if has_gitlab_ci {
             Ok(Some(CiCdInfo {
@@ -517,64 +502,34 @@ mod tests {
     #[test]
     fn test_encode_project_id() {
         assert_eq!(encode_project_id("owner", "repo"), "owner%2Frepo");
-        assert_eq!(
-            encode_project_id("group", "subgroup/repo"),
-            "group%2Fsubgroup%2Frepo"
-        );
+        assert_eq!(encode_project_id("group", "subgroup/repo"), "group%2Fsubgroup%2Frepo");
     }
 
     #[test]
     fn test_categorize_readme() {
-        assert_eq!(
-            categorize_document("README.md"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("readme.txt"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("sub/README.md"),
-            Some(DocumentCategory::Readme)
-        );
+        assert_eq!(categorize_document("README.md"), Some(DocumentCategory::Readme));
+        assert_eq!(categorize_document("readme.txt"), Some(DocumentCategory::Readme));
+        assert_eq!(categorize_document("sub/README.md"), Some(DocumentCategory::Readme));
     }
 
     #[test]
     fn test_categorize_docs_folder() {
-        assert_eq!(
-            categorize_document("docs/guide.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-        assert_eq!(
-            categorize_document("doc/api.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
+        assert_eq!(categorize_document("docs/guide.md"), Some(DocumentCategory::DocsFolder));
+        assert_eq!(categorize_document("doc/api.md"), Some(DocumentCategory::DocsFolder));
     }
 
     #[test]
     fn test_categorize_source_doc() {
-        assert_eq!(
-            categorize_document("src/README.md"),
-            Some(DocumentCategory::SourceDoc)
-        );
+        assert_eq!(categorize_document("src/README.md"), Some(DocumentCategory::SourceDoc));
         // Non-doc files in src/ should be None
         assert_eq!(categorize_document("src/main.rs"), None);
     }
 
     #[test]
     fn test_categorize_other() {
-        assert_eq!(
-            categorize_document("CHANGELOG.md"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("LICENSE"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("CONTRIBUTING.md"),
-            Some(DocumentCategory::Other)
-        );
+        assert_eq!(categorize_document("CHANGELOG.md"), Some(DocumentCategory::Other));
+        assert_eq!(categorize_document("LICENSE"), Some(DocumentCategory::Other));
+        assert_eq!(categorize_document("CONTRIBUTING.md"), Some(DocumentCategory::Other));
     }
 
     #[test]
@@ -589,10 +544,7 @@ mod tests {
         let urls = provider.build_key_urls("gitlab-org", "gitlab");
 
         assert_eq!(urls.repo, "https://gitlab.com/gitlab-org/gitlab");
-        assert_eq!(
-            urls.issues,
-            Some("https://gitlab.com/gitlab-org/gitlab/-/issues".to_string())
-        );
+        assert_eq!(urls.issues, Some("https://gitlab.com/gitlab-org/gitlab/-/issues".to_string()));
         assert_eq!(
             urls.pull_requests,
             Some("https://gitlab.com/gitlab-org/gitlab/-/merge_requests".to_string())
@@ -624,7 +576,10 @@ mod tests {
             ],
         };
         match map_schematic_error(err) {
-            SniffError::MissingCredentials { provider, env_var } => {
+            SniffError::MissingCredentials {
+                provider,
+                env_var,
+            } => {
                 assert_eq!(provider, "GitLab");
                 assert!(env_var.contains("GITLAB_TOKEN"));
             }
@@ -639,7 +594,10 @@ mod tests {
             body: "Rate limit exceeded".to_string(),
         };
         match map_schematic_error(err) {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "GitLab");
             }
             _ => panic!("Expected RateLimited error"),

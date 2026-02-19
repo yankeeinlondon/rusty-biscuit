@@ -3,7 +3,7 @@ use clap_complete::CompleteEnv;
 use clap_complete::Shell;
 use sniff::package::enrich_dependency;
 use sniff::programs::ProgramsInfo;
-use sniff::remote::{DocumentCategory, GitRemote, RemoteReport, RemoteRepoProvider};
+use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
@@ -239,7 +239,6 @@ impl Commands {
 
             // Services section
             Commands::Services { .. } => OutputFilter::Services,
-
             // Note: Git with remote arg is handled separately in main before reaching output filter
         }
     }
@@ -516,7 +515,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             return Ok(());
         }
-
     }
 
     // Canonicalize path if provided
@@ -721,15 +719,12 @@ async fn handle_remote_url(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let remote = GitRemote::from_url(url)?;
     let parsed = GitRemote::parse_url(url)?;
-    let report = remote
-        .fetch_report(&parsed.owner, &parsed.repo)
-        .await?;
+    let report = remote.fetch_report(&parsed.owner, &parsed.repo).await?;
 
     if json {
         output::print_remote_json(&report)?;
     } else {
-        let readme =
-            fetch_readme(&report, &remote, &parsed.owner, &parsed.repo, verbose).await;
+        let readme = fetch_readme(&report, &remote, &parsed.owner, &parsed.repo, verbose).await;
         output::print_remote_text(&report, readme.as_deref());
     }
 
@@ -1021,19 +1016,13 @@ mod tests {
         #[test]
         fn repo_subcommand_parses() {
             let cli = parse_args(&["repo"]).unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Repo { deps: false })
-            ));
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: false })));
         }
 
         #[test]
         fn repo_deps_flag_parses() {
             let cli = parse_args(&["repo", "--deps"]).unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Repo { deps: true })
-            ));
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: true })));
         }
 
         #[test]
@@ -1630,7 +1619,10 @@ mod tests {
             // The function itself would match it (two slash-separated parts),
             // but the dispatch order ensures correct behavior.
             let ssh = "git@github.com:owner/repo.git";
-            assert!(ssh.starts_with("git@"), "SSH URLs caught by starts_with check");
+            assert!(
+                ssh.starts_with("git@"),
+                "SSH URLs caught by starts_with check"
+            );
         }
 
         #[test]

@@ -695,7 +695,9 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
     match tool {
         MonorepoTool::CargoWorkspace => {
             let cargo_toml = path.join("Cargo.toml");
-            if cargo_toml.exists() && let Some(name) = read_cargo_package_name(&cargo_toml) {
+            if cargo_toml.exists()
+                && let Some(name) = read_cargo_package_name(&cargo_toml)
+            {
                 return name;
             }
         }
@@ -703,7 +705,9 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
         | MonorepoTool::PnpmWorkspaces
         | MonorepoTool::YarnWorkspaces => {
             let package_json = path.join("package.json");
-            if package_json.exists() && let Some(name) = read_npm_package_name(&package_json) {
+            if package_json.exists()
+                && let Some(name) = read_npm_package_name(&package_json)
+            {
                 return name;
             }
         }

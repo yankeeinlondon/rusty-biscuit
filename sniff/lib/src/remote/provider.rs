@@ -58,11 +58,8 @@ pub trait RemoteRepoProvider: Send + Sync {
     ///
     /// Discovers files by traversing the repository tree and categorizing
     /// markdown, text, and reStructuredText files.
-    async fn list_documents(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Vec<DocumentRef>, SniffError>;
+    async fn list_documents(&self, owner: &str, repo: &str)
+    -> Result<Vec<DocumentRef>, SniffError>;
 
     /// Get file content by path.
     ///
@@ -146,10 +143,7 @@ pub trait RemoteRepoProvider: Send + Sync {
         let documents = self.list_documents(owner, repo).await.unwrap_or_default();
         let pull_requests = self.list_pull_requests(owner, repo).await.unwrap_or_default();
         let issues = self.list_issues(owner, repo).await.unwrap_or_default();
-        let tags_and_releases = self
-            .get_tags_and_releases(owner, repo)
-            .await
-            .unwrap_or_default();
+        let tags_and_releases = self.get_tags_and_releases(owner, repo).await.unwrap_or_default();
         let cicd = self.detect_cicd(owner, repo).await.unwrap_or(None);
         let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
         let key_urls = self.build_key_urls(owner, repo);

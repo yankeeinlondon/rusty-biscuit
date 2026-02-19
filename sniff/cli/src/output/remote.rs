@@ -43,10 +43,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         ));
     }
     if let Some(forks) = meta.forks {
-        stats_parts.push(format!(
-            "<dim>⑂</dim> {}",
-            format_number(forks as usize)
-        ));
+        stats_parts.push(format!("<dim>⑂</dim> {}", format_number(forks as usize)));
     }
     if let Some(issues) = meta.open_issues {
         stats_parts.push(format!(
@@ -165,10 +162,7 @@ fn print_documents(docs: &[DocumentRef], term: &Terminal) {
 
     if !items.is_empty() {
         println!();
-        print!(
-            "{}",
-            Prose::new("<b><u>Documents</u></b>").display(term)
-        );
+        print!("{}", Prose::new("<b><u>Documents</u></b>").display(term));
         print!("{}", UnorderedList::new(items).display(term));
     }
 }
@@ -180,10 +174,7 @@ fn print_cicd(cicd: &[CiCdInfo], term: &Terminal) {
     }
 
     println!();
-    print!(
-        "{}",
-        Prose::new("<b><u>CI/CD</u></b>").display(term)
-    );
+    print!("{}", Prose::new("<b><u>CI/CD</u></b>").display(term));
 
     let items: Vec<String> = cicd
         .iter()
@@ -283,7 +274,11 @@ fn print_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) {
         .iter()
         .take(5)
         .map(|tag| {
-            let annotated = if tag.annotated { " <dim>annotated</dim>" } else { "" };
+            let annotated = if tag.annotated {
+                " <dim>annotated</dim>"
+            } else {
+                ""
+            };
             Prose::new(&format!("<b>{}</b>{}", tag.name, annotated)).fallback_render(term)
         })
         .collect();
@@ -314,10 +309,8 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref issues) = urls.issues {
         items.push(
-            Prose::new(&format!(
-                "<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"
-            ))
-            .fallback_render(term),
+            Prose::new(&format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"))
+                .fallback_render(term),
         );
     }
     if let Some(ref prs) = urls.pull_requests {
@@ -338,19 +331,14 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref wiki) = urls.wiki {
         items.push(
-            Prose::new(&format!(
-                "<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"
-            ))
-            .fallback_render(term),
+            Prose::new(&format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"))
+                .fallback_render(term),
         );
     }
 
     if !items.is_empty() {
         println!();
-        print!(
-            "{}",
-            Prose::new("<b><u>URLs</u></b>").display(term)
-        );
+        print!("{}", Prose::new("<b><u>URLs</u></b>").display(term));
         print!("{}", UnorderedList::new(items).display(term));
     }
 }

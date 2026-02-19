@@ -573,7 +573,9 @@ pub fn print_repo_section(
                 }
             }
             if has_excluded {
-                legend.push_str("packages in <orange>orange</orange> are excluded from the workspace");
+                legend.push_str(
+                    "packages in <orange>orange</orange> are excluded from the workspace",
+                );
             }
             legend.push_str("</dim>");
             println!("{}", Prose::new(&legend).render(None));
@@ -865,8 +867,7 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
     let items: Vec<String> = docs
         .iter()
         .map(|doc| {
-            let file_link =
-                format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
+            let file_link = format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
 
             if verbose > 0 {
                 let date_str = doc.last_updated.format("%Y-%m-%d").to_string();

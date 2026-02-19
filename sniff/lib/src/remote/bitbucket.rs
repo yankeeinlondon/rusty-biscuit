@@ -92,18 +92,26 @@ impl Default for BitbucketRemote {
 /// - Other HTTP errors -> `RemoteApi`
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
-        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
+        SchematicError::MissingCredential {
+            env_vars,
+        } => SniffError::MissingCredentials {
             provider: "Bitbucket".to_string(),
             env_var: env_vars.join(" or "),
         },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
+        SchematicError::ApiError {
+            status: 401,
+            body,
+        } => SniffError::MissingCredentials {
             provider: "Bitbucket".to_string(),
             env_var: format!(
                 "BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD (API returned 401: {})",
                 body
             ),
         },
-        SchematicError::ApiError { status: 403, body } => {
+        SchematicError::ApiError {
+            status: 403,
+            body,
+        } => {
             if body.to_lowercase().contains("rate limit") {
                 SniffError::RateLimited {
                     provider: "Bitbucket".to_string(),
@@ -117,16 +125,25 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
                 }
             }
         }
-        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
+        SchematicError::ApiError {
+            status: 429,
+            ..
+        } => SniffError::RateLimited {
             provider: "Bitbucket".to_string(),
             retry_after: None,
         },
-        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
+        SchematicError::ApiError {
+            status: 404,
+            ..
+        } => SniffError::RemoteApi {
             provider: "Bitbucket".to_string(),
             status: 404,
             message: "Not found".to_string(),
         },
-        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
+        SchematicError::ApiError {
+            status,
+            body,
+        } => SniffError::RemoteApi {
             provider: "Bitbucket".to_string(),
             status,
             message: body,
@@ -251,14 +268,14 @@ impl RemoteRepoProvider for BitbucketRemote {
             private: info.is_private,
             default_branch,
             language: info.language,
-            stars: None, // Bitbucket doesn't have stars
-            forks: None, // Fork count not directly available
+            stars: None,       // Bitbucket doesn't have stars
+            forks: None,       // Fork count not directly available
             open_issues: None, // Would require a separate API call
-            archived: false, // Bitbucket doesn't have an archived concept
+            archived: false,   // Bitbucket doesn't have an archived concept
             created_at: info.created_on,
             updated_at: info.updated_on,
-            pushed_at: None, // Not available in Bitbucket API
-            license: None, // Would need to parse LICENSE file
+            pushed_at: None,    // Not available in Bitbucket API
+            license: None,      // Would need to parse LICENSE file
             topics: Vec::new(), // Bitbucket doesn't have topics
             has_issues: info.has_issues,
             has_wiki: info.has_wiki,
@@ -287,11 +304,8 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<Vec<DocumentRef>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info: Repository =
+            self.client.request(repo_request).await.map_err(map_schematic_error)?;
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
@@ -322,19 +336,12 @@ impl RemoteRepoProvider for BitbucketRemote {
         }
 
         // Check for docs/ directory
-        let has_docs = root_entries
-            .iter()
-            .any(|e| e.is_directory() && e.path.as_deref() == Some("docs"));
+        let has_docs =
+            root_entries.iter().any(|e| e.is_directory() && e.path.as_deref() == Some("docs"));
 
         if has_docs
-            && let Ok(docs_entries) = collect_directory_entries(
-                &self.client,
-                workspace,
-                repo_slug,
-                &commit,
-                "docs",
-            )
-            .await
+            && let Ok(docs_entries) =
+                collect_directory_entries(&self.client, workspace, repo_slug, &commit, "docs").await
         {
             for entry in docs_entries {
                 if entry.is_file()
@@ -351,19 +358,12 @@ impl RemoteRepoProvider for BitbucketRemote {
         }
 
         // Check for doc/ directory
-        let has_doc = root_entries
-            .iter()
-            .any(|e| e.is_directory() && e.path.as_deref() == Some("doc"));
+        let has_doc =
+            root_entries.iter().any(|e| e.is_directory() && e.path.as_deref() == Some("doc"));
 
         if has_doc
-            && let Ok(doc_entries) = collect_directory_entries(
-                &self.client,
-                workspace,
-                repo_slug,
-                &commit,
-                "doc",
-            )
-            .await
+            && let Ok(doc_entries) =
+                collect_directory_entries(&self.client, workspace, repo_slug, &commit, "doc").await
         {
             for entry in doc_entries {
                 if entry.is_file()
@@ -390,19 +390,13 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<String, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info: Repository =
+            self.client.request(repo_request).await.map_err(map_schematic_error)?;
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
         let request = GetFileContentRawRequest::new(workspace, repo_slug, &commit, path);
-        self.client
-            .get_file_content_raw(request)
-            .await
-            .map_err(map_schematic_error)
+        self.client.get_file_content_raw(request).await.map_err(map_schematic_error)
     }
 
     async fn list_pull_requests(
@@ -437,7 +431,11 @@ impl RemoteRepoProvider for BitbucketRemote {
                 // Extract updated_at/merged_at before moving
                 let is_merged = pr.is_merged();
                 let updated_at = pr.updated_on.clone();
-                let merged_at = if is_merged { updated_at.clone() } else { None };
+                let merged_at = if is_merged {
+                    updated_at.clone()
+                } else {
+                    None
+                };
 
                 PullRequestInfo {
                     number: pr.id.unwrap_or(0),
@@ -448,8 +446,14 @@ impl RemoteRepoProvider for BitbucketRemote {
                         .and_then(|a| a.name().map(String::from))
                         .unwrap_or_else(|| "unknown".to_string()),
                     draft: false, // Bitbucket doesn't have draft PRs
-                    source_branch: pr.source.as_ref().and_then(|s| s.branch_name().map(String::from)),
-                    target_branch: pr.destination.as_ref().and_then(|d| d.branch_name().map(String::from)),
+                    source_branch: pr
+                        .source
+                        .as_ref()
+                        .and_then(|s| s.branch_name().map(String::from)),
+                    target_branch: pr
+                        .destination
+                        .as_ref()
+                        .and_then(|d| d.branch_name().map(String::from)),
                     created_at: pr.created_on.unwrap_or_default(),
                     updated_at,
                     merged_at,
@@ -469,7 +473,10 @@ impl RemoteRepoProvider for BitbucketRemote {
         // Bitbucket issues may be disabled - handle 404 gracefully
         let response: PaginatedResponse<Issue> = match self.client.request(request).await {
             Ok(resp) => resp,
-            Err(SchematicError::ApiError { status: 404, .. }) => {
+            Err(SchematicError::ApiError {
+                status: 404,
+                ..
+            }) => {
                 // Issue tracker is disabled on this repo
                 return Ok(Vec::new());
             }
@@ -492,7 +499,11 @@ impl RemoteRepoProvider for BitbucketRemote {
                 // Extract is_open and updated_on before moving
                 let is_open = issue.is_open();
                 let updated_at = issue.updated_on.clone();
-                let closed_at = if !is_open { updated_at.clone() } else { None };
+                let closed_at = if !is_open {
+                    updated_at.clone()
+                } else {
+                    None
+                };
 
                 // Normalize state: Bitbucket uses "new", "open", "resolved", etc.
                 let state = issue
@@ -533,11 +544,8 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
         let tags_request = ListTagsRequest::new(workspace, repo_slug);
-        let tags_response: PaginatedResponse<Tag> = self
-            .client
-            .request(tags_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tags_response: PaginatedResponse<Tag> =
+            self.client.request(tags_request).await.map_err(map_schematic_error)?;
 
         // Convert tags (first page only for MVP)
         let tag_infos: Vec<TagInfo> = tags_response
@@ -547,11 +555,8 @@ impl RemoteRepoProvider for BitbucketRemote {
                 // Extract values before moving tag fields
                 let is_annotated = tag.is_annotated();
                 let name = tag.name.clone().unwrap_or_default();
-                let commit_sha = tag
-                    .target
-                    .as_ref()
-                    .and_then(|t| t.hash.clone())
-                    .unwrap_or_default();
+                let commit_sha =
+                    tag.target.as_ref().and_then(|t| t.hash.clone()).unwrap_or_default();
                 let tagger = tag.tagger.as_ref().and_then(|t| t.raw.clone());
 
                 TagInfo {
@@ -567,11 +572,8 @@ impl RemoteRepoProvider for BitbucketRemote {
 
         // Fetch downloads (Bitbucket's equivalent of releases)
         let downloads_request = ListDownloadsRequest::new(workspace, repo_slug);
-        let downloads_response: PaginatedResponse<Download> = self
-            .client
-            .request(downloads_request)
-            .await
-            .unwrap_or_else(|_| PaginatedResponse {
+        let downloads_response: PaginatedResponse<Download> =
+            self.client.request(downloads_request).await.unwrap_or_else(|_| PaginatedResponse {
                 values: Vec::new(),
                 next: None,
                 previous: None,
@@ -614,31 +616,19 @@ impl RemoteRepoProvider for BitbucketRemote {
     ) -> Result<Option<CiCdInfo>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(workspace, repo_slug);
-        let info: Repository = self
-            .client
-            .request(repo_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info: Repository =
+            self.client.request(repo_request).await.map_err(map_schematic_error)?;
 
         let commit = info.default_branch().unwrap_or("main").to_string();
 
         // Get root directory contents
-        let root_entries = collect_directory_entries(
-            &self.client,
-            workspace,
-            repo_slug,
-            &commit,
-            "",
-        )
-        .await?;
+        let root_entries =
+            collect_directory_entries(&self.client, workspace, repo_slug, &commit, "").await?;
 
         // Look for bitbucket-pipelines.yml
-        let has_pipelines = root_entries
-            .iter()
-            .any(|entry| {
-                entry.is_file()
-                    && entry.path.as_deref() == Some("bitbucket-pipelines.yml")
-            });
+        let has_pipelines = root_entries.iter().any(|entry| {
+            entry.is_file() && entry.path.as_deref() == Some("bitbucket-pipelines.yml")
+        });
 
         if has_pipelines {
             Ok(Some(CiCdInfo {
@@ -688,56 +678,29 @@ mod tests {
 
     #[test]
     fn test_categorize_readme() {
-        assert_eq!(
-            categorize_document("README.md"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("readme.txt"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("sub/README.md"),
-            Some(DocumentCategory::Readme)
-        );
+        assert_eq!(categorize_document("README.md"), Some(DocumentCategory::Readme));
+        assert_eq!(categorize_document("readme.txt"), Some(DocumentCategory::Readme));
+        assert_eq!(categorize_document("sub/README.md"), Some(DocumentCategory::Readme));
     }
 
     #[test]
     fn test_categorize_docs_folder() {
-        assert_eq!(
-            categorize_document("docs/guide.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-        assert_eq!(
-            categorize_document("doc/api.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
+        assert_eq!(categorize_document("docs/guide.md"), Some(DocumentCategory::DocsFolder));
+        assert_eq!(categorize_document("doc/api.md"), Some(DocumentCategory::DocsFolder));
     }
 
     #[test]
     fn test_categorize_source_doc() {
-        assert_eq!(
-            categorize_document("src/README.md"),
-            Some(DocumentCategory::SourceDoc)
-        );
+        assert_eq!(categorize_document("src/README.md"), Some(DocumentCategory::SourceDoc));
         // Non-doc files in src/ should be None
         assert_eq!(categorize_document("src/main.rs"), None);
     }
 
     #[test]
     fn test_categorize_other() {
-        assert_eq!(
-            categorize_document("CHANGELOG.md"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("LICENSE"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("CONTRIBUTING.md"),
-            Some(DocumentCategory::Other)
-        );
+        assert_eq!(categorize_document("CHANGELOG.md"), Some(DocumentCategory::Other));
+        assert_eq!(categorize_document("LICENSE"), Some(DocumentCategory::Other));
+        assert_eq!(categorize_document("CONTRIBUTING.md"), Some(DocumentCategory::Other));
     }
 
     #[test]
@@ -762,7 +725,9 @@ mod tests {
         );
         assert_eq!(
             urls.ci_cd,
-            Some("https://bitbucket.org/atlassian/python-bitbucket/addon/pipelines/home".to_string())
+            Some(
+                "https://bitbucket.org/atlassian/python-bitbucket/addon/pipelines/home".to_string()
+            )
         );
         assert_eq!(
             urls.releases,
@@ -773,10 +738,16 @@ mod tests {
     #[test]
     fn test_map_schematic_error_missing_credentials() {
         let err = SchematicError::MissingCredential {
-            env_vars: vec!["BITBUCKET_USERNAME".to_string(), "BITBUCKET_APP_PASSWORD".to_string()],
+            env_vars: vec![
+                "BITBUCKET_USERNAME".to_string(),
+                "BITBUCKET_APP_PASSWORD".to_string(),
+            ],
         };
         match map_schematic_error(err) {
-            SniffError::MissingCredentials { provider, env_var } => {
+            SniffError::MissingCredentials {
+                provider,
+                env_var,
+            } => {
                 assert_eq!(provider, "Bitbucket");
                 assert!(env_var.contains("BITBUCKET_USERNAME"));
             }
@@ -791,7 +762,10 @@ mod tests {
             body: "API rate limit exceeded".to_string(),
         };
         match map_schematic_error(err) {
-            SniffError::RateLimited { provider, .. } => {
+            SniffError::RateLimited {
+                provider,
+                ..
+            } => {
                 assert_eq!(provider, "Bitbucket");
             }
             _ => panic!("Expected RateLimited error"),
