@@ -3,10 +3,11 @@
 use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
+use claudine::actions::{HookAction, LogTarget};
 use claudine::events::{
-    AgenticEvent, EventSupportLevel, GlobalSettings, HookAction, INIT_EVENT_DISPLAY_ORDER,
-    INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, LogTarget, Provider, TtsSettings,
-    default_speak_template, recommended_sound,
+    AgenticEvent, EventSupportLevel, GlobalSettings, INIT_EVENT_DISPLAY_ORDER,
+    INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, Provider, TtsSettings, default_speak_template,
+    recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
 use color_eyre::eyre::Result;

@@ -46,7 +46,7 @@ claudine link
 | `claudine hooks --describe` | Event descriptions and payload schemas |
 | `claudine hooks --variables` | Template variables with current values |
 | `claudine hooks --fix` | Auto-fix invalid sound effect names |
-| `claudine link [--dry-run] [--filter]` | Sync skills across providers |
+| `claudine link [--scope <user\|repo>] [--apply] [--filter]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
@@ -57,7 +57,7 @@ claudine link
 
 ## Configuration
 
-Configuration is stored in `~/.hooker` (user-scoped) or `<repo>/.hooker` (project-scoped) as JSON.
+Configuration is stored in `~/.claudine/config.json` (user-scoped) or `<repo>/.claudine/config.json` (project-scoped).
 
 ## Packages
 

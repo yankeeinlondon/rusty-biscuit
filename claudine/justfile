@@ -39,6 +39,9 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
+play effect:
+    @playa effect {{effect}} --background > /dev/null 2>&1 || exit 0
+
 _notify message:
     #!/usr/bin/env bash
     if command -v osascript &> /dev/null; then
@@ -280,26 +283,22 @@ review *args="":
     @clear
     @echo -e "Performing a code review on the {{BOLD}}{{LIB_NAME}}{{RESET}} package"
     @echo ""
-    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
+    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package (along with the accompanying CLI package {{CLI}}); use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
     @echo
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
+export UPDATE_SKILL := read("./prompts/update-skill.md")
 
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}{{LIBRARY}}{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
-    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
-
-
+# fix documentation drift and update the skill for this package area
+skill:
+    @just ask '$UPDATE_SKILL' || ( \
+      just play "bong" && \
+      just _speak "A problem occurred updating the Claudine skill!" && \
+      exit 1 \
+    )
+    @just _speak "Claudine skill was updated and documentation drift was corrected."
+    @just _notify "Claudine skill was updated and documentation drift was corrected."
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

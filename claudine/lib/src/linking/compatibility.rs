@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
-use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
+use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
 use super::detector::DiscoveredResource;
 use super::model::{ResourceDefinition, ResourceReference, ResourceScope};
 
@@ -135,7 +135,13 @@ fn canonical_file_path(resource: LinkableResource, path: &Path) -> Option<PathBu
                 None
             }
         }
-        LinkableResource::Script => None,
+        LinkableResource::Script => {
+            if path.is_file() {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -212,13 +218,11 @@ fn apply_alias_duplication(
     let mut changed = false;
 
     for aliases in property_alias_groups(resource) {
-        let source = aliases
-            .iter()
-            .find_map(|alias| {
-                get_frontmatter_value(frontmatter, alias)
-                    .filter(|value| yaml_value_has_data(value))
-                    .cloned()
-            });
+        let source = aliases.iter().find_map(|alias| {
+            get_frontmatter_value(frontmatter, alias)
+                .filter(|value| yaml_value_has_data(value))
+                .cloned()
+        });
 
         let Some(source_value) = source else {
             continue;
@@ -561,6 +565,20 @@ mod tests {
             ResourceScope::User,
         )
         .unwrap();
+
+        assert!(matches!(classified, ResourceReference::Source(_)));
+    }
+
+    #[test]
+    fn script_file_is_classified_as_source() {
+        let tmp = TempDir::new().unwrap();
+        let script_file = tmp.path().join("run.sh");
+        std::fs::write(&script_file, "#!/usr/bin/env bash\necho hi\n").unwrap();
+
+        let candidate = build_candidate("run.sh", script_file, Provider::Codex, false);
+        let classified =
+            classify_canonical_candidate(LinkableResource::Script, &candidate, ResourceScope::User)
+                .unwrap();
 
         assert!(matches!(classified, ResourceReference::Source(_)));
     }

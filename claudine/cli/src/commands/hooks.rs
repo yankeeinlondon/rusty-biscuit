@@ -11,10 +11,11 @@ use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
+use claudine::actions::{HookAction, LogTarget, ReportFormat};
 use claudine::events::{
-    AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookAction, HookerConfig, LogTarget,
-    NativeEventName, PROVIDERS_DISPLAY_ORDER, Provider, ReportFormat, detect_environment,
-    event_native_mapping_matrix, event_support_matrix,
+    AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookerConfig, NativeEventName,
+    PROVIDERS_DISPLAY_ORDER, Provider, detect_environment, event_native_mapping_matrix,
+    event_support_matrix,
 };
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;

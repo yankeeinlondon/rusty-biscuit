@@ -102,6 +102,9 @@ pub enum Commands {
         /// Render an internal dependency diagram
         #[arg(long)]
         deps: bool,
+        /// Output only package names as a comma-separated list
+        #[arg(long)]
+        packages: bool,
     },
 
     /// Show only language detection results
@@ -294,6 +297,11 @@ impl Commands {
     /// Check if this is a repo command with `--deps` flag.
     pub fn deps(&self) -> bool {
         matches!(self, Commands::Repo { deps: true, .. })
+    }
+
+    /// Check if this is a repo command with `--packages` flag.
+    pub fn packages(&self) -> bool {
+        matches!(self, Commands::Repo { packages: true, .. })
     }
 
     /// Get remote name/URL if this is a git command with a remote arg.
@@ -619,6 +627,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_or(DocsFilter::default(), |c| c.docs_filter());
 
     let deps = cli.command.as_ref().is_some_and(|c| c.deps());
+    let packages = cli.command.as_ref().is_some_and(|c| c.packages());
 
     let use_json = cli.command.is_none() || cli.json;
 
@@ -632,6 +641,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             history_count,
             &docs_filter,
             deps,
+            packages,
         );
     }
 
@@ -1016,13 +1026,22 @@ mod tests {
         #[test]
         fn repo_subcommand_parses() {
             let cli = parse_args(&["repo"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: false })));
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: false, .. })));
         }
 
         #[test]
         fn repo_deps_flag_parses() {
             let cli = parse_args(&["repo", "--deps"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: true })));
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: true, .. })));
+        }
+
+        #[test]
+        fn repo_packages_flag_parses() {
+            let cli = parse_args(&["repo", "--packages"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo { packages: true, .. })
+            ));
         }
 
         #[test]
@@ -1336,7 +1355,7 @@ mod tests {
 
         #[test]
         fn repo_maps_to_repo_filter() {
-            let cmd = Commands::Repo { deps: false };
+            let cmd = Commands::Repo { deps: false, packages: false };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
 

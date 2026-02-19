@@ -6,9 +6,8 @@ use tracing::{debug, info, warn};
 
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::{
-    AgenticEvent, CompiledMapper, GlobalSettings, HookAction, HookerConfig, Mapper, Provider,
-};
+use crate::actions::{CompiledMapper, HookAction, Mapper};
+use crate::events::{AgenticEvent, GlobalSettings, HookerConfig, Provider};
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -388,6 +387,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::*;
     use crate::events::*;
     use std::collections::HashMap;
     use std::path::PathBuf;

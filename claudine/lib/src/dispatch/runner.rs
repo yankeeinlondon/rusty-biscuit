@@ -7,10 +7,11 @@ use tracing::{debug, warn};
 
 use super::template::interpolate;
 use crate::error::Result;
-use crate::events::{
-    CompiledMapper, EventMeta, GlobalSettings, HookAction, HookDecision, HookResponse, LogTarget,
-    Mapper, ReportFormat, ReportHandler,
+use crate::actions::{
+    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ReportFormat,
+    ReportHandler,
 };
+use crate::events::{EventMeta, GlobalSettings};
 
 /// Execute hook actions in declaration order.
 ///

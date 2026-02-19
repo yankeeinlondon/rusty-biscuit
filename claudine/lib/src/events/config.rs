@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::agentic_event::AgenticEvent;
-use super::hook_action::{HookAction, LogTarget};
 use super::provider::Provider;
+use crate::actions::{HookAction, LogTarget};
 
 /// Root configuration loaded from `~/.claudine/config.json`.
 ///

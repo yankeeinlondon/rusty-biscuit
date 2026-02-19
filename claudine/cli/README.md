@@ -12,9 +12,9 @@ Interactive setup wizard that walks through 5 phases:
 2. **Event Selection** — choose which events to subscribe to (filters to hook-supported events)
 3. **Action Configuration** — configure actions per event (sound effects, TTS, logging, etc.)
 4. **Global Settings** — TTS provider selection, default log targets
-5. **Write & Register** — saves `~/.hooker` config and registers hooks with each provider
+5. **Write & Register** — saves `~/.claudine/config.json` and registers hooks with each provider
 
-`--quick` skips prompts and uses sensible defaults (SessionStart, TurnComplete, ToolError, PermissionRequest with sound effects). `--repo` creates `.hooker` in the current directory (project-scoped) and adds it to `.gitignore`.
+`--quick` skips prompts and uses sensible defaults (SessionStart, TurnComplete, ToolError, PermissionRequest with sound effects). `--repo` creates `.claudine/config.json` in the repository root and can add `.claudine/` to `.gitignore`.
 
 ### `claudine hooks [provider] [flags]`
 
@@ -35,16 +35,16 @@ Sound effect validation uses a 5-tier fuzzy matching algorithm to suggest replac
 
 ### `claudine link [provider] [flags]`
 
-Synchronize skills, commands, and agents across providers via symlinks.
+Analyze and optionally repair skill/command/agent/script link state across providers.
 
 | Flag | Description |
 |------|-------------|
 | `--support` | Provider resource support matrix (Skill/Command/Agent/Script) |
 | `<provider>` | Detailed capability view for one provider (fuzzy matching) |
-| `--dry-run` | Preview what would be linked without creating symlinks |
-| `--filter <name>` | Link only a specific skill by name |
+| `--scope <user\|repo>` | Choose user-scope or repo-scope analysis (default: `user`) |
+| `--apply` | Apply auto-fixable states (`LinkMissing`, `DerivedMissing`, `DerivedStale`) |
+| `--filter <name>` | Analyze only resources with this name |
 | `--detailed` | Show detailed output |
-| `--replace-duplicates` | Replace duplicate real directories with symlinks |
 
 ### `claudine providers`
 
@@ -84,7 +84,7 @@ Generate shell completions for bash, zsh, fish, powershell, or elvish.
 
 ### `claudine uninstall [--keep-config]`
 
-Remove hook registrations from all detected agents. `--keep-config` preserves the `~/.hooker` config file while removing only the hook registrations.
+Remove hook registrations from all detected agents. `--keep-config` preserves `~/.claudine/config.json` while removing only the hook registrations.
 
 ## Module Structure
 

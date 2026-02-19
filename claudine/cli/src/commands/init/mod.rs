@@ -423,7 +423,7 @@ fn build_linking_settings(
 }
 
 fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
-    use claudine::events::HookAction;
+    use claudine::actions::HookAction;
 
     let mut events = HashMap::new();
 

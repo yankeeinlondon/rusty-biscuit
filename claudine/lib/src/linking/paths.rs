@@ -220,6 +220,37 @@ impl ProviderSkillPaths {
         }
     }
 
+    /// Resolve the configured resource directory for any custom-supporting provider/resource.
+    ///
+    /// Unlike `target_dir`, this method is format-agnostic and includes non-markdown
+    /// resource formats (for derived artifact workflows).
+    pub fn resource_dir(
+        &self,
+        provider: Provider,
+        resource: LinkableResource,
+        scope: ResourceScope,
+    ) -> Option<PathBuf> {
+        let caps = capabilities_for(provider);
+        let support = caps.support_for(resource);
+        if !support.level.allows_custom() {
+            return None;
+        }
+
+        let base = match scope {
+            ResourceScope::User => support.user_path.as_ref()?,
+            ResourceScope::Repo => support.repo_path.as_ref()?,
+        };
+
+        if base.as_os_str().is_empty() {
+            return None;
+        }
+
+        Some(match scope {
+            ResourceScope::User => Self::expand_user_path(base, &self.home_dir),
+            ResourceScope::Repo => Self::expand_repo_path(base, &self.repo_root),
+        })
+    }
+
     /// Return scope-aware "also reads from" directories for a provider/resource.
     pub fn also_reads_from(
         &self,
@@ -395,5 +426,17 @@ mod tests {
             ResourceScope::User,
         );
         assert!(target.is_none());
+    }
+
+    #[test]
+    fn resource_dir_resolves_non_markdown_custom_paths() {
+        let paths = ProviderSkillPaths::new();
+        let gemini_cmds = paths.resource_dir(
+            Provider::Gemini,
+            LinkableResource::Command,
+            ResourceScope::User,
+        );
+        assert!(gemini_cmds.is_some());
+        assert!(gemini_cmds.unwrap().ends_with(".gemini/commands"));
     }
 }

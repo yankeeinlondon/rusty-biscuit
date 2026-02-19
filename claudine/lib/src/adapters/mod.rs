@@ -9,7 +9,8 @@ mod roo;
 
 use serde_json::Value;
 
-use crate::events::{AgenticEvent, EventMeta, HookResponse, Provider};
+use crate::actions::HookResponse;
+use crate::events::{AgenticEvent, EventMeta, Provider};
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]

@@ -3,9 +3,8 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde_json::{Value, json};
 
-use crate::events::{
-    AgenticEvent, EnvironmentContext, EventMeta, HookDecision, HookResponse, Provider,
-};
+use crate::actions::{HookDecision, HookResponse};
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
 
 use super::{AdapterError, ProviderAdapter};
 

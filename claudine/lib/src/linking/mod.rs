@@ -4,6 +4,7 @@ mod compatibility;
 mod conflict;
 mod detector;
 mod discovery;
+mod execution;
 mod hashing;
 pub mod model;
 mod paths;
@@ -25,6 +26,7 @@ pub use detector::{
     SkillsDetector, SlashCommandsDetector,
 };
 pub use discovery::DiscoveredSkill;
+pub use execution::{ApplySummary, analyze_resource_links, apply_fixable_resources};
 pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
 pub use symlink::{LinkResult, category_link_target, relative_path};

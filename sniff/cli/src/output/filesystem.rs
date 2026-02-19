@@ -476,6 +476,28 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
     items
 }
 
+/// Print package names as a comma-separated plain text list.
+///
+/// Writes to stderr and exits if the repo is not a monorepo.
+pub fn print_repo_packages(result: &sniff::SniffResult) {
+    let repo = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref());
+
+    match repo {
+        Some(repo) if repo.is_monorepo => {
+            if let Some(ref packages) = repo.packages {
+                let names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+                println!("{}", names.join(", "));
+            }
+        }
+        _ => {
+            eprintln!("- the \"--packages\" switch is only intended to be used in a monorepo");
+        }
+    }
+}
+
 pub fn print_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,

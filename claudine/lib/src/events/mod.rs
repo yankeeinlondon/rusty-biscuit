@@ -2,8 +2,6 @@ mod agentic_event;
 mod config;
 mod environment;
 mod event_meta;
-mod hook_action;
-mod hook_response;
 mod init_defaults;
 mod matrix;
 mod provider;
@@ -18,8 +16,6 @@ pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
 };
 pub use event_meta::EventMeta;
-pub use hook_action::{CompiledMapper, HookAction, LogTarget, Mapper, ReportFormat, ReportHandler};
-pub use hook_response::{HookDecision, HookResponse};
 pub use init_defaults::{
     INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, TtsProviderOption,
     default_speak_template, quick_start_supported_providers, recommended_sound,

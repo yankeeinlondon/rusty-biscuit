@@ -4,11 +4,10 @@ use clap::Args;
 use color_eyre::eyre::{Result, bail};
 use serde_json::{Value, json};
 
+use claudine::actions::HookAction;
 use claudine::adapters;
 use claudine::dispatch::template::interpolate;
-use claudine::events::{
-    AgenticEvent, HookAction, PROVIDERS_DISPLAY_ORDER, Provider, detect_environment,
-};
+use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider, detect_environment};
 
 use crate::log;
 

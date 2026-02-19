@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod adapters;
 pub mod agents;
 pub mod config;

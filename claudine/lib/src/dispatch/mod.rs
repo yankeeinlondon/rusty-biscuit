@@ -6,9 +6,10 @@ pub mod template;
 use serde_json::Value;
 use tracing::{debug, info};
 
+use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
-use crate::events::{EnvironmentContext, HookResponse, Provider, ResolvedHook};
+use crate::events::{EnvironmentContext, Provider, ResolvedHook};
 
 /// Result of dispatching a single incoming provider event.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -140,6 +141,7 @@ fn finalize_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::*;
     use crate::events::*;
     use serde_json::json;
     use std::collections::HashMap;
