@@ -1,76 +1,71 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use super::discovery::DiscoveredSkill;
+use crate::events::Provider;
 
-/// Status of a skill across providers after analysis.
+use super::capabilities::LinkableResource;
+use super::discovery::DiscoveredSkill;
+use super::paths::{ProviderSkillPaths, ResourceScope};
+
+/// Status of a resource across providers after analysis.
 #[derive(Debug, Clone)]
 pub enum SkillSyncStatus {
-    /// Skill exists in one provider -- candidate for linking to others.
+    /// Resource exists in one provider and can be linked to others.
     LinkCandidate {
-        /// The source skill.
+        /// The source resource.
         source: DiscoveredSkill,
-        /// Provider names that should receive a link.
-        target_providers: Vec<String>,
+        /// Providers that should receive a link.
+        target_providers: Vec<Provider>,
     },
-    /// Skill exists in multiple providers with identical content hash.
+    /// Resource exists in multiple providers with identical content hash.
     InSync {
-        /// Skill name.
+        /// Resource name.
         name: String,
-        /// All providers that have this skill with their paths and hashes.
-        providers: Vec<(String, PathBuf, u64)>,
+        /// Providers and their paths/hashes.
+        providers: Vec<(Provider, PathBuf, u64)>,
     },
-    /// Skill exists in multiple providers with different content hashes.
+    /// Resource exists in multiple providers with different content hashes.
     Conflict {
-        /// Skill name.
+        /// Resource name.
         name: String,
-        /// Each provider's path and hash.
-        versions: Vec<(String, PathBuf, u64)>,
+        /// Providers and their paths/hashes.
+        versions: Vec<(Provider, PathBuf, u64)>,
     },
-    /// Skill is already a symlink in all destination providers.
+    /// Resource is already linked from one source to other providers.
     AlreadyLinked {
-        /// Skill name.
+        /// Resource name.
         name: String,
-        /// The non-symlink source.
-        source_provider: String,
+        /// Source provider.
+        source_provider: Provider,
     },
 }
 
-/// Mapping from provider name to directories it reads from other providers.
-pub type AlsoReadsFrom = HashMap<String, Vec<PathBuf>>;
+/// Mapping from provider to directories it also reads from.
+pub type AlsoReadsFrom = HashMap<Provider, Vec<PathBuf>>;
 
-/// Build an `AlsoReadsFrom` map from a `ProviderSkillPaths`.
+/// Build an `AlsoReadsFrom` map from capability-backed paths.
 pub fn build_also_reads_from(
-    paths: &super::paths::ProviderSkillPaths,
-    providers: &[&str],
+    paths: &ProviderSkillPaths,
+    providers: &[Provider],
+    resource: LinkableResource,
+    scope: ResourceScope,
 ) -> AlsoReadsFrom {
     let mut map = AlsoReadsFrom::new();
-    for &name in providers {
-        let reads = paths.also_reads_from(name);
+    for provider in providers {
+        let reads = paths.also_reads_from(*provider, resource, scope);
         if !reads.is_empty() {
-            map.insert(name.to_string(), reads.to_vec());
+            map.insert(*provider, reads);
         }
     }
     map
 }
 
-/// Analyze discovered skills and classify each by sync status.
-///
-/// Groups skills by name, then for each group:
-/// - 1 provider (non-symlink) -> `LinkCandidate`
-/// - Multiple providers, same hash -> `InSync`
-/// - Multiple providers, different hashes -> `Conflict`
-/// - All except one are symlinks -> `AlreadyLinked`
-///
-/// The `also_reads_from` map prevents redundant linking (e.g., OpenCode
-/// reads Claude's skill directory, so we skip creating a link from Claude
-/// to OpenCode).
+/// Analyze discovered resources and classify each by sync status.
 pub fn analyze_skills(
     skills: Vec<DiscoveredSkill>,
-    all_provider_names: &[&str],
+    all_provider_names: &[Provider],
     also_reads_from: &AlsoReadsFrom,
 ) -> Vec<SkillSyncStatus> {
-    // Group by skill name
     let mut groups: BTreeMap<String, Vec<DiscoveredSkill>> = BTreeMap::new();
     for skill in skills {
         groups.entry(skill.name.clone()).or_default().push(skill);
@@ -79,33 +74,31 @@ pub fn analyze_skills(
     let mut results = Vec::new();
 
     for (name, group) in groups {
-        // Check if all non-source entries are symlinks
-        let non_symlinks: Vec<&DiscoveredSkill> = group.iter().filter(|s| !s.is_symlink).collect();
-        let symlinks: Vec<&DiscoveredSkill> = group.iter().filter(|s| s.is_symlink).collect();
+        let non_symlinks: Vec<&DiscoveredSkill> =
+            group.iter().filter(|skill| !skill.is_symlink).collect();
+        let symlinks: Vec<&DiscoveredSkill> =
+            group.iter().filter(|skill| skill.is_symlink).collect();
 
-        // If exactly one non-symlink and the rest are symlinks -> AlreadyLinked
         if non_symlinks.len() == 1 && !symlinks.is_empty() {
             results.push(SkillSyncStatus::AlreadyLinked {
                 name,
-                source_provider: non_symlinks[0].provider.clone(),
+                source_provider: non_symlinks[0].provider,
             });
             continue;
         }
 
-        // Only one provider has this skill -> LinkCandidate
         if group.len() == 1 {
-            let source = group.into_iter().next().unwrap();
-            let source_provider = source.provider.clone();
+            let source = group.into_iter().next().expect("single-item group");
+            let source_provider = source.provider;
 
-            // Determine target providers (all except the source)
-            let target_providers: Vec<String> = all_provider_names
+            let target_providers: Vec<Provider> = all_provider_names
                 .iter()
-                .filter(|&&p| p != source_provider)
-                .filter(|&&target| {
-                    // Skip if target reads from source's directories
+                .copied()
+                .filter(|provider| *provider != source_provider)
+                .filter(|target| {
                     let reads = also_reads_from
                         .get(target)
-                        .map(|v| v.as_slice())
+                        .map(Vec::as_slice)
                         .unwrap_or(&[]);
                     !reads.iter().any(|read_path| {
                         source
@@ -119,7 +112,6 @@ pub fn analyze_skills(
                             .unwrap_or(false)
                     })
                 })
-                .map(|p| p.to_string())
                 .collect();
 
             results.push(SkillSyncStatus::LinkCandidate {
@@ -129,29 +121,28 @@ pub fn analyze_skills(
             continue;
         }
 
-        // Multiple providers have this skill -- compare hashes
-        let hashes: Vec<u64> = group.iter().filter_map(|s| s.hash).collect();
+        let hashes: Vec<u64> = group.iter().filter_map(|skill| skill.hash).collect();
 
         if hashes.is_empty() {
             results.push(SkillSyncStatus::Conflict {
                 name,
                 versions: group
                     .into_iter()
-                    .map(|s| (s.provider, s.path, s.hash.unwrap_or(0)))
+                    .map(|skill| (skill.provider, skill.path, skill.hash.unwrap_or(0)))
                     .collect(),
             });
             continue;
         }
 
         let first_hash = hashes[0];
-        let all_same = hashes.iter().all(|&h| h == first_hash);
+        let all_same = hashes.iter().all(|hash| *hash == first_hash);
 
         if all_same {
             results.push(SkillSyncStatus::InSync {
                 name,
                 providers: group
                     .into_iter()
-                    .map(|s| (s.provider, s.path, s.hash.unwrap_or(0)))
+                    .map(|skill| (skill.provider, skill.path, skill.hash.unwrap_or(0)))
                     .collect(),
             });
         } else {
@@ -159,7 +150,7 @@ pub fn analyze_skills(
                 name,
                 versions: group
                     .into_iter()
-                    .map(|s| (s.provider, s.path, s.hash.unwrap_or(0)))
+                    .map(|skill| (skill.provider, skill.path, skill.hash.unwrap_or(0)))
                     .collect(),
             });
         }
@@ -172,17 +163,22 @@ pub fn analyze_skills(
 mod tests {
     use super::*;
 
-    fn make_skill(name: &str, provider: &str, hash: u64, is_symlink: bool) -> DiscoveredSkill {
+    fn make_skill(name: &str, provider: Provider, hash: u64, is_symlink: bool) -> DiscoveredSkill {
         DiscoveredSkill {
             name: name.to_string(),
-            path: PathBuf::from(format!("/home/.{provider}/skills/{name}")),
-            provider: provider.to_string(),
+            path: PathBuf::from(format!("/home/.{}/skills/{name}", provider.as_slug())),
+            provider,
             is_symlink,
             hash: Some(hash),
         }
     }
 
-    static ALL_PROVIDERS: &[&str] = &["claude", "gemini", "codex", "opencode"];
+    static ALL_PROVIDERS: &[Provider] = &[
+        Provider::Claude,
+        Provider::Codex,
+        Provider::Gemini,
+        Provider::OpenCode,
+    ];
 
     fn no_reads() -> AlsoReadsFrom {
         AlsoReadsFrom::new()
@@ -190,7 +186,7 @@ mod tests {
 
     #[test]
     fn single_provider_is_link_candidate() {
-        let skills = vec![make_skill("clap", "claude", 123, false)];
+        let skills = vec![make_skill("clap", Provider::Claude, 123, false)];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
 
@@ -201,7 +197,7 @@ mod tests {
                 target_providers,
             } => {
                 assert_eq!(source.name, "clap");
-                assert_eq!(source.provider, "claude");
+                assert_eq!(source.provider, Provider::Claude);
                 assert_eq!(target_providers.len(), 3);
             }
             other => panic!("expected LinkCandidate, got {other:?}"),
@@ -211,8 +207,8 @@ mod tests {
     #[test]
     fn same_hash_is_in_sync() {
         let skills = vec![
-            make_skill("tokio", "claude", 999, false),
-            make_skill("tokio", "gemini", 999, false),
+            make_skill("tokio", Provider::Claude, 999, false),
+            make_skill("tokio", Provider::Gemini, 999, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -230,8 +226,8 @@ mod tests {
     #[test]
     fn different_hash_is_conflict() {
         let skills = vec![
-            make_skill("react", "claude", 111, false),
-            make_skill("react", "gemini", 222, false),
+            make_skill("react", Provider::Claude, 111, false),
+            make_skill("react", Provider::Gemini, 222, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -250,8 +246,8 @@ mod tests {
     #[test]
     fn symlinks_detected_as_already_linked() {
         let skills = vec![
-            make_skill("serde", "claude", 500, false),
-            make_skill("serde", "gemini", 500, true),
+            make_skill("serde", Provider::Claude, 500, false),
+            make_skill("serde", Provider::Gemini, 500, true),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -263,7 +259,7 @@ mod tests {
                 source_provider,
             } => {
                 assert_eq!(name, "serde");
-                assert_eq!(source_provider, "claude");
+                assert_eq!(*source_provider, Provider::Claude);
             }
             other => panic!("expected AlreadyLinked, got {other:?}"),
         }
@@ -274,7 +270,7 @@ mod tests {
         let skill = DiscoveredSkill {
             name: "chrono".to_string(),
             path: PathBuf::from("/home/.claude/skills/chrono"),
-            provider: "claude".to_string(),
+            provider: Provider::Claude,
             is_symlink: false,
             hash: Some(100),
         };
@@ -282,7 +278,7 @@ mod tests {
 
         let mut reads = AlsoReadsFrom::new();
         reads.insert(
-            "opencode".to_string(),
+            Provider::OpenCode,
             vec![PathBuf::from("/home/.claude/skills")],
         );
 
@@ -294,11 +290,11 @@ mod tests {
                 target_providers, ..
             } => {
                 assert!(
-                    !target_providers.contains(&"opencode".to_string()),
+                    !target_providers.contains(&Provider::OpenCode),
                     "opencode should be excluded because it reads from claude's path"
                 );
-                assert!(target_providers.contains(&"gemini".to_string()));
-                assert!(target_providers.contains(&"codex".to_string()));
+                assert!(target_providers.contains(&Provider::Gemini));
+                assert!(target_providers.contains(&Provider::Codex));
             }
             other => panic!("expected LinkCandidate, got {other:?}"),
         }
@@ -306,7 +302,7 @@ mod tests {
 
     #[test]
     fn opencode_included_when_no_reads_from() {
-        let skills = vec![make_skill("clap", "claude", 123, false)];
+        let skills = vec![make_skill("clap", Provider::Claude, 123, false)];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
 
@@ -315,7 +311,7 @@ mod tests {
             SkillSyncStatus::LinkCandidate {
                 target_providers, ..
             } => {
-                assert!(target_providers.contains(&"opencode".to_string()));
+                assert!(target_providers.contains(&Provider::OpenCode));
             }
             other => panic!("expected LinkCandidate, got {other:?}"),
         }
@@ -324,22 +320,18 @@ mod tests {
     #[test]
     fn multiple_skills_analyzed_independently() {
         let skills = vec![
-            make_skill("alpha", "claude", 1, false),
-            make_skill("beta", "claude", 2, false),
-            make_skill("beta", "gemini", 2, false),
-            make_skill("gamma", "claude", 3, false),
-            make_skill("gamma", "gemini", 4, false),
+            make_skill("alpha", Provider::Claude, 1, false),
+            make_skill("beta", Provider::Claude, 2, false),
+            make_skill("beta", Provider::Gemini, 2, false),
+            make_skill("gamma", Provider::Claude, 3, false),
+            make_skill("gamma", Provider::Gemini, 4, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
 
         assert_eq!(results.len(), 3);
-
-        // alpha: LinkCandidate (one provider)
         assert!(matches!(&results[0], SkillSyncStatus::LinkCandidate { .. }));
-        // beta: InSync (same hash)
         assert!(matches!(&results[1], SkillSyncStatus::InSync { .. }));
-        // gamma: Conflict (different hashes)
         assert!(matches!(&results[2], SkillSyncStatus::Conflict { .. }));
     }
 }

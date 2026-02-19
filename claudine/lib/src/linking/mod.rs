@@ -7,77 +7,82 @@ mod report;
 mod symlink;
 
 pub use capabilities::{
-    ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourceSupport,
-    SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
+    ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourcePropertySchema,
+    ResourceSupport, SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
 };
 pub use conflict::SkillSyncStatus;
 pub use discovery::DiscoveredSkill;
-pub use paths::{ResourceScope, ProviderPaths, ProviderSkillPaths};
+pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
-pub use symlink::{LinkResult, relative_path};
-
-use conflict::build_also_reads_from;
+pub use symlink::{LinkResult, category_link_target, relative_path};
 
 use crate::error::Result;
 
-/// Orchestrate skill linking across providers.
-///
-/// Runs the 4-phase linking algorithm:
-/// 1. Discovery -- find skills across all providers
-/// 2. Hashing -- content-hash each skill directory
-/// 3. Analysis -- detect conflicts, candidates, and in-sync state
-/// 4. Linking -- create symlinks for candidates
-pub fn link_skills(scope: ResourceScope, filter: Option<&str>, dry_run: bool) -> Result<LinkReport> {
+use conflict::build_also_reads_from;
+
+/// Orchestrate skill and command linking across providers.
+pub fn link_skills(
+    scope: ResourceScope,
+    filter: Option<&str>,
+    dry_run: bool,
+) -> Result<LinkReport> {
     link_skills_inner(&ProviderSkillPaths::new(), scope, filter, dry_run)
 }
 
-/// Core linking logic, injectable for testing.
+/// Core linking logic, injectable for tests.
 fn link_skills_inner(
     provider_paths: &ProviderSkillPaths,
     scope: ResourceScope,
     filter: Option<&str>,
     dry_run: bool,
 ) -> Result<LinkReport> {
-    // Phase 1: Discovery
+    let mut report = LinkReport::default();
+    report_category_level_symlinks(provider_paths, scope, LinkableResource::Skill, &mut report)?;
+
     let mut skills = discovery::discover_skills(provider_paths, scope)?;
-    if let Some(f) = filter {
-        skills.retain(|s| s.name == f);
+    if let Some(name_filter) = filter {
+        skills.retain(|skill| skill.name == name_filter);
     }
 
-    // Phase 2: Hashing
     for skill in &mut skills {
         skill.hash = hashing::hash_skill_dir(&skill.path).ok();
     }
 
-    // Phase 3: Analysis
-    let provider_names: Vec<&str> = provider_paths
+    let providers: Vec<crate::events::Provider> = provider_paths
         .for_scope(scope)
         .iter()
-        .map(|(n, _)| *n)
+        .map(|(provider, _)| *provider)
         .collect();
-    let also_reads = build_also_reads_from(provider_paths, &provider_names);
-    let statuses = conflict::analyze_skills(skills, &provider_names, &also_reads);
+    let also_reads =
+        build_also_reads_from(provider_paths, &providers, LinkableResource::Skill, scope);
+    let statuses = conflict::analyze_skills(skills, &providers, &also_reads);
 
-    // Phase 4: Linking
-    let mut report = LinkReport::default();
-    apply_statuses(statuses, provider_paths, scope, dry_run, &mut report, false)?;
+    apply_statuses(
+        statuses,
+        provider_paths,
+        scope,
+        dry_run,
+        &mut report,
+        LinkableResource::Skill,
+    )?;
 
-    // Command linking
     link_commands(provider_paths, scope, filter, dry_run, &mut report)?;
 
     Ok(report)
 }
 
-/// Apply sync statuses to the report, creating symlinks as needed.
 fn apply_statuses(
     statuses: Vec<SkillSyncStatus>,
     provider_paths: &ProviderSkillPaths,
     scope: ResourceScope,
     dry_run: bool,
     report: &mut LinkReport,
-    is_command: bool,
+    resource: LinkableResource,
 ) -> Result<()> {
-    let prefix = if is_command { "cmd:" } else { "" };
+    let prefix = match resource {
+        LinkableResource::Command => "cmd:",
+        _ => "",
+    };
 
     for status in statuses {
         match status {
@@ -85,37 +90,61 @@ fn apply_statuses(
                 source,
                 target_providers,
             } => {
-                let mut linked = Vec::new();
-                for target in &target_providers {
-                    let dest_dir = if is_command {
-                        match resolve_provider_command_dir(provider_paths, target, scope) {
-                            Some(d) => d,
-                            None => continue,
-                        }
-                    } else {
-                        resolve_provider_skill_dir(provider_paths, target, scope)
+                let mut linked: Vec<String> = Vec::new();
+                for target_provider in target_providers {
+                    let Some(dest_dir) =
+                        provider_paths.target_dir(target_provider, resource, scope)
+                    else {
+                        continue;
                     };
 
+                    if !matches_scope_style(&source.path, &dest_dir, scope) {
+                        report.skipped.push(SkippedEntry {
+                            name: format!("{prefix}{}", source.name),
+                            reason: format!(
+                                "{}: skipped due to scope isolation mismatch (source: {}, destination: {})",
+                                target_provider,
+                                source.path.display(),
+                                dest_dir.display()
+                            ),
+                        });
+                        continue;
+                    }
+
+                    if let Some(category_target) = symlink::category_link_target(&dest_dir)? {
+                        report.skipped.push(SkippedEntry {
+                            name: format!("{prefix}{}", source.name),
+                            reason: format!(
+                                "{}: category-level symlink at {} -> {}. Keep as-is; switch to granular links manually.",
+                                target_provider,
+                                dest_dir.display(),
+                                category_target.display()
+                            ),
+                        });
+                        continue;
+                    }
+
                     if dry_run {
-                        linked.push(target.clone());
+                        linked.push(target_provider.to_string());
                         continue;
                     }
 
                     match symlink::create_skill_link(&source.path, &dest_dir, scope)? {
-                        LinkResult::Linked { .. } => linked.push(target.clone()),
+                        LinkResult::Linked { .. } => linked.push(target_provider.to_string()),
                         LinkResult::AlreadyLinked => {}
                         LinkResult::Skipped { reason } => {
                             report.skipped.push(SkippedEntry {
                                 name: format!("{prefix}{}", source.name),
-                                reason: format!("{target}: {reason}"),
+                                reason: format!("{}: {reason}", target_provider),
                             });
                         }
                     }
                 }
+
                 if !linked.is_empty() {
                     report.linked.push(LinkedEntry {
                         name: format!("{prefix}{}", source.name),
-                        source_provider: source.provider.clone(),
+                        source_provider: source.provider.to_string(),
                         target_providers: linked,
                     });
                 }
@@ -123,13 +152,19 @@ fn apply_statuses(
             SkillSyncStatus::InSync { name, providers } => {
                 report.in_sync.push(InSyncEntry {
                     name: format!("{prefix}{name}"),
-                    providers: providers.iter().map(|(p, _, _)| p.clone()).collect(),
+                    providers: providers
+                        .iter()
+                        .map(|(provider, _, _)| provider.to_string())
+                        .collect(),
                 });
             }
             SkillSyncStatus::Conflict { name, versions } => {
                 report.conflicts.push(ConflictEntry {
                     name: format!("{prefix}{name}"),
-                    versions,
+                    versions: versions
+                        .into_iter()
+                        .map(|(provider, path, hash)| (provider.to_string(), path, hash))
+                        .collect(),
                 });
             }
             SkillSyncStatus::AlreadyLinked { name, .. } => {
@@ -137,10 +172,23 @@ fn apply_statuses(
             }
         }
     }
+
     Ok(())
 }
 
-/// Link commands across providers that support Markdown commands.
+/// Repo scope should operate on repo-relative paths; user scope on absolute paths.
+fn matches_scope_style(
+    source: &std::path::Path,
+    dest: &std::path::Path,
+    scope: ResourceScope,
+) -> bool {
+    match scope {
+        ResourceScope::User => source.is_absolute() && dest.is_absolute(),
+        ResourceScope::Repo => source.is_relative() && dest.is_relative(),
+    }
+}
+
+/// Link commands across providers that support Markdown command files.
 fn link_commands(
     provider_paths: &ProviderSkillPaths,
     scope: ResourceScope,
@@ -148,107 +196,160 @@ fn link_commands(
     dry_run: bool,
     report: &mut LinkReport,
 ) -> Result<()> {
+    report_category_level_symlinks(provider_paths, scope, LinkableResource::Command, report)?;
+
     let mut commands = discovery::discover_commands(provider_paths, scope)?;
-    if let Some(f) = filter {
-        commands.retain(|c| c.name == f);
+    if let Some(name_filter) = filter {
+        commands.retain(|command| command.name == name_filter);
     }
 
-    for cmd in &mut commands {
-        if let Ok(content) = std::fs::read(&cmd.path) {
-            cmd.hash = Some(biscuit_hash::xx_hash_bytes(&content));
+    for command in &mut commands {
+        if let Ok(content) = std::fs::read(&command.path) {
+            command.hash = Some(biscuit_hash::xx_hash_bytes(&content));
         }
     }
 
-    let names: Vec<&str> = provider_paths
+    let providers: Vec<crate::events::Provider> = provider_paths
         .commands_for_scope(scope)
         .iter()
-        .map(|(n, _)| *n)
+        .map(|(provider, _)| *provider)
         .collect();
-    let also_reads = build_also_reads_from(provider_paths, &names);
-    let statuses = conflict::analyze_skills(commands, &names, &also_reads);
+    let also_reads =
+        build_also_reads_from(provider_paths, &providers, LinkableResource::Command, scope);
+    let statuses = conflict::analyze_skills(commands, &providers, &also_reads);
 
-    apply_statuses(statuses, provider_paths, scope, dry_run, report, true)
+    apply_statuses(
+        statuses,
+        provider_paths,
+        scope,
+        dry_run,
+        report,
+        LinkableResource::Command,
+    )
 }
 
-/// Resolve the skill directory path for a provider and scope.
-fn resolve_provider_skill_dir(
-    paths: &ProviderSkillPaths,
-    provider: &str,
+fn report_category_level_symlinks(
+    provider_paths: &ProviderSkillPaths,
     scope: ResourceScope,
-) -> std::path::PathBuf {
-    let p = match provider {
-        "claude" => &paths.claude,
-        "gemini" => &paths.gemini,
-        "codex" => &paths.codex,
-        "opencode" => &paths.opencode,
-        _ => &paths.claude,
+    resource: LinkableResource,
+    report: &mut LinkReport,
+) -> Result<()> {
+    let roots: Vec<(crate::events::Provider, &std::path::PathBuf)> = match resource {
+        LinkableResource::Skill => provider_paths.for_scope(scope),
+        LinkableResource::Command => provider_paths.commands_for_scope(scope),
+        LinkableResource::Agent | LinkableResource::Script => vec![],
     };
-    match scope {
-        ResourceScope::User => p.user_skills.clone(),
-        ResourceScope::Repo => p.repo_skills.clone(),
-    }
-}
 
-/// Resolve the command directory path for a provider and scope.
-fn resolve_provider_command_dir(
-    paths: &ProviderSkillPaths,
-    provider: &str,
-    scope: ResourceScope,
-) -> Option<std::path::PathBuf> {
-    let p = match provider {
-        "claude" => &paths.claude,
-        "opencode" => &paths.opencode,
-        _ => return None,
+    let resource_label = match resource {
+        LinkableResource::Skill => "skill-root",
+        LinkableResource::Command => "command-root",
+        LinkableResource::Agent => "agent-root",
+        LinkableResource::Script => "script-root",
     };
-    match scope {
-        ResourceScope::User => p.user_commands.clone(),
-        ResourceScope::Repo => p.repo_commands.clone(),
+
+    for (provider, root_dir) in roots {
+        if let Some(target) = symlink::category_link_target(root_dir)? {
+            report.skipped.push(SkippedEntry {
+                name: format!("{resource_label}:{provider}"),
+                reason: format!(
+                    "{provider}: category-level symlink at {} -> {}. Keep as-is; switch to granular links manually.",
+                    root_dir.display(),
+                    target.display()
+                ),
+            });
+        }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
+    use std::collections::HashMap;
+
     use tempfile::TempDir;
 
-    fn test_paths(base: &std::path::Path) -> ProviderSkillPaths {
-        ProviderSkillPaths {
-            claude: ProviderPaths {
-                user_skills: base.join("claude/skills"),
-                repo_skills: base.join("repo/.claude/skills"),
+    use super::*;
+    use crate::events::Provider;
+
+    fn empty_provider(provider: Provider) -> ProviderPaths {
+        ProviderPaths {
+            provider,
+            user_skills: None,
+            repo_skills: None,
+            user_commands: None,
+            repo_commands: None,
+            skill_also_reads_from: vec![],
+            command_also_reads_from: vec![],
+        }
+    }
+
+    fn test_paths(base: &std::path::Path, opencode_reads_from_claude: bool) -> ProviderSkillPaths {
+        let mut providers = HashMap::new();
+        for provider in ALL_PROVIDERS {
+            providers.insert(provider, empty_provider(provider));
+        }
+
+        providers.insert(
+            Provider::Claude,
+            ProviderPaths {
+                provider: Provider::Claude,
+                user_skills: Some(base.join("claude/skills")),
+                repo_skills: Some(base.join("repo/.claude/skills")),
                 user_commands: Some(base.join("claude/commands")),
                 repo_commands: Some(base.join("repo/.claude/commands")),
-                also_reads_from: vec![],
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
             },
-            gemini: ProviderPaths {
-                user_skills: base.join("gemini/skills"),
-                repo_skills: base.join("repo/.gemini/skills"),
+        );
+        providers.insert(
+            Provider::Codex,
+            ProviderPaths {
+                provider: Provider::Codex,
+                user_skills: Some(base.join("codex/skills")),
+                repo_skills: Some(base.join("repo/.codex/skills")),
+                user_commands: Some(base.join("codex/commands")),
+                repo_commands: Some(base.join("repo/.codex/commands")),
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+            },
+        );
+        providers.insert(
+            Provider::Gemini,
+            ProviderPaths {
+                provider: Provider::Gemini,
+                user_skills: Some(base.join("gemini/skills")),
+                repo_skills: Some(base.join("repo/.gemini/skills")),
                 user_commands: None,
                 repo_commands: None,
-                also_reads_from: vec![],
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
             },
-            codex: ProviderPaths {
-                user_skills: base.join("codex/skills"),
-                repo_skills: base.join("repo/.codex/skills"),
-                user_commands: None,
-                repo_commands: None,
-                also_reads_from: vec![],
-            },
-            opencode: ProviderPaths {
-                user_skills: base.join("opencode/skills"),
-                repo_skills: base.join("repo/.opencode/skills"),
+        );
+        providers.insert(
+            Provider::OpenCode,
+            ProviderPaths {
+                provider: Provider::OpenCode,
+                user_skills: Some(base.join("opencode/skills")),
+                repo_skills: Some(base.join("repo/.opencode/skills")),
                 user_commands: Some(base.join("opencode/commands")),
                 repo_commands: Some(base.join("repo/.opencode/commands")),
-                also_reads_from: vec![base.join("claude/skills")],
+                skill_also_reads_from: if opencode_reads_from_claude {
+                    vec![base.join("claude/skills")]
+                } else {
+                    vec![]
+                },
+                command_also_reads_from: vec![],
             },
-        }
+        );
+
+        ProviderSkillPaths::from_providers_for_test(providers, base.to_path_buf())
     }
 
     fn setup_skill(dir: &std::path::Path, name: &str, content: &str) {
         let skill = dir.join(name);
-        fs::create_dir_all(&skill).unwrap();
-        fs::write(
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
             skill.join("SKILL.md"),
             format!("---\nname: {name}\ndescription: test\n---\n{content}"),
         )
@@ -258,43 +359,120 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn end_to_end_link_single_skill() {
-        let tmp = TempDir::new().unwrap();
-        let paths = test_paths(tmp.path());
-        setup_skill(&paths.claude.user_skills, "my-tool", "# My Tool\n");
+        let temp_dir = TempDir::new().unwrap();
+        let paths = test_paths(temp_dir.path(), true);
+        setup_skill(
+            &paths
+                .target_dir(
+                    Provider::Claude,
+                    LinkableResource::Skill,
+                    ResourceScope::User,
+                )
+                .unwrap(),
+            "my-tool",
+            "# My Tool\n",
+        );
 
         let report = link_skills_inner(&paths, ResourceScope::User, None, false).unwrap();
 
         assert!(!report.linked.is_empty());
         let entry = &report.linked[0];
         assert_eq!(entry.name, "my-tool");
-        assert_eq!(entry.source_provider, "claude");
-        assert!(!entry.target_providers.contains(&"opencode".to_string()));
+        assert_eq!(entry.source_provider, "Claude");
+        assert!(!entry.target_providers.contains(&"OpenCode".to_string()));
     }
 
     #[cfg(unix)]
     #[test]
     fn dry_run_does_not_create_symlinks() {
-        let tmp = TempDir::new().unwrap();
-        let paths = test_paths(tmp.path());
-        setup_skill(&paths.claude.user_skills, "dry-test", "# Content\n");
+        let temp_dir = TempDir::new().unwrap();
+        let paths = test_paths(temp_dir.path(), true);
+        setup_skill(
+            &paths
+                .target_dir(
+                    Provider::Claude,
+                    LinkableResource::Skill,
+                    ResourceScope::User,
+                )
+                .unwrap(),
+            "dry-test",
+            "# Content\n",
+        );
 
         let report = link_skills_inner(&paths, ResourceScope::User, None, true).unwrap();
 
         assert!(!report.linked.is_empty());
-        assert!(!paths.codex.user_skills.join("dry-test").exists());
-        assert!(!paths.gemini.user_skills.join("dry-test").exists());
+        let codex_target = paths
+            .target_dir(
+                Provider::Codex,
+                LinkableResource::Skill,
+                ResourceScope::User,
+            )
+            .unwrap();
+        let gemini_target = paths
+            .target_dir(
+                Provider::Gemini,
+                LinkableResource::Skill,
+                ResourceScope::User,
+            )
+            .unwrap();
+        assert!(!codex_target.join("dry-test").exists());
+        assert!(!gemini_target.join("dry-test").exists());
     }
 
     #[test]
     fn filter_restricts_to_named_skill() {
-        let tmp = TempDir::new().unwrap();
-        let paths = test_paths(tmp.path());
-        setup_skill(&paths.claude.user_skills, "alpha", "# A\n");
-        setup_skill(&paths.claude.user_skills, "beta", "# B\n");
+        let temp_dir = TempDir::new().unwrap();
+        let paths = test_paths(temp_dir.path(), true);
+        let source_dir = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Skill,
+                ResourceScope::User,
+            )
+            .unwrap();
+        setup_skill(&source_dir, "alpha", "# A\n");
+        setup_skill(&source_dir, "beta", "# B\n");
 
         let report = link_skills_inner(&paths, ResourceScope::User, Some("alpha"), true).unwrap();
 
         assert_eq!(report.linked.len(), 1);
         assert_eq!(report.linked[0].name, "alpha");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn category_level_symlink_is_reported_and_not_modified() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = test_paths(temp_dir.path(), false);
+
+        let source_dir = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Skill,
+                ResourceScope::User,
+            )
+            .unwrap();
+        let opencode_dir = paths
+            .target_dir(
+                Provider::OpenCode,
+                LinkableResource::Skill,
+                ResourceScope::User,
+            )
+            .unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(opencode_dir.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&source_dir, &opencode_dir).unwrap();
+        setup_skill(&source_dir, "category-test", "# Category Test\n");
+
+        let report =
+            link_skills_inner(&paths, ResourceScope::User, Some("category-test"), false).unwrap();
+
+        assert!(
+            report
+                .skipped
+                .iter()
+                .any(|entry| entry.reason.contains("category-level symlink"))
+        );
     }
 }

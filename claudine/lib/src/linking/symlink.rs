@@ -26,6 +26,16 @@ pub enum LinkResult {
     },
 }
 
+/// Return the symlink target when a resource root is itself a symlink.
+pub fn category_link_target(path: &Path) -> Result<Option<PathBuf>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(Some(fs::read_link(path)?)),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Create a symlink from source skill dir into dest_dir.
 ///
 /// User scope creates absolute symlinks. Repo scope creates relative symlinks.
@@ -37,7 +47,11 @@ pub enum LinkResult {
 /// - The source has no file name component
 /// - The parent directory cannot be created
 /// - The symlink cannot be created
-pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: ResourceScope) -> Result<LinkResult> {
+pub fn create_skill_link(
+    source: &Path,
+    dest_dir: &Path,
+    scope: ResourceScope,
+) -> Result<LinkResult> {
     let skill_name = source.file_name().ok_or_else(|| {
         ClaudineError::LinkingError(format!(
             "source path has no file name: {}",
@@ -198,6 +212,19 @@ mod tests {
         let target = Path::new("/repo/sub/.claude/skills/deep-skill");
         let result = relative_path(from, target);
         assert_eq!(result, PathBuf::from("../../.claude/skills/deep-skill"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn category_link_target_detects_root_symlink() {
+        let tmp = TempDir::new().unwrap();
+        let source_root = tmp.path().join("source");
+        let target_root = tmp.path().join("target");
+        fs::create_dir_all(&source_root).unwrap();
+        std::os::unix::fs::symlink(&source_root, &target_root).unwrap();
+
+        let target = category_link_target(&target_root).unwrap();
+        assert_eq!(target, Some(source_root));
     }
 
     #[cfg(unix)]

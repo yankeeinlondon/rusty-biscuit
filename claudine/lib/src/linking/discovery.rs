@@ -2,29 +2,26 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::events::Provider;
 
-use super::paths::{ResourceScope, ProviderSkillPaths};
+use super::paths::{ProviderPaths, ProviderSkillPaths, ResourceScope};
 
-/// A skill discovered during the scan phase.
+/// A resource discovered during the scan phase.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
-    /// Skill name (directory name).
+    /// Resource name (skill directory name or command filename stem).
     pub name: String,
-    /// Absolute path to the skill directory.
+    /// Path to the resource (directory for skills, file for commands).
     pub path: PathBuf,
-    /// Which provider owns this skill directory.
-    pub provider: String,
-    /// Whether this is already a symlink.
+    /// Which provider owns this resource location.
+    pub provider: Provider,
+    /// Whether this entry is already a symlink.
     pub is_symlink: bool,
-    /// Content hash of the skill directory (populated during hashing phase).
+    /// Content hash (populated during hashing phase).
     pub hash: Option<u64>,
 }
 
-/// Discover all skills across providers for the given scope.
-///
-/// Walks each provider's skill directory. Each subdirectory containing
-/// a `SKILL.md` file is treated as a skill. Hidden directories (starting
-/// with `.`) are skipped.
+/// Discover all Markdown skills across providers for the given scope.
 pub fn discover_skills(
     paths: &ProviderSkillPaths,
     scope: ResourceScope,
@@ -36,44 +33,50 @@ pub fn discover_skills(
             continue;
         }
         let entries = match fs::read_dir(dir) {
-            Ok(e) => e,
+            Ok(entries) => entries,
             Err(_) => continue,
         };
+
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
             if !path.is_dir() {
                 continue;
             }
-            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+
+            let name = match path.file_name().and_then(|name| name.to_str()) {
                 Some(name) if name.starts_with('.') => continue,
                 Some(name) => name.to_string(),
                 None => continue,
             };
+
             if !path.join("SKILL.md").exists() {
                 continue;
             }
+
             let is_symlink = fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
+                .map(|meta| meta.file_type().is_symlink())
                 .unwrap_or(false);
+
             skills.push(DiscoveredSkill {
-                name: dir_name,
+                name,
                 path,
-                provider: provider.to_string(),
+                provider,
                 is_symlink,
                 hash: None,
             });
         }
     }
 
-    skills.sort_by(|a, b| a.name.cmp(&b.name).then(a.provider.cmp(&b.provider)));
+    skills.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.provider.as_slug().cmp(right.provider.as_slug()))
+    });
     Ok(skills)
 }
 
-/// Discover commands across providers for the given scope.
-///
-/// Returns a list of `DiscoveredSkill` where each represents a command
-/// file (`.md`). Only providers with Markdown command support are scanned.
+/// Discover Markdown slash commands across providers for the given scope.
 pub fn discover_commands(
     paths: &ProviderSkillPaths,
     scope: ResourceScope,
@@ -85,66 +88,86 @@ pub fn discover_commands(
             continue;
         }
         let entries = match fs::read_dir(dir) {
-            Ok(e) => e,
+            Ok(entries) => entries,
             Err(_) => continue,
         };
+
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) if n.ends_with(".md") && !n.starts_with('.') => n.to_string(),
+            let file_name = match path.file_name().and_then(|name| name.to_str()) {
+                Some(name) if name.ends_with(".md") && !name.starts_with('.') => name.to_string(),
                 _ => continue,
             };
+
             let is_symlink = fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
+                .map(|meta| meta.file_type().is_symlink())
                 .unwrap_or(false);
+
             let name = file_name
                 .strip_suffix(".md")
                 .unwrap_or(&file_name)
                 .to_string();
+
             commands.push(DiscoveredSkill {
                 name,
                 path,
-                provider: provider.to_string(),
+                provider,
                 is_symlink,
                 hash: None,
             });
         }
     }
 
-    commands.sort_by(|a, b| a.name.cmp(&b.name).then(a.provider.cmp(&b.provider)));
+    commands.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.provider.as_slug().cmp(right.provider.as_slug()))
+    });
     Ok(commands)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::paths::ProviderPaths;
-    use super::*;
-    use std::fs;
+    use std::collections::HashMap;
     use std::path::Path;
+
     use tempfile::TempDir;
 
-    fn empty_paths() -> ProviderPaths {
+    use super::*;
+
+    fn empty_provider(provider: Provider) -> ProviderPaths {
         ProviderPaths {
-            user_skills: PathBuf::from("/nonexistent"),
-            repo_skills: PathBuf::from("/nonexistent"),
+            provider,
+            user_skills: None,
+            repo_skills: None,
             user_commands: None,
             repo_commands: None,
-            also_reads_from: vec![],
+            skill_also_reads_from: vec![],
+            command_also_reads_from: vec![],
         }
     }
 
-    /// Build paths where only Claude's user_skills points to `dir`.
-    fn claude_only_paths(dir: PathBuf) -> ProviderSkillPaths {
-        ProviderSkillPaths {
-            claude: ProviderPaths {
-                user_skills: dir,
-                ..empty_paths()
-            },
-            gemini: empty_paths(),
-            codex: empty_paths(),
-            opencode: empty_paths(),
+    fn test_paths(claude_user_skills: PathBuf) -> ProviderSkillPaths {
+        let mut providers = HashMap::new();
+        for provider in super::super::capabilities::ALL_PROVIDERS {
+            providers.insert(provider, empty_provider(provider));
         }
+
+        providers.insert(
+            Provider::Claude,
+            ProviderPaths {
+                provider: Provider::Claude,
+                user_skills: Some(claude_user_skills),
+                repo_skills: None,
+                user_commands: None,
+                repo_commands: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+            },
+        );
+
+        ProviderSkillPaths::from_providers_for_test(providers, PathBuf::from("/tmp"))
     }
 
     fn setup_skill(base: &Path, provider_dir: &str, skill_name: &str) -> PathBuf {
@@ -160,25 +183,25 @@ mod tests {
 
     #[test]
     fn discovers_skills_in_temp_dir() {
-        let tmp = TempDir::new().unwrap();
-        setup_skill(tmp.path(), "claude_skills", "my-skill");
+        let temp_dir = TempDir::new().unwrap();
+        setup_skill(temp_dir.path(), "claude_skills", "my-skill");
 
-        let paths = claude_only_paths(tmp.path().join("claude_skills"));
+        let paths = test_paths(temp_dir.path().join("claude_skills"));
         let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "my-skill");
-        assert_eq!(skills[0].provider, "claude");
+        assert_eq!(skills[0].provider, Provider::Claude);
         assert!(!skills[0].is_symlink);
     }
 
     #[test]
     fn skips_hidden_directories() {
-        let tmp = TempDir::new().unwrap();
-        setup_skill(tmp.path(), "claude_skills", ".system");
-        setup_skill(tmp.path(), "claude_skills", "visible-skill");
+        let temp_dir = TempDir::new().unwrap();
+        setup_skill(temp_dir.path(), "claude_skills", ".system");
+        setup_skill(temp_dir.path(), "claude_skills", "visible-skill");
 
-        let paths = claude_only_paths(tmp.path().join("claude_skills"));
+        let paths = test_paths(temp_dir.path().join("claude_skills"));
         let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
@@ -187,12 +210,12 @@ mod tests {
 
     #[test]
     fn skips_directories_without_skill_md() {
-        let tmp = TempDir::new().unwrap();
-        let no_skill = tmp.path().join("claude_skills/no-skill-md");
+        let temp_dir = TempDir::new().unwrap();
+        let no_skill = temp_dir.path().join("claude_skills/no-skill-md");
         fs::create_dir_all(&no_skill).unwrap();
         fs::write(no_skill.join("README.md"), "# Not a skill").unwrap();
 
-        let paths = claude_only_paths(tmp.path().join("claude_skills"));
+        let paths = test_paths(temp_dir.path().join("claude_skills"));
         let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert!(skills.is_empty());
@@ -201,13 +224,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn detects_symlinked_skill() {
-        let tmp = TempDir::new().unwrap();
-        let claude_skills = tmp.path().join("claude_skills");
-        let source = setup_skill(tmp.path(), "real_skills", "my-skill");
+        let temp_dir = TempDir::new().unwrap();
+        let claude_skills = temp_dir.path().join("claude_skills");
+        let source = setup_skill(temp_dir.path(), "real_skills", "my-skill");
         fs::create_dir_all(&claude_skills).unwrap();
         std::os::unix::fs::symlink(&source, claude_skills.join("my-skill")).unwrap();
 
-        let paths = claude_only_paths(claude_skills);
+        let paths = test_paths(claude_skills);
         let skills = discover_skills(&paths, ResourceScope::User).unwrap();
 
         assert_eq!(skills.len(), 1);
