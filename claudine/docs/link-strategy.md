@@ -77,7 +77,7 @@ The idea of **Link Detection** is to evaluate both **user** and **repo** scopes 
 ### Types
 
 ```rust
-// This is just the code bases `LinkScope` renamed to `ResourceScope`
+
 pub enum ResourceScope {
     /// a resource which is defined in the **Repo** scope (e.g., within
     /// the working git repo)
