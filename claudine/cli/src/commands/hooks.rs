@@ -43,9 +43,6 @@ pub struct HooksArgs {
     #[arg(long)]
     pub variables: bool,
 
-    /// Automatically fix invalid sound effect names using suggestions
-    #[arg(long)]
-    pub fix: bool,
 }
 
 /// All supported providers in display order.
@@ -261,7 +258,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
     log::data("");
     if has_fixable {
         let hint = Prose::new(
-            "{{dim}}Use {{blue}}--fix{{reset}}{{dim}} to automatically apply suggested fixes{{reset}}",
+            "{{dim}}Edit {{blue}}~/.hooker{{reset}}{{dim}} to apply suggested fixes{{reset}}",
         );
         log::data(&format!(" {}", hint.render(Some(100))));
     }
@@ -271,59 +268,6 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
     log::data(&format!(" {}", hint.render(Some(100))));
 
     invalid_effects
-}
-
-/// Fix invalid sound effect names in the user config file.
-///
-/// Replaces invalid names with their suggested alternatives directly in the JSON file.
-fn fix_sound_effects(invalid_effects: &[InvalidEffect]) -> Result<usize> {
-    // Find the user config file
-    let home = dirs::home_dir()
-        .ok_or_else(|| color_eyre::eyre::eyre!("Could not determine home directory"))?;
-
-    let config_names = [".hooker", ".hook-config"];
-    let config_path = config_names
-        .iter()
-        .map(|name| home.join(name))
-        .find(|path| path.exists())
-        .ok_or_else(|| {
-            color_eyre::eyre::eyre!("No config file found at ~/.hooker or ~/.hook-config")
-        })?;
-
-    // Read the config file as text (to preserve formatting as much as possible)
-    let mut content = std::fs::read_to_string(&config_path)?;
-
-    let mut fixed_count = 0;
-    for effect in invalid_effects {
-        if let Some(suggestion) = effect.suggestion {
-            // Simple string replacement - replace the invalid name with suggestion
-            // We search for the name in quotes to avoid partial matches
-            let search = format!("\"{}\"", effect.invalid_name);
-            let replace = format!("\"{}\"", suggestion);
-            if content.contains(&search) {
-                content = content.replace(&search, &replace);
-                fixed_count += 1;
-                let msg = Prose::new(format!(
-                    "{{{{green}}}}✓{{{{reset}}}} {{{{dim}}}}{}{{{{reset}}}} → {{{{green}}}}{}{{{{reset}}}}",
-                    effect.invalid_name, suggestion
-                ));
-                log::data(&format!(" {}", msg.render(Some(100))));
-            }
-        }
-    }
-
-    if fixed_count > 0 {
-        std::fs::write(&config_path, content)?;
-        log::data("");
-        let msg = Prose::new(format!(
-            "{{{{green}}}}{{{{bold}}}}Fixed {} sound effect(s) in {}{{{{reset}}}}",
-            fixed_count,
-            config_path.display()
-        ));
-        log::data(&format!(" {}", msg.render(Some(100))));
-    }
-
-    Ok(fixed_count)
 }
 
 /// Find a similar valid effect name using simple heuristics.
@@ -735,11 +679,7 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
 
                 // Validate sound effects for this provider only
                 if let Some(cfg) = config.as_ref() {
-                    let invalid_effects = validate_sound_effects(cfg);
-                    if args.fix && !invalid_effects.is_empty() {
-                        log::data("");
-                        fix_sound_effects(&invalid_effects)?;
-                    }
+                    validate_sound_effects(cfg);
                 }
 
                 return result;
@@ -767,13 +707,7 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
 
     // Validate sound effects in the config
     if let Some(cfg) = config.as_ref() {
-        let invalid_effects = validate_sound_effects(cfg);
-
-        // If --fix was passed, apply the fixes
-        if args.fix && !invalid_effects.is_empty() {
-            log::data("");
-            fix_sound_effects(&invalid_effects)?;
-        }
+        validate_sound_effects(cfg);
     }
 
     result

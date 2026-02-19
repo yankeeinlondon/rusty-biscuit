@@ -26,10 +26,6 @@ pub struct LinkArgs {
     #[arg(long)]
     pub support: bool,
 
-    /// Show what would happen without creating links.
-    #[arg(long)]
-    pub dry_run: bool,
-
     /// Filter to a specific skill name.
     #[arg(long)]
     pub filter: Option<String>,
@@ -37,10 +33,6 @@ pub struct LinkArgs {
     /// Show detailed output.
     #[arg(long)]
     pub detailed: bool,
-
-    /// Replace duplicate real directories with symlinks.
-    #[arg(long)]
-    pub replace_duplicates: bool,
 }
 
 /// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
@@ -137,15 +129,11 @@ pub fn run(args: LinkArgs) -> Result<()> {
         }
     }
 
-    // Default behavior: run the linking algorithm
+    // Report current link state (read-only)
     let scope = LinkScope::User;
     let filter = args.filter.as_deref();
 
-    let report = linking::link_skills(scope, filter, args.dry_run)?;
-
-    if args.dry_run {
-        log::data("Dry run \u{2014} no changes made:");
-    }
+    let report = linking::link_skills(scope, filter, true)?;
 
     // LinkReport implements Display via format_report()
     log::data(&format!("{report}"));
