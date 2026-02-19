@@ -55,7 +55,7 @@ To be time efficient and context-window efficient you will run as an orchestrato
            - this subagent is responsible for populating the file @.claude/skills/claudine/supported-platforms.md
            - this document should be created by piping the output of `claudine providers` to this this file
      3. Hook/Event Model Subagent
-           - a
+           -
      4. Supported Actions Subagent
            - a
      5. Linking Strategy Subagent
