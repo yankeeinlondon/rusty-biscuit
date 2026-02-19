@@ -158,17 +158,17 @@ check:
     @echo ""
     @cargo check -p biscuit-file -p biscuit-file-cli
 
-# Open Claude Code in yolo mode
+# Open Opencode in yolo mode
 oc *args="":
     @clear
     @echo "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
+    @cd .. && AGENT="Opencode" opencode {{args}}
 
-# Open Opencode
+# Open Claude Code
 cc *args="":
     @clear
     @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
+    @cd .. && AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
 
 # Use GPT 5.2 to commit staged changes
 commit:

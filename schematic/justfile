@@ -245,23 +245,23 @@ commit:
     @cd .. && opencode run commit "-f" --model "openai/gpt-5.2-codex"
     @just _speak "git commits completed in {{BOLD}}rusty-biscuit{{RESET}} monorepo"
 
-# Open Claude Code in yolo mode
+# Open Opencode in yolo mode
 oc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && opencode {{args}}
+    @cd .. && AGENT="Opencode" opencode {{args}}
 
-# Open Opencode
+# Open Claude Code
 cc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && claude --dangerously-skip-permissions {{args}}
+    @cd .. && AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
 
 # Open Codex CLI
 codex *args="":
     @clear
     @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && codex --dangerously-bypass-approvals-and-sandbox {{args}}
+    @cd .. && AGENT="Codex CLI" codex --dangerously-bypass-approvals-and-sandbox {{args}}
 
 # Show the dependencies for this package
 deps:

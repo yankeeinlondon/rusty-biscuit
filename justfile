@@ -29,14 +29,14 @@ cc *args="":
   @clear
   @echo "Starting Claude Code in Yolo mode"
   @echo
-  @claude --dangerously-skip-permissions {{args}}
+  @AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
 
 # start Opencode CLI
 oc *args="":
   @clear
   @echo  "Starting Opencode"
   @echo
-  @opencode {{args}}
+  @AGENT="Opencode" opencode {{args}}
 
 # Uses TTS if available but never error
 _speak *args:
