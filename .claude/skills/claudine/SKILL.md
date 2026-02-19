@@ -1,6 +1,6 @@
 ---
 name: claudine
-description: Universal event handler and skill linker for agentic CLIs (Claude, Codex, Gemini, Goose, Kimi Code, OpenCode, Qwen Code). Use when working with agent hooks, cross-provider skill synchronization, or configuring event reactions like TTS and sound effects.
+description: A library and CLI designed to help fluid movement between various Agentic CLI's. It attempts to cross-link resources such as agent skills, slash commands, etc. while at the same time providing a universal "hook" model that is intended to work across Agentic CLI providers.
 ---
 
 ## Purpose
