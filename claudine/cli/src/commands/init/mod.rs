@@ -17,7 +17,7 @@ use claudine::events::{
 };
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
-    select_canonical_provider, set_canonical_provider,
+    resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
 
 use crate::log;
@@ -133,7 +133,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         ResourceScope::User
     };
     let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    let repo_root = std::env::current_dir()?;
+    let cwd = std::env::current_dir()?;
+    let repo_root = if repo_scope {
+        resolve_repo_root(&cwd)
+    } else {
+        cwd
+    };
     settings.linking = build_linking_settings(
         scope,
         &installed_providers,
@@ -166,8 +171,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
     // Determine config path
     let config_path = if repo_scope {
-        let cwd = std::env::current_dir()?;
-        cwd.join(".claudine").join("config.json")
+        repo_root.join(".claudine").join("config.json")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
@@ -185,7 +189,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
     // Handle .gitignore in repo mode
     if repo_scope {
-        handle_repo_gitignore()?;
+        handle_repo_gitignore(&repo_root)?;
     }
 
     // Register with agents
@@ -229,12 +233,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 }
 
 /// Handle .gitignore prompt in repo mode.
-fn handle_repo_gitignore() -> Result<()> {
+fn handle_repo_gitignore(repo_root: &std::path::Path) -> Result<()> {
     let choice = prompts::prompt_gitignore_choice()?;
 
     match choice {
         prompts::GitignoreChoice::AddToGitignore => {
-            let gitignore_path = std::env::current_dir()?.join(".gitignore");
+            let gitignore_path = repo_root.join(".gitignore");
             let content = if gitignore_path.exists() {
                 std::fs::read_to_string(&gitignore_path)?
             } else {
@@ -279,7 +283,8 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     // Determine config path
     let config_path = if repo_scope {
         let cwd = std::env::current_dir()?;
-        cwd.join(".claudine").join("config.json")
+        let repo_root = resolve_repo_root(&cwd);
+        repo_root.join(".claudine").join("config.json")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
@@ -342,7 +347,8 @@ fn default_config(repo_scope: bool) -> Result<HookerConfig> {
     let installed_providers = installed_provider_list(&all_agents);
     let preference = ranked_provider_preferences(&installed_providers, &[]);
     let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    let repo_root = std::env::current_dir()?;
+    let cwd = std::env::current_dir()?;
+    let repo_root = resolve_repo_root(&cwd);
     let settings = GlobalSettings {
         linking: build_linking_settings(
             scope,

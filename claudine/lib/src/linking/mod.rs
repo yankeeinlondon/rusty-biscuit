@@ -1,8 +1,11 @@
 mod canonical;
 mod capabilities;
+mod compatibility;
 mod conflict;
+mod detector;
 mod discovery;
 mod hashing;
+pub mod model;
 mod paths;
 mod report;
 mod symlink;
@@ -15,9 +18,14 @@ pub use capabilities::{
     ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourcePropertySchema,
     ResourceSupport, SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
 };
+pub use compatibility::{classify_canonical_candidate, classify_target_reference};
 pub use conflict::SkillSyncStatus;
+pub use detector::{
+    AgentDefinitionsDetector, DiscoveredResource, LinkDetector, SharedScriptsDetector,
+    SkillsDetector, SlashCommandsDetector,
+};
 pub use discovery::DiscoveredSkill;
-pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope};
+pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
 pub use symlink::{LinkResult, category_link_target, relative_path};
 
@@ -181,7 +189,10 @@ fn apply_statuses(
     Ok(())
 }
 
-/// Repo scope should operate on repo-relative paths; user scope on absolute paths.
+/// Internal path style validation.
+///
+/// Both scopes operate on absolute filesystem paths during discovery/apply.
+/// Relative path policy for repo scope is enforced by symlink target creation.
 fn matches_scope_style(
     source: &std::path::Path,
     dest: &std::path::Path,
@@ -189,7 +200,7 @@ fn matches_scope_style(
 ) -> bool {
     match scope {
         ResourceScope::User => source.is_absolute() && dest.is_absolute(),
-        ResourceScope::Repo => source.is_relative() && dest.is_relative(),
+        ResourceScope::Repo => source.is_absolute() && dest.is_absolute(),
     }
 }
 

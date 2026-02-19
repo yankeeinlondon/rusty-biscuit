@@ -41,16 +41,23 @@ pub struct ProviderPaths {
 pub struct ProviderSkillPaths {
     providers: HashMap<Provider, ProviderPaths>,
     home_dir: PathBuf,
+    repo_root: PathBuf,
 }
 
 impl ProviderSkillPaths {
     /// Construct provider paths from capability metadata.
     pub fn new() -> Self {
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let repo_root = resolve_repo_root(&cwd);
+        Self::from_roots(home_dir, repo_root)
+    }
+
+    fn from_roots(home_dir: PathBuf, repo_root: PathBuf) -> Self {
         let providers = ALL_PROVIDERS
             .iter()
             .map(|provider| {
-                let provider_paths = Self::build_provider_paths(*provider, &home_dir);
+                let provider_paths = Self::build_provider_paths(*provider, &home_dir, &repo_root);
                 (*provider, provider_paths)
             })
             .collect();
@@ -58,15 +65,26 @@ impl ProviderSkillPaths {
         Self {
             providers,
             home_dir,
+            repo_root,
         }
     }
 
-    fn build_provider_paths(provider: Provider, home_dir: &Path) -> ProviderPaths {
+    fn build_provider_paths(
+        provider: Provider,
+        home_dir: &Path,
+        repo_root: &Path,
+    ) -> ProviderPaths {
         let caps = capabilities_for(provider);
-        let (user_skills, repo_skills) =
-            Self::markdown_link_paths(caps.support_for(LinkableResource::Skill), home_dir);
-        let (user_commands, repo_commands) =
-            Self::markdown_link_paths(caps.support_for(LinkableResource::Command), home_dir);
+        let (user_skills, repo_skills) = Self::markdown_link_paths(
+            caps.support_for(LinkableResource::Skill),
+            home_dir,
+            repo_root,
+        );
+        let (user_commands, repo_commands) = Self::markdown_link_paths(
+            caps.support_for(LinkableResource::Command),
+            home_dir,
+            repo_root,
+        );
 
         ProviderPaths {
             provider,
@@ -82,6 +100,7 @@ impl ProviderSkillPaths {
     fn markdown_link_paths(
         support: &ResourceSupport,
         home_dir: &Path,
+        repo_root: &Path,
     ) -> (Option<PathBuf>, Option<PathBuf>) {
         if !support.level.allows_custom() || support.format != Some(ResourceFormat::Markdown) {
             return (None, None);
@@ -97,7 +116,7 @@ impl ProviderSkillPaths {
             .repo_path
             .as_ref()
             .and_then(Self::non_empty_path)
-            .cloned();
+            .map(|path| Self::expand_repo_path(path, repo_root));
 
         (user, repo)
     }
@@ -118,13 +137,21 @@ impl ProviderSkillPaths {
         }
     }
 
+    fn expand_repo_path(path: &Path, repo_root: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            repo_root.join(path)
+        }
+    }
+
     fn resolve_also_reads(&self, paths: &[PathBuf], scope: ResourceScope) -> Vec<PathBuf> {
         paths
             .iter()
             .filter(|path| !path.as_os_str().is_empty())
             .map(|path| match scope {
                 ResourceScope::User => Self::expand_user_path(path, &self.home_dir),
-                ResourceScope::Repo => path.clone(),
+                ResourceScope::Repo => Self::expand_repo_path(path, &self.repo_root),
             })
             .collect()
     }
@@ -136,8 +163,14 @@ impl ProviderSkillPaths {
     ) -> Self {
         Self {
             providers,
-            home_dir,
+            home_dir: home_dir.clone(),
+            repo_root: home_dir,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_roots_for_test(home_dir: PathBuf, repo_root: PathBuf) -> Self {
+        Self::from_roots(home_dir, repo_root)
     }
 
     /// Return provider names and skill paths for the given scope.
@@ -214,6 +247,16 @@ impl ProviderSkillPaths {
             .map(|provider| capabilities_for(*provider))
             .collect()
     }
+
+    /// Resolved home directory used for user-scoped path expansion.
+    pub fn home_dir(&self) -> &Path {
+        &self.home_dir
+    }
+
+    /// Resolved repository root used for repo-scoped path expansion.
+    pub fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
 }
 
 impl Default for ProviderSkillPaths {
@@ -222,9 +265,40 @@ impl Default for ProviderSkillPaths {
     }
 }
 
+/// Resolve the repository root for a working directory via Sniff.
+///
+/// If no repository root can be detected, falls back to `cwd`.
+pub fn resolve_repo_root(cwd: &Path) -> PathBuf {
+    if let Ok(Some(git)) = sniff::filesystem::detect_git(cwd, false, 1) {
+        return git.repo_root;
+    }
+
+    if let Ok(Some(repo)) = sniff::filesystem::detect_repo(cwd) {
+        return repo.root;
+    }
+
+    cwd.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
     use super::*;
+
+    fn init_git_repo(path: &Path) -> bool {
+        Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
 
     #[test]
     fn new_populates_all_providers() {
@@ -269,7 +343,47 @@ mod tests {
             LinkableResource::Skill,
             ResourceScope::Repo,
         );
-        assert!(reads.contains(&PathBuf::from(".claude/skills")));
+        assert!(reads.iter().any(|path| path.ends_with(".claude/skills")));
+    }
+
+    #[test]
+    fn repo_scope_target_paths_are_absolute() {
+        let paths = ProviderSkillPaths::new();
+        let repo_target = paths.target_dir(
+            Provider::Claude,
+            LinkableResource::Skill,
+            ResourceScope::Repo,
+        );
+        assert!(repo_target.is_some());
+        assert!(repo_target.unwrap().is_absolute());
+    }
+
+    #[test]
+    fn resolve_repo_root_returns_nested_git_root() {
+        let tmp = TempDir::new().unwrap();
+        if !init_git_repo(tmp.path()) {
+            // Skip this assertion if git isn't available in the test environment.
+            return;
+        }
+
+        let nested = tmp.path().join("nested/deeper/path");
+        fs::create_dir_all(&nested).unwrap();
+
+        let resolved = resolve_repo_root(&nested);
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_repo_root_falls_back_to_cwd_when_not_in_repo() {
+        let tmp = TempDir::new().unwrap();
+        let resolved = resolve_repo_root(tmp.path());
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().canonicalize().unwrap()
+        );
     }
 
     #[test]
