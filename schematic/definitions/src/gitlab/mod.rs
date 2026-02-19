@@ -45,8 +45,8 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    params::{EndpointParams, PaginationStyle, QueryParamType},
     ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
 /// Creates the GitLab REST API definition.
@@ -519,7 +519,10 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert!(endpoint.path.contains("/repository/tree"));
-        assert!(!endpoint.path.contains("?"), "Path should not contain query params");
+        assert!(
+            !endpoint.path.contains("?"),
+            "Path should not contain query params"
+        );
         assert!(endpoint.request.is_none());
         match &endpoint.response {
             ApiResponse::Json(schema) => {
@@ -559,7 +562,10 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListMergeRequests")
             .unwrap();
-        assert!(!list.path.contains("?"), "Path should not contain query params");
+        assert!(
+            !list.path.contains("?"),
+            "Path should not contain query params"
+        );
         let list_params = list.params.as_ref().expect("params should be set");
         assert!(list_params.has_pagination());
         assert!(list_params.query.iter().any(|p| p.name == "state"));
@@ -577,7 +583,10 @@ mod tests {
             .find(|e| e.id == "ListMergeRequestCommits")
             .unwrap();
         assert!(commits.path.contains("/commits"));
-        assert!(!commits.path.contains("?"), "Path should not contain query params");
+        assert!(
+            !commits.path.contains("?"),
+            "Path should not contain query params"
+        );
         let commits_params = commits.params.as_ref().expect("params should be set");
         assert!(commits_params.has_pagination());
 
@@ -594,7 +603,10 @@ mod tests {
         let api = define_gitlab_api();
 
         let list = api.endpoints.iter().find(|e| e.id == "ListIssues").unwrap();
-        assert!(!list.path.contains("?"), "Path should not contain query params");
+        assert!(
+            !list.path.contains("?"),
+            "Path should not contain query params"
+        );
         let list_params = list.params.as_ref().expect("params should be set");
         assert!(list_params.has_pagination());
         assert!(list_params.query.iter().any(|p| p.name == "state"));
@@ -608,7 +620,10 @@ mod tests {
             .find(|e| e.id == "ListIssueNotes")
             .unwrap();
         assert!(notes.path.contains("/notes"));
-        assert!(!notes.path.contains("?"), "Path should not contain query params");
+        assert!(
+            !notes.path.contains("?"),
+            "Path should not contain query params"
+        );
         let notes_params = notes.params.as_ref().expect("params should be set");
         assert!(notes_params.has_pagination());
 
@@ -637,11 +652,7 @@ mod tests {
             .unwrap();
         assert!(releases.path.contains("/releases"));
 
-        let release = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "GetRelease")
-            .unwrap();
+        let release = api.endpoints.iter().find(|e| e.id == "GetRelease").unwrap();
         assert!(release.path.contains("/releases/"));
 
         let latest = api
@@ -664,10 +675,12 @@ mod tests {
 
         assert_eq!(api_key.header, "PRIVATE-TOKEN");
         assert!(api_key.names.names().contains(&"GITLAB_TOKEN".to_string()));
-        assert!(api_key
-            .names
-            .names()
-            .contains(&"GITLAB_PRIVATE_TOKEN".to_string()));
+        assert!(
+            api_key
+                .names
+                .names()
+                .contains(&"GITLAB_PRIVATE_TOKEN".to_string())
+        );
     }
 
     #[test]

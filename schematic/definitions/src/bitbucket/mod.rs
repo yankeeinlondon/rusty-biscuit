@@ -308,11 +308,12 @@ mod tests {
         assert_eq!(api.name, "Bitbucket");
         assert_eq!(api.base_url, "https://api.bitbucket.org/2.0");
         assert!(api.docs_url.is_some());
-        assert!(api
-            .docs_url
-            .as_ref()
-            .unwrap()
-            .contains("developer.atlassian.com"));
+        assert!(
+            api.docs_url
+                .as_ref()
+                .unwrap()
+                .contains("developer.atlassian.com")
+        );
     }
 
     #[test]
@@ -524,17 +525,21 @@ mod tests {
             .basic_user
             .as_ref()
             .expect("basic_user mapping should be set");
-        assert!(basic_user
-            .names()
-            .contains(&"BITBUCKET_USERNAME".to_string()));
+        assert!(
+            basic_user
+                .names()
+                .contains(&"BITBUCKET_USERNAME".to_string())
+        );
 
         let basic_pass = mapping
             .basic_pass
             .as_ref()
             .expect("basic_pass mapping should be set");
-        assert!(basic_pass
-            .names()
-            .contains(&"BITBUCKET_APP_PASSWORD".to_string()));
+        assert!(
+            basic_pass
+                .names()
+                .contains(&"BITBUCKET_APP_PASSWORD".to_string())
+        );
     }
 
     #[test]

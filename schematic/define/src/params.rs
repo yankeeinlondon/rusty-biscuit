@@ -333,7 +333,6 @@ pub enum PaginationStyle {
         /// Default limit value.
         default_limit: u32,
     },
-
 }
 
 impl PaginationStyle {
@@ -1240,9 +1239,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_pagination_field_stores_style() {
-        let params = EndpointParams::default().with_pagination(PaginationStyle::offset_limit(
-            "skip", "take", 25, 200,
-        ));
+        let params = EndpointParams::default()
+            .with_pagination(PaginationStyle::offset_limit("skip", "take", 25, 200));
 
         // Verify the style is stored for introspection
         match &params.pagination {
@@ -1315,7 +1313,8 @@ mod tests {
     #[test]
     fn endpoint_params_has_pagination_with_explicit_style() {
         // Using with_pagination() sets both query params AND the pagination field
-        let params = EndpointParams::default().with_pagination(PaginationStyle::cursor("after", None, 20));
+        let params =
+            EndpointParams::default().with_pagination(PaginationStyle::cursor("after", None, 20));
 
         assert!(params.has_pagination());
         assert!(params.pagination.is_some());
@@ -1475,8 +1474,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_with_response_pagination_link_header() {
-        let params = EndpointParams::default()
-            .with_response_pagination(PaginationResponse::LinkHeader);
+        let params =
+            EndpointParams::default().with_response_pagination(PaginationResponse::LinkHeader);
 
         assert!(params.has_response_pagination());
         assert!(matches!(
@@ -1487,8 +1486,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_with_response_pagination_body_field() {
-        let params = EndpointParams::default()
-            .with_response_pagination(PaginationResponse::BodyField {
+        let params =
+            EndpointParams::default().with_response_pagination(PaginationResponse::BodyField {
                 next_field: "next".to_string(),
             });
 
@@ -1503,8 +1502,8 @@ mod tests {
 
     #[test]
     fn endpoint_params_with_response_pagination_total_count() {
-        let params = EndpointParams::default()
-            .with_response_pagination(PaginationResponse::TotalCount {
+        let params =
+            EndpointParams::default().with_response_pagination(PaginationResponse::TotalCount {
                 total_field: "total_items".to_string(),
                 page_field: Some("page_number".to_string()),
             });

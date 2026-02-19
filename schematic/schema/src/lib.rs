@@ -83,16 +83,16 @@
 //!
 //! All request methods return `Result<T, SchematicError>`. See
 //! [`shared::SchematicError`] for the full error enum and handling examples.
-pub mod shared;
-pub mod prelude;
 pub mod anthropic;
 pub mod bitbucket;
-pub mod openai;
 pub mod elevenlabs;
+pub mod emqx;
 pub mod gitea;
 pub mod github;
 pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
-pub mod emqx;
+pub mod openai;
+pub mod prelude;
+pub mod shared;

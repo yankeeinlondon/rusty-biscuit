@@ -43,9 +43,9 @@
 //!     Ok(())
 //! }
 //! ```
-use serde::{Deserialize, Serialize};
-pub use schematic_definitions::gitlab::*;
 use crate::shared::{Paginated, RequestParts, SchematicError};
+pub use schematic_definitions::gitlab::*;
+use serde::{Deserialize, Serialize};
 /// Request for `ListRepositoryTree` endpoint.
 ///
 /// ## Example
@@ -236,8 +236,8 @@ impl GetRepositoryFileRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/projects/{}/repository/files/{}?ref={}", self.id, self.file_path, self
-            .git_ref
+            "/projects/{}/repository/files/{}?ref={}",
+            self.id, self.file_path, self.git_ref
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -401,7 +401,8 @@ impl GetMergeRequestRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/projects/{}/merge_requests/{}", self.id, self.merge_request_iid
+            "/projects/{}/merge_requests/{}",
+            self.id, self.merge_request_iid
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -469,7 +470,8 @@ impl ListMergeRequestCommitsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/projects/{}/merge_requests/{}/commits", self.id, self.merge_request_iid
+            "/projects/{}/merge_requests/{}/commits",
+            self.id, self.merge_request_iid
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -538,7 +540,8 @@ impl ListMergeRequestChangesRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/projects/{}/merge_requests/{}/changes", self.id, self.merge_request_iid
+            "/projects/{}/merge_requests/{}/changes",
+            self.id, self.merge_request_iid
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -835,7 +838,8 @@ impl ListIssueParticipantsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/projects/{}/issues/{}/participants", self.id, self.issue_iid
+            "/projects/{}/issues/{}/participants",
+            self.id, self.issue_iid
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1181,7 +1185,9 @@ impl GetLatestReleaseRequest {
 }
 impl From<&str> for GetLatestReleaseRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetLatestReleaseRequest {
@@ -1234,7 +1240,9 @@ impl GetProjectRequest {
 }
 impl From<&str> for GetProjectRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetProjectRequest {
@@ -1677,36 +1685,24 @@ impl GitLabRequest {
             Self::ListMergeRequestChanges(_) => {
                 <ListMergeRequestChangesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListIssues(_) => {
-                <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetIssue(_) => {
-                <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::ListIssues(_) => <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetIssue(_) => <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::ListIssueNotes(_) => {
                 <ListIssueNotesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListIssueParticipants(_) => {
                 <ListIssueParticipantsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListTags(_) => {
-                <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetTag(_) => {
-                <GetTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::ListTags(_) => <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetTag(_) => <GetTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::ListReleases(_) => {
                 <ListReleasesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetRelease(_) => {
-                <GetReleaseRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetRelease(_) => <GetReleaseRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::GetLatestRelease(_) => {
                 <GetLatestReleaseRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetProject(_) => {
-                <GetProjectRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetProject(_) => <GetProjectRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::ListProjectPipelines(_) => {
                 <ListProjectPipelinesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1832,7 +1828,8 @@ impl GitLab {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
@@ -1844,12 +1841,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                 })
@@ -1869,7 +1864,8 @@ impl GitLab {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
@@ -1881,12 +1877,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                 })
@@ -1912,7 +1906,8 @@ impl GitLab {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
@@ -1924,12 +1919,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                 })
@@ -1948,15 +1941,13 @@ impl GitLab {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
@@ -1968,12 +1959,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                 })
@@ -2203,7 +2192,9 @@ impl<'a> GitLabVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -2231,13 +2222,15 @@ impl<'a> GitLabVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -2299,8 +2292,7 @@ impl GitLab {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder
-                        .header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -2313,23 +2305,22 @@ impl GitLab {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self
-                        .env_username
-                        .as_deref()
-                        .unwrap_or("USERNAME");
+                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env)
-                        .map_err(|_| SchematicError::MissingCredential {
+                    let username = std::env::var(username_env).map_err(|_| {
+                        SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        })?;
-                    let password = std::env::var(password_env)
-                        .map_err(|_| SchematicError::MissingCredential {
+                        }
+                    })?;
+                    let password = std::env::var(password_env).map_err(|_| {
+                        SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        })?;
+                        }
+                    })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -2429,11 +2420,7 @@ impl GitLab {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
+            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

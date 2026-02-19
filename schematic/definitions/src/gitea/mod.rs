@@ -51,8 +51,8 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    params::{EndpointParams, PaginationStyle, QueryParamType},
     ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod,
+    params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
 /// Creates the Gitea REST API definition.
@@ -214,9 +214,7 @@ pub fn define_gitea_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
             },
             // =================================================================
             // Issues
@@ -272,9 +270,7 @@ pub fn define_gitea_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
@@ -284,9 +280,7 @@ pub fn define_gitea_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
             },
             // =================================================================
             // Tags and Releases
@@ -299,9 +293,7 @@ pub fn define_gitea_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
             },
             Endpoint {
                 id: "ListReleases".to_string(),
@@ -334,7 +326,9 @@ pub fn define_gitea_api() -> RestApi {
                 id: "GetTagReference".to_string(),
                 method: RestMethod::Get,
                 path: "/repos/{owner}/{repo}/git/refs/{git_ref}".to_string(),
-                description: "Get tag reference (returns array; check object.type: 'commit' vs 'tag')".to_string(),
+                description:
+                    "Get tag reference (returns array; check object.type: 'commit' vs 'tag')"
+                        .to_string(),
                 request: None,
                 response: ApiResponse::json_vec_type("GitRef"),
                 headers: vec![],
@@ -361,9 +355,7 @@ pub fn define_gitea_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("RepositoryInfo"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
             },
         ],
         module_path: Some("gitea".to_string()),
@@ -472,7 +464,10 @@ mod tests {
         // Clean path without hardcoded query params
         assert_eq!(list_prs.path, "/repos/{owner}/{repo}/pulls");
         // Pagination and query params are in params field
-        let params = list_prs.params.as_ref().expect("ListPullRequests should have params");
+        let params = list_prs
+            .params
+            .as_ref()
+            .expect("ListPullRequests should have params");
         assert!(params.has_pagination());
         assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "limit"));
@@ -487,7 +482,10 @@ mod tests {
         assert!(list_files.path.contains("{index}"));
         // Clean path without hardcoded limit
         assert!(!list_files.path.contains("limit"));
-        let params = list_files.params.as_ref().expect("ListPullRequestFiles should have params");
+        let params = list_files
+            .params
+            .as_ref()
+            .expect("ListPullRequestFiles should have params");
         assert!(params.has_pagination());
     }
 
@@ -517,7 +515,10 @@ mod tests {
             .unwrap();
         assert!(comments.path.contains("{index}/comments"));
         assert!(!comments.path.contains("limit")); // No hardcoded limit in path
-        let params = comments.params.as_ref().expect("ListIssueComments should have params");
+        let params = comments
+            .params
+            .as_ref()
+            .expect("ListIssueComments should have params");
         assert!(params.has_pagination());
 
         let timeline = api
@@ -527,7 +528,10 @@ mod tests {
             .unwrap();
         assert!(timeline.path.contains("timeline"));
         assert!(!timeline.path.contains("limit")); // No hardcoded limit in path
-        let params = timeline.params.as_ref().expect("ListIssueTimeline should have params");
+        let params = timeline
+            .params
+            .as_ref()
+            .expect("ListIssueTimeline should have params");
         assert!(params.has_pagination());
     }
 
@@ -548,7 +552,10 @@ mod tests {
             .unwrap();
         // Clean path without hardcoded query params
         assert_eq!(releases.path, "/repos/{owner}/{repo}/releases");
-        let params = releases.params.as_ref().expect("ListReleases should have params");
+        let params = releases
+            .params
+            .as_ref()
+            .expect("ListReleases should have params");
         assert!(params.has_pagination());
         // Gitea-specific: draft and pre-release filters as explicit params
         assert!(params.query.iter().any(|p| p.name == "draft"));
@@ -715,7 +722,11 @@ mod tests {
                     max_per_page,
                 }) => {
                     assert_eq!(page_param, "page", "Endpoint {} page param", id);
-                    assert_eq!(per_page_param, "limit", "Endpoint {} should use 'limit' not 'per_page'", id);
+                    assert_eq!(
+                        per_page_param, "limit",
+                        "Endpoint {} should use 'limit' not 'per_page'",
+                        id
+                    );
                     assert_eq!(*default_per_page, 50, "Endpoint {} default_per_page", id);
                     assert_eq!(*max_per_page, 100, "Endpoint {} max_per_page", id);
                 }

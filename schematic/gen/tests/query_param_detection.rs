@@ -116,12 +116,16 @@ fn gitlab_style_pagination_with_recursive() {
         extract_base_path(&endpoint.path),
         "/projects/{id}/repository/tree"
     );
-    assert!(extract_query_string(&endpoint.path)
-        .unwrap()
-        .contains("per_page=100"));
-    assert!(extract_query_string(&endpoint.path)
-        .unwrap()
-        .contains("recursive=true"));
+    assert!(
+        extract_query_string(&endpoint.path)
+            .unwrap()
+            .contains("per_page=100")
+    );
+    assert!(
+        extract_query_string(&endpoint.path)
+            .unwrap()
+            .contains("recursive=true")
+    );
 }
 
 #[test]
@@ -289,10 +293,7 @@ fn classify_github_pullrequests_params() {
         .iter()
         .filter(|(k, _)| is_pagination_param(k))
         .collect();
-    let filters: Vec<_> = params
-        .iter()
-        .filter(|(k, _)| is_filter_param(k))
-        .collect();
+    let filters: Vec<_> = params.iter().filter(|(k, _)| is_filter_param(k)).collect();
 
     assert_eq!(pagination.len(), 1, "per_page is pagination");
     assert_eq!(
@@ -313,10 +314,7 @@ fn classify_gitlab_tree_params() {
         .iter()
         .filter(|(k, _)| is_pagination_param(k))
         .collect();
-    let filters: Vec<_> = params
-        .iter()
-        .filter(|(k, _)| is_filter_param(k))
-        .collect();
+    let filters: Vec<_> = params.iter().filter(|(k, _)| is_filter_param(k)).collect();
 
     assert_eq!(pagination.len(), 1, "per_page is pagination");
     assert_eq!(filters.len(), 1, "recursive is a filter");
@@ -332,10 +330,7 @@ fn classify_gitea_releases_params() {
         .iter()
         .filter(|(k, _)| is_pagination_param(k))
         .collect();
-    let filters: Vec<_> = params
-        .iter()
-        .filter(|(k, _)| is_filter_param(k))
-        .collect();
+    let filters: Vec<_> = params.iter().filter(|(k, _)| is_filter_param(k)).collect();
 
     assert_eq!(pagination.len(), 1, "limit is pagination");
     assert_eq!(

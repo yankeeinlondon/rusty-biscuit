@@ -147,8 +147,11 @@ mod tests {
             response: ApiResponse::json_type("ListEventsResponse"),
             headers: vec![],
             params: Some(
-                EndpointParams::default()
-                    .with_pagination(PaginationStyle::cursor("after", Some("limit"), 50)),
+                EndpointParams::default().with_pagination(PaginationStyle::cursor(
+                    "after",
+                    Some("limit"),
+                    50,
+                )),
             ),
         };
 
@@ -207,10 +210,12 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("SearchResponse"),
             headers: vec![],
-            params: Some(
-                EndpointParams::default()
-                    .with_query_param("q", QueryParamType::String, true, Some("Query")),
-            ),
+            params: Some(EndpointParams::default().with_query_param(
+                "q",
+                QueryParamType::String,
+                true,
+                Some("Query"),
+            )),
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");

@@ -42,8 +42,8 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    params::{EndpointParams, PaginationStyle, QueryParamType},
     ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
 /// Creates the GitHub REST API definition.
@@ -95,9 +95,15 @@ pub fn define_github_api() -> RestApi {
         env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
         env_username: None,
         headers: vec![
-            ("Accept".to_string(), "application/vnd.github+json".to_string()),
+            (
+                "Accept".to_string(),
+                "application/vnd.github+json".to_string(),
+            ),
             ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
-            ("User-Agent".to_string(), "schematic-github-client".to_string()),
+            (
+                "User-Agent".to_string(),
+                "schematic-github-client".to_string(),
+            ),
         ],
         endpoints: vec![
             // =================================================================
@@ -135,14 +141,12 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("GitTreeResponse"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_query_param(
-                        "recursive",
-                        QueryParamType::Boolean,
-                        true,
-                        Some("Fetch tree recursively (always true for this endpoint)"),
-                    ),
-                ),
+                params: Some(EndpointParams::default().with_query_param(
+                    "recursive",
+                    QueryParamType::Boolean,
+                    true,
+                    Some("Fetch tree recursively (always true for this endpoint)"),
+                )),
             },
             // =================================================================
             // Repository Contents (raw file access)
@@ -211,9 +215,7 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             // =================================================================
             // Issues
@@ -275,9 +277,7 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
@@ -287,9 +287,7 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             // =================================================================
             // Tags and Releases
@@ -302,9 +300,7 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             Endpoint {
                 id: "ListReleases".to_string(),
@@ -314,9 +310,7 @@ pub fn define_github_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_vec_type("Release"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             Endpoint {
                 id: "GetTagReference".to_string(),
@@ -484,7 +478,10 @@ mod tests {
         assert!(accept.is_some());
         assert_eq!(accept.unwrap().1, "application/vnd.github+json");
 
-        let version = api.headers.iter().find(|(k, _)| k == "X-GitHub-Api-Version");
+        let version = api
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-GitHub-Api-Version");
         assert!(version.is_some());
         assert_eq!(version.unwrap().1, "2022-11-28");
 
@@ -527,10 +524,7 @@ mod tests {
             .iter()
             .find(|e| e.id == "GetGitTreeRecursive")
             .unwrap();
-        assert_eq!(
-            recursive.path,
-            "/repos/{owner}/{repo}/git/trees/{tree_sha}"
-        );
+        assert_eq!(recursive.path, "/repos/{owner}/{repo}/git/trees/{tree_sha}");
         // recursive param is now explicit
         let params = recursive.params.as_ref().expect("should have params");
         assert!(params.query.iter().any(|p| p.name == "recursive"));
@@ -550,10 +544,7 @@ mod tests {
 
         let accept_header = endpoint.headers.iter().find(|(k, _)| k == "Accept");
         assert!(accept_header.is_some());
-        assert_eq!(
-            accept_header.unwrap().1,
-            "application/vnd.github.raw+json"
-        );
+        assert_eq!(accept_header.unwrap().1, "application/vnd.github.raw+json");
     }
 
     #[test]

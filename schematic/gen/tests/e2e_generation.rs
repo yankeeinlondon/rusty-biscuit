@@ -787,9 +787,7 @@ fn paginated_endpoints_generate_paginated_trait() {
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::github()),
-                ),
+                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
             },
             // Non-paginated endpoint
             Endpoint {

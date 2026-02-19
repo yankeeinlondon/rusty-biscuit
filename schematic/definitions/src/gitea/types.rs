@@ -43,9 +43,7 @@ pub struct UserSummary {
 impl UserSummary {
     /// Returns the user's login name, preferring `login` over `username`.
     pub fn login_name(&self) -> Option<&str> {
-        self.login
-            .as_deref()
-            .or(self.username.as_deref())
+        self.login.as_deref().or(self.username.as_deref())
     }
 }
 

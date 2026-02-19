@@ -62,6 +62,6 @@ pub use crate::gitea::{
 pub use crate::bitbucket::{
     Download as BitbucketDownload, Issue as BitbucketIssue,
     PaginatedResponse as BitbucketPaginatedResponse, PullRequest as BitbucketPullRequest,
-    Repository as BitbucketRepository, SourceEntry as BitbucketSourceEntry,
-    Tag as BitbucketTag, User as BitbucketUser,
+    Repository as BitbucketRepository, SourceEntry as BitbucketSourceEntry, Tag as BitbucketTag,
+    User as BitbucketUser,
 };
