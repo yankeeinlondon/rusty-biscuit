@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use claudine::adapters;
 use claudine::dispatch::template::interpolate;
-use claudine::events::{AgenticEvent, EventAction, Provider, detect_environment};
+use claudine::events::{AgenticEvent, HookAction, Provider, detect_environment};
 
 use crate::log;
 
@@ -57,10 +57,11 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
     let env = detect_environment(&cwd);
 
     let adapter = adapters::adapter_for(provider);
-    let parsed = adapter.parse_event(&raw, &env);
+    let parsed = adapter.parse_event(&raw);
 
     match parsed {
-        Some((parsed_event, meta)) => {
+        Ok((parsed_event, mut meta)) => {
+            meta.env = env;
             log::data(&format!("Provider: {provider}"));
             log::data(&format!("Event:    {parsed_event}"));
             if let Some(tool) = &meta.tool_name {
@@ -87,29 +88,34 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                         log::data(&format!("  Actions: {}", binding.actions.len()));
                         for (i, action) in binding.actions.iter().enumerate() {
                             match action {
-                                EventAction::Speak { message } => {
+                                HookAction::Speak { message } => {
                                     let resolved = interpolate(message, &meta);
                                     log::data(&format!("  [{i}] Speak: \"{resolved}\""));
                                 }
-                                EventAction::Log { target } => {
+                                HookAction::Log { target } => {
                                     log::data(&format!("  [{i}] Log: {target:?}"));
                                 }
-                                EventAction::Report { handler } => {
+                                HookAction::Report { handler } => {
                                     log::data(&format!("  [{i}] Report: {handler:?}"));
                                 }
-                                EventAction::Run {
+                                HookAction::FireAndForget { command, args } => {
+                                    let args_str =
+                                        args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
+                                    log::data(&format!("  [{i}] FireAndForget: {command} {args_str}"));
+                                }
+                                HookAction::Call {
                                     command,
                                     args,
-                                    blocking,
+                                    timeout_ms,
+                                    mapper,
                                 } => {
                                     let args_str =
                                         args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
-                                    let mode = if *blocking { "blocking" } else { "async" };
                                     log::data(&format!(
-                                        "  [{i}] Run ({mode}): {command} {args_str}"
+                                        "  [{i}] Call: {command} {args_str} (timeout={timeout_ms:?}, mapper={mapper:?})"
                                     ));
                                 }
-                                EventAction::SoundEffect {
+                                HookAction::SoundEffect {
                                     name,
                                     volume,
                                     speed,
@@ -118,6 +124,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                         "  [{i}] SoundEffect: {name} (vol={volume}, speed={speed})"
                                     ));
                                 }
+                                _ => log::data(&format!("  [{i}] Other action: {action:?}")),
                             }
                         }
                     } else {
@@ -130,8 +137,8 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                 }
             }
         }
-        None => {
-            log::data("Adapter returned None for this payload (unknown event).");
+        Err(error) => {
+            log::data(&format!("Adapter parse failed: {error}"));
         }
     }
 
@@ -198,7 +205,11 @@ fn mock_payload(provider: Provider, event: &AgenticEvent) -> Value {
         Provider::Codex => mock_codex_payload(event),
         Provider::Gemini => mock_gemini_payload(event),
         Provider::OpenCode => mock_opencode_payload(event),
-        _ => mock_claude_payload(event), // Fallback to Claude format
+        Provider::Goose
+        | Provider::KimiCode
+        | Provider::QwenCode
+        | Provider::RooCode => mock_claude_payload(event),
+        _ => mock_claude_payload(event),
     }
 }
 
@@ -257,24 +268,46 @@ fn mock_claude_payload(event: &AgenticEvent) -> Value {
 /// Mock payload in Codex format.
 fn mock_codex_payload(event: &AgenticEvent) -> Value {
     let type_field = match event {
-        AgenticEvent::TurnComplete => "agent_turn_complete",
-        AgenticEvent::PermissionRequest => "approval_request",
-        _ => "agent_turn_complete",
+        AgenticEvent::BeforeTool => "item.started",
+        AgenticEvent::AfterTool => "item.completed",
+        AgenticEvent::BeforePrompt => "turn.started",
+        AgenticEvent::TurnError => "turn.failed",
+        _ => "turn.completed",
     };
 
-    json!({
+    let mut payload = json!({
         "type": type_field,
         "thread_id": "mock-thread-001",
         "session_id": "mock-session-001"
-    })
+    });
+
+    if type_field == "item.started" {
+        payload["item"] = json!({
+            "type": "command_execution",
+            "name": "shell"
+        });
+    }
+    if type_field == "item.completed" {
+        payload["item"] = json!({
+            "type": "command_execution",
+            "name": "shell",
+            "output": {"exit_code": 0}
+        });
+    }
+
+    payload
 }
 
 /// Mock payload in Gemini format.
 fn mock_gemini_payload(event: &AgenticEvent) -> Value {
     let hook_event_name = match event {
-        AgenticEvent::TurnComplete => "turn_end",
-        AgenticEvent::PermissionRequest => "turn_end",
-        _ => "turn_end",
+        AgenticEvent::BeforePrompt => "BeforeAgent",
+        AgenticEvent::BeforeTool => "BeforeTool",
+        AgenticEvent::AfterTool => "AfterTool",
+        AgenticEvent::BeforeModel => "BeforeModel",
+        AgenticEvent::AfterModel => "AfterModel",
+        AgenticEvent::BeforeCompact => "PreCompress",
+        _ => "AfterAgent",
     };
 
     json!({
@@ -286,9 +319,19 @@ fn mock_gemini_payload(event: &AgenticEvent) -> Value {
 /// Mock payload in OpenCode format.
 fn mock_opencode_payload(event: &AgenticEvent) -> Value {
     let event_type = match event {
-        AgenticEvent::TurnComplete => "turn_complete",
-        AgenticEvent::PermissionRequest => "permission_request",
-        _ => "turn_complete",
+        AgenticEvent::SessionStart => "session.created",
+        AgenticEvent::SessionEnd => "session.deleted",
+        AgenticEvent::BeforePrompt => "chat.message",
+        AgenticEvent::BeforeTool => "tool.execute.before",
+        AgenticEvent::AfterTool => "tool.execute.after",
+        AgenticEvent::PermissionRequest => "permission.ask",
+        AgenticEvent::HumanInTheLoop => "permission.asked",
+        AgenticEvent::TurnError => "session.error",
+        AgenticEvent::BeforeCompact => "session.compacted",
+        AgenticEvent::BeforeModel => "chat.params",
+        AgenticEvent::AfterModel => "experimental.text.complete",
+        AgenticEvent::Notification => "event",
+        _ => "session.idle",
     };
 
     json!({
@@ -309,8 +352,14 @@ fn parse_provider(name: &str) -> Result<Provider> {
         "claude" => Ok(Provider::Claude),
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
+        "goose" => Ok(Provider::Goose),
+        "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
-        other => bail!("Unknown provider: {other}\n\nSupported: claude, codex, gemini, opencode"),
+        "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
+        "roo" | "roo_code" | "roocode" => Ok(Provider::RooCode),
+        other => bail!(
+            "Unknown provider: {other}\n\nSupported: claude, codex, gemini, goose, kimi, opencode, qwen, roo"
+        ),
     }
 }
 

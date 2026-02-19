@@ -25,7 +25,13 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     let env = detect_environment(&cwd);
 
     debug!(%provider, event = %args.event, "Handling event");
-    claudine::dispatch::dispatch(&raw, provider, &env).await?;
+    let outcome = claudine::dispatch::dispatch(&raw, provider, &env).await?;
+    if let Some(payload) = outcome.response {
+        println!("{}", serde_json::to_string(&payload)?);
+    }
+    if let Some(exit_code) = outcome.exit_code {
+        std::process::exit(exit_code);
+    }
     Ok(())
 }
 
@@ -61,6 +67,9 @@ fn resolve_provider(hint: Option<&str>, raw: &Value) -> Result<Provider> {
     if raw.get("event_name").is_some() {
         return Ok(Provider::Gemini);
     }
+    if raw.get("method").is_some() {
+        return Ok(Provider::KimiCode);
+    }
 
     bail!("Could not detect provider from payload. Use --provider to specify.")
 }
@@ -70,7 +79,11 @@ fn parse_provider(name: &str) -> Result<Provider> {
         "claude" => Ok(Provider::Claude),
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
+        "goose" => Ok(Provider::Goose),
+        "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
+        "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
+        "roo" | "roocode" | "roo_code" => Ok(Provider::RooCode),
         other => bail!("Unknown provider: {other}"),
     }
 }

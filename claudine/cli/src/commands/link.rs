@@ -45,6 +45,8 @@ fn provider_to_ai_cli(provider: Provider) -> AiCli {
         Provider::KimiCode => AiCli::KimiCli,
         Provider::OpenCode => AiCli::Opencode,
         Provider::QwenCode => AiCli::QwenCli,
+        Provider::RooCode => AiCli::Roo,
+        _ => AiCli::Claude,
     }
 }
 

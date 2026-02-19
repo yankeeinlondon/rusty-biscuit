@@ -321,7 +321,7 @@ fn default_config() -> HookerConfig {
 }
 
 fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
-    use claudine::events::EventAction;
+    use claudine::events::HookAction;
 
     let mut events = HashMap::new();
 
@@ -330,7 +330,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         AgenticEvent::SessionStart,
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::SoundEffect {
+            actions: vec![HookAction::SoundEffect {
                 name: defaults::recommended_sound(&AgenticEvent::SessionStart).to_string(),
                 volume: 1.0,
                 speed: 1.0,
@@ -344,7 +344,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         AgenticEvent::TurnComplete,
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::SoundEffect {
+            actions: vec![HookAction::SoundEffect {
                 name: defaults::recommended_sound(&AgenticEvent::TurnComplete).to_string(),
                 volume: 1.0,
                 speed: 1.0,
@@ -358,7 +358,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         AgenticEvent::ToolError,
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::SoundEffect {
+            actions: vec![HookAction::SoundEffect {
                 name: defaults::recommended_sound(&AgenticEvent::ToolError).to_string(),
                 volume: 1.0,
                 speed: 1.0,
@@ -372,7 +372,7 @@ fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
         AgenticEvent::PermissionRequest,
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::SoundEffect {
+            actions: vec![HookAction::SoundEffect {
                 name: defaults::recommended_sound(&AgenticEvent::PermissionRequest).to_string(),
                 volume: 1.0,
                 speed: 1.0,

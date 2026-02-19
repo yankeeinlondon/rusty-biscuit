@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
 use claudine::events::{
-    AgenticEvent, EventAction, EventSupportLevel, GlobalSettings, LogTarget, Provider, TtsSettings,
+    AgenticEvent, EventSupportLevel, GlobalSettings, HookAction, LogTarget, Provider, TtsSettings,
 };
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
@@ -210,7 +210,7 @@ pub fn prompt_action_types(event: &AgenticEvent) -> Result<Vec<ActionType>> {
 }
 
 /// Prompt user to select a sound effect for an event.
-pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
+pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<HookAction> {
     let recommended = recommended_sound(event);
 
     // Get available sound effects from playa
@@ -237,7 +237,7 @@ pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
 
     let name = selected.replace(" (recommended)", "").to_string();
 
-    Ok(EventAction::SoundEffect {
+    Ok(HookAction::SoundEffect {
         name,
         volume: 1.0,
         speed: 1.0,
@@ -245,7 +245,7 @@ pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
 }
 
 /// Prompt user to configure a speak action for an event.
-pub fn prompt_speak_action(event: &AgenticEvent) -> Result<EventAction> {
+pub fn prompt_speak_action(event: &AgenticEvent) -> Result<HookAction> {
     let default_template = default_speak_template(event);
 
     let message = Text::new(&format!("Speak message for {} event:", event))
@@ -253,11 +253,11 @@ pub fn prompt_speak_action(event: &AgenticEvent) -> Result<EventAction> {
         .with_help_message("Supports {placeholder} interpolation")
         .prompt()?;
 
-    Ok(EventAction::Speak { message })
+    Ok(HookAction::Speak { message })
 }
 
 /// Prompt user to configure a log action.
-pub fn prompt_log_action() -> Result<EventAction> {
+pub fn prompt_log_action() -> Result<HookAction> {
     let options = vec![
         "Local file (~/.claudine/events.jsonl)",
         "Custom file path",
@@ -269,16 +269,18 @@ pub fn prompt_log_action() -> Result<EventAction> {
     let target = match selected {
         "Local file (~/.claudine/events.jsonl)" => {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-            LogTarget::LocalFile {
-                path: home.join(".claudine").join("events.jsonl"),
+            LogTarget::File {
+                path: Some(home.join(".claudine").join("events.jsonl")),
+                rotate_daily: false,
             }
         }
         "Custom file path" => {
             let path = Text::new("Enter file path:")
                 .with_default("~/.claudine/events.jsonl")
                 .prompt()?;
-            LogTarget::LocalFile {
-                path: PathBuf::from(shellexpand::tilde(&path).into_owned()),
+            LogTarget::File {
+                path: Some(PathBuf::from(shellexpand::tilde(&path).into_owned())),
+                rotate_daily: false,
             }
         }
         "Remote server URL" => {
@@ -287,22 +289,26 @@ pub fn prompt_log_action() -> Result<EventAction> {
                 .prompt()?;
             let url = url::Url::parse(&url_str)
                 .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
-            LogTarget::Server { url }
+            LogTarget::Server {
+                url: url.to_string(),
+                timeout_ms: 10_000,
+                headers: None,
+            }
         }
         _ => unreachable!(),
     };
 
-    Ok(EventAction::Log { target })
+    Ok(HookAction::Log { target })
 }
 
 /// Prompt user to configure a report action.
-pub fn prompt_report_action() -> Result<EventAction> {
+pub fn prompt_report_action() -> Result<HookAction> {
     // For simplicity, use default reporter (no custom handler)
-    Ok(EventAction::Report { handler: None })
+    Ok(HookAction::Report { handler: None })
 }
 
 /// Prompt user to configure a run command action.
-pub fn prompt_run_action(event: &AgenticEvent) -> Result<EventAction> {
+pub fn prompt_run_action(event: &AgenticEvent) -> Result<HookAction> {
     let command = Text::new(&format!("Command to run on {} event:", event))
         .with_placeholder("notify-send")
         .prompt()?;
@@ -321,15 +327,20 @@ pub fn prompt_run_action(event: &AgenticEvent) -> Result<EventAction> {
         .with_default(false)
         .prompt()?;
 
-    Ok(EventAction::Run {
-        command,
-        args,
-        blocking,
-    })
+    if blocking {
+        Ok(HookAction::Call {
+            command,
+            args,
+            timeout_ms: None,
+            mapper: None,
+        })
+    } else {
+        Ok(HookAction::FireAndForget { command, args })
+    }
 }
 
 /// Configure all actions for an event.
-pub fn configure_event_actions(event: &AgenticEvent) -> Result<Vec<EventAction>> {
+pub fn configure_event_actions(event: &AgenticEvent) -> Result<Vec<HookAction>> {
     let action_types = prompt_action_types(event)?;
 
     if action_types.is_empty() {
@@ -400,7 +411,7 @@ pub fn prompt_global_settings() -> Result<GlobalSettings> {
 
     let default_log_target = if configure_log {
         Some(match prompt_log_action()? {
-            EventAction::Log { target } => target,
+            HookAction::Log { target } => target,
             _ => unreachable!(),
         })
     } else {

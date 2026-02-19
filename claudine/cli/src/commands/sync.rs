@@ -438,6 +438,7 @@ fn parse_provider(name: &str) -> color_eyre::eyre::Result<Provider> {
         "kimi" | "kimicode" | "kimi_code" => Ok(Provider::KimiCode),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
         "qwen" | "qwencode" | "qwen_code" => Ok(Provider::QwenCode),
+        "roo" | "roocode" | "roo_code" => Ok(Provider::RooCode),
         other => color_eyre::eyre::bail!("Unknown provider: {other}"),
     }
 }

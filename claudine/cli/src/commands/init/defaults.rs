@@ -24,20 +24,21 @@ pub fn recommended_sound(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterModel => "phase-jump-3",
         AgenticEvent::BeforeCompact => "air-woosh",
         AgenticEvent::Notification => "doorbell-2",
+        _ => "doorbell-2",
     }
 }
 
 /// Returns the default speak template for an event.
 ///
-/// Templates support `{placeholder}` interpolation from the event's metadata.
+/// Templates support `{{placeholder}}` interpolation from the event metadata.
 pub fn default_speak_template(event: &AgenticEvent) -> &'static str {
     match event {
         AgenticEvent::SessionStart => "Session started",
         AgenticEvent::SessionEnd => "Session ended",
         AgenticEvent::BeforePrompt => "Processing prompt",
-        AgenticEvent::BeforeTool => "Running {tool_name}",
-        AgenticEvent::AfterTool => "{tool_name} completed",
-        AgenticEvent::ToolError => "Tool {tool_name} failed",
+        AgenticEvent::BeforeTool => "Running {{tool_name}}",
+        AgenticEvent::AfterTool => "{{tool_name}} completed",
+        AgenticEvent::ToolError => "Tool {{tool_name}} failed",
         AgenticEvent::PermissionRequest => "Permission needed",
         AgenticEvent::HumanInTheLoop => "Question for you",
         AgenticEvent::TurnComplete => "Turn complete",
@@ -48,6 +49,7 @@ pub fn default_speak_template(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterModel => "Response received",
         AgenticEvent::BeforeCompact => "Compacting context",
         AgenticEvent::Notification => "Notification received",
+        _ => "Event received",
     }
 }
 
@@ -70,6 +72,7 @@ pub fn event_description(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterModel => "After receiving a response from the LLM",
         AgenticEvent::BeforeCompact => "Before context compaction/summarization",
         AgenticEvent::Notification => "Provider-specific notification",
+        _ => "Provider-specific event",
     }
 }
 

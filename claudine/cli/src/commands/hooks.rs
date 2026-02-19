@@ -12,7 +12,7 @@ use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{
-    AgenticEvent, EventAction, EventBinding, EventMeta, EventSupportLevel, HookerConfig, LogTarget,
+    AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookAction, HookerConfig, LogTarget,
     Provider, ReportFormat, detect_environment,
 };
 use playa::SoundEffect;
@@ -46,7 +46,7 @@ pub struct HooksArgs {
 }
 
 /// All supported providers in display order.
-const ALL_PROVIDERS: [Provider; 7] = [
+const ALL_PROVIDERS: [Provider; 8] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Gemini,
@@ -54,6 +54,7 @@ const ALL_PROVIDERS: [Provider; 7] = [
     Provider::KimiCode,
     Provider::OpenCode,
     Provider::QwenCode,
+    Provider::RooCode,
 ];
 
 /// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
@@ -66,6 +67,8 @@ fn provider_to_ai_cli(provider: Provider) -> AiCli {
         Provider::KimiCode => AiCli::KimiCli,
         Provider::OpenCode => AiCli::Opencode,
         Provider::QwenCode => AiCli::QwenCli,
+        Provider::RooCode => AiCli::Roo,
+        _ => AiCli::Claude,
     }
 }
 
@@ -206,7 +209,7 @@ fn find_invalid_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
     for provider_config in config.providers.values() {
         for binding in provider_config.events.values() {
             for action in &binding.actions {
-                if let EventAction::SoundEffect { name, .. } = action
+                if let HookAction::SoundEffect { name, .. } = action
                     && SoundEffect::from_name(name).is_none()
                     && !seen.contains(name)
                 {
@@ -378,15 +381,15 @@ fn fuzzy_match_provider(input: &str) -> Option<Provider> {
 }
 
 /// Format an action for display in the detailed provider view.
-fn format_action(action: &EventAction) -> String {
+fn format_action(action: &HookAction) -> String {
     match action {
-        EventAction::Speak { message } => {
+        HookAction::Speak { message } => {
             format!(
                 "{{{{cyan}}}}speak{{{{reset}}}} \"{}\"",
                 truncate_string(message, 40)
             )
         }
-        EventAction::SoundEffect {
+        HookAction::SoundEffect {
             name,
             volume,
             speed,
@@ -400,21 +403,27 @@ fn format_action(action: &EventAction) -> String {
             }
             parts.join(" ")
         }
-        EventAction::Log { target } => match target {
-            LogTarget::LocalFile { path } => {
-                format!("{{{{blue}}}}log{{{{reset}}}} → {}", path.display())
+        HookAction::Log { target } => match target {
+            LogTarget::File { path, .. } => {
+                let display = path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "~/.claudine/logs/YYYY-MM-DD.jsonl".to_string());
+                format!("{{{{blue}}}}log{{{{reset}}}} → {display}")
             }
-            LogTarget::Server { url } => {
+            LogTarget::Server { url, .. } => {
                 format!("{{{{blue}}}}log{{{{reset}}}} → {}", url)
             }
+            _ => "{{blue}}log{{reset}}".to_string(),
         },
-        EventAction::Report { handler } => match handler {
+        HookAction::Report { handler } => match handler {
             None => "{{yellow}}report{{reset}} (default)".to_string(),
             Some(h) => {
                 let format_str = match h.format {
                     ReportFormat::Text => "text",
                     ReportFormat::Json => "json",
                     ReportFormat::Compact => "compact",
+                    _ => "text",
                 };
                 if let Some(template) = &h.template {
                     format!(
@@ -427,23 +436,38 @@ fn format_action(action: &EventAction) -> String {
                 }
             }
         },
-        EventAction::Run {
+        HookAction::FireAndForget {
             command,
             args,
-            blocking,
         } => {
             let cmd_str = if let Some(a) = args {
                 format!("{} {}", command, a.join(" "))
             } else {
                 command.clone()
             };
-            let blocking_marker = if *blocking { " (blocking)" } else { "" };
             format!(
-                "{{{{green}}}}run{{{{reset}}}} `{}`{}",
-                truncate_string(&cmd_str, 35),
-                blocking_marker
+                "{{{{green}}}}fire_and_forget{{{{reset}}}} `{}`",
+                truncate_string(&cmd_str, 35)
             )
         }
+        HookAction::Call {
+            command,
+            args,
+            timeout_ms,
+            ..
+        } => {
+            let cmd_str = if let Some(a) = args {
+                format!("{} {}", command, a.join(" "))
+            } else {
+                command.clone()
+            };
+            format!(
+                "{{{{green}}}}call{{{{reset}}}} `{}` {{{{dim}}}}timeout={:?}{{{{reset}}}}",
+                truncate_string(&cmd_str, 35),
+                timeout_ms
+            )
+        }
+        _ => format!("{{{{dim}}}}{action:?}{{{{reset}}}}"),
     }
 }
 
@@ -1107,7 +1131,7 @@ fn run_variables() -> Result<()> {
     log::data(&format!("\n {}", header.fallback_render(&term)));
     log::data("");
     let intro = Prose::new(
-        "{{dim}}Use these in speak messages and report templates: {{reset}}{{cyan}}\"Tool {tool_name} failed: {error}\"{{reset}}",
+        "{{dim}}Use these in speak messages and report templates: {{reset}}{{cyan}}\"Tool {{tool_name}} failed: {{error}}\"{{reset}}",
     );
     log::data(&format!(" {}", intro.fallback_render(&term)));
     log::data("");
@@ -1207,7 +1231,7 @@ fn run_variables() -> Result<()> {
     let example = Prose::new(
         r#"{{dim}}  {
     "type": "speak",
-    "message": "Tool {tool_name} failed on {git.branch}: {error}"
+    "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
   }{{reset}}"#,
     );
     log::data(&example.fallback_render(&term));
