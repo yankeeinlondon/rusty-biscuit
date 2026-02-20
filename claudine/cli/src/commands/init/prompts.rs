@@ -1,77 +1,16 @@
 //! Interactive prompts for the init wizard using the inquire crate.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
-use claudine::config::AgentInfo;
 use claudine::actions::{HookAction, LogTarget};
 use claudine::events::{
-    AgenticEvent, EventSupportLevel, GlobalSettings, INIT_EVENT_DISPLAY_ORDER,
-    INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, Provider, TtsSettings, default_speak_template,
-    recommended_sound,
+    AgenticEvent, INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, Provider,
+    default_speak_template, recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
-
-/// Prompt user to select which agents to configure.
-///
-/// Returns the selected providers. Pre-selects agents that are available.
-pub fn prompt_agent_selection(agents: &[AgentInfo]) -> Result<Vec<AgentInfo>> {
-    let available: Vec<_> = agents.iter().filter(|a| a.is_available()).collect();
-    let unavailable: Vec<_> = agents.iter().filter(|a| !a.is_available()).collect();
-
-    if available.is_empty() {
-        eprintln!("\nNo agents detected on your system.");
-        eprintln!("Install at least one of: claude, gemini, codex, opencode");
-        return Ok(vec![]);
-    }
-
-    // Build options with status indicators
-    let options: Vec<String> = agents
-        .iter()
-        .map(|a| {
-            let status = if a.config_exists && a.on_path {
-                "(config + binary)"
-            } else if a.config_exists {
-                "(config only)"
-            } else if a.on_path {
-                "(binary only)"
-            } else {
-                "(not detected)"
-            };
-            format!("{} {}", a.display_name, status)
-        })
-        .collect();
-
-    // Pre-select available agents
-    let defaults: Vec<usize> = agents
-        .iter()
-        .enumerate()
-        .filter_map(|(i, a)| if a.is_available() { Some(i) } else { None })
-        .collect();
-
-    let selected = MultiSelect::new("Select agents to configure:", options)
-        .with_default(&defaults)
-        .with_help_message("Space to toggle, Enter to confirm")
-        .prompt()?;
-
-    // Map back to AgentInfo
-    let result: Vec<AgentInfo> = selected
-        .iter()
-        .filter_map(|opt| {
-            agents
-                .iter()
-                .find(|a| opt.starts_with(a.display_name))
-                .cloned()
-        })
-        .collect();
-
-    if result.is_empty() && !unavailable.is_empty() {
-        eprintln!("\nNo agents selected. At least one agent is required.");
-    }
-
-    Ok(result)
-}
 
 /// Prompt user for ranked provider preferences based on installed provider count.
 ///
@@ -114,202 +53,125 @@ pub fn prompt_provider_preferences(installed_providers: &[Provider]) -> Result<V
     Ok(ranked)
 }
 
-/// Check if an event has hook-based support from at least one of the given providers.
-fn has_hook_support(event: &AgenticEvent, providers: &[Provider]) -> bool {
-    providers
-        .iter()
-        .any(|p| p.event_support_level(event) == EventSupportLevel::Hook)
+/// Global init action choices applied across all registered events.
+#[derive(Debug, Clone)]
+pub struct InitActionProfile {
+    /// Logging policy applied across registered events.
+    pub logging: LoggingProfile,
+    /// Actions for events where the agent asks for human input.
+    pub input_required_actions: Vec<HookAction>,
 }
 
-/// Prompt user to select which events to configure.
-///
-/// Only shows events that have hook-based support from at least one of the
-/// selected providers. Events that require non-hook methods (wrapper/proxy)
-/// are excluded since those features are not yet implemented.
-///
-/// Returns the selected events. Pre-selects recommended events.
-pub fn prompt_event_selection(selected_providers: &[Provider]) -> Result<Vec<AgenticEvent>> {
-    let all_events = INIT_EVENT_DISPLAY_ORDER;
-
-    // Filter to only events that have hook support from at least one provider
-    let hookable_events: Vec<AgenticEvent> = all_events
-        .iter()
-        .filter(|e| has_hook_support(e, selected_providers))
-        .cloned()
-        .collect();
-
-    // Count excluded events for info message
-    let excluded_count = all_events.len() - hookable_events.len();
-
-    if hookable_events.is_empty() {
-        eprintln!("\nNo events with hook support for the selected providers.");
-        eprintln!(
-            "Selected providers only support non-hook methods (wrapper/proxy) which are not yet implemented."
-        );
-        return Ok(vec![]);
-    }
-
-    let options: Vec<String> = hookable_events
-        .iter()
-        .map(|e| format!("{} - {}", e, e.description()))
-        .collect();
-
-    let defaults: Vec<usize> = hookable_events
-        .iter()
-        .enumerate()
-        .filter_map(|(i, e)| {
-            if INIT_RECOMMENDED_EVENTS.contains(e) {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let help_msg = if excluded_count > 0 {
-        format!(
-            "Recommended events pre-selected. {} events excluded (require non-hook methods).",
-            excluded_count
-        )
-    } else {
-        "Recommended events are pre-selected".to_string()
-    };
-
-    let selected = MultiSelect::new("Select events to configure:", options)
-        .with_default(&defaults)
-        .with_help_message(&help_msg)
-        .prompt()?;
-
-    // Map back to AgenticEvent
-    let result: Vec<AgenticEvent> = selected
-        .iter()
-        .filter_map(|opt| {
-            let event_name = opt.split(" - ").next()?;
-            hookable_events
-                .iter()
-                .find(|e| e.to_string() == event_name)
-                .cloned()
-        })
-        .collect();
-
-    Ok(result)
+/// Logging policy selected during init.
+#[derive(Debug, Clone)]
+pub enum LoggingProfile {
+    /// Do not add logging actions by default.
+    None,
+    /// Add logging actions to all events.
+    All { target: LogTarget },
+    /// Add logging actions only to selected events.
+    Some {
+        target: LogTarget,
+        events: HashSet<AgenticEvent>,
+    },
 }
 
-/// Action types available for configuration.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ActionType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputActionType {
+    SaySomething,
     SoundEffect,
-    Speak,
-    Log,
-    Report,
-    Run,
+    RunCommand,
 }
 
-impl std::fmt::Display for ActionType {
+impl std::fmt::Display for InputActionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ActionType::SoundEffect => write!(f, "Sound Effect"),
-            ActionType::Speak => write!(f, "Text-to-Speech"),
-            ActionType::Log => write!(f, "Log to File"),
-            ActionType::Report => write!(f, "Report to Output"),
-            ActionType::Run => write!(f, "Run Command"),
+            InputActionType::SaySomething => write!(f, "Say Something"),
+            InputActionType::SoundEffect => write!(f, "Create a Sound Effect"),
+            InputActionType::RunCommand => write!(f, "Run a command"),
         }
     }
 }
 
-/// Prompt user to select action types for an event.
-pub fn prompt_action_types(event: &AgenticEvent) -> Result<Vec<ActionType>> {
-    let options = [
-        ActionType::SoundEffect,
-        ActionType::Speak,
-        ActionType::Log,
-        ActionType::Report,
-        ActionType::Run,
-    ];
+/// Prompt for global action defaults.
+pub fn prompt_action_profile() -> Result<InitActionProfile> {
+    let logging = prompt_logging_profile()?;
+    let input_required_actions = prompt_input_required_actions()?;
 
-    let option_strings: Vec<String> = options.iter().map(|a| a.to_string()).collect();
-
-    // Default to SoundEffect for most events
-    let defaults = vec![0]; // SoundEffect
-
-    let selected = MultiSelect::new(&format!("Actions for {} event:", event), option_strings)
-        .with_default(&defaults)
-        .with_help_message("Select one or more actions")
-        .prompt()?;
-
-    let result: Vec<ActionType> = selected
-        .iter()
-        .filter_map(|s| options.iter().find(|a| &a.to_string() == s).copied())
-        .collect();
-
-    Ok(result)
-}
-
-/// Prompt user to select a sound effect for an event.
-pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<HookAction> {
-    let recommended = recommended_sound(event);
-
-    // Get available sound effects from playa
-    let effects = playa::SoundEffect::all();
-    let sounds: Vec<&str> = effects.iter().map(|e| e.name()).collect();
-
-    let options: Vec<String> = sounds
-        .iter()
-        .map(|s| {
-            if *s == recommended {
-                format!("{} (recommended)", s)
-            } else {
-                s.to_string()
-            }
-        })
-        .collect();
-
-    // Find recommended index
-    let default_idx = sounds.iter().position(|s| *s == recommended).unwrap_or(0);
-
-    let selected = Select::new(&format!("Sound for {} event:", event), options)
-        .with_starting_cursor(default_idx)
-        .prompt()?;
-
-    let name = selected.replace(" (recommended)", "").to_string();
-
-    Ok(HookAction::SoundEffect {
-        name,
-        volume: 1.0,
-        speed: 1.0,
+    Ok(InitActionProfile {
+        logging,
+        input_required_actions,
     })
 }
 
-/// Prompt user to configure a speak action for an event.
-pub fn prompt_speak_action(event: &AgenticEvent) -> Result<HookAction> {
-    let default_template = default_speak_template(event);
-
-    let message = Text::new(&format!("Speak message for {} event:", event))
-        .with_default(default_template)
-        .with_help_message("Supports {placeholder} interpolation")
+fn prompt_logging_profile() -> Result<LoggingProfile> {
+    let options = vec!["All events", "Some events", "No events"];
+    let selected = Select::new("Add logging to all, some, or none of the events?", options)
+        .with_starting_cursor(2)
         .prompt()?;
 
-    Ok(HookAction::Speak { message })
+    Ok(match selected {
+        "All events" => LoggingProfile::All {
+            target: prompt_log_target()?,
+        },
+        "Some events" => {
+            let events = prompt_logging_event_selection()?;
+            if events.is_empty() {
+                LoggingProfile::None
+            } else {
+                LoggingProfile::Some {
+                    target: prompt_log_target()?,
+                    events,
+                }
+            }
+        }
+        _ => LoggingProfile::None,
+    })
 }
 
-/// Prompt user to configure a log action.
-pub fn prompt_log_action() -> Result<HookAction> {
+fn prompt_logging_event_selection() -> Result<HashSet<AgenticEvent>> {
+    let options: Vec<String> = INIT_EVENT_DISPLAY_ORDER
+        .iter()
+        .map(|event| format!("{} - {}", event, event.description()))
+        .collect();
+
+    let defaults: Vec<usize> = INIT_EVENT_DISPLAY_ORDER
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, event)| INIT_RECOMMENDED_EVENTS.contains(event).then_some(idx))
+        .collect();
+
+    let selected = MultiSelect::new("Select events to log:", options)
+        .with_default(&defaults)
+        .with_help_message("Space to toggle, Enter to confirm")
+        .prompt()?;
+
+    Ok(selected
+        .iter()
+        .filter_map(|opt| {
+            let name = opt.split(" - ").next()?;
+            INIT_EVENT_DISPLAY_ORDER
+                .iter()
+                .find(|event| event.to_string() == name)
+                .copied()
+        })
+        .collect())
+}
+
+fn prompt_log_target() -> Result<LogTarget> {
     let options = vec![
-        "Local file (~/.claudine/events.jsonl)",
+        "Daily local file (~/.claudine/logs/YYYY-MM-DD.jsonl)",
         "Custom file path",
         "Remote server URL",
     ];
 
-    let selected = Select::new("Log destination:", options).prompt()?;
+    let selected = Select::new("Where should events be logged?", options).prompt()?;
 
-    let target = match selected {
-        "Local file (~/.claudine/events.jsonl)" => {
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-            LogTarget::File {
-                path: Some(home.join(".claudine").join("events.jsonl")),
-                rotate_daily: false,
-            }
-        }
+    Ok(match selected {
+        "Daily local file (~/.claudine/logs/YYYY-MM-DD.jsonl)" => LogTarget::File {
+            path: None,
+            rotate_daily: true,
+        },
         "Custom file path" => {
             let path = Text::new("Enter file path:")
                 .with_default("~/.claudine/events.jsonl")
@@ -332,33 +194,99 @@ pub fn prompt_log_action() -> Result<HookAction> {
             }
         }
         _ => unreachable!(),
-    };
-
-    Ok(HookAction::Log { target })
+    })
 }
 
-/// Prompt user to configure a report action.
-pub fn prompt_report_action() -> Result<HookAction> {
-    // For simplicity, use default reporter (no custom handler)
-    Ok(HookAction::Report { handler: None })
+fn prompt_input_required_actions() -> Result<Vec<HookAction>> {
+    let options = [
+        InputActionType::SaySomething,
+        InputActionType::SoundEffect,
+        InputActionType::RunCommand,
+    ];
+    let option_strings: Vec<String> = options
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
+    let default_sound = options
+        .iter()
+        .position(|action| *action == InputActionType::SoundEffect)
+        .unwrap_or(0);
+
+    let selected = MultiSelect::new(
+        "What would you like to do when an agent needs input from you?",
+        option_strings,
+    )
+    .with_default(&[default_sound])
+    .with_help_message("Space to toggle, Enter to confirm")
+    .prompt()?;
+
+    let selected_types: Vec<InputActionType> = selected
+        .iter()
+        .filter_map(|value| options.iter().find(|option| option.to_string() == *value))
+        .copied()
+        .collect();
+
+    let mut actions = Vec::new();
+    for action_type in selected_types {
+        match action_type {
+            InputActionType::SaySomething => actions.push(prompt_input_speak_action()?),
+            InputActionType::SoundEffect => actions.push(prompt_input_sound_effect()?),
+            InputActionType::RunCommand => actions.push(prompt_input_run_action()?),
+        }
+    }
+    Ok(actions)
 }
 
-/// Prompt user to configure a run command action.
-pub fn prompt_run_action(event: &AgenticEvent) -> Result<HookAction> {
-    let command = Text::new(&format!("Command to run on {} event:", event))
-        .with_placeholder("notify-send")
+fn prompt_input_speak_action() -> Result<HookAction> {
+    let default_message = default_speak_template(&AgenticEvent::HumanInTheLoop);
+    let message = Text::new("What should Claudine say when input is needed?")
+        .with_default(default_message)
+        .with_help_message("Supports {{placeholder}} interpolation")
+        .prompt()?;
+    Ok(HookAction::Speak { message })
+}
+
+fn prompt_input_sound_effect() -> Result<HookAction> {
+    let recommended = recommended_sound(&AgenticEvent::HumanInTheLoop);
+    let effects = playa::SoundEffect::all();
+    let names: Vec<&str> = effects.iter().map(|effect| effect.name()).collect();
+    let options: Vec<String> = names
+        .iter()
+        .map(|name| {
+            if *name == recommended {
+                format!("{name} (recommended)")
+            } else {
+                name.to_string()
+            }
+        })
+        .collect();
+    let default_idx = names
+        .iter()
+        .position(|name| *name == recommended)
+        .unwrap_or(0);
+    let selected = Select::new("Select a sound effect for input-needed events:", options)
+        .with_starting_cursor(default_idx)
         .prompt()?;
 
+    Ok(HookAction::SoundEffect {
+        name: selected.replace(" (recommended)", ""),
+        volume: 1.0,
+        speed: 1.0,
+    })
+}
+
+fn prompt_input_run_action() -> Result<HookAction> {
+    let command = Text::new("Command to run when input is needed:")
+        .with_placeholder("notify-send")
+        .prompt()?;
     let args_str = Text::new("Arguments (space-separated, or leave empty):")
         .with_default("")
         .prompt()?;
-
     let args = if args_str.is_empty() {
         None
     } else {
         Some(args_str.split_whitespace().map(String::from).collect())
     };
-
     let blocking = Confirm::new("Wait for command to complete?")
         .with_default(false)
         .prompt()?;
@@ -373,95 +301,6 @@ pub fn prompt_run_action(event: &AgenticEvent) -> Result<HookAction> {
     } else {
         Ok(HookAction::FireAndForget { command, args })
     }
-}
-
-/// Configure all actions for an event.
-pub fn configure_event_actions(event: &AgenticEvent) -> Result<Vec<HookAction>> {
-    let action_types = prompt_action_types(event)?;
-
-    if action_types.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let mut actions = Vec::new();
-
-    for action_type in action_types {
-        let action = match action_type {
-            ActionType::SoundEffect => prompt_sound_effect(event)?,
-            ActionType::Speak => prompt_speak_action(event)?,
-            ActionType::Log => prompt_log_action()?,
-            ActionType::Report => prompt_report_action()?,
-            ActionType::Run => prompt_run_action(event)?,
-        };
-        actions.push(action);
-    }
-
-    Ok(actions)
-}
-
-/// Prompt user to configure global TTS settings.
-pub fn prompt_tts_settings() -> Result<Option<TtsSettings>> {
-    let configure_tts = Confirm::new("Configure text-to-speech settings?")
-        .with_default(false)
-        .prompt()?;
-
-    if !configure_tts {
-        return Ok(None);
-    }
-
-    let providers = INIT_TTS_PROVIDERS;
-    let options: Vec<String> = providers
-        .iter()
-        .map(|provider| provider.display_name.to_string())
-        .collect();
-
-    let selected = Select::new("TTS provider:", options).prompt()?;
-
-    let provider = providers
-        .iter()
-        .find(|provider| provider.display_name == selected)
-        .map(|provider| provider.id.to_string());
-
-    let voice = Text::new("Voice name (or leave empty for default):")
-        .with_default("")
-        .prompt()?;
-
-    let rate_str = Text::new("Speech rate (1.0 = normal, 1.5 = faster):")
-        .with_default("1.0")
-        .prompt()?;
-
-    let rate = rate_str.parse::<f32>().ok();
-
-    Ok(Some(TtsSettings {
-        provider,
-        voice: if voice.is_empty() { None } else { Some(voice) },
-        rate,
-    }))
-}
-
-/// Prompt user to configure global settings.
-pub fn prompt_global_settings() -> Result<GlobalSettings> {
-    let tts = prompt_tts_settings()?;
-
-    // Ask about default log target
-    let configure_log = Confirm::new("Set a default log target for all events?")
-        .with_default(false)
-        .prompt()?;
-
-    let default_log_target = if configure_log {
-        Some(match prompt_log_action()? {
-            HookAction::Log { target } => target,
-            _ => unreachable!(),
-        })
-    } else {
-        None
-    };
-
-    Ok(GlobalSettings {
-        default_log_target,
-        tts,
-        linking: None,
-    })
 }
 
 /// Gitignore handling options.

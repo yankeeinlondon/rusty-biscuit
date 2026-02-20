@@ -13,8 +13,9 @@ use claudine::dispatch::loader::load_config;
 use claudine::events::Provider;
 use claudine::linking::model::{ReferenceStatus, Resource, ResourceReference};
 use claudine::linking::{
-    self, all_capabilities, canonical_provider, capabilities_for, ApplySummary, LinkableResource,
-    ResourceFormat, ResourceScope as PathScope, SupportLevel, ALL_PROVIDERS,
+    self, ALL_PROVIDERS, ApplySummary, LinkableResource, ResourceFormat,
+    ResourceScope as PathScope, SupportLevel, all_capabilities, canonical_provider,
+    capabilities_for,
 };
 use sniff::programs::InstalledAiClients;
 

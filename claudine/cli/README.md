@@ -6,15 +6,16 @@ Binary: `claudine` — interactive setup, hook inspection, event handling, and s
 
 ### `claudine init [--quick] [--repo]`
 
-Interactive setup wizard that walks through 5 phases:
+Interactive setup wizard that walks through 4 phases:
 
 1. **Agent Discovery** — detects installed agentic CLIs on the system
-2. **Event Selection** — choose which events to subscribe to (filters to hook-supported events)
-3. **Action Configuration** — configure actions per event (sound effects, TTS, logging, etc.)
-4. **Global Settings** — TTS provider selection, default log targets
-5. **Write & Register** — saves `~/.claudine/config.json` and registers hooks with each provider
+2. **Provider Preferences** — rank your favorite installed CLIs for canonical ordering
+3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
+4. **Write & Register** — saves `~/.claudine/config.json` and registers hooks with each provider
 
-`--quick` skips prompts and uses sensible defaults (SessionStart, TurnComplete, ToolError, PermissionRequest with sound effects). `--repo` creates `.claudine/config.json` in the repository root and can add `.claudine/` to `.gitignore`.
+Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings.
+
+`--quick` skips prompts and registers all hook-supported events for installed providers, with default sounds for `session_start`, `turn_complete`, `tool_error`, `permission_request`, and `human_in_the_loop`. `--repo` creates `.claudine/config.json` in the repository root and can add `.claudine/` to `.gitignore`.
 
 ### `claudine hooks [provider] [flags]`
 

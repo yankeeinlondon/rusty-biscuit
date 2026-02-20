@@ -6,11 +6,11 @@ use tokio::process::Command;
 use tracing::{debug, warn};
 
 use super::template::interpolate;
-use crate::error::Result;
 use crate::actions::{
     CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ReportFormat,
     ReportHandler,
 };
+use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
 
 /// Execute hook actions in declaration order.

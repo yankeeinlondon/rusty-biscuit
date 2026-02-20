@@ -8,10 +8,10 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
+use claudine::actions::{HookAction, LogTarget, ReportFormat};
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
-use claudine::actions::{HookAction, LogTarget, ReportFormat};
 use claudine::events::{
     AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookerConfig, NativeEventName,
     PROVIDERS_DISPLAY_ORDER, Provider, detect_environment, event_native_mapping_matrix,
@@ -48,6 +48,8 @@ pub struct HooksArgs {
 
 /// All supported providers in display order.
 const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
+/// Keep provider names from wrapping into multi-line labels in narrow terminals.
+const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
 
 fn bool_indicator(value: bool) -> TableCellContent {
     if value {
@@ -677,7 +679,7 @@ fn run_simple(
     config: Option<&HookerConfig>,
 ) -> Result<()> {
     let mut table = Table::new().with_columns(vec![
-        TableColumn::new("Provider"),
+        TableColumn::new("Provider").with_min_width(PROVIDER_COLUMN_MIN_WIDTH),
         TableColumn::new("Installed"),
         TableColumn::new("Subscribed Hooks"),
     ]);
@@ -807,7 +809,7 @@ fn run_verbose(
 ) -> Result<()> {
     // Build columns: Provider, ∃ (exists/installed), then one per event
     let mut columns = vec![
-        TableColumn::new("Provider"),
+        TableColumn::new("Provider").with_min_width(PROVIDER_COLUMN_MIN_WIDTH),
         TableColumn::new("∃"), // existence symbol for installed
     ];
 

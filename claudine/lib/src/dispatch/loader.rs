@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use tracing::{debug, info, warn};
 
+use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::events::{AgenticEvent, GlobalSettings, HookerConfig, Provider};
 
 /// Candidate file names for user-level configuration.

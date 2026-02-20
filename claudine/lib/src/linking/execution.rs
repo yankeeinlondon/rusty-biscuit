@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::events::Provider;
 
-use super::capabilities::{capabilities_for, LinkableResource, ResourceFormat};
+use super::capabilities::{LinkableResource, ResourceFormat, capabilities_for};
 use super::compatibility::{classify_canonical_candidate, classify_target_reference};
 use super::detector::{
     AgentDefinitionsDetector, DiscoveredResource, LinkDetector, SharedScriptsDetector,
@@ -15,7 +15,7 @@ use super::model::{
     ResourceScope as ModelScope, ResourceType,
 };
 use super::paths::{ProviderSkillPaths, ResourceScope as PathScope};
-use super::symlink::{category_link_target, create_skill_link, relative_path, LinkResult};
+use super::symlink::{LinkResult, category_link_target, create_skill_link, relative_path};
 
 const DERIVED_FM_HASH_KEY: &str = "_claudine_fm_hash";
 const DERIVED_BODY_HASH_KEY: &str = "_claudine_body_hash";
@@ -811,11 +811,13 @@ mod tests {
         assert!(summary.links_created > 0);
 
         let codex_link = repo.path().join(".codex/skills/repo-skill");
-        assert!(codex_link
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            codex_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let target = std::fs::read_link(&codex_link).unwrap();
         assert!(target.is_relative());
         let expected = relative_path(codex_link.parent().unwrap(), canonical.parent().unwrap());
@@ -1055,11 +1057,13 @@ mod tests {
         assert!(summary.links_created > 0);
 
         let opencode_link = repo.path().join(".opencode/agents/reviewer.md");
-        assert!(opencode_link
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            opencode_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let target = std::fs::read_link(&opencode_link).unwrap();
         assert!(target.is_relative());
         let expected = relative_path(opencode_link.parent().unwrap(), &canonical);
@@ -1113,11 +1117,13 @@ mod tests {
         assert!(summary.links_created > 0);
 
         let goose_user_link = home.path().join(".config/goose/scripts/tool.sh");
-        assert!(goose_user_link
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            goose_user_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let user_target = std::fs::read_link(&goose_user_link).unwrap();
         assert!(user_target.is_absolute());
         assert_eq!(user_target, user_canonical);
@@ -1147,11 +1153,13 @@ mod tests {
         assert!(summary.links_created > 0);
 
         let goose_repo_link = repo.path().join(".goose/scripts/tool.sh");
-        assert!(goose_repo_link
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            goose_repo_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let repo_target = std::fs::read_link(&goose_repo_link).unwrap();
         assert!(repo_target.is_relative());
         let expected = relative_path(goose_repo_link.parent().unwrap(), &repo_canonical);

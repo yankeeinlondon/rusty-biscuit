@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
-use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
+use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::detector::DiscoveredResource;
 use super::model::{ResourceDefinition, ResourceReference, ResourceScope};
 

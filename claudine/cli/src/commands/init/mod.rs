@@ -8,12 +8,13 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use claudine::actions::HookAction;
 use claudine::config::{
-    AgentInfo, RegistrationResult, SkipReason, detect_agents, discover_agents_full,
+    AgentInfo, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
 use claudine::events::{
     AgenticEvent, CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig,
-    LinkingSettings, Provider, ProviderConfig, quick_start_supported_providers, recommended_sound,
+    LinkingSettings, Provider, ProviderConfig, recommended_sound,
 };
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
@@ -65,68 +66,69 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("Phase 1: Agent Discovery");
     log::message("-------------------------");
     let all_agents = discover_agents_full();
-    let selected_agents = prompts::prompt_agent_selection(&all_agents)?;
+    let selected_agents: Vec<AgentInfo> = all_agents
+        .iter()
+        .filter(|agent| agent.is_available())
+        .cloned()
+        .collect();
 
     if selected_agents.is_empty() {
-        log::error("No agents selected. Exiting.");
+        log::error("No agents detected. Exiting.");
         return Ok(());
     }
 
     log::message("");
-    log::message(&format!("Selected {} agent(s)", selected_agents.len()));
+    log::message(&format!(
+        "Detected {} available agent(s)",
+        selected_agents.len()
+    ));
+    for agent in &selected_agents {
+        log::message(&format!("  {}", agent.provider));
+    }
     log::message("");
 
+    // Phase 2: Provider Preferences
+    log::message("Phase 2: Provider Preferences");
+    log::message("------------------------------");
     let installed_providers = installed_provider_list(&all_agents);
     let ranked_preferences = prompts::prompt_provider_preferences(&installed_providers)?;
     let preference = ranked_provider_preferences(&installed_providers, &ranked_preferences);
 
-    // Phase 2: Event Selection
-    log::message("Phase 2: Event Selection");
+    // Phase 3: Global Action Interview
+    log::message("Phase 3: Action Defaults");
     log::message("-------------------------");
-    let selected_providers: Vec<_> = selected_agents.iter().map(|a| a.provider).collect();
-    let selected_events = prompts::prompt_event_selection(&selected_providers)?;
+    let action_profile = prompts::prompt_action_profile()?;
 
-    if selected_events.is_empty() {
-        log::warn("No events selected. Configuration will be minimal.");
-    } else {
-        log::message("");
-        log::message(&format!("Selected {} event(s)", selected_events.len()));
+    // Build provider-specific event bindings:
+    // - include every event the provider can register via native hooks
+    // - include empty actions as explicit no-op bindings
+    let mut provider_event_bindings: HashMap<Provider, HashMap<AgenticEvent, EventBinding>> =
+        HashMap::new();
+    for agent in &selected_agents {
+        provider_event_bindings.insert(
+            agent.provider,
+            build_provider_event_bindings(agent.provider, &action_profile),
+        );
+    }
+
+    let total_bindings: usize = provider_event_bindings
+        .values()
+        .map(std::collections::HashMap::len)
+        .sum();
+
+    log::message("");
+    log::message(&format!("Prepared {total_bindings} event binding(s):"));
+    for agent in &selected_agents {
+        let count = provider_event_bindings
+            .get(&agent.provider)
+            .map(std::collections::HashMap::len)
+            .unwrap_or(0);
+        log::message(&format!("  {}: {} events", agent.provider, count));
     }
     log::message("");
 
-    // Phase 3: Per-Event Action Configuration
-    log::message("Phase 3: Action Configuration");
-    log::message("------------------------------");
-    let mut event_bindings = HashMap::new();
-
-    for event in &selected_events {
-        log::message("");
-        log::message(&format!("Configuring: {}", event));
-        let actions = prompts::configure_event_actions(event)?;
-
-        if !actions.is_empty() {
-            event_bindings.insert(
-                *event,
-                EventBinding {
-                    enabled: true,
-                    actions,
-                    matcher: None,
-                },
-            );
-        }
-    }
-
-    log::message("");
-    log::message(&format!(
-        "Configured {} event binding(s)",
-        event_bindings.len()
-    ));
-    log::message("");
-
-    // Phase 4: Global Settings
-    log::message("Phase 4: Global Settings");
-    log::message("-------------------------");
-    let mut settings = prompts::prompt_global_settings()?;
+    // Build global settings (non-interactive)
+    let mut settings = GlobalSettings::default();
     let scope = if repo_scope {
         ResourceScope::Repo
     } else {
@@ -150,12 +152,10 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     // Build final config with per-provider configuration
     let mut providers = HashMap::new();
     for agent in &selected_agents {
-        providers.insert(
-            agent.provider,
-            ProviderConfig {
-                events: event_bindings.clone(),
-            },
-        );
+        let events = provider_event_bindings
+            .remove(&agent.provider)
+            .unwrap_or_default();
+        providers.insert(agent.provider, ProviderConfig { events });
     }
 
     let config = HookerConfig {
@@ -164,9 +164,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         providers,
     };
 
-    // Phase 5: Write and Register
+    // Phase 4: Write and Register
     log::message("");
-    log::message("Phase 5: Write Configuration");
+    log::message("Phase 4: Write Configuration");
     log::message("-----------------------------");
 
     // Determine config path
@@ -194,16 +194,10 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
     // Register with agents
     log::message("");
-    log::message("Registering with detected agents:");
-
-    let agents = detect_agents();
-    for (provider, configurator) in &agents {
-        // Only register with selected agents
-        let is_selected = selected_agents.iter().any(|a| a.provider == *provider);
-        if !is_selected {
-            continue;
-        }
-
+    log::message("Registering with available agents:");
+    for agent in &selected_agents {
+        let provider = agent.provider;
+        let configurator = get_configurator(provider);
         match configurator.register(&config, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
@@ -300,12 +294,13 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     std::fs::write(&config_path, &json)?;
     log::message(&format!("  Wrote config to {}", config_path.display()));
 
-    // Detect and register with agents
-    let agents = detect_agents();
+    // Register with providers included in this config
     log::message("");
-    log::message("Registering with detected agents:");
-
-    for (provider, configurator) in &agents {
+    log::message("Registering with configured providers:");
+    let mut providers: Vec<Provider> = config.providers.keys().copied().collect();
+    providers.sort_by_key(|provider| provider.to_string());
+    for provider in providers {
+        let configurator = get_configurator(provider);
         match configurator.register(&config, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
@@ -335,9 +330,6 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
 }
 
 fn default_config(repo_scope: bool) -> Result<HookerConfig> {
-    // Create default event bindings
-    let default_events = create_default_events();
-
     let scope = if repo_scope {
         ResourceScope::Repo
     } else {
@@ -360,13 +352,19 @@ fn default_config(repo_scope: bool) -> Result<HookerConfig> {
         ..GlobalSettings::default()
     };
 
-    // Apply to all supported providers that have hook registration
+    // Apply to installed providers that can register at least one event via hooks.
+    let quick_providers: Vec<Provider> = installed_providers
+        .iter()
+        .copied()
+        .filter(|provider| !provider_hook_events(*provider).is_empty())
+        .collect();
+
     let mut providers = HashMap::new();
-    for provider in quick_start_supported_providers() {
+    for provider in quick_providers {
         providers.insert(
             provider,
             ProviderConfig {
-                events: default_events.clone(),
+                events: create_quick_provider_events(provider),
             },
         );
     }
@@ -422,66 +420,236 @@ fn build_linking_settings(
     })
 }
 
-fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
-    use claudine::actions::HookAction;
+fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
+    AgenticEvent::ALL
+        .into_iter()
+        .filter(|event| provider.supports_event_via_hook(event))
+        .collect()
+}
 
-    let mut events = HashMap::new();
+fn build_provider_event_bindings(
+    provider: Provider,
+    action_profile: &prompts::InitActionProfile,
+) -> HashMap<AgenticEvent, EventBinding> {
+    provider_hook_events(provider)
+        .into_iter()
+        .map(|event| {
+            (
+                event,
+                EventBinding {
+                    enabled: true,
+                    actions: actions_for_event(event, action_profile),
+                    matcher: None,
+                },
+            )
+        })
+        .collect()
+}
 
-    // SessionStart -> SFX power-up
-    events.insert(
-        AgenticEvent::SessionStart,
-        EventBinding {
-            enabled: true,
-            actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::SessionStart).to_string(),
+fn actions_for_event(
+    event: AgenticEvent,
+    action_profile: &prompts::InitActionProfile,
+) -> Vec<HookAction> {
+    let mut actions = Vec::new();
+
+    match &action_profile.logging {
+        prompts::LoggingProfile::None => {}
+        prompts::LoggingProfile::All { target } => {
+            actions.push(HookAction::Log {
+                target: target.clone(),
+            });
+        }
+        prompts::LoggingProfile::Some { target, events } => {
+            if events.contains(&event) {
+                actions.push(HookAction::Log {
+                    target: target.clone(),
+                });
+            }
+        }
+    }
+
+    if matches!(
+        event,
+        AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
+    ) {
+        actions.extend(action_profile.input_required_actions.clone());
+    }
+
+    actions
+}
+
+fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, EventBinding> {
+    provider_hook_events(provider)
+        .into_iter()
+        .map(|event| {
+            let actions = if matches!(
+                event,
+                AgenticEvent::SessionStart
+                    | AgenticEvent::TurnComplete
+                    | AgenticEvent::ToolError
+                    | AgenticEvent::PermissionRequest
+                    | AgenticEvent::HumanInTheLoop
+            ) {
+                vec![HookAction::SoundEffect {
+                    name: recommended_sound(&event).to_string(),
+                    volume: 1.0,
+                    speed: 1.0,
+                }]
+            } else {
+                vec![]
+            };
+
+            (
+                event,
+                EventBinding {
+                    enabled: true,
+                    actions,
+                    matcher: None,
+                },
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudine::actions::LogTarget;
+
+    fn no_action_profile() -> prompts::InitActionProfile {
+        prompts::InitActionProfile {
+            logging: prompts::LoggingProfile::None,
+            input_required_actions: vec![],
+        }
+    }
+
+    #[test]
+    fn provider_hook_events_only_returns_hook_supported_events() {
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ] {
+            let events = provider_hook_events(provider);
+            for event in events {
+                assert!(provider.supports_event_via_hook(&event));
+            }
+        }
+    }
+
+    #[test]
+    fn interactive_bindings_include_noop_entries_for_supported_events() {
+        let bindings = build_provider_event_bindings(Provider::Claude, &no_action_profile());
+        let expected: Vec<AgenticEvent> = AgenticEvent::ALL
+            .into_iter()
+            .filter(|event| Provider::Claude.supports_event_via_hook(event))
+            .collect();
+
+        assert_eq!(bindings.len(), expected.len());
+        for event in expected {
+            let binding = bindings
+                .get(&event)
+                .expect("every hook-supported event should be configured");
+            assert!(binding.enabled);
+            assert!(
+                binding.actions.is_empty(),
+                "expected no-op actions for {event}"
+            );
+        }
+    }
+
+    #[test]
+    fn interactive_profile_applies_logging_and_input_sound() {
+        let profile = prompts::InitActionProfile {
+            logging: prompts::LoggingProfile::All {
+                target: LogTarget::File {
+                    path: None,
+                    rotate_daily: true,
+                },
+            },
+            input_required_actions: vec![HookAction::SoundEffect {
+                name: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
-            matcher: None,
-        },
-    );
+        };
 
-    // TurnComplete -> SFX success
-    events.insert(
-        AgenticEvent::TurnComplete,
-        EventBinding {
-            enabled: true,
-            actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::TurnComplete).to_string(),
-                volume: 1.0,
-                speed: 1.0,
-            }],
-            matcher: None,
-        },
-    );
+        let bindings = build_provider_event_bindings(Provider::Claude, &profile);
 
-    // ToolError -> SFX error
-    events.insert(
-        AgenticEvent::ToolError,
-        EventBinding {
-            enabled: true,
-            actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::ToolError).to_string(),
-                volume: 1.0,
-                speed: 1.0,
-            }],
-            matcher: None,
-        },
-    );
+        // Non-input event gets logging only.
+        let session_start = bindings
+            .get(&AgenticEvent::SessionStart)
+            .expect("session_start should exist for Claude");
+        assert_eq!(session_start.actions.len(), 1);
+        assert!(matches!(session_start.actions[0], HookAction::Log { .. }));
 
-    // PermissionRequest -> SFX notification
-    events.insert(
-        AgenticEvent::PermissionRequest,
-        EventBinding {
-            enabled: true,
-            actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::PermissionRequest).to_string(),
-                volume: 1.0,
-                speed: 1.0,
-            }],
-            matcher: None,
-        },
-    );
+        // Input-required event gets logging + sound.
+        let hitl = bindings
+            .get(&AgenticEvent::HumanInTheLoop)
+            .expect("human_in_the_loop should exist for Claude");
+        assert_eq!(hitl.actions.len(), 2);
+        assert!(matches!(hitl.actions[0], HookAction::Log { .. }));
+        assert!(matches!(hitl.actions[1], HookAction::SoundEffect { .. }));
+    }
 
-    events
+    #[test]
+    fn interactive_profile_logs_only_selected_events_when_configured() {
+        let profile = prompts::InitActionProfile {
+            logging: prompts::LoggingProfile::Some {
+                target: LogTarget::File {
+                    path: None,
+                    rotate_daily: true,
+                },
+                events: [AgenticEvent::TurnComplete].into_iter().collect(),
+            },
+            input_required_actions: vec![],
+        };
+
+        let bindings = build_provider_event_bindings(Provider::Claude, &profile);
+
+        let turn_complete = bindings
+            .get(&AgenticEvent::TurnComplete)
+            .expect("turn_complete should exist for Claude");
+        assert_eq!(turn_complete.actions.len(), 1);
+        assert!(matches!(turn_complete.actions[0], HookAction::Log { .. }));
+
+        let session_start = bindings
+            .get(&AgenticEvent::SessionStart)
+            .expect("session_start should exist for Claude");
+        assert!(session_start.actions.is_empty());
+    }
+
+    #[test]
+    fn quick_mode_keeps_all_hook_events_and_adds_default_sounds() {
+        let events = create_quick_provider_events(Provider::Gemini);
+
+        // All hook-supported Gemini events should be present.
+        let expected: Vec<AgenticEvent> = AgenticEvent::ALL
+            .into_iter()
+            .filter(|event| Provider::Gemini.supports_event_via_hook(event))
+            .collect();
+        assert_eq!(events.len(), expected.len());
+
+        // turn_complete is a default sound event in quick mode.
+        let turn_complete = events
+            .get(&AgenticEvent::TurnComplete)
+            .expect("turn_complete should be configured");
+        assert!(
+            turn_complete
+                .actions
+                .iter()
+                .any(|action| matches!(action, HookAction::SoundEffect { .. }))
+        );
+
+        // before_model should still be present but no-op by default.
+        let before_model = events
+            .get(&AgenticEvent::BeforeModel)
+            .expect("before_model should be configured");
+        assert!(before_model.actions.is_empty());
+    }
 }

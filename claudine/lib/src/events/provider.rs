@@ -218,6 +218,36 @@ const OPENCODE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
         parse_aliases: &["session.deleted"],
     },
     SharedNativeEventMapping {
+        event: AgenticEvent::BeforePrompt,
+        native_name: "chat.message",
+        parse_aliases: &["chat.message"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeTool,
+        native_name: "tool.execute.before",
+        parse_aliases: &["tool.execute.before"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::AfterTool,
+        native_name: "tool.execute.after",
+        parse_aliases: &["tool.execute.after"],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::BeforeModel,
+        native_name: "chat.params",
+        parse_aliases: &[
+            "chat.params",
+            "chat.headers",
+            "experimental.chat.system.transform",
+            "experimental.chat.messages.transform",
+        ],
+    },
+    SharedNativeEventMapping {
+        event: AgenticEvent::AfterModel,
+        native_name: "message.part.updated",
+        parse_aliases: &["message.part.updated", "experimental.text.complete"],
+    },
+    SharedNativeEventMapping {
         event: AgenticEvent::TurnComplete,
         native_name: "session.idle",
         parse_aliases: &["session.idle"],
