@@ -484,4 +484,23 @@ mod tests {
         assert!(source.contains("\"permission.ask\": \"permission_request\""));
         assert!(source.contains("\"permission.asked\": \"human_in_the_loop\""));
     }
+
+    #[test]
+    fn bridge_uses_shared_mappings_for_core_opencode_events() {
+        let config = test_config(vec![
+            AgenticEvent::BeforePrompt,
+            AgenticEvent::BeforeTool,
+            AgenticEvent::AfterTool,
+            AgenticEvent::BeforeModel,
+            AgenticEvent::AfterModel,
+        ]);
+        let provider_config = config.providers.get(&Provider::OpenCode).unwrap();
+
+        let source = generate_bridge(provider_config);
+        assert!(source.contains("\"chat.message\": \"before_prompt\""));
+        assert!(source.contains("\"tool.execute.before\": \"before_tool\""));
+        assert!(source.contains("\"tool.execute.after\": \"after_tool\""));
+        assert!(source.contains("\"chat.params\": \"before_model\""));
+        assert!(source.contains("\"message.part.updated\": \"after_model\""));
+    }
 }

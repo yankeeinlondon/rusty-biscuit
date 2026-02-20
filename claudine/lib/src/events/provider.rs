@@ -1142,6 +1142,42 @@ mod tests {
     }
 
     #[test]
+    fn opencode_shared_native_mappings_cover_core_hook_events() {
+        use crate::events::AgenticEvent::*;
+
+        assert_eq!(
+            Provider::OpenCode.registration_native_event_name(&BeforePrompt),
+            Some("chat.message")
+        );
+        assert_eq!(
+            Provider::OpenCode.registration_native_event_name(&BeforeTool),
+            Some("tool.execute.before")
+        );
+        assert_eq!(
+            Provider::OpenCode.registration_native_event_name(&AfterTool),
+            Some("tool.execute.after")
+        );
+        assert_eq!(
+            Provider::OpenCode.registration_native_event_name(&BeforeModel),
+            Some("chat.params")
+        );
+        assert_eq!(
+            Provider::OpenCode.registration_native_event_name(&AfterModel),
+            Some("message.part.updated")
+        );
+
+        assert_eq!(
+            Provider::OpenCode
+                .event_from_shared_native_name("experimental.chat.messages.transform"),
+            Some(BeforeModel)
+        );
+        assert_eq!(
+            Provider::OpenCode.event_from_shared_native_name("experimental.text.complete"),
+            Some(AfterModel)
+        );
+    }
+
+    #[test]
     fn parse_cli_name_accepts_aliases() {
         assert_eq!(Provider::parse_cli_name("claude"), Some(Provider::Claude));
         assert_eq!(Provider::parse_cli_name("kimi"), Some(Provider::KimiCode));
