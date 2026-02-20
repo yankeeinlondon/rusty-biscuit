@@ -1026,13 +1026,19 @@ mod tests {
         #[test]
         fn repo_subcommand_parses() {
             let cli = parse_args(&["repo"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: false, .. })));
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo { deps: false, .. })
+            ));
         }
 
         #[test]
         fn repo_deps_flag_parses() {
             let cli = parse_args(&["repo", "--deps"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: true, .. })));
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo { deps: true, .. })
+            ));
         }
 
         #[test]
@@ -1355,7 +1361,10 @@ mod tests {
 
         #[test]
         fn repo_maps_to_repo_filter() {
-            let cmd = Commands::Repo { deps: false, packages: false };
+            let cmd = Commands::Repo {
+                deps: false,
+                packages: false,
+            };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
 
