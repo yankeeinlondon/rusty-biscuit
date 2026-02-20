@@ -125,6 +125,10 @@ struct PlaybackOptions {
     #[arg(long)]
     meta: bool,
 
+    /// Play in the background and return control to the terminal immediately
+    #[arg(long)]
+    background: bool,
+
     /// Play at 1.25x speed
     #[arg(long, conflicts_with = "slow")]
     fast: bool,
@@ -203,6 +207,61 @@ impl PlaybackOptions {
     }
 }
 
+fn background_requested(cli: &Cli) -> bool {
+    cli.playback.background
+        || match &cli.command {
+            Some(Command::Play { playback, .. }) => playback.background,
+            Some(Command::Effect { playback, .. }) => playback.background,
+            _ => false,
+        }
+}
+
+fn has_playback_target(cli: &Cli) -> bool {
+    match &cli.command {
+        Some(Command::Play { .. }) | Some(Command::Effect { .. }) => true,
+        None => cli.audio_file.is_some(),
+        _ => false,
+    }
+}
+
+fn spawn_background_process() -> Result<(), std::io::Error> {
+    let args: Vec<String> = std::env::args()
+        .filter(|arg| arg != "--background")
+        .collect();
+    let Some(program) = args.first() else {
+        return Err(std::io::Error::other(
+            "failed to determine executable for background playback",
+        ));
+    };
+
+    std::process::Command::new(program)
+        .args(&args[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+    Ok(())
+}
+
+fn maybe_spawn_background(cli: &Cli) -> bool {
+    if !background_requested(cli) {
+        return false;
+    }
+
+    if !has_playback_target(cli) {
+        eprintln!("--background can only be used when playing an audio file or sound effect.");
+        std::process::exit(2);
+    }
+
+    if let Err(error) = spawn_background_process() {
+        eprintln!("Failed to start background playback: {error}");
+        std::process::exit(1);
+    }
+
+    true
+}
+
 #[cfg(feature = "audio-ducking")]
 #[tokio::main]
 async fn main() {
@@ -219,6 +278,9 @@ async fn run_cli() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
+    if maybe_spawn_background(&cli) {
+        return;
+    }
 
     match cli.command {
         Some(Command::ListEffects { filter }) => {
@@ -258,6 +320,9 @@ fn run_cli_sync() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
+    if maybe_spawn_background(&cli) {
+        return;
+    }
 
     match cli.command {
         Some(Command::ListEffects { filter }) => {
@@ -825,6 +890,7 @@ mod tests {
     fn playback_options_default() {
         let opts = PlaybackOptions {
             meta: false,
+            background: false,
             fast: false,
             slow: false,
             quiet: false,
@@ -850,6 +916,7 @@ mod tests {
     fn playback_options_fast() {
         let opts = PlaybackOptions {
             meta: false,
+            background: false,
             fast: true,
             slow: false,
             quiet: false,
@@ -870,6 +937,7 @@ mod tests {
     fn playback_options_custom_speed_and_volume() {
         let opts = PlaybackOptions {
             meta: false,
+            background: false,
             fast: false,
             slow: false,
             quiet: false,
@@ -885,5 +953,57 @@ mod tests {
         };
         assert_eq!(opts.speed, Some(0.9));
         assert_eq!(opts.volume, Some(0.3));
+    }
+
+    fn base_playback_options() -> PlaybackOptions {
+        PlaybackOptions {
+            meta: false,
+            background: false,
+            fast: false,
+            slow: false,
+            quiet: false,
+            loud: false,
+            speed: None,
+            volume: None,
+            #[cfg(feature = "audio-ducking")]
+            no_duck: false,
+            #[cfg(feature = "audio-ducking")]
+            duck_ramp_ms: 1000,
+            #[cfg(feature = "audio-ducking")]
+            duck_floor: 0.2,
+        }
+    }
+
+    #[test]
+    fn background_flag_detected_for_playback_target() {
+        let cli = Cli {
+            command: Some(Command::Play {
+                audio_file: PathBuf::from("tone.wav"),
+                playback: PlaybackOptions {
+                    background: true,
+                    ..base_playback_options()
+                },
+            }),
+            audio_file: None,
+            playback: base_playback_options(),
+        };
+
+        assert!(background_requested(&cli));
+        assert!(has_playback_target(&cli));
+    }
+
+    #[test]
+    fn background_flag_rejected_without_playback_target() {
+        let cli = Cli {
+            command: Some(Command::Players),
+            audio_file: None,
+            playback: PlaybackOptions {
+                background: true,
+                ..base_playback_options()
+            },
+        };
+
+        assert!(background_requested(&cli));
+        assert!(!has_playback_target(&cli));
     }
 }

@@ -30,6 +30,13 @@ playa effect sad-trombone
 playa effect sad-trombone --loud
 ```
 
+Play in the background and return immediately:
+
+```bash
+playa --background audio.wav
+playa effect sad-trombone --background
+```
+
 List built-in sound effects:
 
 ```bash
@@ -66,6 +73,7 @@ These options apply to `play` and `effect` subcommands, as well as the default m
 | Option | Description |
 |--------|-------------|
 | `--meta` | Display playback metadata (player, volume, speed, codec, format) |
+| `--background` | Start playback in a detached process and return control immediately |
 | `--fast` | Play at 1.25x speed |
 | `--slow` | Play at 0.75x speed |
 | `--quiet` | Play at 50% volume |
