@@ -24,6 +24,14 @@ default:
     just --list | grep -v 'default'
     echo
 
+_notify message title="Rusty Biscuit":
+    #!/usr/bin/env bash
+    if command -v osascript &> /dev/null; then
+        osascript -e 'display notification "message" with title "{{title}}"'
+    elif command -v notify-send &> /dev/null; then
+        notify-send '{{message}}'
+    fi
+
 # start Claude Code CLI in yolo mode
 cc *args="":
   @clear

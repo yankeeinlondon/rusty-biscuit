@@ -11,13 +11,13 @@ BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 
-AREA := "Biscuit Terminal"
-LIB_NAME := AREA + " Library"
+PACKAGE := "Biscuit Terminal"
+LIB_NAME := PACKAGE + " Library"
 CLI_BINARY := "bt"
-CLI_NAME := AREA + " CLI " + RESET + "(" + DIM + BLUE + ITALIC + CLI_BINARY + RESET + ")" + RESET
-CLI_NAME_SPEAK := AREA + " CLI (called " + CLI_BINARY + ")"
-LIBRARY := replace(lowercase(AREA), " ", "-")
-CLI := replace(lowercase(AREA) + "-cli", " ", "-")
+CLI_NAME := PACKAGE + " CLI " + RESET + "(" + DIM + BLUE + ITALIC + CLI_BINARY + RESET + ")" + RESET
+CLI_NAME_SPEAK := PACKAGE + " CLI (called " + CLI_BINARY + ")"
+LIBRARY := replace(lowercase(PACKAGE), " ", "-")
+CLI := replace(lowercase(PACKAGE) + "-cli", " ", "-")
 CLI_PATH := "./cli"
 DOCS := ""
 
@@ -30,7 +30,7 @@ default:
         md just.md
     else
       echo
-      echo -e "{{BOLD}}{{AREA}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+      echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
       echo "======================================================================================"
       echo ""
     fi
@@ -42,10 +42,10 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
-_notify message:
+_notify message title=PACKAGE:
     #!/usr/bin/env bash
     if command -v osascript &> /dev/null; then
-        osascript -e '{{message}}'
+        osascript -e 'display notification "message" with title "{{title}}"'
     elif command -v notify-send &> /dev/null; then
         notify-send '{{message}}'
     fi
@@ -219,7 +219,7 @@ lint-fix-ai:
     @echo -e "Checking {{BOLD}}{{CLI_NAME}}{{RESET}} for lint errors"
     @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || just _lint_fix_cli "/tmp/{{CLI}}_clippy_errors.txt"
     @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @just _speak "No lint errors were found in {{AREA}}"
+    @just _speak "No lint errors were found in {{PACKAGE}}"
 
 # commits all the staged changes using GPT 5.2 (via Opencode)
 commit:
@@ -345,16 +345,16 @@ _skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
 
 _refresh_docs *args="":
     @echo >&2
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{AREA}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
+    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
     @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
     @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
     @just _claude_file "{{DOCS_PROMPT}}"
 
 
 _refresh_skill SUMMARY_FILE *args:
-    @just _speak "The documentation files for {{AREA}} were updated and now we're starting the update of the skill files"
+    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
     @echo >&2
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{AREA}}{{RESET}}" >&2
+    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
     @echo >&2
     @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
     @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
@@ -371,7 +371,7 @@ drift *args="":
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
-    @_speak "the drift recipe for the {{AREA}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 
 
