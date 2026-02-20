@@ -7,7 +7,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Margin, WordWrap};
 use claudine::actions::{HookAction, LogTarget, ReportFormat};
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
@@ -50,6 +50,12 @@ pub struct HooksArgs {
 const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 /// Keep provider names from wrapping into multi-line labels in narrow terminals.
 const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
+
+fn provider_column() -> TableColumn {
+    TableColumn::new("Provider")
+        .with_min_width(PROVIDER_COLUMN_MIN_WIDTH)
+        .with_word_wrap(WordWrap::None)
+}
 
 fn bool_indicator(value: bool) -> TableCellContent {
     if value {
@@ -679,7 +685,7 @@ fn run_simple(
     config: Option<&HookerConfig>,
 ) -> Result<()> {
     let mut table = Table::new().with_columns(vec![
-        TableColumn::new("Provider").with_min_width(PROVIDER_COLUMN_MIN_WIDTH),
+        provider_column(),
         TableColumn::new("Installed"),
         TableColumn::new("Subscribed Hooks"),
     ]);
@@ -808,10 +814,7 @@ fn run_verbose(
     config: Option<&HookerConfig>,
 ) -> Result<()> {
     // Build columns: Provider, ∃ (exists/installed), then one per event
-    let mut columns = vec![
-        TableColumn::new("Provider").with_min_width(PROVIDER_COLUMN_MIN_WIDTH),
-        TableColumn::new("∃"), // existence symbol for installed
-    ];
+    let mut columns = vec![provider_column(), TableColumn::new("∃")]; // existence symbol for installed
 
     // Add a column for each event using abbreviations
     for event in AgenticEvent::ALL {
