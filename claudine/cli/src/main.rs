@@ -34,6 +34,8 @@ pub(crate) enum Commands {
     Sync(commands::sync::SyncArgs),
     /// Show registered hooks for all detected agents.
     Hooks(commands::hooks::HooksArgs),
+    /// Show which actions are configured and for which events.
+    Actions(commands::actions::ActionsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers,
     /// Remove Claudine hooks from all agents.
@@ -64,6 +66,7 @@ async fn main() -> Result<()> {
         Some(Commands::Link(args)) => commands::link::run(args),
         Some(Commands::Sync(args)) => commands::sync::run(args).await,
         Some(Commands::Hooks(args)) => commands::hooks::run(args, cli.verbose > 0),
+        Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),
         Some(Commands::Providers) => commands::providers::run(),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         None => {
