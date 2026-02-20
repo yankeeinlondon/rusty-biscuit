@@ -614,7 +614,7 @@ impl Table {
             }
         }
 
-        // Apply max width constraints
+        // Apply max width constraints (ensuring max_width doesn't go below min_width)
         for (i, col) in self.columns.iter().enumerate() {
             if fixed.get(i).copied().unwrap_or(false) {
                 continue;
@@ -622,7 +622,8 @@ impl Table {
             if let Some(max) = col.max_width
                 && i < widths.len()
             {
-                widths[i] = widths[i].min(max);
+                let min = col.min_width.unwrap_or(0);
+                widths[i] = widths[i].min(max).max(min);
             }
         }
 
@@ -2393,6 +2394,61 @@ mod tests {
             widths[0] >= 15,
             "Column width {} should respect min_width 15",
             widths[0]
+        );
+    }
+
+    #[test]
+    fn test_min_width_with_short_content() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Grade").with_min_width(8)])
+            .with_data(vec![vec!["A".into()]]);
+
+        let widths = table.calculate_column_widths(Some(100));
+        assert!(
+            widths[0] >= 8,
+            "Column width {} should respect min_width 8, got {}",
+            8,
+            widths[0]
+        );
+    }
+
+    #[test]
+    fn test_min_width_with_max_width_conflict() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Text").with_min_width(20).with_max_width(5),
+            ])
+            .with_data(vec![vec!["Hi".into()]]);
+
+        let widths = table.calculate_column_widths(Some(100));
+        // max_width < min_width is a config error, but min_width should still apply as floor
+        assert!(
+            widths[0] >= 20,
+            "Column width {} should respect min_width 20 (not max_width 5), got {}",
+            20,
+            widths[0]
+        );
+    }
+
+    #[test]
+    fn test_multiple_columns_min_width_with_constraint() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name").with_min_width(15),
+                TableColumn::new("Value").with_min_width(10),
+            ])
+            .with_data(vec![vec!["Short".into(), "12345678901234567890".into()]]);
+
+        let widths = table.calculate_column_widths(Some(40));
+        assert!(
+            widths[0] >= 15,
+            "Col1 width {} should respect min_width 15",
+            widths[0]
+        );
+        assert!(
+            widths[1] >= 10,
+            "Col2 width {} should respect min_width 10",
+            widths[1]
         );
     }
 
