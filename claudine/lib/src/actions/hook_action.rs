@@ -167,6 +167,32 @@ pub enum HookAction {
     },
 }
 
+impl HookAction {
+    /// Returns the canonical snake_case action type used in config serialization.
+    pub const fn type_slug(&self) -> &'static str {
+        match self {
+            HookAction::SoundEffect { .. } => "sound_effect",
+            HookAction::Speak { .. } => "speak",
+            HookAction::Log { .. } => "log",
+            HookAction::FireAndForget { .. } => "fire_and_forget",
+            HookAction::Call { .. } => "call",
+            HookAction::Report { .. } => "report",
+        }
+    }
+
+    /// Returns a PascalCase action type label for terminal presentation.
+    pub const fn type_pascal_case(&self) -> &'static str {
+        match self {
+            HookAction::SoundEffect { .. } => "SoundEffect",
+            HookAction::Speak { .. } => "Speak",
+            HookAction::Log { .. } => "Log",
+            HookAction::FireAndForget { .. } => "FireAndForget",
+            HookAction::Call { .. } => "Call",
+            HookAction::Report { .. } => "Report",
+        }
+    }
+}
+
 fn default_volume() -> f32 {
     1.0
 }
@@ -252,5 +278,16 @@ mod tests {
                 rotate_daily: true
             }
         );
+    }
+
+    #[test]
+    fn action_type_labels() {
+        let action = HookAction::FireAndForget {
+            command: "echo".to_string(),
+            args: None,
+        };
+
+        assert_eq!(action.type_slug(), "fire_and_forget");
+        assert_eq!(action.type_pascal_case(), "FireAndForget");
     }
 }

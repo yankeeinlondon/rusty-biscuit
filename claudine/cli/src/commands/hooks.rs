@@ -65,6 +65,12 @@ fn bool_indicator(value: bool) -> TableCellContent {
     }
 }
 
+fn event_name_pascal(slug: &str) -> String {
+    AgenticEvent::from_slug(slug)
+        .map(|event| event.as_pascal_case().to_string())
+        .unwrap_or_else(|| slug.to_string())
+}
+
 /// Get the expected events for a provider from the claudine config.
 ///
 /// Returns events that are enabled for this specific provider AND can be
@@ -104,7 +110,7 @@ fn expected_events_for_provider(
                     // Default: filter by provider's hook-based event support only
                     provider.supports_event_via_hook(event)
                 })
-                .map(|(event, _)| event.to_string())
+                .map(|(event, _)| event.as_slug().to_string())
                 .collect()
         })
         .unwrap_or_default()
@@ -122,7 +128,7 @@ fn all_enabled_events_for_provider(config: &HookerConfig, provider: Provider) ->
             p.events
                 .iter()
                 .filter(|(_, binding)| binding.enabled)
-                .map(|(event, _)| event.to_string())
+                .map(|(event, _)| event.as_slug().to_string())
                 .collect()
         })
         .unwrap_or_default()
@@ -147,15 +153,16 @@ fn format_event_with_color(
     is_missing: bool,
     is_unsupported: bool,
 ) -> String {
+    let display = event_name_pascal(event);
     if is_unsupported {
         // Unsupported events get red + strikethrough
-        format!("{{{{red}}}}{{{{strikethrough}}}}{event}{{{{reset}}}}")
+        format!("{{{{red}}}}{{{{strikethrough}}}}{display}{{{{reset}}}}")
     } else if is_stale {
-        format!("{{{{red}}}}{event}{{{{reset}}}}")
+        format!("{{{{red}}}}{display}{{{{reset}}}}")
     } else if is_missing {
-        format!("{{{{yellow}}}}{event}{{{{reset}}}}")
+        format!("{{{{yellow}}}}{display}{{{{reset}}}}")
     } else {
-        event.to_string()
+        display
     }
 }
 
@@ -329,7 +336,7 @@ fn format_action(action: &HookAction) -> String {
     match action {
         HookAction::Speak { message } => {
             format!(
-                "{{{{cyan}}}}speak{{{{reset}}}} \"{}\"",
+                "{{{{cyan}}}}Speak{{{{reset}}}} \"{}\"",
                 truncate_string(message, 40)
             )
         }
@@ -338,7 +345,7 @@ fn format_action(action: &HookAction) -> String {
             volume,
             speed,
         } => {
-            let mut parts = vec![format!("{{{{magenta}}}}sound{{{{reset}}}} {}", name)];
+            let mut parts = vec![format!("{{{{magenta}}}}SoundEffect{{{{reset}}}} {}", name)];
             if *volume != 1.0 {
                 parts.push(format!("vol={:.1}", volume));
             }
@@ -353,15 +360,15 @@ fn format_action(action: &HookAction) -> String {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| "~/.claudine/logs/YYYY-MM-DD.jsonl".to_string());
-                format!("{{{{blue}}}}log{{{{reset}}}} → {display}")
+                format!("{{{{blue}}}}Log{{{{reset}}}} → {display}")
             }
             LogTarget::Server { url, .. } => {
-                format!("{{{{blue}}}}log{{{{reset}}}} → {}", url)
+                format!("{{{{blue}}}}Log{{{{reset}}}} → {}", url)
             }
-            _ => "{{blue}}log{{reset}}".to_string(),
+            _ => "{{blue}}Log{{reset}}".to_string(),
         },
         HookAction::Report { handler } => match handler {
-            None => "{{yellow}}report{{reset}} (default)".to_string(),
+            None => "{{yellow}}Report{{reset}} (default)".to_string(),
             Some(h) => {
                 let format_str = match h.format {
                     ReportFormat::Text => "text",
@@ -371,12 +378,12 @@ fn format_action(action: &HookAction) -> String {
                 };
                 if let Some(template) = &h.template {
                     format!(
-                        "{{{{yellow}}}}report{{{{reset}}}} [{}] \"{}\"",
+                        "{{{{yellow}}}}Report{{{{reset}}}} [{}] \"{}\"",
                         format_str,
                         truncate_string(template, 30)
                     )
                 } else {
-                    format!("{{{{yellow}}}}report{{{{reset}}}} [{}]", format_str)
+                    format!("{{{{yellow}}}}Report{{{{reset}}}} [{}]", format_str)
                 }
             }
         },
@@ -387,7 +394,7 @@ fn format_action(action: &HookAction) -> String {
                 command.clone()
             };
             format!(
-                "{{{{green}}}}fire_and_forget{{{{reset}}}} `{}`",
+                "{{{{green}}}}FireAndForget{{{{reset}}}} `{}`",
                 truncate_string(&cmd_str, 35)
             )
         }
@@ -403,7 +410,7 @@ fn format_action(action: &HookAction) -> String {
                 command.clone()
             };
             format!(
-                "{{{{green}}}}call{{{{reset}}}} `{}` {{{{dim}}}}timeout={:?}{{{{reset}}}}",
+                "{{{{green}}}}Call{{{{reset}}}} `{}` {{{{dim}}}}timeout={:?}{{{{reset}}}}",
                 truncate_string(&cmd_str, 35),
                 timeout_ms
             )
@@ -527,7 +534,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         };
 
         table.add_row(vec![
-            event.to_string().into(),
+            event.as_pascal_case().into(),
             support_cell,
             status_cell,
             actions_cell,
@@ -593,12 +600,12 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
             let event_cell: TableCellContent = if is_unsupported {
                 Prose::new(format!(
                     "{{{{red}}}}{{{{strikethrough}}}}{}{{{{reset}}}}",
-                    event
+                    event.as_pascal_case()
                 ))
                 .fallback_render(&term)
                 .into()
             } else {
-                event.to_string().into()
+                event.as_pascal_case().into()
             };
             let desc_cell: TableCellContent = if is_unsupported {
                 Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", event.description()))
@@ -926,7 +933,7 @@ fn run_support() -> Result<()> {
 
     // Add a row for each event
     for matrix_row in matrix {
-        let mut row: Vec<TableCellContent> = vec![matrix_row.event.to_string().into()];
+        let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];
 
         for cell in matrix_row.cells {
             let rendered = match cell.level {
@@ -987,7 +994,7 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
 
     // Add a row for each event
     for matrix_row in event_native_mapping_matrix(providers) {
-        let mut row: Vec<TableCellContent> = vec![matrix_row.event.to_string().into()];
+        let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];
 
         for cell in matrix_row.cells {
             let cell: TableCellContent = match cell.native {
@@ -1020,7 +1027,7 @@ fn run_describe() -> Result<()> {
     // Add a row for each event
     for event in AgenticEvent::ALL {
         let row: Vec<TableCellContent> = vec![
-            event.to_string().into(),
+            event.as_pascal_case().into(),
             event.response_schema().into(),
             event.return_schema().into(),
             event.description().into(),

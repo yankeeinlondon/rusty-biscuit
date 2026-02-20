@@ -9,7 +9,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_configurator};
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
 
 use crate::log;
 
@@ -58,11 +58,17 @@ enum SyncAction {
     Error(String),
 }
 
+fn event_name_pascal(slug: &str) -> String {
+    AgenticEvent::from_slug(slug)
+        .map(|event| event.as_pascal_case().to_string())
+        .unwrap_or_else(|| slug.to_string())
+}
+
 /// Format a prose for an added hook.
 fn prose_added(hook: &str) -> Prose {
     Prose::new(format!(
         "<i>added</i> the hook <inverse> {} </inverse>",
-        hook
+        event_name_pascal(hook)
     ))
 }
 
@@ -70,7 +76,7 @@ fn prose_added(hook: &str) -> Prose {
 fn prose_removed_stale(hook: &str) -> Prose {
     Prose::new(format!(
         "<i>removed</i> the <b>stale</b> hook <inverse> {} </inverse>",
-        hook
+        event_name_pascal(hook)
     ))
 }
 
@@ -98,7 +104,7 @@ fn prose_up_to_date() -> Prose {
 fn prose_would_add(hook: &str) -> Prose {
     Prose::new(format!(
         "<dim>would add hook</dim> <inverse> {} </inverse>",
-        hook
+        event_name_pascal(hook)
     ))
 }
 
@@ -106,7 +112,7 @@ fn prose_would_add(hook: &str) -> Prose {
 fn prose_would_remove_stale(hook: &str) -> Prose {
     Prose::new(format!(
         "<dim>would remove stale hook</dim> <inverse> {} </inverse>",
-        hook
+        event_name_pascal(hook)
     ))
 }
 
@@ -234,7 +240,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                             p.events
                                 .iter()
                                 .filter(|(e, b)| b.enabled && provider.supports_event_via_hook(e))
-                                .map(|(e, _)| e.to_string())
+                                .map(|(e, _)| e.as_slug().to_string())
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -333,7 +339,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                 .filter(|(event, binding)| {
                     binding.enabled && !provider.supports_event_via_hook(event)
                 })
-                .map(|(event, _)| event.to_string())
+                .map(|(event, _)| event.as_slug().to_string())
                 .collect();
 
             if !unsupported.is_empty() {
@@ -358,7 +364,11 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                         log::data("");
 
                         for (provider, events) in &removed {
-                            let events_str = events.join(", ");
+                            let events_str = events
+                                .iter()
+                                .map(|event| event_name_pascal(event))
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             let line = Prose::new(format!(
                                 "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
                                 provider, events_str
@@ -390,7 +400,11 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                 log::data("");
 
                 for (provider, events) in &unsupported_warnings {
-                    let events_str = events.join(", ");
+                    let events_str = events
+                        .iter()
+                        .map(|event| event_name_pascal(event))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let line = Prose::new(format!(
                         "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
                         provider, events_str
@@ -408,7 +422,11 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                 log::data("");
 
                 for (provider, events) in &unsupported_warnings {
-                    let events_str = events.join(", ");
+                    let events_str = events
+                        .iter()
+                        .map(|event| event_name_pascal(event))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let line = Prose::new(format!(
                         "  <b>{}</b>: <red><strikethrough>{}</strikethrough></red>",
                         provider, events_str

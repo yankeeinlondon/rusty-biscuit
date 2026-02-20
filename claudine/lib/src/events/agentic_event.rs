@@ -67,6 +67,50 @@ impl AgenticEvent {
         AgenticEvent::Notification,
     ];
 
+    /// Returns the canonical snake_case identifier used in config files.
+    pub const fn as_slug(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "session_start",
+            AgenticEvent::SessionEnd => "session_end",
+            AgenticEvent::BeforePrompt => "before_prompt",
+            AgenticEvent::BeforeTool => "before_tool",
+            AgenticEvent::AfterTool => "after_tool",
+            AgenticEvent::ToolError => "tool_error",
+            AgenticEvent::PermissionRequest => "permission_request",
+            AgenticEvent::TurnComplete => "turn_complete",
+            AgenticEvent::TurnError => "turn_error",
+            AgenticEvent::SubagentStart => "subagent_start",
+            AgenticEvent::SubagentStop => "subagent_stop",
+            AgenticEvent::BeforeModel => "before_model",
+            AgenticEvent::AfterModel => "after_model",
+            AgenticEvent::BeforeCompact => "before_compact",
+            AgenticEvent::Notification => "notification",
+            AgenticEvent::HumanInTheLoop => "human_in_the_loop",
+        }
+    }
+
+    /// Returns a PascalCase display label for terminal presentation.
+    pub const fn as_pascal_case(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "SessionStart",
+            AgenticEvent::SessionEnd => "SessionEnd",
+            AgenticEvent::BeforePrompt => "BeforePrompt",
+            AgenticEvent::BeforeTool => "BeforeTool",
+            AgenticEvent::AfterTool => "AfterTool",
+            AgenticEvent::ToolError => "ToolError",
+            AgenticEvent::PermissionRequest => "PermissionRequest",
+            AgenticEvent::TurnComplete => "TurnComplete",
+            AgenticEvent::TurnError => "TurnError",
+            AgenticEvent::SubagentStart => "SubagentStart",
+            AgenticEvent::SubagentStop => "SubagentStop",
+            AgenticEvent::BeforeModel => "BeforeModel",
+            AgenticEvent::AfterModel => "AfterModel",
+            AgenticEvent::BeforeCompact => "BeforeCompact",
+            AgenticEvent::Notification => "Notification",
+            AgenticEvent::HumanInTheLoop => "HumanInTheLoop",
+        }
+    }
+
     /// Parse a canonical snake_case event name.
     pub fn from_slug(name: &str) -> Option<Self> {
         match name {
@@ -248,11 +292,7 @@ fn normalize_event_identifier(input: &str) -> String {
 
 impl fmt::Display for AgenticEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_else(|| format!("{self:?}"));
-        f.write_str(&s)
+        f.write_str(self.as_slug())
     }
 }
 
@@ -299,6 +339,12 @@ mod tests {
     fn display_uses_snake_case() {
         assert_eq!(AgenticEvent::BeforeTool.to_string(), "before_tool");
         assert_eq!(AgenticEvent::SessionStart.to_string(), "session_start");
+    }
+
+    #[test]
+    fn as_pascal_case_returns_pascal_case() {
+        assert_eq!(AgenticEvent::BeforeTool.as_pascal_case(), "BeforeTool");
+        assert_eq!(AgenticEvent::SessionStart.as_pascal_case(), "SessionStart");
     }
 
     #[test]

@@ -64,7 +64,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
         Ok((parsed_event, mut meta)) => {
             meta.env = env;
             log::data(&format!("Provider: {provider}"));
-            log::data(&format!("Event:    {parsed_event}"));
+            log::data(&format!("Event:    {}", parsed_event.as_pascal_case()));
             if let Some(tool) = &meta.tool_name {
                 log::data(&format!("Tool:     {tool}"));
             }
@@ -131,7 +131,10 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                             }
                         }
                     } else {
-                        log::data(&format!("No binding found for {provider}/{parsed_event}"));
+                        log::data(&format!(
+                            "No binding found for {provider}/{}",
+                            parsed_event.as_pascal_case()
+                        ));
                     }
                 }
                 Err(e) => {
@@ -156,7 +159,7 @@ fn parse_event(name: &str) -> Result<AgenticEvent> {
 
     let available = AgenticEvent::ALL
         .iter()
-        .map(AgenticEvent::to_string)
+        .map(AgenticEvent::as_pascal_case)
         .collect::<Vec<_>>()
         .join(", ");
     bail!("Unknown event: {name}\n\nAvailable events: {available}")

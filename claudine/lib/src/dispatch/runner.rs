@@ -2,6 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use regex::Regex;
+use serde_json::{Map, Value};
 use tokio::process::Command;
 use tracing::{debug, warn};
 
@@ -263,7 +264,7 @@ fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta) {
         Some(handler) => format_report(handler, meta),
         None => format!(
             "[{}] {} ({})",
-            meta.event,
+            meta.event.as_pascal_case(),
             meta.tool_name.as_deref().unwrap_or("-"),
             meta.provider
         ),
@@ -271,12 +272,106 @@ fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta) {
     println!("{output}");
 }
 
+fn terminal_meta_json(meta: &EventMeta) -> String {
+    let mut value = terminal_meta_value(meta);
+    strip_nulls(&mut value);
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn terminal_meta_value(meta: &EventMeta) -> Value {
+    let mut object = Map::new();
+
+    object.insert(
+        "provider".to_string(),
+        Value::String(meta.provider.as_slug().to_string()),
+    );
+    object.insert(
+        "event".to_string(),
+        Value::String(meta.event.as_pascal_case().to_string()),
+    );
+    object.insert(
+        "timestamp".to_string(),
+        serde_json::to_value(meta.timestamp).unwrap_or(Value::Null),
+    );
+
+    if let Some(value) = &meta.session_id {
+        object.insert("session_id".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.cwd {
+        object.insert("cwd".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.tool_name {
+        object.insert("tool_name".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.tool_input {
+        object.insert("tool_input".to_string(), value.clone());
+    }
+    if let Some(value) = &meta.tool_response {
+        object.insert("tool_response".to_string(), value.clone());
+    }
+    if let Some(value) = &meta.error {
+        object.insert("error".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.prompt {
+        object.insert("prompt".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.agent_type {
+        object.insert("agent_type".to_string(), Value::String(value.clone()));
+    }
+    if let Some(value) = &meta.notification_type {
+        object.insert(
+            "notification_type".to_string(),
+            Value::String(value.clone()),
+        );
+    }
+    if let Some(value) = &meta.notification_message {
+        object.insert(
+            "notification_message".to_string(),
+            Value::String(value.clone()),
+        );
+    }
+
+    object.insert(
+        "extra".to_string(),
+        serde_json::to_value(&meta.extra).unwrap_or_else(|_| Value::Object(Map::new())),
+    );
+    object.insert(
+        "env".to_string(),
+        serde_json::to_value(&meta.env).unwrap_or(Value::Null),
+    );
+
+    Value::Object(object)
+}
+
+fn strip_nulls(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            let mut to_remove = Vec::new();
+            for (key, nested) in map.iter_mut() {
+                strip_nulls(nested);
+                if nested.is_null() {
+                    to_remove.push(key.clone());
+                }
+            }
+            for key in to_remove {
+                map.remove(&key);
+            }
+        }
+        Value::Array(items) => {
+            for nested in items.iter_mut() {
+                strip_nulls(nested);
+            }
+            items.retain(|item| !item.is_null());
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 fn format_report(handler: &ReportHandler, meta: &EventMeta) -> String {
     if let Some(template) = &handler.template {
         let mut output = interpolate(template, meta);
-        if handler.include_metadata
-            && let Ok(json) = serde_json::to_string(meta)
-        {
+        if handler.include_metadata {
+            let json = terminal_meta_json(meta);
             output.push(' ');
             output.push_str(&json);
         }
@@ -284,15 +379,15 @@ fn format_report(handler: &ReportHandler, meta: &EventMeta) -> String {
     }
 
     match handler.format {
-        ReportFormat::Json => serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
+        ReportFormat::Json => terminal_meta_json(meta),
         ReportFormat::Compact => format!(
             "[{}] {}",
-            meta.event,
+            meta.event.as_pascal_case(),
             meta.tool_name.as_deref().unwrap_or("-")
         ),
         ReportFormat::Text => format!(
             "Event: {}, Provider: {}, Tool: {}",
-            meta.event,
+            meta.event.as_pascal_case(),
             meta.provider,
             meta.tool_name.as_deref().unwrap_or("-")
         ),
@@ -550,5 +645,39 @@ mod tests {
             Some(&deny_response),
             &continue_response
         ));
+    }
+
+    #[test]
+    fn terminal_meta_json_uses_pascal_case_and_omits_none() {
+        let json = terminal_meta_json(&meta());
+        let value: Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["event"], "BeforeTool");
+        assert_eq!(value["provider"], "claude");
+        assert!(value.get("tool_input").is_none());
+        assert!(value.get("tool_response").is_none());
+        assert!(value.get("error").is_none());
+        assert!(value.get("prompt").is_none());
+        assert!(value.get("notification_type").is_none());
+        assert!(value.get("notification_message").is_none());
+        assert!(value["env"].get("git").is_none());
+        assert!(value["env"].get("repo").is_none());
+        assert!(value["env"].get("primary_language").is_none());
+    }
+
+    #[test]
+    fn report_json_uses_terminal_serialization() {
+        let output = format_report(
+            &ReportHandler {
+                format: ReportFormat::Json,
+                template: None,
+                include_metadata: false,
+            },
+            &meta(),
+        );
+
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["event"], "BeforeTool");
+        assert!(value.get("tool_input").is_none());
     }
 }

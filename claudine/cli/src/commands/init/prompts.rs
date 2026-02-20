@@ -132,7 +132,7 @@ fn prompt_logging_profile() -> Result<LoggingProfile> {
 fn prompt_logging_event_selection() -> Result<HashSet<AgenticEvent>> {
     let options: Vec<String> = INIT_EVENT_DISPLAY_ORDER
         .iter()
-        .map(|event| format!("{} - {}", event, event.description()))
+        .map(|event| format!("{} - {}", event.as_pascal_case(), event.description()))
         .collect();
 
     let defaults: Vec<usize> = INIT_EVENT_DISPLAY_ORDER
@@ -152,7 +152,7 @@ fn prompt_logging_event_selection() -> Result<HashSet<AgenticEvent>> {
             let name = opt.split(" - ").next()?;
             INIT_EVENT_DISPLAY_ORDER
                 .iter()
-                .find(|event| event.to_string() == name)
+                .find(|event| event.as_pascal_case() == name)
                 .copied()
         })
         .collect())

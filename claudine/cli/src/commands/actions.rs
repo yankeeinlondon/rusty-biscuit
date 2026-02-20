@@ -9,6 +9,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::actions::HookAction;
 use claudine::dispatch::loader::load_config;
+use claudine::events::AgenticEvent;
 
 use crate::log;
 
@@ -34,15 +35,13 @@ pub fn run(_args: ActionsArgs, verbose: bool) -> Result<()> {
 }
 
 fn action_type_name(action: &HookAction) -> &'static str {
-    match action {
-        HookAction::SoundEffect { .. } => "sound_effect",
-        HookAction::Speak { .. } => "speak",
-        HookAction::Log { .. } => "log",
-        HookAction::FireAndForget { .. } => "fire_and_forget",
-        HookAction::Call { .. } => "call",
-        HookAction::Report { .. } => "report",
-        _ => "unknown",
-    }
+    action.type_pascal_case()
+}
+
+fn event_name_pascal(slug: &str) -> String {
+    AgenticEvent::from_slug(slug)
+        .map(|event| event.as_pascal_case().to_string())
+        .unwrap_or_else(|| slug.to_string())
 }
 
 fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {
@@ -59,7 +58,7 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
                 action_to_events
                     .entry(action_name.to_string())
                     .or_default()
-                    .push(event.to_string());
+                    .push(event.as_slug().to_string());
             }
         }
     }
@@ -85,7 +84,11 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
         unique_events.sort();
         unique_events.dedup();
 
-        let events_str = unique_events.join(", ");
+        let events_str = unique_events
+            .iter()
+            .map(|event| event_name_pascal(event))
+            .collect::<Vec<_>>()
+            .join(", ");
         table.add_row(vec![action_name.clone().into(), events_str.into()]);
     }
 
@@ -102,7 +105,7 @@ fn action_with_params(action: &HookAction) -> String {
             volume,
             speed,
         } => {
-            let mut s = format!("sound_effect({name}");
+            let mut s = format!("{}({name}", action.type_pascal_case());
             if *volume != 1.0 {
                 s.push_str(&format!(", vol={}", volume));
             }
@@ -118,7 +121,7 @@ fn action_with_params(action: &HookAction) -> String {
             } else {
                 message.clone()
             };
-            format!("speak({truncated})")
+            format!("{}({truncated})", action.type_pascal_case())
         }
         HookAction::Log { target } => {
             let params = match target {
@@ -147,16 +150,21 @@ fn action_with_params(action: &HookAction) -> String {
                 _ => String::new(),
             };
             if params.is_empty() {
-                "log()".to_string()
+                format!("{}()", action.type_pascal_case())
             } else {
-                format!("log({{{params}}})")
+                format!("{}({{{params}}})", action.type_pascal_case())
             }
         }
         HookAction::FireAndForget { command, args } => {
             if let Some(args) = args {
-                format!("fire_and_forget({} {})", command, args.join(" "))
+                format!(
+                    "{}({} {})",
+                    action.type_pascal_case(),
+                    command,
+                    args.join(" ")
+                )
             } else {
-                format!("fire_and_forget({})", command)
+                format!("{}({})", action.type_pascal_case(), command)
             }
         }
         HookAction::Call {
@@ -165,7 +173,7 @@ fn action_with_params(action: &HookAction) -> String {
             timeout_ms,
             ..
         } => {
-            let mut s = format!("call({}", command);
+            let mut s = format!("{}({}", action.type_pascal_case(), command);
             if let Some(args) = args {
                 s.push_str(&format!(" {}", args.join(" ")));
             }
@@ -187,12 +195,12 @@ fn action_with_params(action: &HookAction) -> String {
                         &template[..template.len().min(20)]
                     ));
                 }
-                format!("report({{{params}}})")
+                format!("{}({{{params}}})", action.type_pascal_case())
             } else {
-                "report()".to_string()
+                format!("{}()", action.type_pascal_case())
             }
         }
-        _ => "unknown".to_string(),
+        _ => action.type_pascal_case().to_string(),
     }
 }
 
@@ -210,7 +218,7 @@ fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Resu
                 action_to_events
                     .entry(action_key)
                     .or_default()
-                    .push(event.to_string());
+                    .push(event.as_slug().to_string());
             }
         }
     }
@@ -239,7 +247,11 @@ fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Resu
         unique_events.sort();
         unique_events.dedup();
 
-        let events_str = unique_events.join(", ");
+        let events_str = unique_events
+            .iter()
+            .map(|event| event_name_pascal(event))
+            .collect::<Vec<_>>()
+            .join(", ");
         table.add_row(vec![action_key.clone().into(), events_str.into()]);
     }
 
