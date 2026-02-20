@@ -47,7 +47,7 @@ fn event_name_pascal(slug: &str) -> String {
 fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {
     let mut action_to_events: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for (_provider, provider_config) in &config.providers {
+    for provider_config in config.providers.values() {
         for (event, binding) in &provider_config.events {
             if !binding.enabled {
                 continue;
@@ -127,7 +127,7 @@ fn action_with_params(action: &HookAction) -> String {
             let params = match target {
                 claudine::actions::LogTarget::File { path, rotate_daily } => {
                     let mut p = String::new();
-                    if *rotate_daily != true {
+                    if !*rotate_daily {
                         p.push_str(&format!("rotate_daily: {}", rotate_daily));
                     }
                     if path.is_some() {
@@ -207,7 +207,7 @@ fn action_with_params(action: &HookAction) -> String {
 fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {
     let mut action_to_events: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for (_provider, provider_config) in &config.providers {
+    for provider_config in config.providers.values() {
         for (event, binding) in &provider_config.events {
             if !binding.enabled {
                 continue;

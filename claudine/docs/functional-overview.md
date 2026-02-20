@@ -30,7 +30,7 @@ Claudine interacts with your Agentic CLI's in two distinct ways:
             - **Bespoke Actions:**
     - **Initialization and Event Abstraction**
         - Initialization
-            - When you first initialize Claudine with `claudine init` it will immediately subscribe to all _events_ that each Agentic CLI you have installed provides
+            - When you first initialize Claudine with `claudine init` it will immediately subscribe to ALL _events_ on ALL installed Agentic CLIs's
             - It will not only subscribe to all events but ensure that Claudine's events are subscribed to FIRST in the cases where other non-claudine events are also subscribed
         - Event Abstraction
             - The hook event names which each Agentic CLI provides are not always the same. Sometimes two Agents will have in essence the "same event" but use different names, in other cases they will have an event that is quite distinct and not like the others.
