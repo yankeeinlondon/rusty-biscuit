@@ -139,10 +139,13 @@ cli *args="":
     @cargo run -p queue-cli -- {{args}}
 
 # Use GPT 5.2 to commit staged changes
+# commits all the staged changes using GPT 5.2 (via Opencode)
 commit:
-    @echo "Using Opencode with {{BOLD}}gpt-5.2-codex{{RESET}} to {{BOLD}}commit{{RESET}} staged changes"
-    @echo
-    @cd .. && opencode run "/commit -f ; remember you must use 'conventional commits' naming conventions and that unless all staged files are strongly related to the same thing be sure to make multiple commits by package or related activity." --model "openai/gpt-5.2-codex"
+    @echo ""
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
+    @echo ""
+    @opencode run "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, etc.) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message. If no files are staged for commit then communicate this to the user and exit." --model "${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}}"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi

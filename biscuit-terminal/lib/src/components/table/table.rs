@@ -661,10 +661,20 @@ impl Table {
         // Calculate how much we need to reduce
         let excess = current_content_width.saturating_sub(max_content_width);
 
-        // Identify reducible columns (text columns that allow word wrap and aren't fixed)
+        // Identify reducible columns (text columns that allow word wrap, aren't fixed, 
+        // and don't have min_width - columns with min_width are treated as non-reducible)
         let mut reducible: Vec<(usize, usize)> = Vec::new(); // (index, current_width)
         for (i, &width) in widths.iter().enumerate() {
             if fixed.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            // Columns with min_width should not be reduced - treat them as fixed
+            let has_min_width = self
+                .columns
+                .get(i)
+                .and_then(|col| col.min_width)
+                .is_some();
+            if has_min_width {
                 continue;
             }
             let allows_reduction = self
