@@ -1,5 +1,6 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use color_eyre::eyre::Result;
+use tracing::level_filters::LevelFilter;
 
 mod commands;
 mod log;
@@ -48,9 +49,8 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Initialize tracing (only DEBUG env var enables info/debug logs)
-    let env_filter = tracing_subscriber::EnvFilter::try_from_env("DEBUG")
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    // Default levels come from -v/-vv and can be overridden by RUST_LOG/DEBUG.
+    let env_filter = build_env_filter(cli.verbose);
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -74,5 +74,46 @@ async fn main() -> Result<()> {
             Cli::command().print_help()?;
             Ok(())
         }
+    }
+}
+
+fn build_env_filter(verbose: u8) -> tracing_subscriber::EnvFilter {
+    let default_directive = verbosity_level(verbose).into();
+
+    if std::env::var_os("RUST_LOG").is_some() {
+        return tracing_subscriber::EnvFilter::builder()
+            .with_default_directive(default_directive)
+            .from_env_lossy();
+    }
+
+    if let Some(debug) = std::env::var("DEBUG")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        let directive = normalize_debug_override(&debug).unwrap_or(debug);
+        return tracing_subscriber::EnvFilter::builder()
+            .with_default_directive(default_directive)
+            .parse_lossy(directive);
+    }
+
+    tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(default_directive)
+        .from_env_lossy()
+}
+
+fn verbosity_level(verbose: u8) -> LevelFilter {
+    match verbose {
+        0 => LevelFilter::WARN,
+        1 => LevelFilter::INFO,
+        _ => LevelFilter::DEBUG,
+    }
+}
+
+fn normalize_debug_override(raw: &str) -> Option<String> {
+    match raw.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some("debug".to_string()),
+        "0" | "false" | "no" | "off" => Some("warn".to_string()),
+        _ => None,
     }
 }

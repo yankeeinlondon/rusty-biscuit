@@ -3,6 +3,8 @@ mod matcher;
 mod runner;
 pub mod template;
 
+use std::path::Path;
+
 use serde_json::Value;
 use tracing::{debug, info};
 
@@ -44,7 +46,7 @@ pub async fn dispatch(
 
     info!(%provider, %event, "Dispatching event");
 
-    let config = match loader::load_runtime_config(None, None) {
+    let config = match loader::load_runtime_config(None, runtime_repo_root(env)) {
         Ok(config) => config,
         Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
             debug!("No .claudine config found, skipping dispatch");
@@ -109,6 +111,13 @@ pub async fn dispatch(
     )
 }
 
+fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
+    env.git
+        .as_ref()
+        .map(|git| git.repo_root.as_path())
+        .or_else(|| env.repo.as_ref().map(|repo| repo.root.as_path()))
+}
+
 fn finalize_response(
     adapter: &dyn adapters::ProviderAdapter,
     event: &crate::events::AgenticEvent,
@@ -165,6 +174,84 @@ mod tests {
 
         let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
         assert_eq!(outcome, DispatchOutcome::default());
+    }
+
+    #[tokio::test]
+    async fn dispatch_loads_repo_scoped_config_from_environment_context() {
+        let repo = tempfile::tempdir().unwrap();
+        let log_path = repo.path().join("repo-events.jsonl");
+
+        let mut claude_config = ProviderConfig::default();
+        claude_config.events.insert(
+            AgenticEvent::SessionStart,
+            EventBinding {
+                enabled: true,
+                actions: vec![HookAction::Log {
+                    target: LogTarget::File {
+                        path: Some(log_path.clone()),
+                        rotate_daily: false,
+                    },
+                }],
+                matcher: None,
+            },
+        );
+
+        let config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                default_log_target: None,
+                tts: None,
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+            },
+            providers: {
+                let mut providers = HashMap::new();
+                providers.insert(Provider::Claude, claude_config);
+                providers
+            },
+        };
+
+        let config_path = repo.path().join(".claudine/config.json");
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let raw = json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "repo-scoped-123"
+        });
+        let env = EnvironmentContext {
+            git: Some(GitContext {
+                repo_root: repo.path().to_path_buf(),
+                branch: None,
+                is_dirty: false,
+                staged_count: 0,
+                unstaged_count: 0,
+                untracked_count: 0,
+                head_sha: None,
+                head_message: None,
+                user_name: None,
+                user_email: None,
+                remote_name: None,
+                remote_url: None,
+                hosting_provider: None,
+                repo_name: None,
+                repo_org: None,
+            }),
+            ..EnvironmentContext::default()
+        };
+
+        let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
+        assert_eq!(outcome, DispatchOutcome::default());
+
+        let content = std::fs::read_to_string(log_path).unwrap();
+        assert!(content.contains("repo-scoped-123"));
     }
 
     #[test]

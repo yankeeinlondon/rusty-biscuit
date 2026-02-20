@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::time::Duration;
 
+use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use regex::Regex;
 use serde_json::{Map, Value};
 use tokio::process::Command;
@@ -28,7 +29,7 @@ pub async fn execute_actions(
 
     for (index, action) in actions.iter().enumerate() {
         match action {
-            HookAction::Speak { message } => execute_speak(message, meta),
+            HookAction::Speak { message } => execute_speak(message, meta, settings),
             HookAction::Log { target } => {
                 let target = resolve_log_target(target, settings);
                 execute_log(target, meta).await?
@@ -118,17 +119,51 @@ fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookRespo
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
-fn execute_speak(message_template: &str, meta: &EventMeta) {
+fn execute_speak(message_template: &str, meta: &EventMeta, settings: &GlobalSettings) {
     let text = interpolate(message_template, meta);
     if text.is_empty() {
         return;
     }
 
+    let config = tts_config_from_settings(settings.tts.as_ref());
+
     tokio::spawn(async move {
-        if let Err(error) = biscuit_speaks::Speak::new(text).play().await {
+        if let Err(error) = biscuit_speaks::Speak::new(text)
+            .with_config(config)
+            .play()
+            .await
+        {
             warn!(%error, "TTS playback failed");
         }
     });
+}
+
+fn tts_config_from_settings(settings: Option<&crate::events::TtsSettings>) -> TtsConfig {
+    let mut config = TtsConfig::new();
+    let Some(settings) = settings else {
+        return config;
+    };
+
+    if let Some(voice) = settings.voice.as_deref() {
+        config = config.with_voice(voice);
+    }
+
+    if let Some(rate) = settings.rate {
+        config = config.with_speed(SpeedLevel::Explicit(rate));
+    }
+
+    if let Some(provider) = settings.provider.as_deref() {
+        if let Some(provider) = biscuit_speaks::parse_provider_name(provider) {
+            config = config.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+        } else {
+            warn!(
+                provider,
+                "Unknown TTS provider in settings; falling back to automatic provider selection"
+            );
+        }
+    }
+
+    config
 }
 
 fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
@@ -547,10 +582,11 @@ mod tests {
     use std::collections::HashMap;
     use std::os::unix::process::ExitStatusExt;
 
+    use biscuit_speaks::{HostTtsProvider, TtsFailoverStrategy, TtsProvider};
     use chrono::Utc;
 
     use super::*;
-    use crate::events::{EnvironmentContext, Provider};
+    use crate::events::{EnvironmentContext, Provider, TtsSettings};
 
     fn meta() -> EventMeta {
         EventMeta {
@@ -679,5 +715,38 @@ mod tests {
         let value: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value["event"], "BeforeTool");
         assert!(value.get("tool_input").is_none());
+    }
+
+    #[test]
+    fn tts_config_applies_provider_voice_and_rate() {
+        let settings = TtsSettings {
+            provider: Some("say".to_string()),
+            voice: Some("Samantha".to_string()),
+            rate: Some(1.4),
+        };
+
+        let config = tts_config_from_settings(Some(&settings));
+
+        assert_eq!(config.requested_voice.as_deref(), Some("Samantha"));
+        assert_eq!(config.speed, SpeedLevel::Explicit(1.4));
+        assert!(matches!(
+            config.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(HostTtsProvider::Say))
+        ));
+    }
+
+    #[test]
+    fn tts_config_keeps_default_failover_for_unknown_provider() {
+        let settings = TtsSettings {
+            provider: Some("not-a-provider".to_string()),
+            voice: None,
+            rate: None,
+        };
+
+        let config = tts_config_from_settings(Some(&settings));
+        assert!(matches!(
+            config.failover_strategy,
+            TtsFailoverStrategy::FirstAvailable
+        ));
     }
 }

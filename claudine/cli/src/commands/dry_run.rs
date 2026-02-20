@@ -11,6 +11,13 @@ use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider, detect_e
 
 use crate::log;
 
+const DRY_RUN_SUPPORTED_PROVIDERS: &[Provider] = &[
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Gemini,
+    Provider::OpenCode,
+];
+
 /// Arguments for the dry-run subcommand.
 #[derive(Args)]
 #[command(after_help = r#"EXAMPLES:
@@ -285,7 +292,16 @@ fn read_stdin_json() -> Result<Value> {
 
 fn parse_provider(name: &str) -> Result<Provider> {
     if let Some(provider) = Provider::parse_cli_name(name) {
-        return Ok(provider);
+        if DRY_RUN_SUPPORTED_PROVIDERS.contains(&provider) {
+            return Ok(provider);
+        }
+
+        let supported = DRY_RUN_SUPPORTED_PROVIDERS
+            .iter()
+            .map(Provider::as_slug)
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!("Unsupported provider for dry-run: {name}\n\nSupported: {supported}");
     }
 
     let supported = PROVIDERS_DISPLAY_ORDER
@@ -355,6 +371,20 @@ mod tests {
     #[test]
     fn parse_event_unknown_fails() {
         assert!(parse_event("not_an_event").is_err());
+    }
+
+    #[test]
+    fn parse_provider_accepts_supported_values() {
+        assert_eq!(parse_provider("claude").unwrap(), Provider::Claude);
+        assert_eq!(parse_provider("codex").unwrap(), Provider::Codex);
+        assert_eq!(parse_provider("gemini").unwrap(), Provider::Gemini);
+        assert_eq!(parse_provider("open_code").unwrap(), Provider::OpenCode);
+    }
+
+    #[test]
+    fn parse_provider_rejects_unsupported_dry_run_provider() {
+        let error = parse_provider("goose").unwrap_err().to_string();
+        assert!(error.contains("Unsupported provider for dry-run"));
     }
 
     #[test]
