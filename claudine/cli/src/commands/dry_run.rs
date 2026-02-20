@@ -27,8 +27,8 @@ use crate::log;
 
 AVAILABLE EVENTS:
     session_start, session_end, before_prompt, before_tool, after_tool,
-    tool_error, permission_request, turn_complete, turn_error,
-    subagent_start, subagent_stop, before_model, after_model,
+    tool_error, permission_request, human_in_the_loop, turn_complete,
+    turn_error, subagent_start, subagent_stop, before_model, after_model,
     before_compact, notification
 "#)]
 pub struct DryRunArgs {

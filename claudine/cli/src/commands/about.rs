@@ -19,6 +19,7 @@ Cross-agent hook/event system for agentic CLIs. Configure once, use everywhere.
 | Goose         | ⛔️ Non-hook  | Requires wrapper (not yet impl)  |
 | Kimi Code     | ⛔️ Non-hook  | Requires wire-mode proxy         |
 | Qwen Code     | ❌ None      | No hook support currently        |
+| Roo Code      | ⛔️ Non-hook  | Requires event stream proxy      |
 
 Run `claudine hooks --support` for the full event/provider matrix.
 
@@ -33,6 +34,7 @@ Run `claudine hooks --support` for the full event/provider matrix.
 | after_tool        | Tool call completed successfully                 |
 | tool_error        | Tool call failed with an error                   |
 | permission_request| Agent requesting user permission                 |
+| human_in_the_loop | Agent asking user a clarifying question           |
 | turn_complete     | Agent turn (request/response) completed          |
 | turn_error        | Agent turn failed with an error                  |
 | subagent_start    | Sub-agent spawned                                |
@@ -56,8 +58,8 @@ Actions execute when events fire. Multiple actions per event supported.
 
 Share skills and commands across all your AI agents:
 
-    claudine link              # Symlink skills to all providers
-    claudine link --dry-run    # Preview without changes
+    claudine link              # Analyze link state (dry-run by default)
+    claudine link --apply      # Apply fixable link states
 
 Links skills from `~/.claudine/skills/` to each provider's config directory,
 so Claude, Codex, Gemini, and OpenCode all share the same knowledge base.

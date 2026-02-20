@@ -66,8 +66,8 @@ To be time efficient and context-window efficient you will run as an orchestrato
                    - append the line `- Fixed: Library README.md drift based on supported platform inconsistencies` to @.ai/logs/claudine-skill-update.md
      3. Hook/Event Subagent
            - you are responsible for creating the documentation file @.claude/skill/claudine/unified-hooks.md
-           - add a section `## Event Mapping to Providers` and then pipe the output of `claudine hook --mapping` into this section
-           - add a section `## Event Support by Provider` and then pipe the output of `claudine hook --support` into this section
+           - add a section `## Event Mapping to Providers` and then pipe the output of `claudine hooks --mapping` into this section
+           - add a section `## Event Support by Provider` and then pipe the output of `claudine hooks --support` into this section
            - review the code in the "events" module of the Claudine library: @claudine/lib/src/events
            - document any important structs, enums, or traits which are defined
            - describe how these symbols help to achieve the functional goals of event/hook processing

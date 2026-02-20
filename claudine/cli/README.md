@@ -29,9 +29,8 @@ Inspect hook registrations and provider capabilities.
 | `--mapping` | Native event name mappings per provider |
 | `--describe` | Event descriptions, payload schemas, and return schemas |
 | `--variables` | All 28 template variables with current detected values |
-| `--fix` | Validate sound effect names and auto-fix with suggestions |
 
-Sound effect validation uses a 5-tier fuzzy matching algorithm to suggest replacements for invalid effect names.
+Sound effect validation runs automatically when viewing hooks and uses a 5-tier fuzzy matching algorithm to suggest replacements for invalid effect names.
 
 ### `claudine link [provider] [flags]`
 
@@ -103,9 +102,8 @@ cli/src/
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal
     └── init/
-        ├── mod.rs       → Wizard orchestration (interactive + quick modes)
-        ├── prompts.rs   → inquire-based interactive prompts
-        └── defaults.rs  → Default configs and event-to-action mappings
+        ├── mod.rs       → Wizard orchestration (interactive + quick modes, default configs)
+        └── prompts.rs   → inquire-based interactive prompts
 ```
 
 ## Output System
@@ -141,5 +139,5 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 
 - **Provider fuzzy matching**: commands that accept a provider name use a 3-tier resolution: exact match → prefix match → contains match. This lets users type `cl` instead of `claude`.
 - **Event name normalization in dry-run**: the event parser handles canonical snake_case, native provider names (e.g., `Stop` for Claude's `turn_complete`), PascalCase, kebab-case, and is case-insensitive. This makes testing easier.
-- **Sound effect suggestion engine**: `hooks --fix` uses 5 matching heuristics (exact, normalized, prefix, contains, Levenshtein-like) to suggest replacements for invalid sound effect names.
+- **Sound effect suggestion engine**: Sound effect validation runs automatically when viewing hooks and uses 5 matching heuristics (exact, normalized, prefix, contains, Levenshtein-like) to suggest replacements for invalid effect names.
 - **Stdin auto-detection in handle**: the provider is detected from JSON payload structure (`hook_event_name` → Claude, `type` + `thread_id` → Codex, etc.) so hooks don't need to pass `--provider` explicitly.

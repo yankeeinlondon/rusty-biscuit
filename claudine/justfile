@@ -42,10 +42,10 @@ _speak *args:
 play effect:
     @playa effect {{effect}} --background > /dev/null 2>&1 || exit 0
 
-_notify message:
+_notify message title=PACKAGE:
     #!/usr/bin/env bash
     if command -v osascript &> /dev/null; then
-        osascript -e '{{message}}'
+        osascript -e 'display notification "message" with title "{{title}}"'
     elif command -v notify-send &> /dev/null; then
         notify-send '{{message}}'
     fi
@@ -263,6 +263,12 @@ cc *args="":
     @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @cd .. && AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
 
+# Open Claude Code
+gem *args="":
+    @clear
+    @echo -e "Loading {{BOLD}}Gemini CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && AGENT="Gemini CLI" gemini -y {{args}}
+
 # Open Codex CLI
 codex *args="":
     @clear
@@ -292,7 +298,8 @@ export UPDATE_SKILL := read("./prompts/update-skill.md")
 
 # fix documentation drift and update the skill for this package area
 skill:
-    @just ask '$UPDATE_SKILL' || ( \
+    @echo "$UPDATE_SKILL" > /tmp/claudine_update_skill.md
+    @just _claude_file /tmp/claudine_update_skill.md || ( \
       just play "bong" && \
       just _speak "A problem occurred updating the Claudine skill!" && \
       exit 1 \

@@ -2,7 +2,7 @@
 
 > Claude Code's ex-girlfriend who knows Claude's inner secrets but is now dating other Agents
 
-Universal event handler and skill linker for agentic CLIs. Normalizes 16 lifecycle events across 7 providers into a single configuration, then executes actions (TTS, sound effects, logging, shell commands) when those events fire. Also synchronizes skills, commands, and agents between providers via symlinks.
+Universal event handler and skill linker for agentic CLIs. Normalizes 16 lifecycle events across 8 providers into a single configuration, then executes 6 action types (TTS, sound effects, logging, shell commands, reports, blocking calls) when those events fire. Also synchronizes skills, commands, and agents between providers via symlinks.
 
 ## Supported Providers
 
@@ -15,9 +15,10 @@ Universal event handler and skill linker for agentic CLIs. Normalizes 16 lifecyc
 | Kimi Code | - | ✓ | - | Wire mode JSON-RPC |
 | OpenCode | ✓ | - | ✓ | `opencode.json` plugins |
 | Qwen Code | - | ✓ | ✓ | Stream-json output |
+| Roo Code | - | ✓ | ✓ | Stream-json event emitter |
 
 **Hook** = native hook/plugin system (config-driven).
-**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen).
+**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen/Roo).
 
 ## Quick Start
 
@@ -45,9 +46,9 @@ claudine link
 | `claudine hooks --mapping` | Native event name mappings |
 | `claudine hooks --describe` | Event descriptions and payload schemas |
 | `claudine hooks --variables` | Template variables with current values |
-| `claudine hooks --fix` | Auto-fix invalid sound effect names |
-| `claudine link [--scope <user\|repo>] [--apply] [--filter]` | Analyze resource link states and optionally fix auto-repairable issues |
+| `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
+| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
 | `claudine dry-run <event> [--provider]` | Test event handling without side effects |
@@ -81,5 +82,5 @@ Uses the following libraries from this monorepo:
 - `biscuit-speaks` - Text-to-speech for speak actions
 - `biscuit-terminal` - Terminal detection and rich output (tables, prose)
 - `darkmatter` - Markdown rendering for `about` command
-- `playa` - Sound effect playback (53 embedded effects)
+- `playa` - Sound effect playback (88 embedded effects)
 - `sniff` - System and environment detection (OS, hardware, git, repo context)

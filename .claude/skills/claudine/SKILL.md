@@ -1,134 +1,77 @@
 ---
 name: claudine
-description: A library and CLI designed to help fluid movement between various Agentic CLI's. It attempts to cross-link resources such as agent skills, slash commands, etc. while at the same time providing a universal "hook" model that is intended to work across Agentic CLI providers.
+description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
+last_updated: 2026-02-19
 ---
 
-## Purpose
+## Claudine Library
 
-Claudine normalizes 16 lifecycle events across 7 agentic CLI providers into a single configuration, then executes actions (TTS, sound effects, logging, shell commands) when those events fire. Also synchronizes skills, commands, and agents between providers via symlinks.
+Claudine is a universal event handler and skill linker for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, then executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire. The library also synchronizes skills, commands, agents, and scripts between providers via symlinks, enabling a single set of resources to be shared across all installed agentic CLIs.
 
-1. **Universal event handling** - React to agent lifecycle events across 7 CLI providers
-2. **Skill linking** - Synchronize skills, commands, agents, and scripts across provider directories
-3. **Non-destructive integration** - Atomic config writes, backup utilities, registers hooks without clobbering
+The library is organized into seven core modules: `actions` (hook action types and response model with 6 action variants and 4 decision types), `adapters` (provider-specific event parsers implementing the `ProviderAdapter` trait), `agents` (comprehensive capability catalog for all 8 CLIs covering model selection, permissions, skill paths, and more), `config` (agent detection, hook registration, atomic file writes, and backup utilities), `dispatch` (the 6-step event processing pipeline including config loading, matcher evaluation, and action execution), `events` (the normalized 16-event lifecycle model with metadata, support levels, and provider mappings), and `linking` (cross-provider skill synchronization via a 4-phase discovery/hashing/analysis/linking algorithm).
 
-## Quick Start
+The dispatch pipeline supports a Handlebars-style template engine with 28 variables across 5 categories (event, OS, hardware, git, and project), shell environment variable interpolation with optional defaults, and precompiled regex matchers for event filtering. Configuration merges user-scope and repo-scope configs with an intentionally asymmetric strategy: repo provider configs fully replace user-level configs, while global settings merge field-by-field.
 
-```bash
-# Initialize configuration interactively
-claudine init
+- [Supported Platforms](supported-platforms.md)
+- [Unified Hook/Event Model](unified-hooks.md)
+- [Supported Actions](hook-actions.md)
+- [Linking Strategy](linking-strategy.md)
+- [Logging Strategy](logging-strategy.md)
 
-# Or use quick defaults
-claudine init --quick
+## Claudine CLI
 
-# Check registered hooks
-claudine hooks
+The `claudine` binary provides interactive setup, hook inspection, event handling, and skill linking for agentic CLIs. It includes an `init` wizard that walks through 5 phases (agent discovery, event selection, action configuration, global settings, and hook registration), with a `--quick` flag for sensible defaults and a `--repo` flag for project-scoped configuration. All user-facing output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), with rich formatting via biscuit-terminal components including tables, prose markup, and OSC8 hyperlinks.
 
-# Link skills across all detected providers
-claudine link
-```
+The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so users can type shorthand like `cl` for `claude`. The `dry-run` command accepts event names in multiple formats (canonical snake_case, native provider names, PascalCase, and kebab-case) and generates realistic mock payloads when no stdin is provided, making it easy to test hook configurations without triggering real events.
 
-## Supported Providers
-
-| Provider | Hook | NonHook | Skills | Config Method |
-|----------|:----:|:-------:|:------:|---------------|
-| Claude Code | ✓ | - | ✓ | `settings.json` hooks |
-| Codex CLI | partial | ✓ | ✓ | `config.toml` notify + JSONL stream |
-| Gemini CLI | ✓ | - | ✓ | `settings.json` hooks |
-| Goose | - | ✓ | - | Stream-json + env var |
-| Kimi Code | - | ✓ | - | Wire mode JSON-RPC |
-| OpenCode | ✓ | - | ✓ | `opencode.json` plugins |
-| Qwen Code | - | ✓ | ✓ | Stream-json output |
-
-**Hook** = native hook/plugin system (config-driven).
-**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen).
-
-## Event Model
-
-16 normalized lifecycle events across 7 providers:
-
-| Category | Events |
-|----------|--------|
-| Session | `session_start`, `session_end` |
-| Prompt | `before_prompt` |
-| Tool | `before_tool`, `after_tool`, `tool_error` |
-| Turn | `turn_complete`, `turn_error` |
-| Permission | `permission_request`, `human_in_the_loop` |
-| Subagent | `subagent_start`, `subagent_stop` |
-| Model | `before_model`, `after_model` |
-| Other | `before_compact`, `notification` |
-
-## CLI Commands
-
-| Command | Purpose |
-|---------|---------|
-| `claudine init [--quick] [--repo]` | Setup wizard (interactive or quick defaults) |
-| `claudine hooks [provider]` | Show hook status for all or one provider |
-| `claudine hooks --support` | Event support matrix |
-| `claudine hooks --mapping` | Native event mappings |
+| Command | Description |
+|---------|-------------|
+| `claudine init [--quick] [--repo]` | Interactive setup wizard (or quick defaults) |
+| `claudine hooks [provider]` | Show registered hooks for all or one provider |
+| `claudine hooks --support` | Provider event support matrix |
+| `claudine hooks --mapping` | Native event name mappings per provider |
 | `claudine hooks --describe` | Event descriptions and payload schemas |
 | `claudine hooks --variables` | Template variables with current values |
-| `claudine hooks --fix` | Auto-fix invalid sound effect names |
-| `claudine link [--dry-run] [--filter] [--detailed] [--replace-duplicates]` | Sync skills across providers |
+| `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
-| `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply registrations |
-| `claudine handle <event> [--provider]` | Process event from stdin (hook target) |
+| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
+| `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
 | `claudine dry-run <event> [--provider]` | Test event handling without side effects |
 | `claudine about` | Rich help documentation |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 
-## Configuration (`~/.hooker`)
+## Research on Agentic CLI Platforms
 
-```json
-{
-  "version": "1.0",
-  "settings": { "tts": { "provider": "say" } },
-  "providers": {
-    "claude": {
-      "events": {
-        "turn_complete": {
-          "enabled": true,
-          "actions": [{ "type": "sound_effect", "name": "success" }]
-        }
-      }
-    }
-  }
-}
-```
+### Hooks Research
 
-**Merge strategy**: repo-level (`.hooker`) provider configs completely replace user-level (`~/.hooker`); global settings merge field-by-field with repo taking precedence.
+Research into each Agentic CLI's provided hooks, payloads and return types.
 
-## Actions
+- [Claude Code](research/hooks/claude-code.md)
+- [Codex](research/hooks/codex.md)
+- [Gemini CLI](research/hooks/gemini-cli.md)
+- [Goose](research/hooks/goose.md)
+- [Kimi Code](research/hooks/kimi-code.md)
+- [OpenCode](research/hooks/opencode.md)
+- [Qwen CLI](research/hooks/qwen-cli.md)
+- [Roo Code](research/hooks/roo-code.md)
 
-| Type | Behavior | Blocking |
-|------|----------|----------|
-| `speak` | TTS via biscuit-speaks with template interpolation | Fire-and-forget |
-| `sound_effect` | 53 embedded effects via playa with volume/speed | Fire-and-forget |
-| `log` | JSONL file append or HTTP POST (10s timeout) | Synchronous |
-| `report` | Output to stdout with optional template/format | Synchronous |
-| `run` | Execute shell command | Configurable |
+### Cross-referencing Research
 
-## Template Variables (28)
+Research into each Agentic CLI's support for features like agentic skills, slash commands, agents/subagents, and shared scripts folders.
 
-**Event:** `{provider}`, `{event}`, `{timestamp}`, `{session_id}`, `{cwd}`, `{tool_name}`, `{error}`, `{prompt}`, `{agent_type}`, `{notification_type}`
+- [Claude Code](research/cross-referencing/claude-code.md)
+- [Codex](research/cross-referencing/codex.md)
+- [Gemini CLI](research/cross-referencing/gemini-cli.md)
+- [Goose](research/cross-referencing/goose.md)
+- [Kimi Code](research/cross-referencing/kimi-code.md)
+- [OpenCode](research/cross-referencing/opencode.md)
+- [Qwen CLI](research/cross-referencing/qwen-cli.md)
+- [Roo Code](research/cross-referencing/roo-code.md)
 
-**Context** (auto-detected via sniff):
-- `{os.*}` - `{os.name}`, `{os.type}`, `{os.version}`, `{os.hostname}`
-- `{hardware.*}` - `{hardware.arch}`, `{hardware.cpu}`, `{hardware.cores}`
-- `{git.*}` - `{git.branch}`, `{git.is_dirty}`, `{git.head_sha}`, `{git.head_message}`, `{git.remote}`, `{git.hosting}`, `{git.repo_name}`, `{git.repo_org}`
-- `{project.*}` - `{project.language}`, `{project.is_monorepo}`, `{project.monorepo_tool}`
+### CLI Research
 
-Unknown placeholders are left as-is. `None` values render as empty strings.
+Research into the subcommands and switches each Agentic CLI platform provides as well as providing insight into the various means of executing this platform in a non-interactive session, choosing which model to use, and more.
 
-## Troubleshooting
-
-- **Hooks not firing?** Check `claudine hooks`, verify PATH, restart agent
-- **Skills not linking?** Use `claudine link --dry-run` to preview
-- **OpenCode shows no links?** OpenCode reads `.claude/skills/` directly
-- **Invalid sound effects?** Use `claudine hooks --fix` for 5-tier fuzzy matching suggestions
-
-## Additional Resources
-
-- [architecture.md](architecture.md) - Event model, dispatch pipeline, provider adapters, linking algorithm
-- [cli-reference.md](cli-reference.md) - Full command documentation with examples
-- `claudine/docs/hooks/` - Per-provider hook specifications
+No CLI research documents are available yet.
