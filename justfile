@@ -50,13 +50,7 @@ oc *args="":
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
-_notify message:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e '{{message}}'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
+
 
 _ask_opencode prompt:
     #!/usr/bin/env bash

@@ -40,6 +40,8 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
+play effect:
+    @playa effect {{effect}} --background > /dev/null 2>&1 || exit 0
 
 _notify message title=PACKAGE:
     #!/usr/bin/env bash
@@ -155,7 +157,7 @@ install *args="":
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
     @echo ""
-    @playa effect drop-4 2>/dev/null || return 0
+    @just play drop-4
 
 check:
     @echo ""

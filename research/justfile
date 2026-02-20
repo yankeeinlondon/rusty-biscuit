@@ -134,8 +134,6 @@ _claude_file PROMPT_FILE:
     cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
     echo -e "\n\033[2m✓ claude finished\033[0m" >&2
 
-
-
 # Build the library and CLI
 build *args="":
     @echo -e "Building {{LIB_NAME}}"

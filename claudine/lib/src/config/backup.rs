@@ -6,9 +6,13 @@ use chrono::Utc;
 use crate::error::Result;
 use crate::events::Provider;
 
+/// Maximum number of backup files to retain per provider.
+const MAX_BACKUPS: usize = 10;
+
 /// Create a timestamped backup of a config file before modification.
 ///
 /// Backups are stored at `~/.claudine/backups/<provider>/<timestamp>.bak`.
+/// After creating the backup, old backups beyond [`MAX_BACKUPS`] are pruned.
 pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
     let backup_dir = backup_base_dir()?.join(provider.as_slug());
     fs::create_dir_all(&backup_dir)?;
@@ -18,7 +22,52 @@ pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
 
     fs::copy(path, &backup_path)?;
 
+    let deleted = cleanup_old_backups(&backup_dir)?;
+    if deleted > 0 {
+        tracing::debug!(provider = %provider.as_slug(), deleted, retained = MAX_BACKUPS, "pruned old backups");
+    }
+
     Ok(backup_path)
+}
+
+/// Remove old backups beyond [`MAX_BACKUPS`], keeping the most recent.
+///
+/// Files are sorted lexicographically by name (format `YYYYMMDD_HHMMSS.bak`),
+/// so alphabetical order equals chronological order.
+///
+/// ## Returns
+///
+/// The number of deleted backup files.
+fn cleanup_old_backups(backup_dir: &Path) -> Result<usize> {
+    let mut bak_files: Vec<PathBuf> = fs::read_dir(backup_dir)?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("bak") {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if bak_files.len() <= MAX_BACKUPS {
+        return Ok(0);
+    }
+
+    // Sort ascending by filename — oldest first
+    bak_files.sort();
+
+    let to_delete = bak_files.len() - MAX_BACKUPS;
+    let mut deleted = 0;
+
+    for path in bak_files.iter().take(to_delete) {
+        if fs::remove_file(path).is_ok() {
+            deleted += 1;
+        }
+    }
+
+    Ok(deleted)
 }
 
 /// Returns the base backup directory (`~/.claudine/backups`).
@@ -68,5 +117,70 @@ mod tests {
     fn backup_fails_for_missing_source() {
         let result = create_backup(Path::new("/nonexistent/file.json"), Provider::Claude);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cleanup_retains_only_max_backups() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+
+        // Create 15 fake backup files
+        for i in 0..15 {
+            let name = format!("20260201_{:06}.bak", i);
+            fs::write(dir.join(&name), format!("backup {i}")).unwrap();
+        }
+
+        let deleted = cleanup_old_backups(dir).unwrap();
+        assert_eq!(deleted, 5);
+
+        let remaining: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("bak"))
+            .collect();
+        assert_eq!(remaining.len(), MAX_BACKUPS);
+    }
+
+    #[test]
+    fn cleanup_leaves_fewer_than_max_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+
+        // Create 5 fake backup files (fewer than MAX_BACKUPS)
+        for i in 0..5 {
+            let name = format!("20260201_{:06}.bak", i);
+            fs::write(dir.join(&name), format!("backup {i}")).unwrap();
+        }
+
+        let deleted = cleanup_old_backups(dir).unwrap();
+        assert_eq!(deleted, 0);
+
+        let remaining: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("bak"))
+            .collect();
+        assert_eq!(remaining.len(), 5);
+    }
+
+    #[test]
+    fn cleanup_keeps_most_recent_files() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+
+        // Create 12 backups — oldest 2 should be deleted
+        for i in 0..12 {
+            let name = format!("20260201_{:06}.bak", i);
+            fs::write(dir.join(&name), format!("backup {i}")).unwrap();
+        }
+
+        cleanup_old_backups(dir).unwrap();
+
+        // The two oldest (000000, 000001) should be gone
+        assert!(!dir.join("20260201_000000.bak").exists());
+        assert!(!dir.join("20260201_000001.bak").exists());
+        // The rest should remain
+        assert!(dir.join("20260201_000002.bak").exists());
+        assert!(dir.join("20260201_000011.bak").exists());
     }
 }

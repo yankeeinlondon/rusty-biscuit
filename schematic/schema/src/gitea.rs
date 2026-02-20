@@ -40,9 +40,9 @@
 //!     Ok(())
 //! }
 //! ```
-use crate::shared::{Paginated, RequestParts, SchematicError};
-pub use schematic_definitions::gitea::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::gitea::*;
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -112,7 +112,11 @@ pub struct GetGitTreeRequest {
 }
 impl GetGitTreeRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -163,7 +167,11 @@ pub struct GetGitTreeRecursiveRequest {
 }
 impl GetGitTreeRecursiveRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -186,8 +194,7 @@ impl GetGitTreeRecursiveRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/trees/{}?recursive=true",
-            self.owner, self.repo, self.sha
+            "/repos/{}/{}/git/trees/{}?recursive=true", self.owner, self.repo, self.sha
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -426,8 +433,7 @@ impl ListPullRequestFilesRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/pulls/{}/files",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/pulls/{}/files", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -685,8 +691,7 @@ impl ListIssueCommentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/comments",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/issues/{}/comments", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -780,8 +785,7 @@ impl ListIssueTimelineRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/timeline",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/issues/{}/timeline", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -1051,8 +1055,7 @@ impl GetTagReferenceRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/refs/{}",
-            self.owner, self.repo, self.git_ref
+            "/repos/{}/{}/git/refs/{}", self.owner, self.repo, self.git_ref
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1082,7 +1085,11 @@ pub struct GetAnnotatedTagRequest {
 }
 impl GetAnnotatedTagRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -1292,7 +1299,9 @@ impl GiteaRequest {
             Self::GetRepository(_) => {
                 <GetRepositoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetGitTree(_) => <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetGitTree(_) => {
+                <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetGitTreeRecursive(_) => {
                 <GetGitTreeRecursiveRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1305,15 +1314,21 @@ impl GiteaRequest {
             Self::ListPullRequestFiles(_) => {
                 <ListPullRequestFilesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListIssues(_) => <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetIssue(_) => <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListIssues(_) => {
+                <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetIssue(_) => {
+                <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListIssueComments(_) => {
                 <ListIssueCommentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListIssueTimeline(_) => {
                 <ListIssueTimelineRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListTags(_) => <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListTags(_) => {
+                <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListReleases(_) => {
                 <ListReleasesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1436,9 +1451,9 @@ impl Gitea {
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITEA_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1465,9 +1480,9 @@ impl Gitea {
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITEA_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1500,9 +1515,9 @@ impl Gitea {
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITEA_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1522,7 +1537,10 @@ impl Gitea {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -1533,9 +1551,9 @@ impl Gitea {
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITEA_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1766,9 +1784,7 @@ impl<'a> GiteaVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -1796,15 +1812,13 @@ impl<'a> GiteaVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -1866,7 +1880,8 @@ impl Gitea {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -1879,22 +1894,23 @@ impl Gitea {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        }
-                    })?;
-                    let password = std::env::var(password_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        }
-                    })?;
+                        })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -1994,7 +2010,11 @@ impl Gitea {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

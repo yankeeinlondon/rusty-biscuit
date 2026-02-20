@@ -661,7 +661,7 @@ impl Table {
         // Calculate how much we need to reduce
         let excess = current_content_width.saturating_sub(max_content_width);
 
-        // Identify reducible columns (text columns that allow word wrap, aren't fixed, 
+        // Identify reducible columns (text columns that allow word wrap, aren't fixed,
         // and don't have min_width - columns with min_width are treated as non-reducible)
         let mut reducible: Vec<(usize, usize)> = Vec::new(); // (index, current_width)
         for (i, &width) in widths.iter().enumerate() {
@@ -669,11 +669,7 @@ impl Table {
                 continue;
             }
             // Columns with min_width should not be reduced - treat them as fixed
-            let has_min_width = self
-                .columns
-                .get(i)
-                .and_then(|col| col.min_width)
-                .is_some();
+            let has_min_width = self.columns.get(i).and_then(|col| col.min_width).is_some();
             if has_min_width {
                 continue;
             }
@@ -2426,7 +2422,9 @@ mod tests {
     fn test_min_width_with_max_width_conflict() {
         let table = Table::new()
             .with_columns(vec![
-                TableColumn::new("Text").with_min_width(20).with_max_width(5),
+                TableColumn::new("Text")
+                    .with_min_width(20)
+                    .with_max_width(5),
             ])
             .with_data(vec![vec!["Hi".into()]]);
 
@@ -2459,6 +2457,40 @@ mod tests {
             widths[1] >= 10,
             "Col2 width {} should respect min_width 10",
             widths[1]
+        );
+    }
+
+    #[test]
+    fn test_min_width_columns_not_reduced_when_constraining() {
+        // Scenario: Two columns, first has min_width=15, second is long content
+        // Available width is tight - the second column should shrink, not the first
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Label").with_min_width(15),
+                TableColumn::new("Description"), // No min_width
+            ])
+            .with_data(vec![vec![
+                "A".into(),
+                "This is a very long description that should be wrapped".into(),
+            ]]);
+
+        // With tight constraint, first column should stay at min_width=15
+        // and second column should absorb all the reduction
+        let widths = table.calculate_column_widths(Some(30));
+
+        // First column should be at least min_width (15)
+        assert!(
+            widths[0] >= 15,
+            "Col1 (with min_width=15) should not be reduced below 15, got {}",
+            widths[0]
+        );
+
+        // Total should fit within available (30 - border overhead)
+        let total_with_borders: usize = widths.iter().sum::<usize>() + 4 + (widths.len() - 1) * 3;
+        assert!(
+            total_with_borders <= 30,
+            "Total width {} should fit in available 30",
+            total_with_borders
         );
     }
 

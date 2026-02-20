@@ -387,10 +387,11 @@
     "editor.tabSize": 4,
     "editor.detectIndentation": false,
     "rust-analyzer.server.extraEnv": {
-        "RUSTC_WRAPPER": "sccache",
+        "RUSTC_WRAPPER": "/opt/homebrew/bin/sccache",
         "CARGO_TARGET_DIR": "/Users/ken/.cargo/ra-target"
     },
     "rust-analyzer.trace.server": "verbose",
     "rust-analyzer.trace.extension": true,
     "rust-analyzer.cargo.allTargets": false,
+    "rust-analyzer.files.watcher": "server",
 }

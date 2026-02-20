@@ -30,9 +30,9 @@
 //!     Ok(())
 //! }
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::openai::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::openai::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `ListModels` endpoint.
 ///
 /// ## Example
@@ -87,9 +87,7 @@ pub struct RetrieveModelRequest {
 impl RetrieveModelRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-        }
+        Self { model: model.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -112,9 +110,7 @@ impl RetrieveModelRequest {
 }
 impl From<&str> for RetrieveModelRequest {
     fn from(param: &str) -> Self {
-        Self {
-            model: param.to_string(),
-        }
+        Self { model: param.to_string() }
     }
 }
 impl From<String> for RetrieveModelRequest {
@@ -144,9 +140,7 @@ pub struct DeleteModelRequest {
 impl DeleteModelRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-        }
+        Self { model: model.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -169,9 +163,7 @@ impl DeleteModelRequest {
 }
 impl From<&str> for DeleteModelRequest {
     fn from(param: &str) -> Self {
-        Self {
-            model: param.to_string(),
-        }
+        Self { model: param.to_string() }
     }
 }
 impl From<String> for DeleteModelRequest {
@@ -216,7 +208,9 @@ impl OpenAIRequest {
     #[must_use]
     pub fn endpoint_id(&self) -> &'static str {
         match self {
-            Self::ListModels(_) => <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::RetrieveModel(_) => {
                 <RetrieveModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -260,26 +254,30 @@ impl OpenAI {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> =
-        Some("https://platform.openai.com/docs/api-reference");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://platform.openai.com/docs/api-reference",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["OPENAI_API_KEY".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "OPENAI_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["OPENAI_API_KEY".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -295,18 +293,21 @@ impl OpenAI {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec!["OPENAI_API_KEY".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "OPENAI_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["OPENAI_API_KEY".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -328,18 +329,21 @@ impl OpenAI {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["OPENAI_API_KEY".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "OPENAI_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["OPENAI_API_KEY".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -354,23 +358,29 @@ impl OpenAI {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec!["OPENAI_API_KEY".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "OPENAI_API_KEY".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["OPENAI_API_KEY".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -596,9 +606,7 @@ impl<'a> OpenAIVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -626,15 +634,13 @@ impl<'a> OpenAIVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -696,7 +702,8 @@ impl OpenAI {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -709,22 +716,23 @@ impl OpenAI {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        }
-                    })?;
-                    let password = std::env::var(password_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        }
-                    })?;
+                        })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -824,7 +832,11 @@ impl OpenAI {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

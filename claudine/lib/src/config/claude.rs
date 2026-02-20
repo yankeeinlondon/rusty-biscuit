@@ -614,6 +614,21 @@ mod tests {
             Provider::Claude.registration_native_event_name(&AgenticEvent::TurnError),
             None
         );
+        // HumanInTheLoop is derived from PreToolUse, not a standalone hook
+        assert_eq!(
+            Provider::Claude.registration_native_event_name(&AgenticEvent::HumanInTheLoop),
+            None
+        );
+    }
+
+    #[test]
+    fn human_in_the_loop_supported_via_hook_for_claude() {
+        use crate::events::EventSupportLevel;
+        // HumanInTheLoop is captured via PreToolUse hook with AskUserQuestion tool matcher
+        assert_eq!(
+            Provider::Claude.event_support_level(&AgenticEvent::HumanInTheLoop),
+            EventSupportLevel::Hook
+        );
     }
 
     #[test]

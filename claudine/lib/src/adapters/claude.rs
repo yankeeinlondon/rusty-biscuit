@@ -22,14 +22,23 @@ impl ProviderAdapter for ClaudeAdapter {
             .and_then(Value::as_str)
             .ok_or(AdapterError::MissingField("hook_event_name"))?;
 
-        let event = map_event(event_name)?;
+        let mut event = map_event(event_name)?;
+        let tool_name = str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName"));
+
+        // Adapter-level remapping: PreToolUse with AskUserQuestion → HumanInTheLoop
+        if event == AgenticEvent::BeforeTool
+            && tool_name.as_deref() == Some("AskUserQuestion")
+        {
+            event = AgenticEvent::HumanInTheLoop;
+        }
+
         let mut meta = EventMeta {
             provider: Provider::Claude,
             event,
             timestamp: Utc::now(),
             session_id: str_field(raw, "session_id"),
             cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
+            tool_name,
             tool_input: raw.get("tool_input").cloned(),
             tool_response: raw.get("tool_response").cloned(),
             error: str_field(raw, "error"),
@@ -194,6 +203,36 @@ mod tests {
         assert!(adapter.can_block(&AgenticEvent::BeforeTool));
         assert!(adapter.can_block(&AgenticEvent::TurnComplete));
         assert!(!adapter.can_block(&AgenticEvent::Notification));
+    }
+
+    #[test]
+    fn parse_pretooluse_ask_user_question_remaps_to_human_in_the_loop() {
+        let adapter = ClaudeAdapter;
+        let raw = json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion",
+            "session_id": "s1"
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::HumanInTheLoop);
+        assert_eq!(meta.event, AgenticEvent::HumanInTheLoop);
+        assert_eq!(meta.tool_name.as_deref(), Some("AskUserQuestion"));
+    }
+
+    #[test]
+    fn parse_pretooluse_bash_stays_before_tool() {
+        let adapter = ClaudeAdapter;
+        let raw = json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "session_id": "s1"
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::BeforeTool);
+        assert_eq!(meta.event, AgenticEvent::BeforeTool);
+        assert_eq!(meta.tool_name.as_deref(), Some("Bash"));
     }
 
     #[test]

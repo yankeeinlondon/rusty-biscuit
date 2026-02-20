@@ -122,11 +122,6 @@ const CLAUDE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
         parse_aliases: &["PermissionRequest"],
     },
     SharedNativeEventMapping {
-        event: AgenticEvent::HumanInTheLoop,
-        native_name: "HumanInTheLoop",
-        parse_aliases: &["HumanInTheLoop"],
-    },
-    SharedNativeEventMapping {
         event: AgenticEvent::TurnComplete,
         native_name: "Stop",
         parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],

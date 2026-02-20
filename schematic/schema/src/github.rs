@@ -41,9 +41,9 @@
 //!     Ok(())
 //! }
 //! ```
-use crate::shared::{Paginated, RequestParts, SchematicError};
-pub use schematic_definitions::github::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::github::*;
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -140,8 +140,7 @@ impl GetGitTreeRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/trees/{}",
-            self.owner, self.repo, self.tree_sha
+            "/repos/{}/{}/git/trees/{}", self.owner, self.repo, self.tree_sha
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -207,8 +206,7 @@ impl GetGitTreeRecursiveRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/git/trees/{}",
-            self.owner, self.repo, self.tree_sha
+            "/repos/{}/{}/git/trees/{}", self.owner, self.repo, self.tree_sha
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.recursive {
@@ -254,7 +252,11 @@ pub struct GetRepositoryContentRawRequest {
 }
 impl GetRepositoryContentRawRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, path: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -281,10 +283,7 @@ impl GetRepositoryContentRawRequest {
             "GET",
             path,
             None,
-            vec![(
-                "Accept".to_string(),
-                "application/vnd.github.raw+json".to_string(),
-            )],
+            vec![("Accept".to_string(), "application/vnd.github.raw+json".to_string())],
         ))
     }
 }
@@ -479,8 +478,7 @@ impl ListPullRequestFilesRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/pulls/{}/files",
-            self.owner, self.repo, self.pull_number
+            "/repos/{}/{}/pulls/{}/files", self.owner, self.repo, self.pull_number
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -677,8 +675,7 @@ impl GetIssueRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/issues/{}",
-            self.owner, self.repo, self.issue_number
+            "/repos/{}/{}/issues/{}", self.owner, self.repo, self.issue_number
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -753,8 +750,7 @@ impl ListIssueCommentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/comments",
-            self.owner, self.repo, self.issue_number
+            "/repos/{}/{}/issues/{}/comments", self.owner, self.repo, self.issue_number
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -848,8 +844,7 @@ impl ListIssueTimelineRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/timeline",
-            self.owner, self.repo, self.issue_number
+            "/repos/{}/{}/issues/{}/timeline", self.owner, self.repo, self.issue_number
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -1068,7 +1063,11 @@ pub struct GetTagReferenceRequest {
 }
 impl GetTagReferenceRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, tag: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        tag: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -1091,8 +1090,7 @@ impl GetTagReferenceRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/ref/tags/{}",
-            self.owner, self.repo, self.tag
+            "/repos/{}/{}/git/ref/tags/{}", self.owner, self.repo, self.tag
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1149,8 +1147,7 @@ impl GetAnnotatedTagRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/tags/{}",
-            self.owner, self.repo, self.tag_sha
+            "/repos/{}/{}/git/tags/{}", self.owner, self.repo, self.tag_sha
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1506,7 +1503,9 @@ impl GitHubRequest {
             Self::GetRepository(_) => {
                 <GetRepositoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetGitTree(_) => <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetGitTree(_) => {
+                <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetGitTreeRecursive(_) => {
                 <GetGitTreeRecursiveRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1519,15 +1518,21 @@ impl GitHubRequest {
             Self::ListPullRequestFiles(_) => {
                 <ListPullRequestFilesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListIssues(_) => <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetIssue(_) => <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListIssues(_) => {
+                <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetIssue(_) => {
+                <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListIssueComments(_) => {
                 <ListIssueCommentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListIssueTimeline(_) => {
                 <ListIssueTimelineRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListTags(_) => <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListTags(_) => {
+                <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListReleases(_) => {
                 <ListReleasesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1652,14 +1657,17 @@ impl GitHub {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITHUB_TOKEN".to_string(),
-                        "GH_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1682,14 +1690,17 @@ impl GitHub {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITHUB_TOKEN".to_string(),
-                        "GH_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1718,14 +1729,17 @@ impl GitHub {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITHUB_TOKEN".to_string(),
-                        "GH_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1747,19 +1761,25 @@ impl GitHub {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             env_username: None,
             headers: schematic_define::Headers::default()
                 .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "GITHUB_TOKEN".to_string(),
-                        "GH_TOKEN".to_string(),
-                    ])),
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
+                        ),
+                    ),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
@@ -1992,9 +2012,7 @@ impl<'a> GitHubVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -2022,15 +2040,13 @@ impl<'a> GitHubVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -2092,7 +2108,8 @@ impl GitHub {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -2105,22 +2122,23 @@ impl GitHub {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        }
-                    })?;
-                    let password = std::env::var(password_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        }
-                    })?;
+                        })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -2220,7 +2238,11 @@ impl GitHub {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
