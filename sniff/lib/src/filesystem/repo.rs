@@ -1,7 +1,7 @@
 use super::languages::detect_languages;
 use crate::{Result, SniffError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Supported monorepo tools and package managers
@@ -265,6 +265,9 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
     if let Some(info) = detect_pnpm_workspace(root)? {
         return Ok(Some(info));
     }
+    if let Some(info) = detect_yarn_workspace(root)? {
+        return Ok(Some(info));
+    }
     if let Some(info) = detect_npm_workspace(root)? {
         return Ok(Some(info));
     }
@@ -294,7 +297,7 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     let members = workspace
         .get("members")
         .and_then(|m| m.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
         .unwrap_or_default();
 
     if members.is_empty() {
@@ -307,7 +310,7 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     let excludes = workspace
         .get("exclude")
         .and_then(|m| m.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
         .unwrap_or_default();
 
     // Expand globs and collect packages with dependencies
@@ -417,30 +420,324 @@ fn parse_cargo_dep_section(
         .collect()
 }
 
+/// Parses a single dependency section from package.json.
+fn parse_package_json_dep_section(
+    parsed: &serde_json::Value,
+    section: &str,
+    kind: DependencyKind,
+    package_manager: &str,
+    optional: bool,
+) -> Vec<DependencyEntry> {
+    let Some(deps) = parsed.get(section).and_then(|d| d.as_object()) else {
+        return Vec::new();
+    };
+
+    deps.iter()
+        .map(|(name, value)| {
+            let targeted_version = value
+                .as_str()
+                .map(String::from)
+                .or_else(|| {
+                    value
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| "*".to_string());
+
+            DependencyEntry {
+                name: name.clone(),
+                kind,
+                targeted_version,
+                actual_version: None,
+                package_manager: Some(package_manager.to_string()),
+                latest_version: None,
+                target: None,
+                optional,
+                features: Vec::new(),
+                is_updatable: false,
+                has_major_update: false,
+            }
+        })
+        .collect()
+}
+
+/// Parses package.json dependencies into category-specific vectors.
+#[allow(clippy::type_complexity)]
+fn parse_package_json_dependencies(
+    package_json_path: &Path,
+    package_manager: &str,
+) -> Option<(
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+)> {
+    let content = std::fs::read_to_string(package_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    let deps = parse_package_json_dep_section(
+        &parsed,
+        "dependencies",
+        DependencyKind::Normal,
+        package_manager,
+        false,
+    );
+    let dev_deps = parse_package_json_dep_section(
+        &parsed,
+        "devDependencies",
+        DependencyKind::Dev,
+        package_manager,
+        false,
+    );
+    let peer_deps = parse_package_json_dep_section(
+        &parsed,
+        "peerDependencies",
+        DependencyKind::Normal,
+        package_manager,
+        false,
+    );
+    let optional_deps = parse_package_json_dep_section(
+        &parsed,
+        "optionalDependencies",
+        DependencyKind::Optional,
+        package_manager,
+        true,
+    );
+
+    Some((deps, dev_deps, peer_deps, optional_deps))
+}
+
+/// Extracts package name from a PEP 508 requirement string.
+fn parse_python_requirement_name(requirement: &str) -> Option<String> {
+    let without_comment = requirement.split('#').next()?.trim();
+    if without_comment.is_empty() {
+        return None;
+    }
+
+    let before_marker = without_comment.split(';').next().unwrap_or(without_comment).trim();
+    if before_marker.is_empty() {
+        return None;
+    }
+
+    let before_at = before_marker.split('@').next().unwrap_or(before_marker).trim();
+    if before_at.is_empty() {
+        return None;
+    }
+
+    let end = before_at
+        .find(|c: char| c == '[' || c == '<' || c == '>' || c == '=' || c == '!' || c == '~' || c.is_whitespace())
+        .unwrap_or(before_at.len());
+    let name = before_at[..end].trim();
+
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Parses pyproject.toml dependencies from PEP 621 `[project]` sections.
+fn parse_pyproject_dependencies(
+    pyproject_path: &Path,
+) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>)> {
+    let content = std::fs::read_to_string(pyproject_path).ok()?;
+    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let project = parsed.get("project")?;
+
+    let dependencies = project
+        .get("dependencies")
+        .and_then(|v| v.as_array())
+        .map(|deps| {
+            deps.iter()
+                .filter_map(|entry| entry.as_str())
+                .filter_map(|req| parse_python_requirement_name(req).map(|name| (name, req)))
+                .map(|(name, req)| DependencyEntry {
+                    name,
+                    kind: DependencyKind::Normal,
+                    targeted_version: req.to_string(),
+                    actual_version: None,
+                    package_manager: Some("pip".to_string()),
+                    latest_version: None,
+                    target: None,
+                    optional: false,
+                    features: Vec::new(),
+                    is_updatable: false,
+                    has_major_update: false,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let optional_dependencies = project
+        .get("optional-dependencies")
+        .and_then(|v| v.as_table())
+        .map(|groups| {
+            groups
+                .values()
+                .filter_map(|value| value.as_array())
+                .flat_map(|entries| entries.iter())
+                .filter_map(|entry| entry.as_str())
+                .filter_map(|req| parse_python_requirement_name(req).map(|name| (name, req)))
+                .map(|(name, req)| DependencyEntry {
+                    name,
+                    kind: DependencyKind::Optional,
+                    targeted_version: req.to_string(),
+                    actual_version: None,
+                    package_manager: Some("pip".to_string()),
+                    latest_version: None,
+                    target: None,
+                    optional: true,
+                    features: Vec::new(),
+                    is_updatable: false,
+                    has_major_update: false,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Some((dependencies, optional_dependencies))
+}
+
+/// Parses requirements.txt dependency lines.
+fn parse_requirements_txt_dependencies(requirements_path: &Path) -> Option<Vec<DependencyEntry>> {
+    let content = std::fs::read_to_string(requirements_path).ok()?;
+    let mut deps = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some(name) = parse_python_requirement_name(trimmed) else {
+            continue;
+        };
+
+        deps.push(DependencyEntry {
+            name,
+            kind: DependencyKind::Normal,
+            targeted_version: trimmed.to_string(),
+            actual_version: None,
+            package_manager: Some("pip".to_string()),
+            latest_version: None,
+            target: None,
+            optional: false,
+            features: Vec::new(),
+            is_updatable: false,
+            has_major_update: false,
+        });
+    }
+
+    if deps.is_empty() {
+        None
+    } else {
+        Some(deps)
+    }
+}
+
+/// Parses go.mod `require` entries.
+fn parse_go_mod_dependencies(go_mod_path: &Path) -> Option<Vec<DependencyEntry>> {
+    let content = std::fs::read_to_string(go_mod_path).ok()?;
+    let mut deps = Vec::new();
+    let mut in_require_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+
+        if in_require_block {
+            if trimmed.starts_with(')') {
+                in_require_block = false;
+                continue;
+            }
+
+            let line_without_comment = trimmed.split("//").next().unwrap_or(trimmed).trim();
+            let mut parts = line_without_comment.split_whitespace();
+            let Some(name) = parts.next() else {
+                continue;
+            };
+            let Some(version) = parts.next() else {
+                continue;
+            };
+
+            deps.push(DependencyEntry {
+                name: name.to_string(),
+                kind: DependencyKind::Normal,
+                targeted_version: version.to_string(),
+                actual_version: None,
+                package_manager: Some("go".to_string()),
+                latest_version: None,
+                target: None,
+                optional: false,
+                features: Vec::new(),
+                is_updatable: false,
+                has_major_update: false,
+            });
+
+            continue;
+        }
+
+        if trimmed.starts_with("require (") {
+            in_require_block = true;
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("require ") {
+            let line_without_comment = rest.split("//").next().unwrap_or(rest).trim();
+            let mut parts = line_without_comment.split_whitespace();
+            let Some(name) = parts.next() else {
+                continue;
+            };
+            let Some(version) = parts.next() else {
+                continue;
+            };
+
+            deps.push(DependencyEntry {
+                name: name.to_string(),
+                kind: DependencyKind::Normal,
+                targeted_version: version.to_string(),
+                actual_version: None,
+                package_manager: Some("go".to_string()),
+                latest_version: None,
+                target: None,
+                optional: false,
+                features: Vec::new(),
+                is_updatable: false,
+                has_major_update: false,
+            });
+        }
+    }
+
+    if deps.is_empty() {
+        None
+    } else {
+        Some(deps)
+    }
+}
+
 fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
     if !pnpm_workspace.exists() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&pnpm_workspace)?;
-    let parsed: serde_yaml::Value =
-        serde_yaml::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-
-    let packages = parsed
-        .get("packages")
-        .and_then(|p| p.as_sequence())
-        .map(|seq| seq.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-        .unwrap_or_default();
+    let packages = parse_pnpm_workspace_patterns(&pnpm_workspace)?;
 
     if packages.is_empty() {
         return Ok(None);
     }
 
-    let mut package_locations = expand_glob_patterns(root, &packages, MonorepoTool::PnpmWorkspaces);
+    let lock_versions = None;
+    let mut package_locations = expand_glob_patterns_with_deps(
+        root,
+        &packages,
+        MonorepoTool::PnpmWorkspaces,
+        &lock_versions,
+    );
+    package_locations = dedupe_packages(package_locations);
     resolve_internal_deps(&mut package_locations);
 
     Ok(Some(RepoInfo {
@@ -461,29 +758,63 @@ fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&package_json)?;
-    let parsed: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-
-    let workspaces = parsed
-        .get("workspaces")
-        .and_then(|w| w.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-        .unwrap_or_default();
+    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
 
     if workspaces.is_empty() {
         return Ok(None);
     }
 
-    let mut packages = expand_glob_patterns(root, &workspaces, MonorepoTool::NpmWorkspaces);
+    let lock_versions = None;
+    let mut packages = expand_glob_patterns_with_deps(
+        root,
+        &workspaces,
+        MonorepoTool::NpmWorkspaces,
+        &lock_versions,
+    );
+    packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::NpmWorkspaces),
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages: Some(packages),
+    }))
+}
+
+fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    if !root.join("yarn.lock").exists() {
+        return Ok(None);
+    }
+
+    let package_json = root.join("package.json");
+    if !package_json.exists() {
+        return Ok(None);
+    }
+
+    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+
+    if workspaces.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let mut packages = expand_glob_patterns_with_deps(
+        root,
+        &workspaces,
+        MonorepoTool::YarnWorkspaces,
+        &lock_versions,
+    );
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: Some(MonorepoTool::YarnWorkspaces),
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -499,6 +830,19 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
         return Ok(None);
     }
 
+    let mut patterns = collect_default_workspace_patterns(root);
+    patterns.extend(parse_nx_layout_patterns(&nx_json));
+    patterns = dedupe_patterns(patterns);
+
+    let lock_versions = None;
+    let mut packages = if patterns.is_empty() {
+        discover_packages_from_manifests(root, MonorepoTool::Nx, &lock_versions)
+    } else {
+        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
+    };
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Nx),
@@ -507,7 +851,7 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
-        packages: Some(vec![]), // Nx projects would need deeper parsing
+        packages: Some(packages),
     }))
 }
 
@@ -517,6 +861,16 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
         return Ok(None);
     }
 
+    let patterns = collect_default_workspace_patterns(root);
+    let lock_versions = None;
+    let mut packages = if patterns.is_empty() {
+        discover_packages_from_manifests(root, MonorepoTool::Turborepo, &lock_versions)
+    } else {
+        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
+    };
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Turborepo),
@@ -525,7 +879,7 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
-        packages: Some(vec![]), // Would need to parse package.json workspaces
+        packages: Some(packages),
     }))
 }
 
@@ -535,6 +889,19 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
         return Ok(None);
     }
 
+    let mut patterns = parse_lerna_workspace_patterns(&lerna_json).unwrap_or_default();
+    patterns.extend(collect_default_workspace_patterns(root));
+    patterns = dedupe_patterns(patterns);
+
+    let lock_versions = None;
+    let mut packages = if patterns.is_empty() {
+        discover_packages_from_manifests(root, MonorepoTool::Lerna, &lock_versions)
+    } else {
+        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
+    };
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Lerna),
@@ -543,8 +910,102 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
         dev_dependencies: None,
         peer_dependencies: None,
         optional_dependencies: None,
-        packages: Some(vec![]),
+        packages: Some(packages),
     }))
+}
+
+fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(pnpm_workspace_path)?;
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&content).map_err(|e| SniffError::SystemInfo {
+            domain: "repo",
+            message: e.to_string(),
+        })?;
+
+    Ok(parsed
+        .get("packages")
+        .and_then(|p| p.as_sequence())
+        .map(|seq| seq.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
+        .unwrap_or_default())
+}
+
+fn parse_package_json_workspace_patterns(package_json_path: &Path) -> Result<Option<Vec<String>>> {
+    let content = std::fs::read_to_string(package_json_path)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
+            domain: "repo",
+            message: e.to_string(),
+        })?;
+    let Some(workspaces) = parsed.get("workspaces") else {
+        return Ok(None);
+    };
+
+    if let Some(arr) = workspaces.as_array() {
+        return Ok(Some(arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()));
+    }
+
+    if let Some(obj) = workspaces.as_object() {
+        return Ok(Some(
+            obj.get("packages")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        ));
+    }
+
+    Ok(Some(Vec::new()))
+}
+
+fn parse_lerna_workspace_patterns(lerna_json_path: &Path) -> Option<Vec<String>> {
+    let content = std::fs::read_to_string(lerna_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    parsed
+        .get("packages")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+}
+
+fn parse_nx_layout_patterns(nx_json_path: &Path) -> Vec<String> {
+    let content = match std::fs::read_to_string(nx_json_path) {
+        Ok(content) => content,
+        Err(_) => return Vec::new(),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return Vec::new(),
+    };
+
+    let apps_dir = parsed
+        .get("workspaceLayout")
+        .and_then(|v| v.get("appsDir"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("apps");
+    let libs_dir = parsed
+        .get("workspaceLayout")
+        .and_then(|v| v.get("libsDir"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("libs");
+
+    vec![format!("{apps_dir}/*"), format!("{libs_dir}/*")]
+}
+
+fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
+    let mut patterns = Vec::new();
+
+    if let Ok(Some(package_json_patterns)) = parse_package_json_workspace_patterns(&root.join("package.json")) {
+        patterns.extend(package_json_patterns);
+    }
+
+    if let Ok(pnpm_patterns) = parse_pnpm_workspace_patterns(&root.join("pnpm-workspace.yaml")) {
+        patterns.extend(pnpm_patterns);
+    }
+
+    if let Some(lerna_patterns) = parse_lerna_workspace_patterns(&root.join("lerna.json")) {
+        patterns.extend(lerna_patterns);
+    }
+
+    dedupe_patterns(patterns)
 }
 
 // ============================================================================
@@ -577,6 +1038,37 @@ fn read_npm_package_version(package_json: &Path) -> Option<String> {
     let content = std::fs::read_to_string(package_json).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
     parsed.get("version").and_then(|v| v.as_str()).map(String::from)
+}
+
+/// Reads package name from a pyproject.toml `[project].name`.
+fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(pyproject_toml).ok()?;
+    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    parsed
+        .get("project")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .map(String::from)
+}
+
+/// Reads package version from a pyproject.toml `[project].version`.
+fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(pyproject_toml).ok()?;
+    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    parsed
+        .get("project")
+        .and_then(|p| p.get("version"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Reads module name from a go.mod file (module directive).
+fn read_go_module_name(go_mod: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(go_mod).ok()?;
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        trimmed.strip_prefix("module ").map(|value| value.trim().to_string())
+    })
 }
 
 /// Reads the feature flag names from a Cargo.toml `[features]` section.
@@ -703,7 +1195,10 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
         }
         MonorepoTool::NpmWorkspaces
         | MonorepoTool::PnpmWorkspaces
-        | MonorepoTool::YarnWorkspaces => {
+        | MonorepoTool::YarnWorkspaces
+        | MonorepoTool::Nx
+        | MonorepoTool::Turborepo
+        | MonorepoTool::Lerna => {
             let package_json = path.join("package.json");
             if package_json.exists()
                 && let Some(name) = read_npm_package_name(&package_json)
@@ -713,12 +1208,27 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
         }
         _ => {}
     }
+
+    let pyproject_toml = path.join("pyproject.toml");
+    if pyproject_toml.exists()
+        && let Some(name) = read_pyproject_package_name(&pyproject_toml)
+    {
+        return name;
+    }
+
+    let go_mod = path.join("go.mod");
+    if go_mod.exists()
+        && let Some(name) = read_go_module_name(&go_mod)
+    {
+        return name;
+    }
+
     // Fallback: relative path from root
     make_relative_path(path, root)
 }
 
 /// Determines the package version based on monorepo tool type.
-fn resolve_package_version(path: &Path, tool: MonorepoTool) -> Option<String> {
+fn resolve_package_version(path: &Path, root: &Path, tool: MonorepoTool) -> Option<String> {
     match tool {
         MonorepoTool::CargoWorkspace => {
             let cargo_toml = path.join("Cargo.toml");
@@ -728,14 +1238,33 @@ fn resolve_package_version(path: &Path, tool: MonorepoTool) -> Option<String> {
         }
         MonorepoTool::NpmWorkspaces
         | MonorepoTool::PnpmWorkspaces
-        | MonorepoTool::YarnWorkspaces => {
+        | MonorepoTool::YarnWorkspaces
+        | MonorepoTool::Nx
+        | MonorepoTool::Turborepo
+        | MonorepoTool::Lerna => {
             let package_json = path.join("package.json");
             if package_json.exists() {
-                return read_npm_package_version(&package_json);
+                if let Some(version) = read_npm_package_version(&package_json) {
+                    return Some(version);
+                }
+                if path != root {
+                    let root_package_json = root.join("package.json");
+                    if root_package_json.exists() {
+                        return read_npm_package_version(&root_package_json);
+                    }
+                }
             }
         }
         _ => {}
     }
+
+    let pyproject_toml = path.join("pyproject.toml");
+    if pyproject_toml.exists()
+        && let Some(version) = read_pyproject_package_version(&pyproject_toml)
+    {
+        return Some(version);
+    }
+
     None
 }
 
@@ -758,6 +1287,7 @@ fn resolve_internal_deps(packages: &mut [Package]) {
         for dep_list in [
             pkg.dependencies.as_ref(),
             pkg.dev_dependencies.as_ref(),
+            pkg.peer_dependencies.as_ref(),
             pkg.optional_dependencies.as_ref(),
         ]
         .into_iter()
@@ -859,7 +1389,108 @@ fn detect_package_managers(path: &Path) -> Vec<String> {
     managers
 }
 
-fn expand_glob_patterns(root: &Path, patterns: &[&str], tool: MonorepoTool) -> Vec<Package> {
+fn resolve_js_package_manager(tool: MonorepoTool, root: &Path, package_managers: &[String]) -> &'static str {
+    match tool {
+        MonorepoTool::PnpmWorkspaces => return "pnpm",
+        MonorepoTool::YarnWorkspaces => return "yarn",
+        _ => {}
+    }
+
+    if package_managers.iter().any(|manager| manager == "pnpm") || root.join("pnpm-lock.yaml").exists()
+    {
+        return "pnpm";
+    }
+    if package_managers.iter().any(|manager| manager == "yarn") || root.join("yarn.lock").exists() {
+        return "yarn";
+    }
+    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
+        return "bun";
+    }
+
+    "npm"
+}
+
+fn dedupe_patterns(patterns: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for pattern in patterns {
+        if seen.insert(pattern.clone()) {
+            deduped.push(pattern);
+        }
+    }
+
+    deduped
+}
+
+fn dedupe_packages(packages: Vec<Package>) -> Vec<Package> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+
+    for package in packages {
+        if seen.insert(package.relative.clone()) {
+            deduped.push(package);
+        }
+    }
+
+    deduped
+}
+
+fn discover_packages_from_manifests(
+    root: &Path,
+    tool: MonorepoTool,
+    lock_versions: &Option<CargoLockVersions>,
+) -> Vec<Package> {
+    let mut discovered_dirs = HashSet::new();
+
+    let walker = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            if !entry.file_type().is_dir() {
+                return true;
+            }
+
+            let name = entry.file_name().to_string_lossy();
+            name != ".git"
+                && name != "node_modules"
+                && name != "target"
+                && name != ".turbo"
+                && name != "dist"
+                && name != "build"
+        });
+
+    for entry in walker.filter_map(|entry| entry.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy();
+        let is_manifest = matches!(
+            file_name.as_ref(),
+            "Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod"
+        );
+        if !is_manifest {
+            continue;
+        }
+
+        let Some(parent) = entry.path().parent() else {
+            continue;
+        };
+        if parent == root {
+            continue;
+        }
+        discovered_dirs.insert(parent.to_path_buf());
+    }
+
+    let mut dirs: Vec<PathBuf> = discovered_dirs.into_iter().collect();
+    dirs.sort();
+
+    dirs.iter().map(|path| create_package(path, root, tool, lock_versions)).collect()
+}
+
+#[allow(dead_code)]
+fn expand_glob_patterns(root: &Path, patterns: &[String], tool: MonorepoTool) -> Vec<Package> {
     let mut packages = Vec::new();
 
     for pattern in patterns {
@@ -890,7 +1521,7 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str], tool: MonorepoTool) -> V
 /// Expand glob patterns and parse dependencies for Cargo workspaces.
 fn expand_glob_patterns_with_deps(
     root: &Path,
-    patterns: &[&str],
+    patterns: &[String],
     tool: MonorepoTool,
     lock_versions: &Option<CargoLockVersions>,
 ) -> Vec<Package> {
@@ -931,9 +1562,9 @@ fn create_package(
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
     let name = resolve_package_name(path, root, tool);
-    let version = resolve_package_version(path, tool);
     let (primary_language, languages) = detect_package_languages(path);
     let package_managers = detect_package_managers(path);
+    let version = resolve_package_version(path, root, tool);
     let files = detect_package_files(path, root);
 
     // Read feature flags (Cargo only for now)
@@ -944,37 +1575,81 @@ fn create_package(
         Vec::new()
     };
 
-    // Try to parse Cargo.toml dependencies (for Cargo workspaces)
-    let (dependencies, dev_dependencies, optional_dependencies) = if cargo_toml.exists() {
-        if let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml, lock_versions) {
-            let mut all_deps = normal;
-            all_deps.extend(build);
+    let mut dependencies = Vec::new();
+    let mut dev_dependencies = Vec::new();
+    let mut peer_dependencies = Vec::new();
+    let mut optional_dependencies = Vec::new();
 
-            let (optional, regular): (Vec<_>, Vec<_>) =
-                all_deps.into_iter().partition(|d| d.optional);
+    if cargo_toml.exists()
+        && let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml, lock_versions)
+    {
+        let mut all_deps = normal;
+        all_deps.extend(build);
 
-            let deps = if regular.is_empty() {
-                None
-            } else {
-                Some(regular)
-            };
-            let dev_deps = if dev.is_empty() {
-                None
-            } else {
-                Some(dev)
-            };
-            let opt_deps = if optional.is_empty() {
-                None
-            } else {
-                Some(optional)
-            };
+        let (optional, regular): (Vec<_>, Vec<_>) =
+            all_deps.into_iter().partition(|d| d.optional);
 
-            (deps, dev_deps, opt_deps)
-        } else {
-            (None, None, None)
+        dependencies.extend(regular);
+        dev_dependencies.extend(dev);
+        optional_dependencies.extend(optional);
+    }
+
+    // Parse package.json dependency sections when available.
+    let package_json = path.join("package.json");
+    if package_json.exists() {
+        let js_package_manager = resolve_js_package_manager(tool, root, &package_managers);
+        if let Some((normal, dev, peer, optional)) =
+            parse_package_json_dependencies(&package_json, js_package_manager)
+        {
+            dependencies.extend(normal);
+            dev_dependencies.extend(dev);
+            peer_dependencies.extend(peer);
+            optional_dependencies.extend(optional);
         }
+    }
+
+    // Parse Python dependencies from pyproject.toml / requirements.txt.
+    let pyproject_toml = path.join("pyproject.toml");
+    if pyproject_toml.exists()
+        && let Some((normal, optional)) = parse_pyproject_dependencies(&pyproject_toml)
+    {
+        dependencies.extend(normal);
+        optional_dependencies.extend(optional);
+    }
+    let requirements_txt = path.join("requirements.txt");
+    if requirements_txt.exists()
+        && let Some(req_deps) = parse_requirements_txt_dependencies(&requirements_txt)
+    {
+        dependencies.extend(req_deps);
+    }
+
+    // Parse Go module dependencies when available.
+    let go_mod = path.join("go.mod");
+    if go_mod.exists()
+        && let Some(go_deps) = parse_go_mod_dependencies(&go_mod)
+    {
+        dependencies.extend(go_deps);
+    };
+
+    let dependencies = if dependencies.is_empty() {
+        None
     } else {
-        (None, None, None)
+        Some(dependencies)
+    };
+    let dev_dependencies = if dev_dependencies.is_empty() {
+        None
+    } else {
+        Some(dev_dependencies)
+    };
+    let peer_dependencies = if peer_dependencies.is_empty() {
+        None
+    } else {
+        Some(peer_dependencies)
+    };
+    let optional_dependencies = if optional_dependencies.is_empty() {
+        None
+    } else {
+        Some(optional_dependencies)
     };
 
     Package {
@@ -995,7 +1670,7 @@ fn create_package(
         used_by: Vec::new(),
         dependencies,
         dev_dependencies,
-        peer_dependencies: None,
+        peer_dependencies,
         optional_dependencies,
         is_updatable: None,
         has_major_update: None,
@@ -1071,6 +1746,56 @@ mod tests {
     }
 
     #[test]
+    fn test_pnpm_workspace_resolves_internal_dependencies_from_package_json() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n").unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"private": true}"#).unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
+
+        let app_dir = dir.path().join("packages/app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            r#"{
+  "name": "@scope/app",
+  "version": "1.2.3",
+  "dependencies": {
+    "@scope/lib": "workspace:*",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@scope/lib": "workspace:*"
+  }
+}"#,
+        )
+        .unwrap();
+
+        let lib_dir = dir.path().join("packages/lib");
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::write(
+            lib_dir.join("package.json"),
+            r#"{
+  "name": "@scope/lib",
+  "version": "2.0.0"
+}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::PnpmWorkspaces));
+        let packages = result.packages.unwrap();
+
+        let app = packages.iter().find(|p| p.name == "@scope/app").unwrap();
+        assert_eq!(app.version.as_deref(), Some("1.2.3"));
+        assert_eq!(app.depends_on, vec!["@scope/lib".to_string()]);
+        assert_eq!(app.dependencies.as_ref().unwrap().len(), 2);
+        assert!(app.dev_dependencies.is_some());
+
+        let lib = packages.iter().find(|p| p.name == "@scope/lib").unwrap();
+        assert!(lib.used_by.contains(&"@scope/app".to_string()));
+    }
+
+    #[test]
     fn test_nx_detected() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("nx.json"), "{}").unwrap();
@@ -1080,6 +1805,46 @@ mod tests {
         let info = result.unwrap();
         assert!(info.is_monorepo);
         assert_eq!(info.monorepo_tool, Some(MonorepoTool::Nx));
+    }
+
+    #[test]
+    fn test_nx_detected_with_workspace_packages() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("nx.json"), "{}").unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["apps/*", "libs/*"]}"#,
+        )
+        .unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
+
+        let app_dir = dir.path().join("apps/web");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            r#"{
+  "name": "@scope/web",
+  "version": "0.1.0",
+  "dependencies": {"@scope/shared": "workspace:*"}
+}"#,
+        )
+        .unwrap();
+
+        let shared_dir = dir.path().join("libs/shared");
+        fs::create_dir_all(&shared_dir).unwrap();
+        fs::write(
+            shared_dir.join("package.json"),
+            r#"{"name": "@scope/shared", "version": "0.1.0"}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::Nx));
+        let packages = result.packages.unwrap();
+        assert_eq!(packages.len(), 2);
+
+        let web = packages.iter().find(|p| p.name == "@scope/web").unwrap();
+        assert_eq!(web.depends_on, vec!["@scope/shared".to_string()]);
     }
 
     #[test]
@@ -1113,6 +1878,48 @@ mod tests {
     }
 
     #[test]
+    fn test_npm_workspace_detected_with_object_syntax() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": {"packages": ["modules/*"]}}"#,
+        )
+        .unwrap();
+        let pkg = dir.path().join("modules/types");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(
+            pkg.join("package.json"),
+            r#"{"name": "@scope/types", "version": "0.5.0"}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::NpmWorkspaces));
+        let packages = result.packages.unwrap();
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "@scope/types");
+        assert_eq!(packages[0].version.as_deref(), Some("0.5.0"));
+    }
+
+    #[test]
+    fn test_yarn_workspace_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("yarn.lock"), "").unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"workspaces": ["packages/*"]}"#).unwrap();
+        let pkg = dir.path().join("packages/app");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(
+            pkg.join("package.json"),
+            r#"{"name": "@scope/app", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::YarnWorkspaces));
+        assert_eq!(result.packages.unwrap().len(), 1);
+    }
+
+    #[test]
     fn test_turborepo_detected() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("turbo.json"), "{}").unwrap();
@@ -1125,6 +1932,28 @@ mod tests {
     }
 
     #[test]
+    fn test_turborepo_detects_packages_from_workspaces() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("turbo.json"), "{}").unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n").unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
+
+        let app_dir = dir.path().join("packages/app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            r#"{"name": "@scope/app", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::Turborepo));
+        let packages = result.packages.unwrap();
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "@scope/app");
+    }
+
+    #[test]
     fn test_lerna_detected() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("lerna.json"), "{}").unwrap();
@@ -1134,6 +1963,30 @@ mod tests {
         let info = result.unwrap();
         assert!(info.is_monorepo);
         assert_eq!(info.monorepo_tool, Some(MonorepoTool::Lerna));
+    }
+
+    #[test]
+    fn test_lerna_detects_packages_from_lerna_json() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("lerna.json"),
+            r#"{"packages": ["packages/*"], "version": "independent"}"#,
+        )
+        .unwrap();
+
+        let app_dir = dir.path().join("packages/app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            r#"{"name": "@scope/app", "version": "0.9.0"}"#,
+        )
+        .unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::Lerna));
+        let packages = result.packages.unwrap();
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "@scope/app");
     }
 
     #[test]
