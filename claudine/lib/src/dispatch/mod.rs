@@ -208,6 +208,7 @@ mod tests {
                         ..CanonicalProviderSettings::default()
                     },
                 }),
+                protect: None,
             },
             providers: {
                 let mut providers = HashMap::new();

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::agentic_event::AgenticEvent;
 use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
+use crate::services::protect::ProtectConfig;
 
 /// Root configuration loaded from `~/.claudine/config.json`.
 ///
@@ -52,6 +53,10 @@ pub struct GlobalSettings {
     /// Link strategy settings used for canonical provider selection and ordering.
     #[serde(default)]
     pub linking: Option<LinkingSettings>,
+
+    /// Protect service policy configuration.
+    #[serde(default)]
+    pub protect: Option<ProtectConfig>,
 }
 
 /// TTS configuration forwarded to biscuit-speaks.
@@ -363,6 +368,7 @@ mod tests {
         assert!(settings.default_log_target.is_none());
         assert!(settings.tts.is_none());
         assert!(settings.linking.is_none());
+        assert!(settings.protect.is_none());
     }
 
     #[test]

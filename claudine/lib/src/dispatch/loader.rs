@@ -375,6 +375,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
             .or(user.settings.default_log_target),
         tts: repo.settings.tts.or(user.settings.tts),
         linking: repo.settings.linking.or(user.settings.linking),
+        protect: repo.settings.protect.or(user.settings.protect),
     };
 
     HookerConfig {
@@ -557,6 +558,7 @@ mod tests {
                     rate: None,
                 }),
                 linking: None,
+                protect: None,
             },
             providers: HashMap::new(),
         };
@@ -570,6 +572,7 @@ mod tests {
                     rate: Some(1.5),
                 }),
                 linking: None,
+                protect: None,
             },
             providers: HashMap::new(),
         };

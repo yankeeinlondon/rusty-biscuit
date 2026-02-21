@@ -252,3 +252,5 @@ Future wrapper-compatible seams included now:
   - secret leakage patterns,
   - malicious MCP payload samples,
   - completion-loop guard behavior.
+
+Implementation checklist: [protect-service-implementation-checklist.md](./protect-service-implementation-checklist.md)

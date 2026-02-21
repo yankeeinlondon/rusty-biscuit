@@ -4,7 +4,7 @@ Core library for the Claudine cross-agent event handling and skill linking syste
 
 ## Architecture
 
-The library is organized into seven top-level modules:
+The library is organized into eight top-level modules:
 
 ```
 claudine/lib/src/
@@ -15,6 +15,7 @@ claudine/lib/src/
 ├── dispatch/    → Event processing pipeline
 ├── events/      → Normalized event model and types
 ├── linking/     → Cross-provider skill and command synchronization
+├── services/    → Cross-provider policy services (Protect)
 └── error.rs     → ClaudineError enum
 ```
 
@@ -169,6 +170,12 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 | RooCode | `~/.roo/skills/` | `.roo/skills/` | -- |
 
 Additional sub-modules: `canonical` (canonical provider selection), `capabilities` (provider resource support metadata with required/optional property schemas), `compatibility` (candidate/reference classification with alias duplication and name derivation), `conflict` (sync status analysis with also-reads-from awareness), `detector` (per-resource-type detectors via `LinkDetector` trait), `discovery` (legacy skill and command discovery), `execution` (analyze and apply resource links with derived artifact generation), `hashing` (xxHash content dedup with symlink resolution), `model` (data types including `ResourceReference` 9-variant state machine), `paths` (provider path resolution with repo-root awareness), `report` (link report types), `symlink` (symlink creation with relative path support).
+
+### Services (`services`)
+
+Cross-provider policy engines that operate on normalized event context:
+
+- `protect` — Capability-aware policy evaluation service used to normalize safety decisions (`allow`, `ask`, `stop`, `advisory`) across providers with different control surfaces.
 
 ## Action Execution
 
