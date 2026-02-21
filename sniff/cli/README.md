@@ -342,11 +342,11 @@ The library provides modular detection across six domains:
    - Deep mode: Remote branch lists, commit synchronization
 
 2. **Repository Detection** (`filesystem/repo.rs`):
-   - Monorepo tool detection (Cargo workspaces, pnpm, npm, Nx, Turborepo, Lerna)
+   - Monorepo tool detection (Cargo workspaces, pnpm, npm, yarn, Nx, Turborepo, Lerna)
    - Package enumeration with glob pattern expansion
    - Per-package language detection
    - Per-package dependency manager detection (cargo, npm, pnpm, yarn, pip, go)
-   - Dependency parsing from `Cargo.toml` with version requirements
+   - Dependency parsing from `Cargo.toml`, `package.json`, `pyproject.toml`, `requirements.txt`, and `go.mod`
 
 3. **Language Analysis** (`filesystem/languages.rs`):
    - File extension-based language detection
@@ -649,17 +649,17 @@ sniff repo --deep --json | jq '.packages[].dependencies'
 - **Network detection** requires appropriate permissions (may fail on restricted systems)
 - **Deep mode** requires network access to package registries
 - **Git deep mode** queries all remotes (can be slow for many remotes)
-- **Monorepo detection** is limited to known tools (Cargo, npm, pnpm, Nx, Turborepo, Lerna)
+- **Monorepo detection** is limited to known tools (Cargo, npm, pnpm, yarn, Nx, Turborepo, Lerna)
 - **Language detection** is file extension-based (no content analysis)
 
 ## Future Enhancements
 
 See `.ai/plans/2026-01-14.plan-for-sniff-package-roundout.md` for planned features:
 
-- Expanded dependency parsing (npm, pnpm, pip, go.mod)
+- Lockfile-based resolved version extraction for npm/pnpm/yarn
 - Lockfile resolution for actual versions
 - Package registry abstraction layer
-- Extended monorepo tool support
+- Additional workspace standards beyond current built-in detectors
 - Runtime environment detection (Docker, VM, cloud providers)
 
 ## License

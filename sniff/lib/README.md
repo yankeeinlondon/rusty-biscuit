@@ -843,7 +843,7 @@ if hw.cpu.simd.avx2 && hw.memory.total_bytes >= 16 * 1024 * 1024 * 1024 {
 
 Planned features:
 
-- Expanded dependency parsing (npm, pip, go.mod)
+- Expanded lockfile resolution for npm/pnpm/yarn and pip ecosystems
 - Lockfile resolution for actual versions
 - GPU detection for Windows (D3D12) and Linux (Vulkan)
 - Runtime environment detection (Docker, VM, cloud providers)
