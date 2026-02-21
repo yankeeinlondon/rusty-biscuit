@@ -12,7 +12,9 @@
 | Roo Code | None | ✗ NonHook |
 
 For NonHook providers (Goose, Kimi, Qwen, Roo), events are captured via:
+
 - Stream JSON parsing (Goose, Qwen, Roo)
 - Wire mode JSON-RPC proxy (Kimi)
 
 
+## Kimi Code CLI's JSON-RPC
