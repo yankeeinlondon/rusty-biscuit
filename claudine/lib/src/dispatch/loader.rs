@@ -8,6 +8,7 @@ use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, GlobalSettings, HookerConfig, Provider};
+use crate::services::{ProtectConfig, ProtectPosture};
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -91,22 +92,25 @@ pub fn load_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<Hook
     let user_config = load_user_config(user)?;
     let repo_config = load_repo_config(repo_root)?;
 
-    match (user_config, repo_config) {
+    let config = match (user_config, repo_config) {
         (Some(user_cfg), Some(repo_cfg)) => {
             debug!("Merging user and repo configurations");
-            Ok(merge_configs(user_cfg, repo_cfg))
+            merge_configs(user_cfg, repo_cfg)
         }
-        (Some(cfg), None) => Ok(cfg),
-        (None, Some(cfg)) => Ok(cfg),
+        (Some(cfg), None) => cfg,
+        (None, Some(cfg)) => cfg,
         (None, None) => {
             let path = user.map(PathBuf::from).unwrap_or_else(|| {
                 dirs::home_dir()
                     .unwrap_or_else(|| PathBuf::from("~"))
                     .join(USER_CONFIG_NAMES[0])
             });
-            Err(ClaudineError::ConfigNotFound(path))
+            return Err(ClaudineError::ConfigNotFound(path));
         }
-    }
+    };
+
+    config.validate()?;
+    Ok(config)
 }
 
 /// Load configuration and compile regex-based runtime structures.
@@ -368,6 +372,11 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
     }
 
     // Settings: repo fields override user fields individually
+    let protect = merge_protect_configs(
+        user.settings.protect.as_ref(),
+        repo.settings.protect.as_ref(),
+    );
+
     let settings = crate::events::GlobalSettings {
         default_log_target: repo
             .settings
@@ -375,7 +384,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
             .or(user.settings.default_log_target),
         tts: repo.settings.tts.or(user.settings.tts),
         linking: repo.settings.linking.or(user.settings.linking),
-        protect: repo.settings.protect.or(user.settings.protect),
+        protect,
     };
 
     HookerConfig {
@@ -385,11 +394,42 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
     }
 }
 
+fn merge_protect_configs(
+    user: Option<&ProtectConfig>,
+    repo: Option<&ProtectConfig>,
+) -> Option<ProtectConfig> {
+    match (user, repo) {
+        (None, None) => None,
+        (Some(user_cfg), None) => Some(user_cfg.clone()),
+        (None, Some(repo_cfg)) => Some(repo_cfg.clone()),
+        (Some(user_cfg), Some(repo_cfg)) => {
+            let mut merged = user_cfg.merge_with(repo_cfg);
+            let allow_downgrade =
+                user_cfg.allow_repo_posture_downgrade || repo_cfg.allow_repo_posture_downgrade;
+
+            if !allow_downgrade {
+                if user_cfg.posture == ProtectPosture::Strict
+                    && merged.posture != ProtectPosture::Strict
+                {
+                    merged.posture = ProtectPosture::Strict;
+                }
+
+                if user_cfg.enabled && !merged.enabled {
+                    merged.enabled = true;
+                }
+            }
+
+            Some(merged)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::actions::*;
     use crate::events::*;
+    use crate::services::{ProtectConfig, ProtectPosture};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -584,6 +624,75 @@ mod tests {
         let tts = merged.settings.tts.unwrap();
         assert_eq!(tts.provider.as_deref(), Some("espeak"));
         assert_eq!(tts.rate, Some(1.5));
+    }
+
+    #[test]
+    fn merge_protect_does_not_silently_weaken_strict_user_posture() {
+        let user = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                protect: Some(ProtectConfig {
+                    enabled: true,
+                    posture: ProtectPosture::Strict,
+                    ..ProtectConfig::default()
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let repo = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                protect: Some(ProtectConfig {
+                    enabled: false,
+                    posture: ProtectPosture::Advisory,
+                    ..ProtectConfig::default()
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let merged = merge_configs(user, repo);
+        let protect = merged.settings.protect.expect("missing merged protect");
+        assert!(protect.enabled);
+        assert_eq!(protect.posture, ProtectPosture::Strict);
+    }
+
+    #[test]
+    fn merge_protect_allows_explicit_repo_downgrade() {
+        let user = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                protect: Some(ProtectConfig {
+                    enabled: true,
+                    posture: ProtectPosture::Strict,
+                    ..ProtectConfig::default()
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let repo = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                protect: Some(ProtectConfig {
+                    enabled: false,
+                    posture: ProtectPosture::Advisory,
+                    allow_repo_posture_downgrade: true,
+                    ..ProtectConfig::default()
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let merged = merge_configs(user, repo);
+        let protect = merged.settings.protect.expect("missing merged protect");
+        assert!(!protect.enabled);
+        assert_eq!(protect.posture, ProtectPosture::Advisory);
     }
 
     #[test]

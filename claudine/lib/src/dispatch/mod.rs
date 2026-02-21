@@ -10,8 +10,11 @@ use tracing::{debug, info};
 
 use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
-use crate::error::Result;
+use crate::error::{ClaudineError, Result};
 use crate::events::{EnvironmentContext, Provider, ResolvedHook};
+use crate::services::{
+    ProtectDecision, ProtectInput, ProtectOutcome, ProtectService, ProviderProtectProfiles,
+};
 
 /// Result of dispatching a single incoming provider event.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -20,6 +23,10 @@ pub struct DispatchOutcome {
     pub response: Option<Value>,
     /// Optional process exit code for shell-based providers.
     pub exit_code: Option<i32>,
+    /// Optional protect decision evaluated before actions.
+    pub protect_pre: Option<ProtectDecision>,
+    /// Optional protect decision evaluated after actions.
+    pub protect_post: Option<ProtectDecision>,
 }
 
 /// Main dispatch entry point.
@@ -69,8 +76,11 @@ pub async fn dispatch(
     }
 
     if binding.actions().is_empty() {
-        debug!(%event, "No actions configured, skipping");
-        return Ok(DispatchOutcome::default());
+        debug!(
+            %event,
+            %provider,
+            "No actions configured; protect evaluation may still apply"
+        );
     }
 
     if !matcher::matches_with_regex(binding.matcher(), &meta) {
@@ -86,6 +96,39 @@ pub async fn dispatch(
         can_block: adapter.can_block(&event),
     };
 
+    let mut protect_service = config.settings().protect.clone().map(|protect| {
+        let mut profiles = ProviderProtectProfiles::defaults();
+        profiles.insert(provider, adapter.protect_capabilities());
+        ProtectService::with_profiles(protect, profiles)
+    });
+
+    let protect_pre = protect_service.as_mut().and_then(|service| {
+        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)
+            .map(|input| service.evaluate(&input))
+    });
+
+    if let Some(decision) = protect_pre.as_ref()
+        && should_short_circuit_on_protect(&decision.outcome)
+    {
+        let response = adapter
+            .map_protect_outcome(&resolved_hook.event, decision)
+            .map_err(|error| {
+                ClaudineError::ProtectEnforcementMapping(format!(
+                    "provider={provider} event={} pre-action: {error}",
+                    resolved_hook.event
+                ))
+            })?;
+
+        return finalize_response(
+            adapter,
+            &resolved_hook.event,
+            resolved_hook.can_block,
+            Some(response),
+            protect_pre,
+            None,
+        );
+    }
+
     info!(
         event = %resolved_hook.event,
         provider = %resolved_hook.provider,
@@ -100,14 +143,41 @@ pub async fn dispatch(
         &resolved_hook.meta,
         config.settings(),
         resolved_hook.can_block,
+        protect_pre.as_ref(),
     )
     .await?;
+
+    let protect_post = protect_service.as_mut().and_then(|service| {
+        build_post_action_input(provider, &resolved_hook, action_response.as_ref())
+            .map(|input| service.evaluate(&input))
+    });
+
+    let action_response = if let Some(decision) = protect_post.as_ref() {
+        if should_short_circuit_on_protect(&decision.outcome) {
+            Some(
+                adapter
+                    .map_protect_outcome(&resolved_hook.event, decision)
+                    .map_err(|error| {
+                        ClaudineError::ProtectEnforcementMapping(format!(
+                            "provider={provider} event={} post-action: {error}",
+                            resolved_hook.event
+                        ))
+                    })?,
+            )
+        } else {
+            action_response
+        }
+    } else {
+        action_response
+    };
 
     finalize_response(
         adapter,
         &resolved_hook.event,
         resolved_hook.can_block,
         action_response,
+        protect_pre,
+        protect_post,
     )
 }
 
@@ -123,17 +193,36 @@ fn finalize_response(
     event: &crate::events::AgenticEvent,
     can_block: bool,
     response: Option<HookResponse>,
+    protect_pre: Option<ProtectDecision>,
+    protect_post: Option<ProtectDecision>,
 ) -> Result<DispatchOutcome> {
+    let stop_session =
+        has_stop_session(protect_pre.as_ref()) || has_stop_session(protect_post.as_ref());
+
     if !can_block {
-        return Ok(DispatchOutcome::default());
+        return Ok(DispatchOutcome {
+            response: None,
+            exit_code: stop_session.then_some(2),
+            protect_pre,
+            protect_post,
+        });
     }
 
     let Some(response) = response else {
-        return Ok(DispatchOutcome::default());
+        return Ok(DispatchOutcome {
+            response: None,
+            exit_code: None,
+            protect_pre,
+            protect_post,
+        });
     };
 
     let payload = adapter.format_response(event, &response)?;
-    let exit_code = adapter.exit_code(event, &response);
+    let exit_code = if stop_session {
+        Some(2)
+    } else {
+        adapter.exit_code(event, &response)
+    };
 
     let response_payload = if payload.is_null() {
         None
@@ -144,7 +233,44 @@ fn finalize_response(
     Ok(DispatchOutcome {
         response: response_payload,
         exit_code,
+        protect_pre,
+        protect_post,
     })
+}
+
+fn should_short_circuit_on_protect(outcome: &ProtectOutcome) -> bool {
+    matches!(
+        outcome,
+        ProtectOutcome::AskThenAllowOrStop { .. }
+            | ProtectOutcome::StopCurrent { .. }
+            | ProtectOutcome::StopSession { .. }
+    )
+}
+
+fn build_post_action_input(
+    provider: Provider,
+    resolved_hook: &ResolvedHook,
+    action_response: Option<&HookResponse>,
+) -> Option<ProtectInput> {
+    if !matches!(
+        resolved_hook.event,
+        crate::events::AgenticEvent::AfterTool
+            | crate::events::AgenticEvent::TurnComplete
+            | crate::events::AgenticEvent::SubagentStop
+    ) {
+        return None;
+    }
+
+    let mut input =
+        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)?;
+    if let Some(reason) = action_response.and_then(|response| response.reason.clone()) {
+        input.summary = Some(reason);
+    }
+    Some(input)
+}
+
+fn has_stop_session(decision: Option<&ProtectDecision>) -> bool {
+    decision.is_some_and(|decision| matches!(decision.outcome, ProtectOutcome::StopSession { .. }))
 }
 
 #[cfg(test)]

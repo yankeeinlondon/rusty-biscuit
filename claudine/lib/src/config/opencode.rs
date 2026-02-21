@@ -36,27 +36,59 @@ import { execFileSync } from "child_process";
 
 const CLAUDINE_BIN = "{{CLAUDINE_BIN}}";
 
-// Map OpenCode event types to Claudine event names
+// Map OpenCode event types to Claudine event names (for event hook)
 const EVENT_MAP: Record<string, string> = {
 {{EVENT_MAP_ENTRIES}}
 };
 
+// Tool hooks require separate registration (not via event bus)
+const TOOL_EVENT_MAP: Record<string, string> = {
+  "tool.execute.before": "before_tool",
+  "tool.execute.after": "after_tool",
+};
+
+// Helper to invoke claudine handle
+function invokeClaudine(eventName: string, payload: object): void {
+  try {
+    execFileSync(CLAUDINE_BIN, ["handle", eventName, "--provider", "open_code"], {
+      input: JSON.stringify(payload),
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+  } catch {
+    // Silently ignore errors to avoid disrupting OpenCode
+  }
+}
+
 export const ClaudineBridge: Plugin = async () => {
   return {
+    // Event bus hook - handles session.*, message.*, permission.* events
     event: async ({ event }) => {
       const mapped = EVENT_MAP[event.type];
       if (mapped) {
-        try {
-          const payload = JSON.stringify(event);
-          // Pass JSON payload over stdin, matching `claudine handle` contract.
-          execFileSync(CLAUDINE_BIN, ["handle", mapped, "--provider", "open_code"], {
-            input: payload,
-            stdio: ["pipe", "ignore", "ignore"],
-          });
-        } catch {
-          // Silently ignore errors to avoid disrupting OpenCode
-        }
+        invokeClaudine(mapped, event as object);
       }
+    },
+    // Tool hooks - these are NOT on the event bus and require explicit registration
+    "tool.execute.before": async (input, output) => {
+      invokeClaudine("before_tool", {
+        event_type: "tool.execute.before",
+        tool: input.tool,
+        session_id: input.sessionID,
+        call_id: input.callID,
+        args: output.args,
+      });
+    },
+    "tool.execute.after": async (input, output) => {
+      invokeClaudine("after_tool", {
+        event_type: "tool.execute.after",
+        tool: input.tool,
+        session_id: input.sessionID,
+        call_id: input.callID,
+        args: input.args,
+        output: output.output,
+        title: output.title,
+        metadata: output.metadata,
+      });
     },
   };
 };
@@ -359,8 +391,9 @@ mod tests {
         assert!(source.contains("claudine"));
         assert!(source.contains("turn_complete"));
         assert!(source.contains("execFileSync"));
-        assert!(source.contains("[\"handle\", mapped, \"--provider\", \"open_code\"]"));
-        assert!(source.contains("input: payload"));
+        assert!(source.contains("invokeClaudine"));
+        assert!(source.contains("tool.execute.before"));
+        assert!(source.contains("tool.execute.after"));
     }
 
     #[test]
@@ -517,7 +550,8 @@ mod tests {
 
         let source = generate_bridge(provider_config);
         assert!(source.contains("execFileSync(CLAUDINE_BIN"));
-        assert!(source.contains("[\"handle\", mapped, \"--provider\", \"open_code\"]"));
-        assert!(source.contains("input: payload"));
+        assert!(source.contains("invokeClaudine"));
+        assert!(source.contains("[\"handle\","));
+        assert!(source.contains("--provider\", \"open_code\"]"));
     }
 }

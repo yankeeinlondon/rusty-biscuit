@@ -68,6 +68,23 @@ pub enum ClaudineError {
         /// Provider name.
         provider: String,
     },
+
+    /// Protect rule pattern failed to parse as regex.
+    #[error("protect rule parse error for pattern `{pattern}`: {source}")]
+    ProtectRuleParse {
+        /// Rule regex pattern.
+        pattern: String,
+        /// Regex parser error.
+        source: regex::Error,
+    },
+
+    /// Protect policy is semantically invalid.
+    #[error("protect policy invalid: {0}")]
+    ProtectInvalidPolicy(String),
+
+    /// Failed mapping a protect outcome to provider-native enforcement.
+    #[error("protect enforcement mapping error: {0}")]
+    ProtectEnforcementMapping(String),
 }
 
 /// Convenience type alias for Claudine results.

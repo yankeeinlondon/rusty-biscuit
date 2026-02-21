@@ -9,11 +9,12 @@ use tracing::{debug, warn};
 
 use super::template::interpolate;
 use crate::actions::{
-    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ReportFormat,
-    ReportHandler,
+    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ProtectCallContext,
+    ReportFormat, ReportHandler,
 };
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
+use crate::services::{ProtectDecision, ProtectOutcome};
 
 /// Execute hook actions in declaration order.
 ///
@@ -24,6 +25,7 @@ pub async fn execute_actions(
     meta: &EventMeta,
     settings: &GlobalSettings,
     can_block: bool,
+    protect_decision: Option<&ProtectDecision>,
 ) -> Result<Option<HookResponse>> {
     let mut selected_response: Option<HookResponse> = None;
 
@@ -44,6 +46,32 @@ pub async fn execute_actions(
                 timeout_ms,
                 mapper,
             } => {
+                if should_short_circuit_call(protect_decision) {
+                    let Some(decision) = protect_decision else {
+                        continue;
+                    };
+
+                    let outcome_reason = protect_reason(&decision.outcome)
+                        .unwrap_or_else(|| decision.reason.clone());
+                    let response = HookResponse {
+                        decision: Some(decision_for_short_circuit(&decision.outcome)),
+                        reason: Some(format!(
+                            "call action short-circuited by protect: {outcome_reason}"
+                        )),
+                        protect: Some(ProtectCallContext {
+                            outcome: protect_outcome_slug(&decision.outcome).to_string(),
+                            reason: decision.reason.clone(),
+                            short_circuited: true,
+                        }),
+                        ..HookResponse::default()
+                    };
+
+                    if can_block && should_replace_selected(selected_response.as_ref(), &response) {
+                        selected_response = Some(response);
+                    }
+                    continue;
+                }
+
                 let cmd = interpolate(command, meta);
                 let rendered_args = args.as_ref().map(|items| {
                     items
@@ -69,6 +97,7 @@ pub async fn execute_actions(
                     Ok(Ok(output)) => match apply_mapper(compiled_mapper, mapper.as_ref(), &output)
                     {
                         Ok(response) => {
+                            let response = attach_protect_context(response, protect_decision);
                             if can_block {
                                 if should_replace_selected(selected_response.as_ref(), &response) {
                                     selected_response = Some(response);
@@ -115,6 +144,65 @@ fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookRespo
             let candidate_is_continue = matches!(candidate.decision, Some(HookDecision::Continue));
             existing_is_continue && !candidate_is_continue
         }
+    }
+}
+
+fn should_short_circuit_call(decision: Option<&ProtectDecision>) -> bool {
+    decision.is_some_and(|decision| {
+        matches!(
+            decision.outcome,
+            ProtectOutcome::AskThenAllowOrStop { .. }
+                | ProtectOutcome::StopCurrent { .. }
+                | ProtectOutcome::StopSession { .. }
+        )
+    })
+}
+
+fn decision_for_short_circuit(outcome: &ProtectOutcome) -> HookDecision {
+    match outcome {
+        ProtectOutcome::AskThenAllowOrStop { .. } => HookDecision::Ask,
+        ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. } => {
+            HookDecision::Deny
+        }
+        ProtectOutcome::Allow
+        | ProtectOutcome::AllowWithRedaction { .. }
+        | ProtectOutcome::AdvisoryOnly { .. } => HookDecision::Continue,
+    }
+}
+
+fn attach_protect_context(
+    mut response: HookResponse,
+    protect_decision: Option<&ProtectDecision>,
+) -> HookResponse {
+    if let Some(decision) = protect_decision {
+        response.protect = Some(ProtectCallContext {
+            outcome: protect_outcome_slug(&decision.outcome).to_string(),
+            reason: decision.reason.clone(),
+            short_circuited: false,
+        });
+    }
+    response
+}
+
+fn protect_outcome_slug(outcome: &ProtectOutcome) -> &'static str {
+    match outcome {
+        ProtectOutcome::Allow => "allow",
+        ProtectOutcome::AskThenAllowOrStop { .. } => "ask_then_allow_or_stop",
+        ProtectOutcome::StopCurrent { .. } => "stop_current",
+        ProtectOutcome::StopSession { .. } => "stop_session",
+        ProtectOutcome::AllowWithRedaction { .. } => "allow_with_redaction",
+        ProtectOutcome::AdvisoryOnly { .. } => "advisory_only",
+    }
+}
+
+fn protect_reason(outcome: &ProtectOutcome) -> Option<String> {
+    match outcome {
+        ProtectOutcome::Allow => None,
+        ProtectOutcome::AskThenAllowOrStop { reason }
+        | ProtectOutcome::StopCurrent { reason }
+        | ProtectOutcome::StopSession { reason }
+        | ProtectOutcome::AllowWithRedaction { reason }
+        | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
     }
 }
 
@@ -620,9 +708,16 @@ mod tests {
             },
         }];
 
-        execute_actions(&actions, None, &meta(), &GlobalSettings::default(), false)
-            .await
-            .unwrap();
+        execute_actions(
+            &actions,
+            None,
+            &meta(),
+            &GlobalSettings::default(),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(path).unwrap();
         assert!(content.contains("before_tool"));
@@ -748,5 +843,47 @@ mod tests {
             config.failover_strategy,
             TtsFailoverStrategy::FirstAvailable
         ));
+    }
+
+    #[test]
+    fn attach_protect_context_marks_response() {
+        let response = HookResponse {
+            decision: Some(HookDecision::Allow),
+            ..HookResponse::default()
+        };
+
+        let protect = crate::services::ProtectDecision {
+            outcome: crate::services::ProtectOutcome::Allow,
+            degraded_from: None,
+            degraded: false,
+            reason: "protect.normal.balanced".to_string(),
+            capability: Some(crate::services::GateCapability::Guarantee),
+        };
+
+        let with_context = super::attach_protect_context(response, Some(&protect));
+        assert!(with_context.protect.is_some());
+        assert_eq!(
+            with_context.protect.as_ref().map(|p| p.short_circuited),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn short_circuit_call_for_stop_outcome() {
+        let protect = crate::services::ProtectDecision {
+            outcome: crate::services::ProtectOutcome::StopCurrent {
+                reason: "rules.blocked-command".to_string(),
+            },
+            degraded_from: None,
+            degraded: false,
+            reason: "protect.normal.strict".to_string(),
+            capability: Some(crate::services::GateCapability::Guarantee),
+        };
+
+        assert!(super::should_short_circuit_call(Some(&protect)));
+        assert_eq!(
+            super::decision_for_short_circuit(&protect.outcome),
+            HookDecision::Deny
+        );
     }
 }

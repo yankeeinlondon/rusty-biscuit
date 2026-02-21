@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::agentic_event::AgenticEvent;
 use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
+use crate::error::{ClaudineError, Result};
 use crate::services::protect::ProtectConfig;
 
 /// Root configuration loaded from `~/.claudine/config.json`.
@@ -147,6 +148,17 @@ impl HookerConfig {
             .get(&provider)
             .map(|p| p.events.keys().collect())
             .unwrap_or_default()
+    }
+
+    /// Validate semantic config invariants that are not expressible in serde types.
+    pub fn validate(&self) -> Result<()> {
+        if let Some(protect) = self.settings.protect.as_ref() {
+            protect.validate().map_err(|error| {
+                ClaudineError::ConfigValidation(format!("invalid settings.protect: {error}"))
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -406,5 +418,27 @@ mod tests {
         });
         let config: HookerConfig = serde_json::from_value(json).unwrap();
         assert!(config.providers.is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_protect_settings() {
+        let config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                protect: Some(ProtectConfig {
+                    completion: crate::services::protect::CompletionPolicy {
+                        enabled: true,
+                        max_retries: 0,
+                        ..crate::services::protect::CompletionPolicy::default()
+                    },
+                    ..ProtectConfig::default()
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("invalid settings.protect"));
     }
 }
