@@ -96,6 +96,37 @@ prompt: |-
 
     **IMPORTANT:** You must use the "claudine" skill when executing this task.
     **IMPORTANT:** Preserve all frontmatter properties that exist in this document. Your updates will only be to the BODY of this document.
+
+    ## Built in Tools
+
+    All Agentic platforms have a built-in tools which they use to solve problems with. You need to research what tools the Agent platform you're focusing on provides. List out all the built-in tools with:
+
+    - a name,
+    - description,
+    - parameters provided to the tool,
+    - and 2-3 examples of how this tool might be called by the agent
+
+    ### Permissions
+
+    Each Agentic platforms will allow for the configuration of what tools are allowed and how their parameters can be constrained. Your task is to:
+
+    - identify the best URL that documents the permission configuration for the Agent you are focused on
+    - identify the various ways permission configuration is set:
+        - user scoped configuration
+        - repo scoped configuration
+        - agent/subagent configuration?
+        - slash command configuration?
+        - CLI switch configuration?
+        - others?
+    - give 2-3 examples of how someone might configure their Agent and why they might do it that way
+
+    ### Risk Vectors
+
+    Once you've described the Agent's tools, evaluate where you think the greatest risks might be within the use of these tools. Create a markdown list of risks and for each risk:
+
+    - describe the risk (with context)
+    - discuss how this risk might be able to be identified in semi-structured or unstructured content
+    - discuss how you might help to lower this risk based on what you know about the Agent's capabilities, configuration, and features
 closure: |-
     ## Task
 
@@ -168,6 +199,14 @@ closure: |-
     - `body_hash` to the xxHash value for this document's Markdown body content (not frontmatter)
         - Compute by printing the body content and piping to `bh` as STDIN
         - If the `bh` utility is not found in the executable path, leave this blank
+
+    ## Built in Tools
+
+    Make sure to add the following properties to this document's Frontmatter:
+
+    - `permissions_url` - the URL for documentation on setting permissions on the agent.
+    - `built_in_tools` - should be a dictionary where the _keys_ are the tool name and the _values_ are the description of the tool along with a usage example.
+    - `risk_vectors` - should be a list of named risks, along with how to identify this risk, and ideas on how the Agent might be able to lower this risk.
 agent_version: "v1.2.10"
 has_blocking_pre_tool_event: true
 pre_tool_influence: guarantee

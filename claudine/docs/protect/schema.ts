@@ -95,6 +95,15 @@ export type Schema = {
     /** whether the Agent has a mode that bypasses permission checks entirely */
     has_bypass_mode: boolean;
 
+    // ── Built-in Tools ────────────────────────────────────────────
+
+    /** URL to the Agent's documentation on setting tool permissions */
+    permissions_url: string;
+    /** dictionary of built-in tool names to their description and a usage example */
+    built_in_tools: Record<string, string>;
+    /** list of named risks with identification strategies and mitigation ideas */
+    risk_vectors: string[];
+
     // ── Metadata ─────────────────────────────────────────────────
 
     /** in the format of YYYY-MM-DD */

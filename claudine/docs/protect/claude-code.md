@@ -96,6 +96,37 @@ prompt: |-
 
     **IMPORTANT:** You must use the "claudine" skill when executing this task.
     **IMPORTANT:** Preserve all frontmatter properties that exist in this document. Your updates will only be to the BODY of this document.
+
+    ## Built in Tools
+
+    All Agentic platforms have a built-in tools which they use to solve problems with. You need to research what tools the Agent platform you're focusing on provides. List out all the built-in tools with:
+
+    - a name,
+    - description,
+    - parameters provided to the tool,
+    - and 2-3 examples of how this tool might be called by the agent
+
+    ### Permissions
+
+    Each Agentic platforms will allow for the configuration of what tools are allowed and how their parameters can be constrained. Your task is to:
+
+    - identify the best URL that documents the permission configuration for the Agent you are focused on
+    - identify the various ways permission configuration is set:
+        - user scoped configuration
+        - repo scoped configuration
+        - agent/subagent configuration?
+        - slash command configuration?
+        - CLI switch configuration?
+        - others?
+    - give 2-3 examples of how someone might configure their Agent and why they might do it that way
+
+    ### Risk Vectors
+
+    Once you've described the Agent's tools, evaluate where you think the greatest risks might be within the use of these tools. Create a markdown list of risks and for each risk:
+
+    - describe the risk (with context)
+    - discuss how this risk might be able to be identified in semi-structured or unstructured content
+    - discuss how you might help to lower this risk based on what you know about the Agent's capabilities, configuration, and features
 closure: |-
     ## Task
 
@@ -168,6 +199,14 @@ closure: |-
     - `body_hash` to the xxHash value for this document's Markdown body content (not frontmatter)
         - Compute by printing the body content and piping to `bh` as STDIN
         - If the `bh` utility is not found in the executable path, leave this blank
+
+    ## Built in Tools
+
+    Make sure to add the following properties to this document's Frontmatter:
+
+    - `permissions_url` - the URL for documentation on setting permissions on the agent.
+    - `built_in_tools` - should be a dictionary where the _keys_ are the tool name and the _values_ are the description of the tool along with a usage example.
+    - `risk_vectors` - should be a list of named risks, along with how to identify this risk, and ideas on how the Agent might be able to lower this risk.
 agent_version: "2.1.50"
 has_blocking_pre_tool_event: true
 pre_tool_influence: guarantee
@@ -895,3 +934,399 @@ Source: [Security](https://code.claude.com/docs/en/security), [Permissions](http
 - [Claude Code Security](https://code.claude.com/docs/en/security)
 - [Claude Code Subagents](https://code.claude.com/docs/en/sub-agents)
 - [Claude Code DevContainers](https://code.claude.com/docs/en/devcontainer)
+
+## Built in Tools
+
+Claude Code provides a set of built-in tools that the agent uses to interact with the filesystem, terminal, web, and subagent system. MCP (Model Context Protocol) servers extend this tool set with additional capabilities, but MCP tools are covered in the [Intercepting MCP Calls](#intercepting-mcp-calls) section above.
+
+### Tool Catalog
+
+#### Bash
+
+Executes shell commands in the user's environment. This is the most powerful and most dangerous tool -- it has full access to the system shell and can run arbitrary commands.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | Yes | The shell command to execute |
+| `description` | string | No | Human-readable description of what the command does |
+| `timeout` | number | No | Timeout in milliseconds (default: 120000ms / 2 minutes, max: 600000ms / 10 minutes) |
+| `run_in_background` | boolean | No | Run command in background, returning a task ID for later retrieval via `TaskOutput` |
+| `dangerouslyDisableSandbox` | boolean | No | Disable sandbox restrictions for this command (goes through normal permissions if sandbox is active) |
+
+**Example invocations:**
+
+1. Running a test suite: `command: "npm test"`, `description: "Run unit tests"`, `timeout: 300000`
+2. Checking git status: `command: "git status"`, `description: "Show working tree status"`
+3. Building a project in background: `command: "cargo build --release"`, `run_in_background: true`
+
+#### Read
+
+Reads file contents from the local filesystem. Can read text files, images (PNG, JPG, etc.), PDFs, and Jupyter notebooks.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | Yes | Absolute path to the file to read |
+| `offset` | number | No | Line number to start reading from (1-indexed) |
+| `limit` | number | No | Number of lines to read (default: 2000) |
+| `pages` | string | No | Page range for PDF files (e.g., "1-5", "3", "10-20") |
+
+**Example invocations:**
+
+1. Reading a source file: `file_path: "/home/user/project/src/main.rs"`
+2. Reading a specific section: `file_path: "/home/user/project/README.md"`, `offset: 50`, `limit: 100`
+3. Reading a PDF page range: `file_path: "/tmp/report.pdf"`, `pages: "1-5"`
+
+#### Write
+
+Writes content to a file on the local filesystem. Overwrites existing files entirely.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | Yes | Absolute path to the file to write |
+| `content` | string | Yes | The full content to write to the file |
+
+**Example invocations:**
+
+1. Creating a new file: `file_path: "/home/user/project/config.json"`, `content: "{\n  \"key\": \"value\"\n}"`
+2. Overwriting an existing file: `file_path: "/home/user/project/src/utils.ts"`, `content: "export function add(a: number, b: number) { return a + b; }"`
+
+#### Edit
+
+Performs exact string replacements within files. Requires the `old_string` to be unique in the file (or `replace_all` must be set to true).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | Yes | Absolute path to the file to modify |
+| `old_string` | string | Yes | The exact text to replace (must be unique in the file unless `replace_all` is true) |
+| `new_string` | string | Yes | The replacement text (must differ from `old_string`) |
+| `replace_all` | boolean | No | Replace all occurrences of `old_string` (default: false) |
+
+**Example invocations:**
+
+1. Renaming a function: `file_path: "/src/lib.rs"`, `old_string: "fn old_name("`, `new_string: "fn new_name("`
+2. Replacing all occurrences of a variable: `file_path: "/src/app.ts"`, `old_string: "oldVar"`, `new_string: "newVar"`, `replace_all: true`
+
+#### Glob
+
+Finds files matching glob patterns. Returns matching file paths sorted by modification time.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pattern` | string | Yes | Glob pattern to match files against (e.g., `"**/*.ts"`, `"src/**/*.rs"`) |
+| `path` | string | No | Directory to search in (defaults to current working directory) |
+
+**Example invocations:**
+
+1. Finding all TypeScript files: `pattern: "**/*.ts"`
+2. Finding test files in a specific directory: `pattern: "*.test.js"`, `path: "/home/user/project/src"`
+
+#### Grep
+
+Searches file contents using regular expressions (built on ripgrep).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pattern` | string | Yes | Regular expression pattern to search for |
+| `path` | string | No | File or directory to search in (defaults to cwd) |
+| `glob` | string | No | Glob pattern to filter files (e.g., `"*.js"`, `"**/*.tsx"`) |
+| `output_mode` | string | No | `"content"`, `"files_with_matches"` (default), or `"count"` |
+| `-i` | boolean | No | Case-insensitive search |
+| `multiline` | boolean | No | Enable multiline matching (patterns can span lines) |
+| `-A` | number | No | Lines to show after each match |
+| `-B` | number | No | Lines to show before each match |
+| `-C` | number | No | Lines of context around each match |
+| `-n` | boolean | No | Show line numbers (default: true for content mode) |
+| `head_limit` | number | No | Limit output to first N entries |
+| `offset` | number | No | Skip first N entries before applying head_limit |
+| `type` | string | No | File type filter (e.g., `"js"`, `"py"`, `"rust"`) |
+
+**Example invocations:**
+
+1. Finding all TODO comments: `pattern: "TODO"`, `output_mode: "content"`, `glob: "**/*.rs"`
+2. Searching for a function definition: `pattern: "fn process_event"`, `output_mode: "content"`, `-C: 5`
+3. Counting matches in Python files: `pattern: "import requests"`, `type: "py"`, `output_mode: "count"`
+
+#### WebFetch
+
+Fetches content from a URL, converts HTML to markdown, and processes it with an AI model.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | The URL to fetch content from (must be fully-formed, HTTP auto-upgraded to HTTPS) |
+| `prompt` | string | Yes | Describes what information to extract from the page |
+
+**Example invocations:**
+
+1. Reading documentation: `url: "https://docs.rs/tokio/latest/tokio/"`, `prompt: "Extract the main API types and their descriptions"`
+2. Checking a package's latest version: `url: "https://crates.io/crates/serde"`, `prompt: "What is the latest version?"`
+
+#### WebSearch
+
+Searches the web and returns results to inform responses.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | The search query (minimum 2 characters) |
+| `allowed_domains` | array | No | Only include results from these domains |
+| `blocked_domains` | array | No | Exclude results from these domains |
+
+**Example invocations:**
+
+1. Searching for documentation: `query: "rust tokio async runtime tutorial 2026"`
+2. Restricting to specific domains: `query: "react hooks best practices"`, `allowed_domains: ["react.dev", "developer.mozilla.org"]`
+
+#### Task
+
+Creates subagent tasks for delegation. Spawns a separate agent with its own context window.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | Yes | The instructions for the subagent |
+| `description` | string | No | Human-readable description of the task |
+| `subagent_type` | string | No | The subagent type to use (e.g., `"Explore"`, `"Plan"`, or a custom agent name) |
+| `model` | string | No | Model override for the subagent |
+
+**Example invocations:**
+
+1. Delegating exploration: `prompt: "Find all files that import the auth module"`, `subagent_type: "Explore"`
+2. Creating a custom subagent task: `prompt: "Review the recent changes for security issues"`, `description: "Security review"`, `subagent_type: "code-reviewer"`
+
+#### TaskOutput
+
+Retrieves the output from a background task (bash command or subagent).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task_id` | string | Yes | The ID of the background task to retrieve output from |
+
+**Example invocations:**
+
+1. Retrieving background build output: `task_id: "bg-task-abc123"`
+
+#### NotebookEdit
+
+Edits Jupyter notebook cells. Can replace, insert, or delete cells.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `notebook_path` | string | Yes | Absolute path to the `.ipynb` file |
+| `new_source` | string | Yes | The new content for the cell |
+| `cell_id` | string | No | ID of the cell to edit (for insert: new cell is added after this cell) |
+| `cell_type` | string | No | `"code"` or `"markdown"` (required for insert, defaults to current type for replace) |
+| `edit_mode` | string | No | `"replace"` (default), `"insert"`, or `"delete"` |
+
+**Example invocations:**
+
+1. Replacing a cell's content: `notebook_path: "/home/user/analysis.ipynb"`, `new_source: "import pandas as pd\ndf = pd.read_csv('data.csv')"`, `cell_id: "cell-1"`
+2. Inserting a new markdown cell: `notebook_path: "/home/user/analysis.ipynb"`, `new_source: "## Results"`, `cell_type: "markdown"`, `edit_mode: "insert"`, `cell_id: "cell-3"`
+
+#### AskUserQuestion
+
+Asks the user a multiple-choice or open-ended question to gather requirements or clarify ambiguity. Does not require permission.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | Yes | The question to ask the user |
+| `options` | array | No | List of options for multiple-choice questions |
+
+**Example invocations:**
+
+1. Clarifying requirements: `question: "Which database should this migration target?"`, `options: ["PostgreSQL", "MySQL", "SQLite"]`
+2. Open-ended question: `question: "What naming convention do you prefer for the new API endpoints?"`
+
+#### Skill
+
+Invokes a skill (custom slash command) within the conversation.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skill` | string | Yes | The skill name (e.g., `"commit"`, `"review-pr"`) |
+| `args` | string | No | Optional arguments for the skill |
+
+**Example invocations:**
+
+1. Invoking a skill: `skill: "commit"`, `args: "-m 'Fix authentication bug'"`
+2. Using a namespaced skill: `skill: "ms-office-suite:pdf"`
+
+#### TodoWrite
+
+Manages TODO items for task tracking (deprecated in favor of the task list system, but still available).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `todos` | array | Yes | Array of TODO items with `id`, `content`, `status`, and optional `priority` |
+
+**Example invocations:**
+
+1. Creating TODOs: `todos: [{"id": "1", "content": "Write unit tests", "status": "in_progress"}, {"id": "2", "content": "Update docs", "status": "pending"}]`
+
+### Permissions
+
+Claude Code's permission system controls which tools the agent can use and how their parameters are constrained. The primary documentation is at [https://code.claude.com/docs/en/permissions](https://code.claude.com/docs/en/permissions).
+
+#### Permission Rule Format
+
+Rules follow the syntax `Tool` or `Tool(specifier)` and are organized into three categories evaluated in order: **deny** (first), **ask** (second), **allow** (third). The first matching rule wins.
+
+#### Configuration Scopes
+
+| Scope | Location | Priority | Notes |
+|-------|----------|----------|-------|
+| Managed (enterprise) | `/Library/Application Support/ClaudeCode/managed-settings.json` (macOS), `/etc/claude-code/managed-settings.json` (Linux) | Highest | Cannot be overridden; admin-controlled |
+| CLI flags | `--allowedTools`, `--disallowedTools` | High | Session-scoped |
+| Project (local) | `.claude/settings.local.json` | Medium-High | Not committed to VCS |
+| Project (shared) | `.claude/settings.json` | Medium | Committed to VCS; team-shared |
+| User | `~/.claude/settings.json` | Low | Personal defaults |
+| Subagent frontmatter | `tools` / `disallowedTools` fields in agent `.md` files | Scoped to subagent lifecycle | Controls subagent capabilities |
+
+#### Configuration Examples
+
+**Example 1: Restrictive CI/CD configuration** -- Lock down an automated pipeline to only allow safe, pre-approved commands.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run test *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Read"
+    ],
+    "deny": [
+      "Bash(rm *)",
+      "Bash(git push *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+  "defaultMode": "dontAsk"
+}
+```
+
+This configuration is suitable for a CI job that needs to build and test but should never modify files, push to remote, or access the network via Bash. The `dontAsk` mode auto-denies anything not explicitly allowed.
+
+**Example 2: Developer workstation with safety rails** -- Allow most operations but protect sensitive files and block dangerous commands.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(cargo *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Read",
+      "Edit",
+      "Write"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(git push --force *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Edit(./.env)",
+      "Edit(./.env.*)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "WebFetch"
+    ]
+  }
+}
+```
+
+This lets the developer work freely with build tools and git while blocking destructive commands, protecting secrets files, and requiring confirmation for pushes and web fetches.
+
+**Example 3: Read-only subagent via frontmatter** -- A subagent definition that restricts tool access at the agent level.
+
+```yaml
+---
+name: safe-explorer
+description: Explore the codebase without making changes
+tools: Read, Grep, Glob
+permissionMode: plan
+maxTurns: 25
+---
+You have read-only access. Search the codebase and report findings.
+```
+
+By listing only `Read`, `Grep`, and `Glob` in the `tools` field and setting `permissionMode: plan`, this subagent cannot execute commands, write files, or fetch web content.
+
+### Risk Vectors
+
+The following risks are associated with Claude Code's built-in tools, ordered from highest to lowest severity.
+
+- **Arbitrary shell execution via Bash** -- The Bash tool can execute any command the user's shell supports, including commands that delete data (`rm -rf`), exfiltrate secrets (`curl` with embedded credentials), install malware, or escalate privileges (`sudo`). This is the single greatest risk vector.
+    - *Identification*: In `PreToolUse` hooks, inspect `tool_input.command` for patterns like `rm -rf`, `sudo`, `chmod 777`, `curl`, `wget`, `nc`, `ssh`, `scp`, `dd`, `mkfs`, `> /dev/`, pipe chains to unknown binaries, or base64-encoded payloads. Watch for shell metacharacter abuse (`;`, `&&`, `||`, backticks, `$()`) that chains safe-looking commands with dangerous ones.
+    - *Mitigation*: Use `permissions.deny` rules with specific patterns (`Bash(rm -rf *)`, `Bash(sudo *)`, `Bash(curl *)`). Enable sandbox mode for OS-level filesystem and network isolation. Deploy `PreToolUse` hooks that parse and validate the command string before execution. In headless/CI mode, use `dontAsk` with a strict allowlist. Use managed settings to enforce deny rules organization-wide.
+
+- **Secret and credential exposure via Read** -- The Read tool can access any file the OS user can read, including `.env` files, SSH keys, API tokens, cloud credentials, and password databases. Even without exfiltration, reading a secret into Claude's context window means it persists in conversation transcripts stored on disk.
+    - *Identification*: In `PreToolUse` hooks, inspect `tool_input.file_path` for patterns like `.env`, `.env.*`, `credentials`, `secrets`, `.ssh/`, `.aws/`, `.gnupg/`, `*.pem`, `*.key`, `id_rsa`, `token`, `password`. Check for paths outside the project directory. In `PostToolUse` hooks, scan `tool_response` for patterns matching API keys (`sk-`, `AKIA`, `ghp_`, `gho_`, `glpat-`).
+    - *Mitigation*: Use `permissions.deny` rules: `Read(./.env)`, `Read(./.env.*)`, `Read(~/.ssh/**)`, `Read(~/.aws/**)`. Use `PostToolUse` hooks to scan tool output for secret patterns and replace them via `updatedMCPToolOutput` (for MCP tools) or flag them via `decision: "block"`. Consider sandboxing to restrict filesystem read access to the project directory.
+
+- **Uncontrolled file writes via Write and Edit** -- Write and Edit can create or modify any file in the working directory tree, including critical configuration files, scripts that will later be executed, CI pipeline definitions, or Dockerfiles. A prompt injection could cause the agent to write malicious content.
+    - *Identification*: In `PreToolUse` hooks, inspect `tool_input.file_path` for writes to sensitive paths: `.github/workflows/`, `Dockerfile`, `Makefile`, `.claude/settings.json`, `.bashrc`, `.zshrc`, `package.json` (scripts section), or any executable file. Inspect `tool_input.content` or `tool_input.new_string` for suspicious patterns (embedded scripts, encoded payloads, `eval()`, `exec()`).
+    - *Mitigation*: Use `permissions.deny` rules for critical paths: `Edit(.github/workflows/**)`, `Edit(Dockerfile)`. Use `PostToolUse` hooks on `Write|Edit` to scan newly written content for secrets, embedded commands, or unexpected patterns. Enable sandbox mode so Bash commands spawned from written scripts are still constrained. Use `acceptEdits` mode (rather than `bypassPermissions`) to auto-approve edits while maintaining other permission checks.
+
+- **Network exfiltration via WebFetch and WebSearch** -- WebFetch can reach arbitrary URLs, potentially sending data to attacker-controlled servers (e.g., via URL query parameters). WebSearch queries could be crafted to include sensitive information.
+    - *Identification*: In `PreToolUse` hooks, inspect `tool_input.url` for non-HTTPS schemes, IP addresses, localhost, internal network addresses, or domains that don't match an allowlist. For WebSearch, inspect `tool_input.query` for embedded secrets or internal project names.
+    - *Mitigation*: Use `permissions.deny` rules: `WebFetch` (block all), then selectively allow via `permissions.allow`: `WebFetch(domain:docs.rs)`, `WebFetch(domain:crates.io)`. Use the sandbox's `allowedDomains` list to restrict Bash-based network access. For WebSearch, use `PreToolUse` hooks to scan query text for secret patterns before submission.
+
+- **Prompt injection via MCP tool responses** -- MCP servers return unvalidated content that enters Claude's context. A compromised or malicious MCP server can embed instructions ("ignore previous instructions and...") in its responses, potentially causing Claude to execute harmful tool calls.
+    - *Identification*: In `PostToolUse` hooks matching `mcp__.*`, scan `tool_response` for prompt injection patterns: "ignore previous", "system prompt", "you are now", "disregard", SYSTEM/ASSISTANT role markers, or instruction-like content that doesn't match expected data formats.
+    - *Mitigation*: Use `PostToolUse` hooks to sanitize MCP responses via `updatedMCPToolOutput`. Use `PreToolUse` hooks to restrict which MCP tools can be called. Deploy managed MCP settings to control which servers are available. Use enterprise allowlists/denylists for MCP servers.
+
+- **Subagent escalation via Task** -- The Task tool creates subagents that inherit the parent's permissions by default. If an attacker can influence the `prompt` parameter (e.g., through a compromised CLAUDE.md or MCP response), they can instruct the subagent to perform harmful actions with full tool access.
+    - *Identification*: In `PreToolUse` hooks matching `Task`, inspect `tool_input.prompt` for suspicious instructions, references to files outside the project, or requests to disable safety measures. Use `SubagentStart` hooks to log all subagent creation events.
+    - *Mitigation*: Restrict subagent tool access via `tools` and `disallowedTools` in subagent frontmatter. Use `permissions.deny` rules to block specific subagent types: `Task(Explore)`. Use `SubagentStart` hooks to inject security policy context into every subagent. Remember that settings-level `PreToolUse` hooks fire inside subagents, providing a global safety net.
+
+- **Notebook code execution via NotebookEdit** -- NotebookEdit modifies Jupyter notebook cells, which may later be executed by the user. Malicious code injected into a notebook cell could run with the user's full privileges when the notebook is opened.
+    - *Identification*: In `PreToolUse` hooks matching `Notebook.*`, inspect `tool_input.new_source` for suspicious patterns: `os.system()`, `subprocess`, `eval()`, `exec()`, network calls, or file I/O outside the project directory.
+    - *Mitigation*: Use `PreToolUse` hooks to validate notebook cell content before insertion. Consider denying `NotebookEdit` entirely if notebooks are not part of your workflow.
+
+- **Bypass permissions mode** -- The `--dangerously-skip-permissions` flag and `bypassPermissions` mode disable all permission checks, making every tool call auto-approved. If a user or automation script enables this in a non-isolated environment, all other protections become ineffective.
+    - *Identification*: Every hook input includes `permission_mode` in its JSON payload. Check for `"permission_mode": "bypassPermissions"` in any hook to detect this state. Use `SessionStart` hooks to alert when bypass mode is active.
+    - *Mitigation*: Deploy `"disableBypassPermissionsMode": "disable"` in managed settings to prevent bypass mode organization-wide. Use `SessionStart` hooks to warn users and inject cautionary context when bypass mode is detected. Only use bypass mode inside containers, VMs, or DevContainers with no access to production systems.
+
+Sources:
+- [Claude Code Permissions](https://code.claude.com/docs/en/permissions)
+- [Claude Code Settings - Tools Available to Claude](https://code.claude.com/docs/en/settings)
+- [Claude Code Subagents](https://code.claude.com/docs/en/sub-agents)
+- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks)
+- [Claude Code Sandboxing](https://code.claude.com/docs/en/sandboxing)
+- [Claude Code Security](https://code.claude.com/docs/en/security)

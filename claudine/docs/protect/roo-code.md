@@ -96,6 +96,37 @@ prompt: |-
 
     **IMPORTANT:** You must use the "claudine" skill when executing this task.
     **IMPORTANT:** Preserve all frontmatter properties that exist in this document. Your updates will only be to the BODY of this document.
+
+    ## Built in Tools
+
+    All Agentic platforms have a built-in tools which they use to solve problems with. You need to research what tools the Agent platform you're focusing on provides. List out all the built-in tools with:
+
+    - a name,
+    - description,
+    - parameters provided to the tool,
+    - and 2-3 examples of how this tool might be called by the agent
+
+    ### Permissions
+
+    Each Agentic platforms will allow for the configuration of what tools are allowed and how their parameters can be constrained. Your task is to:
+
+    - identify the best URL that documents the permission configuration for the Agent you are focused on
+    - identify the various ways permission configuration is set:
+        - user scoped configuration
+        - repo scoped configuration
+        - agent/subagent configuration?
+        - slash command configuration?
+        - CLI switch configuration?
+        - others?
+    - give 2-3 examples of how someone might configure their Agent and why they might do it that way
+
+    ### Risk Vectors
+
+    Once you've described the Agent's tools, evaluate where you think the greatest risks might be within the use of these tools. Create a markdown list of risks and for each risk:
+
+    - describe the risk (with context)
+    - discuss how this risk might be able to be identified in semi-structured or unstructured content
+    - discuss how you might help to lower this risk based on what you know about the Agent's capabilities, configuration, and features
 closure: |-
     ## Task
 
@@ -168,6 +199,14 @@ closure: |-
     - `body_hash` to the xxHash value for this document's Markdown body content (not frontmatter)
         - Compute by printing the body content and piping to `bh` as STDIN
         - If the `bh` utility is not found in the executable path, leave this blank
+
+    ## Built in Tools
+
+    Make sure to add the following properties to this document's Frontmatter:
+
+    - `permissions_url` - the URL for documentation on setting permissions on the agent.
+    - `built_in_tools` - should be a dictionary where the _keys_ are the tool name and the _values_ are the description of the tool along with a usage example.
+    - `risk_vectors` - should be a list of named risks, along with how to identify this risk, and ideas on how the Agent might be able to lower this risk.
 agent_version: "v3.50.3 (Extension), v0.0.55 (CLI)"
 has_blocking_pre_tool_event: true
 pre_tool_influence: guarantee
@@ -715,3 +754,691 @@ Additionally, the command execution auto-approval includes dangerous-pattern blo
 - [Custom Modes](https://docs.roocode.com/features/custom-modes)
 - [FAQ](https://docs.roocode.com/faq)
 - [Settings Management](https://docs.roocode.com/features/settings-management)
+
+## Built in Tools
+
+Roo Code provides a rich set of built-in tools organized into functional categories. Each tool call is subject to the approval pipeline (auto-approve settings, `.rooignore`, mode tool groups, and workspace boundary checks) before execution. Tools are invoked by the LLM using XML-style tags.
+
+### Read Tools
+
+#### `read_file`
+
+Reads file contents with line numbers. Supports single-file and multi-file (concurrent) reads, PDF/DOCX/XLSX/IPYNB text extraction, and image files (PNG, JPG, GIF, WebP, SVG, BMP, ICO, TIFF, AVIF up to 5MB per image, 20MB total).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path relative to working directory |
+| `mode` | string | No | `"slice"` (default) or `"indentation"` |
+| `offset` | integer | No | 1-based starting line (slice mode, default: 1) |
+| `limit` | integer | No | Max lines to return (slice mode, default: 2000) |
+| `indentation` | object | No | For `mode="indentation"`: `anchor_line`, `max_levels`, `include_siblings`, `include_header`, `max_lines` |
+| `args` | object | No | Multi-file container with `file` entries, each having `path` and optional `line_range` |
+
+**Examples:**
+
+```xml
+<!-- Read lines 46-68 of a file -->
+<read_file><path>src/app.js</path><offset>46</offset><limit>23</limit></read_file>
+
+<!-- Read multiple files concurrently with line ranges -->
+<read_file><args>
+  <file><path>src/app.ts</path><line_range>1-20</line_range></file>
+  <file><path>src/utils.ts</path><line_range>10-25</line_range></file>
+</args></read_file>
+```
+
+#### `search_files`
+
+Performs regex-based searches across multiple files using Ripgrep. Returns matching lines with 1 line of context before and after each match, capped at 300 results.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Directory path relative to workspace root |
+| `regex` | string | Yes | Search pattern (Rust regex syntax) |
+| `file_pattern` | string | No | Glob filter (e.g., `*.ts`) |
+| `respect_gitignore` | boolean | No | Whether to honor `.gitignore` (default: `true`) |
+
+**Examples:**
+
+```xml
+<!-- Find TODO comments in JavaScript files -->
+<search_files><path>src</path><regex>TODO|FIXME</regex><file_pattern>*.js</file_pattern></search_files>
+
+<!-- Find function definitions across the project -->
+<search_files><path>.</path><regex>function\s+calculateTotal</regex></search_files>
+```
+
+#### `list_files`
+
+Lists files and directories at a specified path. Directories are marked with a trailing slash. Ignores large directories (`node_modules`, `.git`) in recursive mode and respects `.gitignore`. Results capped at ~200 files with a 10-second timeout.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Directory path relative to working directory |
+| `recursive` | boolean | No | `true` for recursive listing; `false` (default) for top-level only |
+
+**Examples:**
+
+```xml
+<!-- Top-level project listing -->
+<list_files><path>.</path></list_files>
+
+<!-- Recursive listing of source directory -->
+<list_files><path>src</path><recursive>true</recursive></list_files>
+```
+
+#### `codebase_search`
+
+Performs semantic (AI-embedding-based) search across the codebase. Returns results ranked by similarity score (0-1). Requires codebase indexing to be configured (embedding provider + Qdrant vector database).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Natural language description of what to find |
+| `path` | string | No | Directory path to limit search scope |
+
+**Examples:**
+
+```xml
+<!-- Semantic search for authentication logic -->
+<codebase_search><query>user login and authentication logic</query></codebase_search>
+
+<!-- Scoped semantic search -->
+<codebase_search><query>database connection handling</query><path>src/data</path></codebase_search>
+```
+
+#### `read_command_output`
+
+Retrieves the full output from a previous `execute_command` call when output was truncated. Supports byte-level pagination and regex/literal search filtering.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `artifact_id` | string | Yes | Artifact filename from truncated output (e.g., `cmd-1706119234567.txt`) |
+| `search` | string | No | Regex or literal pattern to filter lines (case-insensitive) |
+| `offset` | integer | No | Byte position to start reading (default: 0) |
+| `limit` | integer | No | Maximum bytes to return (default: 40960) |
+
+**Examples:**
+
+```xml
+<!-- Read full truncated output -->
+<read_command_output><artifact_id>cmd-1706119234567.txt</artifact_id></read_command_output>
+
+<!-- Search for errors in command output -->
+<read_command_output><artifact_id>cmd-1706119234567.txt</artifact_id><search>error|failed</search></read_command_output>
+```
+
+### Edit Tools
+
+#### `write_to_file`
+
+Creates new files or completely replaces existing file content. Displays changes in a diff view requiring explicit user approval. Includes safety checks for code omission, path validation, and content truncation detection. Not suitable for incremental edits.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path relative to working directory |
+| `content` | string | Yes | Complete content to write |
+| `line_count` | integer | Yes | Total number of lines (including empty lines) |
+
+**Examples:**
+
+```xml
+<!-- Create a new configuration file -->
+<write_to_file>
+  <path>config/settings.json</path>
+  <content>{"apiEndpoint": "https://api.example.com", "version": "1.0.0"}</content>
+  <line_count>4</line_count>
+</write_to_file>
+
+<!-- Overwrite an entire file -->
+<write_to_file>
+  <path>src/index.ts</path>
+  <content>export function main() { console.log("Hello"); }</content>
+  <line_count>1</line_count>
+</write_to_file>
+```
+
+#### `apply_diff`
+
+Makes precise, targeted modifications to a single file using fuzzy matching (Levenshtein distance with configurable confidence thresholds 0.8-1.0) guided by line number hints. Uses a search/replace block format.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path relative to working directory |
+| `diff` | string | Yes | Search/replace block in tool-specific format |
+| `start_line` | integer | No | Line number hint for matching |
+| `end_line` | integer | No | Line number hint for matching |
+
+**Examples:**
+
+```xml
+<!-- Modify a specific calculation -->
+<apply_diff><path>src/pricing.ts</path><diff>
+<<<<<<< SEARCH:start_line:10:end_line:12
+    const result = value * 0.9;
+    return result;
+=======
+    const result = value * 0.95;
+    return result;
+>>>>>>> REPLACE
+</diff></apply_diff>
+```
+
+#### `apply_patch`
+
+Applies multi-file unified diff patches atomically. Supports three operation types via custom headers: `*** Add File:`, `*** Delete File:`, and `*** Update File:`. Line numbers and context must exactly match existing file content.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `patch` | string | Yes | Unified diff patch string with custom operation headers |
+
+**Examples:**
+
+```xml
+<!-- Add a new file via patch -->
+<apply_patch><patch>*** Add File: src/utils/helper.ts
+--- /dev/null
++++ b/src/utils/helper.ts
+@@ -0,0 +1,3 @@
++export function process(value: string): string {
++  return value.toUpperCase();
++}
+</patch></apply_patch>
+```
+
+#### `edit` / `edit_file` / `search_replace`
+
+Three variants of search-and-replace editing. `edit` replaces the first occurrence by default; `edit_file` replaces all occurrences with count validation; `search_replace` replaces all occurrences without count validation. All three operate on a single file and present changes for approval.
+
+### Execute Tools
+
+#### `execute_command`
+
+Runs CLI commands on the user's system via the VS Code terminal. Supports real-time output capture, terminal instance reuse, long-running background commands, and custom working directories. Includes security validation using `shell-quote` parsing and blocks dangerous subshell execution patterns (e.g., `${var@P}`, process substitution).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | Yes | CLI command to execute (must be valid for user's OS) |
+| `cwd` | string | No | Working directory (defaults to current directory) |
+
+**Examples:**
+
+```xml
+<!-- Run tests -->
+<execute_command><command>npm run test</command></execute_command>
+
+<!-- Run a command in a specific directory -->
+<execute_command><command>cargo build</command><cwd>./my-project</cwd></execute_command>
+
+<!-- Chain commands -->
+<execute_command><command>npm run build && npm start</command></execute_command>
+```
+
+### Browser Tools
+
+#### `browser_action`
+
+Controls a Puppeteer-managed headless browser for web automation. Returns screenshots and console logs after each action. Requires a vision-capable model. Controlled by the `browser` tool group in mode configuration.
+
+**Actions supported:** launch (navigate to URL), click (coordinate-based), type (text input), scroll (up/down), close.
+
+**Examples:**
+
+```xml
+<!-- Launch browser and navigate -->
+<browser_action><action>launch</action><url>http://localhost:3000</url></browser_action>
+
+<!-- Click at coordinates -->
+<browser_action><action>click</action><coordinate>450,300</coordinate></browser_action>
+
+<!-- Type text into focused element -->
+<browser_action><action>type</action><text>Hello World</text></browser_action>
+```
+
+### Image Tools
+
+#### `generate_image`
+
+Creates images from text prompts or transforms existing images using AI models (OpenRouter or Roo provider APIs). Supports generation mode (text-to-image) and edit mode (image-to-image transformation).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | Yes | Text description of desired image |
+| `path` | string | Yes | Output file path (workspace-relative) |
+| `image` | string | No | Input image path for transformations (PNG, JPG, JPEG, GIF, WEBP) |
+
+**Examples:**
+
+```xml
+<!-- Generate a new image -->
+<generate_image>
+  <prompt>A minimalist logo with geometric shapes in blue and white</prompt>
+  <path>assets/logo.png</path>
+</generate_image>
+
+<!-- Transform an existing image -->
+<generate_image>
+  <prompt>Convert to watercolor painting style</prompt>
+  <path>images/watercolor.png</path>
+  <image>images/original.jpg</image>
+</generate_image>
+```
+
+### MCP Tools
+
+#### `use_mcp_tool`
+
+Invokes tools provided by connected MCP servers. Supports text, image, and resource reference response types. Arguments are validated via Zod schema. Configurable timeouts (1-3600 seconds). Subject to dual-permission approval (global MCP toggle + per-tool "Always allow" list).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `server_name` | string | Yes | Name of the MCP server |
+| `tool_name` | string | Yes | Specific tool to execute |
+| `arguments` | JSON object | Varies | Input parameters matching the tool's schema |
+
+**Examples:**
+
+```xml
+<!-- Call an MCP tool -->
+<use_mcp_tool>
+  <server_name>weather-server</server_name>
+  <tool_name>get_forecast</tool_name>
+  <arguments>{"city": "London", "days": 3}</arguments>
+</use_mcp_tool>
+
+<!-- Call a database MCP tool -->
+<use_mcp_tool>
+  <server_name>db-server</server_name>
+  <tool_name>query</tool_name>
+  <arguments>{"sql": "SELECT count(*) FROM users"}</arguments>
+</use_mcp_tool>
+```
+
+#### `access_mcp_resource`
+
+Retrieves data from resources exposed by MCP servers. Supports text and image data. Requires user approval.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `server_name` | string | Yes | Name of the MCP server |
+| `uri` | string | Yes | URI identifying the resource |
+
+**Examples:**
+
+```xml
+<!-- Access API documentation resource -->
+<access_mcp_resource>
+  <server_name>api-docs</server_name>
+  <uri>docs://payment-service/endpoints</uri>
+</access_mcp_resource>
+```
+
+### Workflow Tools
+
+#### `ask_followup_question`
+
+Asks the user a clarifying question with optional suggested answers. Available in all modes. Resets error counters on successful use.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | Yes | The question to ask |
+| `follow_up` | array | No | 2-4 suggested answers wrapped in `<suggest>` tags |
+
+**Examples:**
+
+```xml
+<ask_followup_question>
+  <question>Which database would you prefer?</question>
+  <follow_up>
+    <suggest>PostgreSQL for relational data</suggest>
+    <suggest>MongoDB for document storage</suggest>
+    <suggest>SQLite for simplicity</suggest>
+  </follow_up>
+</ask_followup_question>
+```
+
+#### `attempt_completion`
+
+Signals task completion by presenting results to the user. The agent pauses and waits for user feedback (an `ask`-type message), enabling iterative refinement. Can optionally execute a demonstration command.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `result` | string | Yes | Summary of accomplishments |
+| `command` | string | No | CLI command to demonstrate the result |
+
+**Examples:**
+
+```xml
+<attempt_completion>
+  <result>Created the REST API with CRUD endpoints, input validation, and error handling.</result>
+  <command>npm start</command>
+</attempt_completion>
+```
+
+#### `switch_mode`
+
+Transitions between operational modes while maintaining conversation context. Requires user approval. Enforces a 500ms delay after switching.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode_slug` | string | Yes | Target mode identifier (e.g., `code`, `architect`, `debug`) |
+| `reason` | string | No | Explanation for the transition |
+
+**Examples:**
+
+```xml
+<switch_mode><mode_slug>architect</mode_slug><reason>Need to design the database schema first</reason></switch_mode>
+```
+
+#### `new_task`
+
+Creates a subtask (Boomerang Task) in a specified mode. The parent task is paused during subtask execution. Subtasks run in isolated conversation contexts.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | string | Yes | Mode slug for the subtask |
+| `message` | string | Yes | Instructions for the subtask |
+| `todos` | string | No | Markdown checklist for the subtask |
+
+**Examples:**
+
+```xml
+<new_task>
+  <mode>code</mode>
+  <message>Implement the user authentication module with JWT tokens</message>
+  <todos>[ ] Create auth middleware
+[ ] Implement login endpoint
+[ ] Add token refresh logic</todos>
+</new_task>
+```
+
+#### `update_todo_list`
+
+Manages interactive task checklists within the chat interface. Replaces the entire TODO list with an updated version. Supports three status indicators: `[ ]` (pending), `[-]` (in progress), `[x]` (completed).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `todos` | string (markdown) | Yes | Complete checklist with status indicators |
+
+**Examples:**
+
+```xml
+<update_todo_list><todos>[x] Set up project structure
+[-] Implement API endpoints
+[ ] Write integration tests
+[ ] Deploy to staging</todos></update_todo_list>
+```
+
+#### `skill`
+
+Loads specialized instruction sets from skill directories into the conversation context. Mode-aware: resolves mode-specific skills first. Referenced files within the skill are not automatically loaded.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skill` | string | Yes | Skill name to load (must match available skills) |
+| `args` | string | No | Additional context or arguments |
+
+**Examples:**
+
+```xml
+<skill><skill>create-mcp-server</skill><args>weather API integration</args></skill>
+```
+
+#### `run_slash_command` (Experimental)
+
+Executes predefined slash commands programmatically. Resolves through a three-level priority hierarchy: project commands, global commands, then built-in commands. Requires explicit enablement in VS Code experimental settings.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | Yes | Command name without leading slash |
+| `args` | string | No | Additional arguments or context |
+
+**Examples:**
+
+```xml
+<run_slash_command><command>init</command></run_slash_command>
+<run_slash_command><command>deploy</command><args>production with zero-downtime</args></run_slash_command>
+```
+
+### Permissions
+
+Roo Code provides a multi-layered permission system for controlling tool access. The primary documentation is at [Auto-Approving Actions](https://docs.roocode.com/features/auto-approving-actions), with additional configuration via [Custom Modes](https://docs.roocode.com/features/custom-modes) and [.rooignore](https://docs.roocode.com/features/rooignore).
+
+#### Permission Mechanisms
+
+**1. Auto-Approval Categories (User-Scoped)**
+
+Eight permission categories control which tool operations proceed without manual approval:
+
+| Category | Risk Level | Controls |
+|----------|------------|----------|
+| Read Files & Directories | Medium | `read_file`, `list_files`, `search_files`, `codebase_search` |
+| Edit Files | High | `write_to_file`, `apply_diff`, `apply_patch`, `edit`, `edit_file`, `search_replace` |
+| Execute Commands | High | `execute_command` with allowlist/denylist |
+| Use Browser | Medium | `browser_action` |
+| Use MCP Servers | Medium-High | `use_mcp_tool`, `access_mcp_resource` (dual-permission: global + per-tool) |
+| Switch Modes | Low | `switch_mode` |
+| Subtasks | Low | `new_task`, subtask completion |
+| Follow-Up Questions | Low | Auto-answer after configurable timeout (1-300s) |
+
+Configuration methods:
+- **VS Code UI**: Settings panel or `Cmd+Alt+A` / `Ctrl+Alt+A` toggle
+- **VS Code settings JSON**: `roo-cline.allowedCommands` and `roo-cline.deniedCommands` arrays
+- **CLI flag**: `--require-approval` / `-a` disables all auto-approval (default CLI behavior auto-approves everything)
+
+**2. Mode Tool Groups (Project or User-Scoped)**
+
+Each mode defines which tool categories are available via the `groups` array in `custom_modes.yaml` (user) or `.roomodes` (project). Available groups: `read`, `edit`, `browser`, `command`, `mcp`. Edit groups support `fileRegex` patterns to restrict which files can be modified.
+
+```yaml
+# .roomodes or custom_modes.yaml
+customModes:
+  - slug: safe-reviewer
+    name: "Safe Reviewer"
+    roleDefinition: "You review code but cannot modify or execute anything."
+    groups:
+      - read
+    # No edit, command, browser, or mcp groups
+```
+
+**3. `.rooignore` (Project-Scoped)**
+
+A gitignore-syntax file at the project root that completely blocks tool access to matching files. This is a hard block -- not overridable by auto-approval or mode configuration.
+
+**4. Workspace Boundary (Global)**
+
+By default, tools cannot operate outside the workspace directory. The "Include files outside workspace" toggle in auto-approval settings can extend this boundary.
+
+**5. Protected Files (Global)**
+
+The `.roo/` directory and `.rooignore` file are write-protected by default. The "Include protected files" toggle can override this protection.
+
+#### Command Allowlist/Denylist
+
+When "Execute Approved Commands" auto-approval is enabled, Roo Code uses a longest-prefix matching system:
+
+- **Allowlist**: Command prefixes that are auto-approved (e.g., `git`, `npm run`, `cargo test`)
+- **Denylist**: Command prefixes that are always blocked (e.g., `rm`, `sudo`, `git push`, `npm publish`)
+- When a command matches both lists equally, the denylist wins
+- Regardless of allowlist/denylist, dangerous parameter substitutions (`${var@P}`) and process substitutions are always blocked (hardcoded safeguard)
+
+#### Configuration Examples
+
+**Example 1: Read-Only Research Mode**
+
+A mode where the agent can only read files and browse the web -- no editing, no commands, no MCP.
+
+```yaml
+customModes:
+  - slug: researcher
+    name: "Researcher"
+    roleDefinition: "Research and analyze code without modifying anything."
+    groups:
+      - read
+      - browser
+```
+
+Why: Prevents any accidental modifications while still allowing the agent to understand the codebase and look things up online.
+
+**Example 2: Restricted Editor with Safe Commands**
+
+A mode that can edit only TypeScript files and run only safe commands, with a command allowlist.
+
+```yaml
+customModes:
+  - slug: ts-editor
+    name: "TypeScript Editor"
+    roleDefinition: "Edit TypeScript files and run tests."
+    groups:
+      - read
+      - - edit
+        - fileRegex: "\\.tsx?$"
+          description: "TypeScript files only"
+      - command
+```
+
+Combined with VS Code settings:
+```json
+{
+  "roo-cline.allowedCommands": ["npm run test", "npm run lint", "tsc"],
+  "roo-cline.deniedCommands": ["rm", "sudo", "npm publish", "git push"]
+}
+```
+
+Why: Limits the blast radius -- the agent can only modify TypeScript and can only run known-safe commands.
+
+**Example 3: CI/CD Pipeline with Full Logging**
+
+Running the CLI in a pipeline with maximum observability and no auto-approval:
+
+```bash
+roo --print --output-format stream-json --require-approval --oneshot \
+  "Run the test suite and report results"
+```
+
+Parse the NDJSON output for `tool_use` and `tool_result` events to audit every tool call. The `--require-approval` flag ensures no tool executes without programmatic approval via the `ExtensionClient` API.
+
+Why: In CI/CD, you want full audit trails and deterministic control over what the agent does.
+
+### Risk Vectors
+
+#### 1. `execute_command` -- Arbitrary Shell Execution
+
+**Risk:** The `execute_command` tool runs arbitrary shell commands on the host system. A prompt injection or adversarial instruction embedded in a file, MCP response, or user prompt could instruct the agent to execute destructive commands (`rm -rf /`, `curl | bash`, credential exfiltration).
+
+**Identification:** Look for commands containing `rm -rf`, `curl | sh`, `wget | bash`, `sudo`, piped commands to interpreters (`python -c`, `node -e`), network data exfiltration (`curl -X POST` with file contents), credential access (`cat ~/.ssh/`, `cat ~/.aws/`), and process substitutions.
+
+**Mitigation:** Use the command allowlist/denylist to limit executable commands to known-safe prefixes. Remove the `command` group from modes that do not need shell access. In CI/CD, use `--require-approval` with an `ExtensionClient` that inspects commands before approval. Roo Code's built-in `shell-quote` parsing and dangerous-pattern blocking provide a baseline, but allowlisting is the strongest defense.
+
+#### 2. `write_to_file` / `apply_diff` / `apply_patch` -- Arbitrary File Writes
+
+**Risk:** Edit tools can overwrite any file within the workspace (and outside it if the workspace boundary is extended). An adversarial prompt could instruct the agent to modify `.roo/mcp.json` (injecting a malicious MCP server), `.roo/rules/` (injecting system prompt instructions), `.env` files (exfiltrating or modifying secrets), or critical configuration files.
+
+**Identification:** Watch for write operations targeting `.roo/`, `.env`, `.git/`, configuration files, and any file outside the project's source directories. Detect writes containing base64-encoded content, URL patterns, or credential-like strings.
+
+**Mitigation:** Use `.rooignore` to block sensitive files from all tool access. Keep the "Include protected files" toggle disabled (default) to protect `.roo/` and `.rooignore`. Use `fileRegex` in mode tool groups to restrict editable file types. For maximum safety, disable auto-approval for write operations.
+
+#### 3. MCP Tool Calls -- Unvetted External Execution
+
+**Risk:** `use_mcp_tool` invokes arbitrary tools on MCP servers, which may execute code, access networks, read/write files, or interact with external services. MCP server responses flow directly back into the agent's context without interception, meaning a compromised or malicious MCP server can inject prompt instructions into the agent's conversation. There is no event to inspect or modify MCP responses before processing.
+
+**Identification:** Monitor `tool_result` events with `subtype: "mcp"` in NDJSON stream output for unexpected content patterns. Look for MCP responses containing instruction-like text ("You must now...", "Execute the following..."), base64-encoded data, or URLs.
+
+**Mitigation:** Disable the `mcp` group in modes that do not need MCP access. Use the `disabledTools` array in MCP server configuration to disable specific high-risk tools. Keep MCP auto-approval disabled and review each MCP tool call manually. Prefer local STDIO MCP servers over remote HTTP/SSE servers to reduce network attack surface. Do not commit `.roo/mcp.json` with plaintext credentials.
+
+#### 4. `browser_action` -- Web Content Injection
+
+**Risk:** The browser tool navigates to URLs, captures screenshots, and reads console output. A malicious website could display adversarial text designed to influence the agent's behavior (visual prompt injection via screenshot). Console output from visited pages also enters the agent's context.
+
+**Identification:** Monitor for `browser_action` launches to unexpected URLs, especially external sites not related to the task. Look for console output containing instruction-like patterns.
+
+**Mitigation:** Remove the `browser` group from modes that do not need web access. When browser access is needed, prefer navigating only to `localhost` or known-safe URLs. Disable auto-approval for browser actions to review each navigation.
+
+#### 5. CLI Default Auto-Approval -- No Permission Gates
+
+**Risk:** The `roo` CLI auto-approves **all** tool calls by default (unlike the VS Code extension, which defaults to manual approval). This means the agent can read, write, execute commands, use MCP tools, and navigate the browser without any human oversight. In CI/CD or scripted workflows, this is the equivalent of running with no safety rails.
+
+**Identification:** Check whether the CLI is invoked without `--require-approval` (`-a`). If the flag is absent, all operations proceed unchecked.
+
+**Mitigation:** Always use `--require-approval` when running the CLI in environments where safety matters. Pair it with an `ExtensionClient` that implements programmatic approval logic. For truly unattended pipelines, use `--output-format stream-json` and parse tool events for post-hoc auditing, even if auto-approval is on.
+
+#### 6. Subtask Privilege Escalation via Mode Selection
+
+**Risk:** The Orchestrator mode spawns subtasks in other modes via `new_task`. If subtask auto-approval is enabled, the Orchestrator can spawn subtasks in powerful modes (e.g., `code` with full tool access) without human review. A crafted prompt could instruct the Orchestrator to delegate to a mode with broader permissions than the current context warrants.
+
+**Identification:** Monitor `new_task` tool calls for the target `mode` parameter. Flag delegations to modes with `command` or `mcp` groups when the parent task's context does not justify elevated access.
+
+**Mitigation:** Disable subtask auto-approval so each `new_task` invocation requires human review. Create restricted custom modes for subtask delegation and guide the Orchestrator via `.roo/rules-orchestrator/` instructions to prefer them. Remove the `command` and `mcp` groups from modes used exclusively for subtask work.
+
+#### 7. `.rooignore` Bypass via Command Execution
+
+**Risk:** While `.rooignore` blocks direct file access through read/edit tools, the `execute_command` tool can run shell commands that read or modify ignored files (e.g., `cat .env`, `sed -i 's/old/new/' .rooignore`). The `.rooignore` protection does not extend to commands executed in the terminal.
+
+**Identification:** Monitor `execute_command` calls for file paths that match `.rooignore` patterns. Look for `cat`, `less`, `head`, `tail`, `sed`, `awk`, `cp`, `mv` operations targeting protected files.
+
+**Mitigation:** Use the command denylist to block commands that reference sensitive file paths. Remove the `command` group from modes that do not need shell access. For maximum protection, combine `.rooignore` with OS-level file permissions.
+
+### Sources
+
+- [Tool Use Overview](https://docs.roocode.com/advanced-usage/available-tools/tool-use-overview)
+- [How Tools Work](https://docs.roocode.com/basic-usage/how-tools-work)
+- [read_file](https://docs.roocode.com/advanced-usage/available-tools/read-file)
+- [write_to_file](https://docs.roocode.com/advanced-usage/available-tools/write-to-file)
+- [apply_diff](https://docs.roocode.com/advanced-usage/available-tools/apply-diff)
+- [apply_patch](https://docs.roocode.com/advanced-usage/available-tools/apply-patch)
+- [execute_command](https://docs.roocode.com/advanced-usage/available-tools/execute-command)
+- [search_files](https://docs.roocode.com/advanced-usage/available-tools/search-files)
+- [list_files](https://docs.roocode.com/advanced-usage/available-tools/list-files)
+- [codebase_search](https://docs.roocode.com/advanced-usage/available-tools/codebase-search)
+- [read_command_output](https://docs.roocode.com/advanced-usage/available-tools/read-command-output)
+- [ask_followup_question](https://docs.roocode.com/advanced-usage/available-tools/ask-followup-question)
+- [attempt_completion](https://docs.roocode.com/advanced-usage/available-tools/attempt-completion)
+- [new_task](https://docs.roocode.com/advanced-usage/available-tools/new-task)
+- [switch_mode](https://docs.roocode.com/advanced-usage/available-tools/switch-mode)
+- [use_mcp_tool](https://docs.roocode.com/advanced-usage/available-tools/use-mcp-tool)
+- [access_mcp_resource](https://docs.roocode.com/advanced-usage/available-tools/access-mcp-resource)
+- [generate_image](https://docs.roocode.com/advanced-usage/available-tools/generate-image)
+- [run_slash_command](https://docs.roocode.com/advanced-usage/available-tools/run-slash-command)
+- [Browser Use](https://docs.roocode.com/features/browser-use)
+- [Auto-Approving Actions](https://docs.roocode.com/features/auto-approving-actions)
+- [Custom Modes](https://docs.roocode.com/features/custom-modes)
+- [.rooignore](https://docs.roocode.com/features/rooignore)
+- [Skills](https://docs.roocode.com/features/skills)
+- [Custom Tools (Experimental)](https://docs.roocode.com/features/experimental/custom-tools)
