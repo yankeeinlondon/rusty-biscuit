@@ -437,12 +437,7 @@ fn parse_package_json_dep_section(
             let targeted_version = value
                 .as_str()
                 .map(String::from)
-                .or_else(|| {
-                    value
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                })
+                .or_else(|| value.get("version").and_then(|v| v.as_str()).map(String::from))
                 .unwrap_or_else(|| "*".to_string());
 
             DependencyEntry {
@@ -467,12 +462,8 @@ fn parse_package_json_dep_section(
 fn parse_package_json_dependencies(
     package_json_path: &Path,
     package_manager: &str,
-) -> Option<(
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-)> {
+) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>)>
+{
     let content = std::fs::read_to_string(package_json_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
 
@@ -526,7 +517,15 @@ fn parse_python_requirement_name(requirement: &str) -> Option<String> {
     }
 
     let end = before_at
-        .find(|c: char| c == '[' || c == '<' || c == '>' || c == '=' || c == '!' || c == '~' || c.is_whitespace())
+        .find(|c: char| {
+            c == '['
+                || c == '<'
+                || c == '>'
+                || c == '='
+                || c == '!'
+                || c == '~'
+                || c.is_whitespace()
+        })
         .unwrap_or(before_at.len());
     let name = before_at[..end].trim();
 
@@ -840,6 +839,9 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
     };
+    if packages.is_empty() {
+        packages = discover_packages_from_manifests(root, MonorepoTool::Nx, &lock_versions);
+    }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
@@ -868,6 +870,9 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
     };
+    if packages.is_empty() {
+        packages = discover_packages_from_manifests(root, MonorepoTool::Turborepo, &lock_versions);
+    }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
@@ -899,6 +904,9 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
     };
+    if packages.is_empty() {
+        packages = discover_packages_from_manifests(root, MonorepoTool::Lerna, &lock_versions);
+    }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
 
@@ -987,13 +995,18 @@ fn parse_nx_layout_patterns(nx_json_path: &Path) -> Vec<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("libs");
 
-    vec![format!("{apps_dir}/*"), format!("{libs_dir}/*")]
+    vec![
+        format!("{apps_dir}/*"),
+        format!("{libs_dir}/*"),
+    ]
 }
 
 fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
     let mut patterns = Vec::new();
 
-    if let Ok(Some(package_json_patterns)) = parse_package_json_workspace_patterns(&root.join("package.json")) {
+    if let Ok(Some(package_json_patterns)) =
+        parse_package_json_workspace_patterns(&root.join("package.json"))
+    {
         patterns.extend(package_json_patterns);
     }
 
@@ -1044,22 +1057,14 @@ fn read_npm_package_version(package_json: &Path) -> Option<String> {
 fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(pyproject_toml).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
-    parsed
-        .get("project")
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .map(String::from)
+    parsed.get("project").and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Reads package version from a pyproject.toml `[project].version`.
 fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(pyproject_toml).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
-    parsed
-        .get("project")
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    parsed.get("project").and_then(|p| p.get("version")).and_then(|v| v.as_str()).map(String::from)
 }
 
 /// Reads module name from a go.mod file (module directive).
@@ -1389,14 +1394,19 @@ fn detect_package_managers(path: &Path) -> Vec<String> {
     managers
 }
 
-fn resolve_js_package_manager(tool: MonorepoTool, root: &Path, package_managers: &[String]) -> &'static str {
+fn resolve_js_package_manager(
+    tool: MonorepoTool,
+    root: &Path,
+    package_managers: &[String],
+) -> &'static str {
     match tool {
         MonorepoTool::PnpmWorkspaces => return "pnpm",
         MonorepoTool::YarnWorkspaces => return "yarn",
         _ => {}
     }
 
-    if package_managers.iter().any(|manager| manager == "pnpm") || root.join("pnpm-lock.yaml").exists()
+    if package_managers.iter().any(|manager| manager == "pnpm")
+        || root.join("pnpm-lock.yaml").exists()
     {
         return "pnpm";
     }
@@ -1443,10 +1453,8 @@ fn discover_packages_from_manifests(
 ) -> Vec<Package> {
     let mut discovered_dirs = HashSet::new();
 
-    let walker = walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
+    let walker =
+        walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_entry(|entry| {
             if !entry.file_type().is_dir() {
                 return true;
             }
@@ -1490,34 +1498,6 @@ fn discover_packages_from_manifests(
 }
 
 #[allow(dead_code)]
-fn expand_glob_patterns(root: &Path, patterns: &[String], tool: MonorepoTool) -> Vec<Package> {
-    let mut packages = Vec::new();
-
-    for pattern in patterns {
-        if pattern.contains('*') {
-            let parts: Vec<&str> = pattern.split('*').collect();
-            if let Some(prefix) = parts.first() {
-                let search_dir = root.join(prefix.trim_end_matches('/'));
-                if let Ok(entries) = std::fs::read_dir(&search_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if entry.path().is_dir() {
-                            let path = entry.path();
-                            packages.push(create_package(&path, root, tool, &None));
-                        }
-                    }
-                }
-            }
-        } else {
-            let path = root.join(pattern);
-            if path.exists() {
-                packages.push(create_package(&path, root, tool, &None));
-            }
-        }
-    }
-
-    packages
-}
-
 /// Expand glob patterns and parse dependencies for Cargo workspaces.
 fn expand_glob_patterns_with_deps(
     root: &Path,
@@ -1586,8 +1566,7 @@ fn create_package(
         let mut all_deps = normal;
         all_deps.extend(build);
 
-        let (optional, regular): (Vec<_>, Vec<_>) =
-            all_deps.into_iter().partition(|d| d.optional);
+        let (optional, regular): (Vec<_>, Vec<_>) = all_deps.into_iter().partition(|d| d.optional);
 
         dependencies.extend(regular);
         dev_dependencies.extend(dev);
@@ -1811,11 +1790,8 @@ mod tests {
     fn test_nx_detected_with_workspace_packages() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("nx.json"), "{}").unwrap();
-        fs::write(
-            dir.path().join("package.json"),
-            r#"{"workspaces": ["apps/*", "libs/*"]}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"workspaces": ["apps/*", "libs/*"]}"#)
+            .unwrap();
         fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
 
         let app_dir = dir.path().join("apps/web");
@@ -1887,11 +1863,8 @@ mod tests {
         .unwrap();
         let pkg = dir.path().join("modules/types");
         fs::create_dir_all(&pkg).unwrap();
-        fs::write(
-            pkg.join("package.json"),
-            r#"{"name": "@scope/types", "version": "0.5.0"}"#,
-        )
-        .unwrap();
+        fs::write(pkg.join("package.json"), r#"{"name": "@scope/types", "version": "0.5.0"}"#)
+            .unwrap();
 
         let result = detect_repo(dir.path()).unwrap().unwrap();
         assert_eq!(result.monorepo_tool, Some(MonorepoTool::NpmWorkspaces));
@@ -1908,11 +1881,8 @@ mod tests {
         fs::write(dir.path().join("package.json"), r#"{"workspaces": ["packages/*"]}"#).unwrap();
         let pkg = dir.path().join("packages/app");
         fs::create_dir_all(&pkg).unwrap();
-        fs::write(
-            pkg.join("package.json"),
-            r#"{"name": "@scope/app", "version": "1.0.0"}"#,
-        )
-        .unwrap();
+        fs::write(pkg.join("package.json"), r#"{"name": "@scope/app", "version": "1.0.0"}"#)
+            .unwrap();
 
         let result = detect_repo(dir.path()).unwrap().unwrap();
         assert_eq!(result.monorepo_tool, Some(MonorepoTool::YarnWorkspaces));
@@ -1940,11 +1910,8 @@ mod tests {
 
         let app_dir = dir.path().join("packages/app");
         fs::create_dir_all(&app_dir).unwrap();
-        fs::write(
-            app_dir.join("package.json"),
-            r#"{"name": "@scope/app", "version": "1.0.0"}"#,
-        )
-        .unwrap();
+        fs::write(app_dir.join("package.json"), r#"{"name": "@scope/app", "version": "1.0.0"}"#)
+            .unwrap();
 
         let result = detect_repo(dir.path()).unwrap().unwrap();
         assert_eq!(result.monorepo_tool, Some(MonorepoTool::Turborepo));
@@ -1976,11 +1943,8 @@ mod tests {
 
         let app_dir = dir.path().join("packages/app");
         fs::create_dir_all(&app_dir).unwrap();
-        fs::write(
-            app_dir.join("package.json"),
-            r#"{"name": "@scope/app", "version": "0.9.0"}"#,
-        )
-        .unwrap();
+        fs::write(app_dir.join("package.json"), r#"{"name": "@scope/app", "version": "0.9.0"}"#)
+            .unwrap();
 
         let result = detect_repo(dir.path()).unwrap().unwrap();
         assert_eq!(result.monorepo_tool, Some(MonorepoTool::Lerna));
@@ -2218,6 +2182,67 @@ mod tests {
         fs::write(&pkg_json, r#"{"name": "pkg", "version": "3.2.1"}"#).unwrap();
 
         assert_eq!(read_npm_package_version(&pkg_json), Some("3.2.1".to_string()));
+    }
+
+    #[test]
+    fn test_read_pyproject_name_and_version() {
+        let dir = TempDir::new().unwrap();
+        let pyproject = dir.path().join("pyproject.toml");
+        fs::write(
+            &pyproject,
+            "[project]\nname = \"py-pkg\"\nversion = \"0.4.0\"\ndependencies = [\"httpx>=0.27\"]\n",
+        )
+        .unwrap();
+
+        assert_eq!(read_pyproject_package_name(&pyproject), Some("py-pkg".to_string()));
+        assert_eq!(read_pyproject_package_version(&pyproject), Some("0.4.0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_pyproject_dependencies() {
+        let dir = TempDir::new().unwrap();
+        let pyproject = dir.path().join("pyproject.toml");
+        fs::write(
+            &pyproject,
+            r#"[project]
+name = "py-pkg"
+version = "0.4.0"
+dependencies = ["httpx>=0.27", "pydantic~=2.8"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+"#,
+        )
+        .unwrap();
+
+        let (normal, optional) = parse_pyproject_dependencies(&pyproject).unwrap();
+        assert_eq!(normal.len(), 2);
+        assert!(normal.iter().any(|dep| dep.name == "httpx"));
+        assert!(optional.iter().any(|dep| dep.name == "pytest"));
+    }
+
+    #[test]
+    fn test_parse_go_mod_dependencies() {
+        let dir = TempDir::new().unwrap();
+        let go_mod = dir.path().join("go.mod");
+        fs::write(
+            &go_mod,
+            r#"module example.com/my-service
+
+go 1.22
+
+require (
+    github.com/gorilla/mux v1.8.1
+    golang.org/x/net v0.37.0 // indirect
+)
+"#,
+        )
+        .unwrap();
+
+        let deps = parse_go_mod_dependencies(&go_mod).unwrap();
+        assert_eq!(deps.len(), 2);
+        assert!(deps.iter().any(|dep| dep.name == "github.com/gorilla/mux"));
+        assert_eq!(read_go_module_name(&go_mod), Some("example.com/my-service".to_string()));
     }
 
     #[test]
