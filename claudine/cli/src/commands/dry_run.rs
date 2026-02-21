@@ -8,6 +8,7 @@ use claudine::actions::HookAction;
 use claudine::adapters;
 use claudine::dispatch::template::interpolate;
 use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider, detect_environment};
+use claudine::services::{ProtectInput, ProtectService, ProviderProtectProfiles};
 
 use crate::log;
 
@@ -47,6 +48,10 @@ pub struct DryRunArgs {
     /// Supported: claude, codex, gemini, opencode
     #[arg(long, default_value = "claude")]
     pub provider: String,
+
+    /// Emit structured JSON output suitable for CI parsing.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Show what would happen for an event without side effects.
@@ -58,7 +63,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
     let raw = if std::io::stdin().is_terminal() {
         mock_payload(provider, &event)
     } else {
-        read_stdin_json()?
+        read_stdin_json()?.unwrap_or_else(|| mock_payload(provider, &event))
     };
 
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -70,6 +75,70 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
     match parsed {
         Ok((parsed_event, mut meta)) => {
             meta.env = env;
+
+            // Try to load config and show what would fire
+            let config = claudine::dispatch::loader::load_config(None, None);
+            let protect_preview = config.as_ref().ok().and_then(|cfg| {
+                cfg.settings.protect.as_ref().and_then(|protect_cfg| {
+                    let mut profiles = ProviderProtectProfiles::defaults();
+                    profiles.insert(provider, adapter.protect_capabilities());
+                    let mut protect = ProtectService::with_profiles(protect_cfg.clone(), profiles);
+                    ProtectInput::from_event_meta(provider, parsed_event, &meta)
+                        .map(|input| protect.evaluate(&input))
+                })
+            });
+
+            if args.json {
+                let mut output = serde_json::Map::new();
+                output.insert(
+                    "provider".to_string(),
+                    serde_json::json!(provider.as_slug()),
+                );
+                output.insert(
+                    "event".to_string(),
+                    serde_json::json!(parsed_event.as_slug()),
+                );
+                output.insert("parsed".to_string(), serde_json::json!(true));
+                output.insert("meta".to_string(), serde_json::to_value(&meta)?);
+                output.insert(
+                    "protect".to_string(),
+                    serde_json::to_value(&protect_preview)?,
+                );
+
+                match config {
+                    Ok(cfg) => {
+                        if let Some(binding) = cfg.get_binding(provider, &parsed_event) {
+                            output.insert("binding_found".to_string(), serde_json::json!(true));
+                            output.insert(
+                                "binding_enabled".to_string(),
+                                serde_json::json!(binding.enabled),
+                            );
+                            output.insert(
+                                "action_count".to_string(),
+                                serde_json::json!(binding.actions.len()),
+                            );
+                            let actions = binding
+                                .actions
+                                .iter()
+                                .map(HookAction::type_slug)
+                                .collect::<Vec<_>>();
+                            output.insert("actions".to_string(), serde_json::json!(actions));
+                        } else {
+                            output.insert("binding_found".to_string(), serde_json::json!(false));
+                        }
+                    }
+                    Err(error) => {
+                        output.insert(
+                            "config_error".to_string(),
+                            serde_json::json!(error.to_string()),
+                        );
+                    }
+                }
+
+                log::data(&serde_json::to_string_pretty(&Value::Object(output))?);
+                return Ok(());
+            }
+
             log::data(&format!("Provider: {provider}"));
             log::data(&format!("Event:    {}", parsed_event.as_pascal_case()));
             if let Some(tool) = &meta.tool_name {
@@ -84,10 +153,11 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
             if let Some(error) = &meta.error {
                 log::data(&format!("Error:    {error}"));
             }
+            if let Some(decision) = protect_preview.as_ref() {
+                log::data(&format!("Protect:  {:?}", decision.outcome));
+            }
             log::data("");
 
-            // Try to load config and show what would fire
-            let config = claudine::dispatch::loader::load_config(None, None);
             match config {
                 Ok(cfg) => {
                     if let Some(binding) = cfg.get_binding(provider, &parsed_event) {
@@ -151,6 +221,16 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
             }
         }
         Err(error) => {
+            if args.json {
+                let output = serde_json::json!({
+                    "provider": provider.as_slug(),
+                    "event": event.as_slug(),
+                    "parsed": false,
+                    "parse_error": error.to_string(),
+                });
+                log::data(&serde_json::to_string_pretty(&output)?);
+                return Ok(());
+            }
             log::data(&format!("Adapter parse failed: {error}"));
         }
     }
@@ -283,11 +363,14 @@ fn mock_opencode_payload(event: &AgenticEvent) -> Value {
     })
 }
 
-fn read_stdin_json() -> Result<Value> {
+fn read_stdin_json() -> Result<Option<Value>> {
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
+    if buf.trim().is_empty() {
+        return Ok(None);
+    }
     let raw: Value = serde_json::from_str(&buf)?;
-    Ok(raw)
+    Ok(Some(raw))
 }
 
 fn parse_provider(name: &str) -> Result<Provider> {

@@ -54,6 +54,15 @@ Actions execute when events fire. Multiple actions per event supported.
 - **Report** --- Formatted output to stdout
 - **Run** --- Execute shell command (blocking or async)
 
+## Protect
+
+Protect is an optional policy engine for high-risk prompts/tools/MCP payloads.
+
+- Postures: `advisory`, `balanced`, `strict`
+- Runtime assumptions: `normal` or `yolo`
+- Provider capability downgrades are shown by `claudine hooks`
+- Decision previews are available via `claudine dry-run --json`
+
 ## Skill Linking
 
 Share skills and commands across all your AI agents:

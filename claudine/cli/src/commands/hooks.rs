@@ -17,6 +17,7 @@ use claudine::events::{
     PROVIDERS_DISPLAY_ORDER, Provider, detect_environment, event_native_mapping_matrix,
     event_support_matrix,
 };
+use claudine::services::{GateCapability, ProtectPosture, ProviderProtectProfiles};
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;
 
@@ -642,6 +643,7 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
 
     // Try to load claudine config for sync checking
     let config = load_config(None, None).ok();
+    render_protect_visibility(config.as_ref());
 
     // If a provider is specified, show detailed view for that provider
     if let Some(ref provider_input) = args.provider {
@@ -683,6 +685,70 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     }
 
     result
+}
+
+fn render_protect_visibility(config: Option<&HookerConfig>) {
+    let Some(config) = config else {
+        return;
+    };
+    let Some(protect) = config.settings.protect.as_ref() else {
+        return;
+    };
+
+    let mode = runtime_mode_assumption();
+    let posture = match protect.posture {
+        ProtectPosture::Advisory => "advisory",
+        ProtectPosture::Balanced => "balanced",
+        ProtectPosture::Strict => "strict",
+    };
+
+    let profiles = ProviderProtectProfiles::defaults();
+    let degraded = ALL_PROVIDERS
+        .iter()
+        .filter_map(|provider| {
+            let resolved = protect
+                .providers
+                .get(provider)
+                .map(|override_cfg| protect.merge_provider_override(override_cfg))
+                .unwrap_or_else(|| protect.clone());
+
+            let caps = profiles.capabilities(*provider);
+            if resolved.posture != ProtectPosture::Advisory
+                && (caps.pre_tool_gate == GateCapability::None
+                    || caps.completion_gate == GateCapability::None)
+            {
+                Some(provider.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    log::data("");
+    log::data(&format!(
+        "Protect: enabled (posture={posture}, runtime_assumption={mode})"
+    ));
+    if degraded.is_empty() {
+        log::data("Protect capability downgrades: none");
+    } else {
+        log::data(&format!(
+            "Protect capability downgrades: {}",
+            degraded.join(", ")
+        ));
+    }
+}
+
+fn runtime_mode_assumption() -> &'static str {
+    let value = std::env::var("CLAUDINE_PROTECT_MODE")
+        .or_else(|_| std::env::var("CLAUDINE_YOLO"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if value.contains("yolo") || value == "1" || value == "true" || value == "on" {
+        "yolo"
+    } else {
+        "normal"
+    }
 }
 
 /// Simple table view showing provider, installed status, and subscribed hooks list.

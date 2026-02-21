@@ -9,6 +9,7 @@ use claudine::events::{
     default_speak_template, recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
+use claudine::services::ProtectPosture;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -102,6 +103,35 @@ pub fn prompt_action_profile() -> Result<InitActionProfile> {
         logging,
         input_required_actions,
     })
+}
+
+/// Prompt whether Protect should be enabled and which posture to use.
+pub fn prompt_protect_posture() -> Result<Option<ProtectPosture>> {
+    let enabled = Confirm::new("Enable Protect policy engine?")
+        .with_default(true)
+        .prompt()?;
+
+    if !enabled {
+        return Ok(None);
+    }
+
+    let options = vec![
+        "Balanced (recommended)",
+        "Advisory (monitor-only)",
+        "Strict (aggressive blocking)",
+    ];
+
+    let selected = Select::new("Select Protect posture:", options)
+        .with_starting_cursor(0)
+        .prompt()?;
+
+    let posture = match selected {
+        "Advisory (monitor-only)" => ProtectPosture::Advisory,
+        "Strict (aggressive blocking)" => ProtectPosture::Strict,
+        _ => ProtectPosture::Balanced,
+    };
+
+    Ok(Some(posture))
 }
 
 fn prompt_logging_profile() -> Result<LoggingProfile> {

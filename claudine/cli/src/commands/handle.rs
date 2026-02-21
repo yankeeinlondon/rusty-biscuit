@@ -15,6 +15,10 @@ pub struct HandleArgs {
     /// Optional provider hint (auto-detected from payload if not given).
     #[arg(long)]
     pub provider: Option<String>,
+
+    /// Emit structured JSON output suitable for CI parsing.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Handle an incoming event from stdin.
@@ -26,7 +30,17 @@ pub async fn run(args: HandleArgs) -> Result<()> {
 
     debug!(%provider, event = %args.event, "Handling event");
     let outcome = claudine::dispatch::dispatch(&raw, provider, &env).await?;
-    if let Some(payload) = outcome.response {
+    if args.json {
+        let output = serde_json::json!({
+            "provider": provider.as_slug(),
+            "event": args.event,
+            "response": outcome.response,
+            "exit_code": outcome.exit_code,
+            "protect_pre": outcome.protect_pre,
+            "protect_post": outcome.protect_post,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if let Some(payload) = outcome.response {
         println!("{}", serde_json::to_string(&payload)?);
     }
     if let Some(exit_code) = outcome.exit_code {

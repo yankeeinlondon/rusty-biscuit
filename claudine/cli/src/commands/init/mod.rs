@@ -20,6 +20,7 @@ use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
+use claudine::services::{ProtectConfig, ProtectPosture};
 
 use crate::log;
 
@@ -99,6 +100,13 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("-------------------------");
     let action_profile = prompts::prompt_action_profile()?;
 
+    log::message("");
+    log::message("Phase 4: Protect Defaults");
+    log::message("-------------------------");
+    let protect_posture = prompts::prompt_protect_posture()?;
+    let protect_defaults = protect_posture
+        .map(|posture| ProtectConfig::provider_aware_defaults(&installed_providers, posture));
+
     // Build provider-specific event bindings:
     // - include every event the provider can register via native hooks
     // - include empty actions as explicit no-op bindings
@@ -148,6 +156,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         &home_dir,
         &repo_root,
     );
+    settings.protect = protect_defaults;
 
     // Build final config with per-provider configuration
     let mut providers = HashMap::new();
@@ -164,9 +173,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         providers,
     };
 
-    // Phase 4: Write and Register
+    // Phase 5: Write and Register
     log::message("");
-    log::message("Phase 4: Write Configuration");
+    log::message("Phase 5: Write Configuration");
     log::message("-----------------------------");
 
     // Determine config path
@@ -349,6 +358,10 @@ fn default_config(repo_scope: bool) -> Result<HookerConfig> {
             &home_dir,
             &repo_root,
         ),
+        protect: Some(ProtectConfig::provider_aware_defaults(
+            &installed_providers,
+            ProtectPosture::Balanced,
+        )),
         ..GlobalSettings::default()
     };
 
@@ -651,5 +664,13 @@ mod tests {
             .get(&AgenticEvent::BeforeModel)
             .expect("before_model should be configured");
         assert!(before_model.actions.is_empty());
+    }
+
+    #[test]
+    fn quick_mode_seeds_provider_aware_protect_defaults() {
+        let config = default_config(false).expect("default config should build");
+        let protect = config.settings.protect.expect("protect defaults missing");
+
+        assert_eq!(protect.posture, ProtectPosture::Balanced);
     }
 }

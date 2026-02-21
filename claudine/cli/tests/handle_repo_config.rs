@@ -15,10 +15,8 @@ impl TestWorkspace {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "claudine-handle-repo-it-{}-{nonce}",
-            process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("claudine-handle-repo-it-{}-{nonce}", process::id()));
         fs::create_dir_all(&root).unwrap();
         Self { root }
     }
