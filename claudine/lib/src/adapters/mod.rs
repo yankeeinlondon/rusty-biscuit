@@ -11,6 +11,9 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
+use crate::services::{
+    ProtectDecision, ProtectOutcome, ProviderProtectCapabilities, ProviderProtectProfiles,
+};
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +72,54 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Exit code to use for shell-driven providers.
     fn exit_code(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32>;
+
+    /// Provider protect capability handshake.
+    fn protect_capabilities(&self) -> ProviderProtectCapabilities {
+        ProviderProtectProfiles::defaults().capabilities(self.provider())
+    }
+
+    /// Map a protect decision into a generic hook response for this provider.
+    fn map_protect_outcome(
+        &self,
+        _event: &AgenticEvent,
+        decision: &ProtectDecision,
+    ) -> std::result::Result<HookResponse, AdapterError> {
+        let reason = match &decision.outcome {
+            ProtectOutcome::Allow => None,
+            ProtectOutcome::AskThenAllowOrStop { reason }
+            | ProtectOutcome::StopCurrent { reason }
+            | ProtectOutcome::StopSession { reason }
+            | ProtectOutcome::AllowWithRedaction { reason }
+            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
+        };
+
+        let response = match decision.outcome {
+            ProtectOutcome::Allow | ProtectOutcome::AllowWithRedaction { .. } => HookResponse {
+                decision: Some(crate::actions::HookDecision::Allow),
+                reason,
+                ..HookResponse::default()
+            },
+            ProtectOutcome::AskThenAllowOrStop { .. } => HookResponse {
+                decision: Some(crate::actions::HookDecision::Ask),
+                reason,
+                ..HookResponse::default()
+            },
+            ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. } => {
+                HookResponse {
+                    decision: Some(crate::actions::HookDecision::Deny),
+                    reason,
+                    ..HookResponse::default()
+                }
+            }
+            ProtectOutcome::AdvisoryOnly { .. } => HookResponse {
+                decision: Some(crate::actions::HookDecision::Continue),
+                reason,
+                ..HookResponse::default()
+            },
+        };
+
+        Ok(response)
+    }
 }
 
 static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
@@ -147,6 +198,100 @@ mod tests {
                         provider.supports_event(&event),
                         "adapter for {provider} marks {event} as blockable but provider does not support it"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn protect_capabilities_align_with_default_profiles() {
+        let profiles = ProviderProtectProfiles::defaults();
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ] {
+            let adapter = adapter_for(provider);
+            assert_eq!(
+                adapter.protect_capabilities(),
+                profiles.capabilities(provider),
+                "protect capability mismatch for provider={provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn protect_outcome_mapping_fixtures_cover_subagent_and_mcp_paths() {
+        let fixture_events = [
+            AgenticEvent::BeforeTool,
+            AgenticEvent::AfterTool,    // MCP-adjacent post-tool path
+            AgenticEvent::SubagentStop, // subagent completion path
+            AgenticEvent::TurnComplete,
+        ];
+
+        let fixture_decisions = [
+            ProtectDecision {
+                outcome: ProtectOutcome::Allow,
+                degraded_from: None,
+                degraded: false,
+                reason: "fixture.allow".to_string(),
+                capability: None,
+            },
+            ProtectDecision {
+                outcome: ProtectOutcome::AskThenAllowOrStop {
+                    reason: "fixture.ask".to_string(),
+                },
+                degraded_from: None,
+                degraded: false,
+                reason: "fixture.ask".to_string(),
+                capability: None,
+            },
+            ProtectDecision {
+                outcome: ProtectOutcome::StopCurrent {
+                    reason: "fixture.stop".to_string(),
+                },
+                degraded_from: None,
+                degraded: false,
+                reason: "fixture.stop".to_string(),
+                capability: None,
+            },
+            ProtectDecision {
+                outcome: ProtectOutcome::AdvisoryOnly {
+                    reason: "fixture.advisory".to_string(),
+                },
+                degraded_from: Some(ProtectOutcome::StopSession {
+                    reason: "fixture.original".to_string(),
+                }),
+                degraded: true,
+                reason: "fixture.advisory".to_string(),
+                capability: None,
+            },
+        ];
+
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ] {
+            let adapter = adapter_for(provider);
+            for event in fixture_events {
+                for decision in &fixture_decisions {
+                    let mapped = adapter
+                        .map_protect_outcome(&event, decision)
+                        .expect("protect mapping should succeed");
+                    let _ = adapter
+                        .format_response(&event, &mapped)
+                        .expect("mapped protect response should be format-compatible");
                 }
             }
         }

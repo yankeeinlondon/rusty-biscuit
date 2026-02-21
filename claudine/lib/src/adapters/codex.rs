@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::services::{ProtectDecision, ProtectOutcome};
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -83,6 +84,34 @@ impl ProviderAdapter for CodexAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
+    }
+
+    fn map_protect_outcome(
+        &self,
+        _event: &AgenticEvent,
+        decision: &ProtectDecision,
+    ) -> Result<HookResponse, AdapterError> {
+        let mut reason = match &decision.outcome {
+            ProtectOutcome::Allow => None,
+            ProtectOutcome::AskThenAllowOrStop { reason }
+            | ProtectOutcome::StopCurrent { reason }
+            | ProtectOutcome::StopSession { reason }
+            | ProtectOutcome::AllowWithRedaction { reason }
+            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
+        };
+
+        if decision.degraded {
+            reason = Some(format!(
+                "{} (codex: no native blocking hook, downgraded to advisory)",
+                reason.unwrap_or_else(|| "protect decision".to_string())
+            ));
+        }
+
+        Ok(HookResponse {
+            decision: Some(crate::actions::HookDecision::Continue),
+            reason,
+            ..HookResponse::default()
+        })
     }
 }
 

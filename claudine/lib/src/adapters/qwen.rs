@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::services::{ProtectDecision, ProtectOutcome};
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -82,6 +83,58 @@ impl ProviderAdapter for QwenAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
+    }
+
+    fn map_protect_outcome(
+        &self,
+        event: &AgenticEvent,
+        decision: &ProtectDecision,
+    ) -> Result<HookResponse, AdapterError> {
+        let mut response = match decision.outcome {
+            ProtectOutcome::Allow | ProtectOutcome::AllowWithRedaction { .. } => HookResponse {
+                decision: Some(HookDecision::Allow),
+                reason: None,
+                ..HookResponse::default()
+            },
+            ProtectOutcome::AskThenAllowOrStop { .. } => HookResponse {
+                decision: Some(HookDecision::Ask),
+                reason: None,
+                ..HookResponse::default()
+            },
+            ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. } => {
+                HookResponse {
+                    decision: Some(HookDecision::Deny),
+                    reason: None,
+                    ..HookResponse::default()
+                }
+            }
+            ProtectOutcome::AdvisoryOnly { .. } => HookResponse {
+                decision: Some(HookDecision::Continue),
+                reason: None,
+                ..HookResponse::default()
+            },
+        };
+
+        let base_reason = match &decision.outcome {
+            ProtectOutcome::Allow => None,
+            ProtectOutcome::AskThenAllowOrStop { reason }
+            | ProtectOutcome::StopCurrent { reason }
+            | ProtectOutcome::StopSession { reason }
+            | ProtectOutcome::AllowWithRedaction { reason }
+            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
+        };
+
+        response.reason = if decision.degraded {
+            Some(format!(
+                "{} (qwen: only permission hooks are enforceable; event `{}` downgraded)",
+                base_reason.unwrap_or_else(|| "protect decision".to_string()),
+                event
+            ))
+        } else {
+            base_reason
+        };
+
+        Ok(response)
     }
 }
 

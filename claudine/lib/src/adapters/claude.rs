@@ -26,9 +26,7 @@ impl ProviderAdapter for ClaudeAdapter {
         let tool_name = str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName"));
 
         // Adapter-level remapping: PreToolUse with AskUserQuestion → HumanInTheLoop
-        if event == AgenticEvent::BeforeTool
-            && tool_name.as_deref() == Some("AskUserQuestion")
-        {
+        if event == AgenticEvent::BeforeTool && tool_name.as_deref() == Some("AskUserQuestion") {
             event = AgenticEvent::HumanInTheLoop;
         }
 
