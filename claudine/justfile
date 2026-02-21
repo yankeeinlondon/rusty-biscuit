@@ -244,7 +244,9 @@ install *args="":
     @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
     @echo
     @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    @echo
+    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} installed{{RESET}}"
+    @echo
     @playa effect drop-4 2>/dev/null || return 0
 
 # Validate the source code without doing a full build
