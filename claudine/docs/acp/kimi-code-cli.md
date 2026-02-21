@@ -6,8 +6,12 @@ prompt: |-
 
     1. Show how a Rust client can interact programmatically with the Kimi Code Agent using ACP
     2. Show explicitly how to handle "Reverse Requests" where Kimi asks the client to fulfill a tool request, a file read, etc. (as a Kimi is not allowed to do this directly when operating via ACP)
-    3. dfd
+    3. Show how a Rust client can respond to requests to execute commands on the host system
     4. Show how the Rust client we've created can use things like `mpsc` channels to send Kimi's streaming text to a desktop desktop app framework like Tauri or iced
+
+last_updated: 2026-02-21
+update_policy:
+    - Duration(6 mo)
 ---
 
 ## Kimi Code's JSON-RPC API
@@ -567,4 +571,132 @@ use tokio::process::Command;
 
 
 ## Hooking up a Frontend UI
+
+Hooking this up to a UI is where the project transforms from a cool terminal script into a real, usable desktop application.
+
+When you build a UI over an asynchronous protocol like ACP, you face a classic concurrency problem: UI frameworks (like Tauri or Iced) run their own blocking event loops to render graphics, but Kimi’s JSON-RPC stream *also* needs a continuous, asynchronous loop to read standard I/O. If you put them on the same thread, your UI will freeze every time Kimi thinks.
+
+To bridge them safely, we use a combination of **`tokio::sync::mpsc` channels** and **`tokio::select!`**.
+
+Here is how you implement this architecture in **Tauri**, which is currently the most popular framework for this exact type of Rust-backend/Web-frontend stack.
+
+### 1. The Architecture Concept
+
+1. **The Global Sender:** You create an `mpsc` channel. You give the `Sender` (Tx) to Tauri's global state. This allows your UI frontend (React, Vue, etc.) to trigger a command that sends a prompt into the channel.
+2. **The Detached Loop:** You spawn your Kimi Code CLI process inside a detached `tokio::spawn` task. This task holds the `Receiver` (Rx).
+3. **The Select Macro:** Inside the background task, you use `tokio::select!` to simultaneously listen for *new prompts from the UI* and *streaming responses from Kimi's stdout*.
+4. **Emitting to Frontend:** When the background task gets a stream chunk from Kimi, it uses Tauri's `AppHandle` to push the event directly to your JavaScript frontend.
+
+### 2. The Rust Implementation (Tauri + Tokio)
+
+Here is the complete backbone for your `src-tauri/src/main.rs` file.
+
+```rust
+use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::mpsc;
+use tauri::Manager;
+use std::process::Stdio;
+
+// 1. Define the commands the UI can send to the background task
+pub enum KimiCommand {
+    Prompt(String),
+    CancelTurn,
+}
+
+// 2. Tauri Command: Called by your frontend (e.g., React/Vue) when the user clicks "Send"
+#[tauri::command]
+async fn send_prompt(
+    prompt: String,
+    state: tauri::State<'_, mpsc::Sender<KimiCommand>>
+) -> Result<(), String> {
+    // Push the prompt into the mpsc channel
+    state.send(KimiCommand::Prompt(prompt)).await.map_err(|e| e.to_string())
+}
+
+#[tokio::main]
+async fn main() {
+    // 3. Create the mpsc channel (capacity of 32 messages)
+    let (tx, mut rx) = mpsc::channel::<KimiCommand>(32);
+
+    tauri::Builder::default()
+        .manage(tx) // Store the Sender in Tauri's global state
+        .setup(|app| {
+            let app_handle = app.handle();
+
+            // 4. Spawn the detached background task for Kimi
+            tokio::spawn(async move {
+                let mut child = Command::new("kimi")
+                    .arg("acp")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .expect("Failed to spawn Kimi");
+
+                let mut stdin = child.stdin.take().unwrap();
+                let stdout = child.stdout.take().unwrap();
+                let mut reader = BufReader::new(stdout).lines();
+
+                // (Assume you do Phase 1 Initialization & Phase 2 Session setup here)
+
+                let mut prompt_id_counter = 100;
+
+                // 5. The Magic Loop: Listen to the UI and Kimi simultaneously
+                loop {
+                    tokio::select! {
+                        // EVENT A: The UI sent a command via the mpsc channel
+                        Some(cmd) = rx.recv() => {
+                            match cmd {
+                                KimiCommand::Prompt(text) => {
+                                    prompt_id_counter += 1;
+                                    let req = json!({
+                                        "jsonrpc": "2.0",
+                                        "id": prompt_id_counter,
+                                        "method": "session/prompt",
+                                        "params": {
+                                            "sessionId": "your_session_id", // From setup
+                                            "content": [{ "type": "text", "text": text }]
+                                        }
+                                    });
+                                    let mut payload = req.to_string();
+                                    payload.push('\n');
+                                    stdin.write_all(payload.as_bytes()).await.unwrap();
+                                    stdin.flush().await.unwrap();
+                                }
+                                KimiCommand::CancelTurn => {
+                                    // Logic to send cancellation JSON-RPC
+                                }
+                            }
+                        }
+
+                        // EVENT B: Kimi printed a new line to stdout
+                        Ok(Some(line)) = reader.next_line() => {
+                            if let Ok(parsed) = serde_json::from_str::<Value>(&line) {
+                                // Extract the text chunk (simplified for brevity)
+                                if let Some(text) = parsed["params"]["update"]["content"]["text"].as_str() {
+                                    // Push the text chunk directly to the frontend
+                                    app_handle.emit_all("kimi-stream-chunk", text).unwrap();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![send_prompt])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+```
+
+### Why `tokio::select!` is the Secret Weapon
+
+If you look closely at the `loop` block, you'll see `tokio::select!`. This macro is the cornerstone of asynchronous Rust programming.
+
+It races multiple async branches against each other. If the user isn't clicking anything, the loop naturally waits for Kimi to stream text. If Kimi is idle, it waits for the user to send an `mpsc` message. Neither branch blocks the other, and your application remains perfectly responsive while using practically zero CPU when idle.
+
 
