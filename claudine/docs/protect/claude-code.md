@@ -38,6 +38,30 @@ prompt: |-
 
     3. Completion Gates
 
+      Attaching to events that mark the "completion" of a task give as an opportunity to do two things:
+
+      1. Run tests to validate that work really is DONE and force the Agent to continue when it's not
+      2. Scan for changes and look for "secrets" that shouldn't be in files and take corrective action
+
+    4. Subagents a Security Event?
+
+      Having the ability to orchestrate and run concurrently via sub-agents is a feature not a bug but because some Agent platforms provide a hook/event model that DOESN'T fire on sub-agents we are forced to potentially treat the creation of a subagent a security event.
+
+      You need to make sure, through thorough research, that the Agent you're investigating supports event hooks not only from the originating/root level tasks but throughout the flow and subagent process. If it does then just be sure to mention this and any quirks or gotchas about this that are worth knowing. If it does not then you should explore how to mitigate this increased risk of subagents.
+
+      - can we detect the sub-agent's creation reliably?
+      - can we force a stricter permissions profile on a sub-agent when it runs?
+      - can we limit MCP servers to only the "readonly" variants?
+      - can we greatly reduce access to shell/filesystem tools?
+
+    5. Escalated Privileges
+
+      If the Agent is running as "root" or some other user with escalated privileges, it has much greater potential for harm. To counteract that we need to consider how we can respond responsibly to this situation.
+
+      - Does the Agent automatically detect and limit permissions?
+      - Is there a way we can detect and respond to this via configuration? Via hooks/events?
+
+
     ## Task
 
     - Your task is to _update_ the research in the body of this file (if it's empty/boilerplate that means you'll be creating the content from scratch).
@@ -72,14 +96,25 @@ closure: |-
             - For every action that is specified, add a small section in the body of the document describing how this would be done, use a small Rust code example where possible, specify if there are any nuances, exceptions, or gotchas to be wary of
         - `user_prompt_event` - add a boolean flag indicating whether the Agent provides an event where user prompts can be received
         - if the `user_prompt_event` flag is set to `true`, then:
-            - `user_prompt_blocking_event` - add a boolean flag if the Agent has an event for user prompts which we can STOP execution or force a confirmation
+            - `user_prompt_blocking_event` - add a boolean flag if the Agent has an event for user prompts which we can STOP execution or force user confirmation before continuing
             - `user_prompt_mutation_event` - add a boolean flag if the Agent has an event for user prompts which allows us to mutate the prompt before the Agent starts processing it
         - `other_events`
             - if there are any other events that the Agent supports and could be useful in the goal of making the Agentic CLI safer in it's actions then this property will be added as a key/value dictionary where _keys_ are the property deemed valuable and the _value_ is a description of both what this hook triggers on, whether it allows a return type, and how it might be used.
     - On the topic of Intercepting MCP Calls, you'll add the following properties:
-        - `mcp_config_user`
+        - `mcp_docs` - the URL to the documentation the Agent provides for configuring MCP services
+        - `mcp_config_user` - the filepath to the user-scoped configuration file for MCP services
+        - `mcp_config_repo` - the filepath to the repo-scoped configuration file for MCP services
+        - `mcp_event` - a boolean flag indicating whether the Agent has a Hook event which gives access to the MCP server's response
+        - `mcp_event_name` - the name of the Agent event that allows us access to the MCP server's response
+        - `mcp_event_modifiable` - boolean flag indicating that the Agent has an event which allows us access to the MCP server's response and allows us to modify it _before_ it is used by the Agent
+        - `mcp_event_stop` - a boolean flag indicating that the Agent has an event which allows us access to the the MCP server's response and allows us to STOP execution or ASK for permission before continuing
 
+    Before you finish you need to set:
 
+    - `last_updated` to the current date in the format YYYY-MM-DD
+    - `body_hash` to the xxHash value for this documents Markdown content (prose content not frontmatter)
+        - you can use the `bh` CLI by printing the content and piping it to `bh` as STDIN
+        - if for some reason the `bh` utility is not found in the executable path then you can leave this blank
 ---
 
 # Protecting Claude Code
