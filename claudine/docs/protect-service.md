@@ -106,20 +106,23 @@ Add `protect` to both user and repo configuration entry points.
 pub struct ProtectConfig {
     pub enabled: bool,
     pub posture: ProtectPosture,          // advisory | balanced | strict
+    pub allow_repo_posture_downgrade: bool,
     pub yolo: YoloPolicy,                 // behavior overrides when provider is in bypass mode
     pub rules: ProtectRules,
     pub completion: CompletionPolicy,
     pub mcp: McpPolicy,
     pub subagents: SubagentPolicy,
     pub privilege: PrivilegePolicy,
-    pub providers: BTreeMap<ProviderId, ProviderProtectOverride>,
+    pub providers: HashMap<Provider, ProviderProtectOverride>,
+    pub max_recent_decisions: u16,
 }
 ```
 
 - Merge behavior:
   - user config = baseline,
   - repo config overlays user config,
-  - repo may tighten but should not silently weaken strict user settings unless explicitly allowed.
+  - repo may tighten but should not silently weaken strict user settings unless explicitly allowed via `allow_repo_posture_downgrade`.
+  - provider overrides are deep-merged through partial override structs (`*Override`) rather than full replacement.
 
 ### Capability-Driven Enforcement (Core Idea)
 
@@ -127,7 +130,7 @@ Protect should not branch directly on provider name in business logic. Instead, 
 
 ```rust
 pub struct ProviderProtectCapabilities {
-    pub pre_tool_block: bool,
+    pub pre_tool_gate: GateCapability,
     pub user_prompt_gate: GateCapability,
     pub mcp_response_gate: GateCapability,
     pub completion_gate: GateCapability,
@@ -155,6 +158,17 @@ Protect evaluation returns one of:
 - `AdvisoryOnly` (no native blocking path; emit finding + recommendation).
 
 Provider adapters map these outcomes to native hook responses (or best-effort observability when no response channel exists).
+
+### Current Implementation Notes (2026-02-21)
+
+- `ProtectService` now includes:
+  - deep provider override resolution,
+  - per-session completion retry loop protection,
+  - MCP text/JSON redaction helpers,
+  - audit snapshot/JSONL export APIs.
+- Dispatch now evaluates Protect both pre-action and post-action.
+- Adapters expose a protect capability handshake and protect-outcome mapping path.
+- CLI supports protect-aware defaults in `init --quick`, interactive protect posture prompts, and structured `--json` outputs in `dry-run`/`handle`.
 
 ### Policy Domains
 
