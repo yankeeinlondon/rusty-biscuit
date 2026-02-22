@@ -17,4 +17,3 @@ For NonHook providers (Goose, Kimi, Qwen, Roo), events are captured via:
 - Wire mode JSON-RPC proxy (Kimi)
 
 
-## Kimi Code CLI's JSON-RPC
