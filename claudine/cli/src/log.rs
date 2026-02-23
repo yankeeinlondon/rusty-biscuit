@@ -30,5 +30,5 @@ pub fn warn(msg: &str) {
 
 /// Write an error to stderr in red.
 pub fn error(msg: &str) {
-    let _ = writeln!(std::io::stderr(), "\x1b[31merror:\x1b[0m {msg}");
+    let _ = writeln!(std::io::stderr(), "\n\x1b[31mError:\x1b[0m {msg}");
 }

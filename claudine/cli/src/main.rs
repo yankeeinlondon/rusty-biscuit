@@ -41,6 +41,20 @@ pub(crate) enum Commands {
     Providers,
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
+    /// Wrap Claude Code with Claudine preflight/env handling.
+    Claude(commands::wrap::WrapperArgs),
+    /// Wrap Codex CLI with Claudine preflight/env handling.
+    Codex(commands::wrap::WrapperArgs),
+    /// Wrap Gemini CLI with Claudine preflight/env handling.
+    Gemini(commands::wrap::WrapperArgs),
+    /// Wrap Kimi Code with Claudine preflight/env handling.
+    Kimi(commands::wrap::WrapperArgs),
+    /// Wrap Qwen Code with Claudine preflight/env handling.
+    Qwen(commands::wrap::WrapperArgs),
+    /// Wrap OpenCode with Claudine preflight/env handling.
+    Opencode(commands::wrap::WrapperArgs),
+    /// Wrap Goose with Claudine preflight/env handling.
+    Goose(commands::wrap::WrapperArgs),
 }
 
 #[tokio::main]
@@ -69,6 +83,13 @@ async fn main() -> Result<()> {
         Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),
         Some(Commands::Providers) => commands::providers::run(),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
+        Some(Commands::Claude(args)) => commands::wrap::run_provider_wrapper("claude", args),
+        Some(Commands::Codex(args)) => commands::wrap::run_provider_wrapper("codex", args),
+        Some(Commands::Gemini(args)) => commands::wrap::run_provider_wrapper("gemini", args),
+        Some(Commands::Kimi(args)) => commands::wrap::run_provider_wrapper("kimi", args),
+        Some(Commands::Qwen(args)) => commands::wrap::run_provider_wrapper("qwen", args),
+        Some(Commands::Opencode(args)) => commands::wrap::run_provider_wrapper("opencode", args),
+        Some(Commands::Goose(args)) => commands::wrap::run_provider_wrapper("goose", args),
         None => {
             // No subcommand given - show help
             Cli::command().print_help()?;

@@ -367,7 +367,10 @@ fn format_action(action: &HookAction) -> String {
             } else {
                 format!(", {}", params.join(", "))
             };
-            format!("<magenta>SoundEffect</magenta>({DI}{}{}{DI_R})", name, params_str)
+            format!(
+                "<magenta>SoundEffect</magenta>({DI}{}{}{DI_R})",
+                name, params_str
+            )
         }
         HookAction::Log { target } => match target {
             LogTarget::File { path, rotate_daily } => {
@@ -385,10 +388,15 @@ fn format_action(action: &HookAction) -> String {
                     "<blue>Log</blue>()".to_string()
                 }
             }
-            LogTarget::Server { url, timeout_ms, .. } => {
+            LogTarget::Server {
+                url, timeout_ms, ..
+            } => {
                 let has_params = *timeout_ms != 10_000;
                 if has_params {
-                    format!("<blue>Log</blue>({DI}url={}, timeout_ms={}{DI_R})", url, timeout_ms)
+                    format!(
+                        "<blue>Log</blue>({DI}url={}, timeout_ms={}{DI_R})",
+                        url, timeout_ms
+                    )
                 } else {
                     format!("<blue>Log</blue>({DI}url={}{DI_R})", url)
                 }
@@ -424,10 +432,7 @@ fn format_action(action: &HookAction) -> String {
         HookAction::FireAndForget { command, args } => {
             let has_args = args.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
             if has_args {
-                let args_str = args
-                    .as_ref()
-                    .map(|a| a.join(" "))
-                    .unwrap_or_default();
+                let args_str = args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
                 format!(
                     "<green>FireAndForget</green>({DI}\"{} {}\"{DI_R})",
                     command,
@@ -444,10 +449,10 @@ fn format_action(action: &HookAction) -> String {
             ..
         } => {
             let mut params = Vec::new();
-            if let Some(a) = args {
-                if !a.is_empty() {
-                    params.push(a.join(" "));
-                }
+            if let Some(a) = args
+                && !a.is_empty()
+            {
+                params.push(a.join(" "));
             }
             if let Some(t) = timeout_ms {
                 params.push(format!("timeout={}ms", t));
@@ -551,7 +556,11 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
             }
         };
 
-        table.add_row(vec![event.as_pascal_case().into(), support_cell, actions_cell]);
+        table.add_row(vec![
+            event.as_pascal_case().into(),
+            support_cell,
+            actions_cell,
+        ]);
     }
 
     let rendered = table.fallback_render(&term);
@@ -596,7 +605,10 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         };
         log::data(&format!(" {}", enabled_header.fallback_render(&term)));
 
-        let desc_columns = vec![TableColumn::new(bold("Event")), TableColumn::new(bold("Description"))];
+        let desc_columns = vec![
+            TableColumn::new(bold("Event")),
+            TableColumn::new(bold("Description")),
+        ];
         let mut desc_table = Table::new()
             .with_columns(desc_columns)
             .prefer_cursor_alignment()
@@ -998,7 +1010,8 @@ fn run_support() -> Result<()> {
     // Build columns: Event name (left-aligned), then one per provider (centered)
     let mut columns = vec![TableColumn::new(bold("Event"))];
     for provider in ALL_PROVIDERS {
-        columns.push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
+        columns
+            .push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
@@ -1059,7 +1072,8 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
     // Build columns: Event name (left-aligned), then one per provider (center-aligned)
     let mut columns = vec![TableColumn::new(bold("Event"))];
     for provider in providers {
-        columns.push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
+        columns
+            .push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
     }
 
     let mut table = Table::new().with_columns(columns);

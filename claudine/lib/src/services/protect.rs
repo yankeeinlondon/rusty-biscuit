@@ -797,10 +797,10 @@ impl ProtectConfig {
                     validate_patterns(patterns)?;
                 }
             }
-            if let Some(mcp) = override_cfg.mcp.as_ref() {
-                if let Some(patterns) = mcp.redact_patterns.as_ref() {
-                    validate_patterns(patterns)?;
-                }
+            if let Some(mcp) = override_cfg.mcp.as_ref()
+                && let Some(patterns) = mcp.redact_patterns.as_ref()
+            {
+                validate_patterns(patterns)?;
             }
             if let Some(completion) = override_cfg.completion.as_ref()
                 && completion.enabled.unwrap_or(false)

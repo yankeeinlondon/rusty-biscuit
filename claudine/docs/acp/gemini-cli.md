@@ -37,19 +37,19 @@ As of **February 22, 2026**, Gemini CLI exposes ACP through `--experimental-acp`
 ### Initialize/auth/session flow
 
 - `initialize` advertises:
-  - auth methods: Google login, Gemini API key, Vertex AI
-  - `loadSession: true`
-  - prompt capabilities: image/audio/embedded context
-  - MCP capabilities: HTTP + SSE
+    - auth methods: Google login, Gemini API key, Vertex AI
+    - `loadSession: true`
+    - prompt capabilities: image/audio/embedded context
+    - MCP capabilities: HTTP + SSE
 - `newSession`:
-  - loads settings from the passed `cwd`
-  - validates auth early
-  - fails fast with 401 when API-key auth is selected but no key is present
-  - installs ACP-backed filesystem service if client advertises `fs` capabilities
+    - loads settings from the passed `cwd`
+    - validates auth early
+    - fails fast with 401 when API-key auth is selected but no key is present
+    - installs ACP-backed filesystem service if client advertises `fs` capabilities
 - `loadSession`:
-  - restores history
-  - resumes chat state
-  - streams prior messages back to the client as `session/update` notifications
+    - restores history
+    - resumes chat state
+    - streams prior messages back to the client as `session/update` notifications
 
 ### Prompt turn behavior
 
@@ -57,8 +57,8 @@ During `session/prompt`:
 
 - user content is normalized into Gemini parts (text, image, audio, resources)
 - streamed model chunks are mapped to ACP updates:
-  - `agent_message_chunk`
-  - `agent_thought_chunk`
+    - `agent_message_chunk`
+    - `agent_thought_chunk`
 - function/tool calls are accumulated and executed in-loop
 - tool status is streamed back with `tool_call` and `tool_call_update`
 - cancellation aborts pending prompt work and returns `stopReason: cancelled`

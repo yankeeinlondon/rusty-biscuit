@@ -86,6 +86,35 @@ Generate shell completions for bash, zsh, fish, powershell, or elvish.
 
 Remove hook registrations from all detected agents. `--keep-config` preserves `~/.claudine/config.json` while removing only the hook registrations.
 
+### Wrapped provider commands
+
+Claudine can wrap provider CLIs with preflight checks, argument translation, and environment sanitization:
+
+- `claudine claude`
+- `claudine codex`
+- `claudine gemini`
+- `claudine kimi`
+- `claudine qwen`
+- `claudine opencode`
+- `claudine goose`
+
+Shared wrapper flags:
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
+| `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
+| `-n, --non-interactive, --ni` | Translate to provider-specific non-interactive execution shape |
+| `-- ...` | Force all remaining args to passthrough unchanged |
+
+Wrapper behavior:
+
+- Validates provider binary availability before spawn (with provider docs URL in errors).
+- Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
+- Reports removed env variable names to stderr (names only, sorted/unique).
+- Injects `AGENT`, `YOLO`, `AGENT_PARAMS`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- Runs child process with inherited stdio/cwd and propagates child exit code.
+
 ## Module Structure
 
 ```
@@ -102,6 +131,11 @@ cli/src/
     ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal
+    ├── wrap/
+    │   ├── mod.rs       → Shared wrapper pipeline + wrapper args
+    │   ├── profile.rs   → Provider mapping profiles (yolo/non-interactive)
+    │   ├── env.rs       → Env sanitization + injected context vars
+    │   └── exec.rs      → Child process execution + exit propagation
     └── init/
         ├── mod.rs       → Wizard orchestration (interactive + quick modes, default configs)
         └── prompts.rs   → inquire-based interactive prompts
@@ -118,7 +152,7 @@ All user-facing output goes through `log.rs`:
 | `output()` | stdout | Inline output (no trailing newline) |
 | `info()` | stderr | Only when verbosity enabled |
 | `warn()` | stderr | Yellow "warning:" prefix |
-| `error()` | stderr | Red "error:" prefix |
+| `error()` | stderr | Red "Error:" prefix (with leading blank line) |
 
 Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` / `{{cyan}}` / `{{dim}}` markup, UnorderedList, OSC8 hyperlinks).
 

@@ -61,5 +61,5 @@ Key areas to check:
 - README files when changing public APIs or behavior
 - `docs/dependencies.md` when adding or removing crates
 - Skill files (`.claude/skills/`) when changing patterns or architecture
-- `CLAUDE.md` when changing workflows or project conventions
+
 

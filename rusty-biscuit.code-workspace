@@ -83,6 +83,12 @@
         "editor.detectIndentation": false,
         "extensions.verifySignature": false,
         "rust-analyzer.cargo.targetDir": true,
-        "rust-analyzer.files.excludeDirs": ["~ monorepo"]
+        "rust-analyzer.files.excludeDirs": [
+            "~ monorepo"
+        ],
+        "cSpell.words": [
+            "highspeed",
+            "qwen"
+        ]
     }
 }

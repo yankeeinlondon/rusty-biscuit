@@ -1,240 +1,82 @@
-# CLAUDE.md
+# Rusty Biscuit Monorepo
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Overview
+## Monorepo Structure
 
-**Dockhand** is a Rust monorepo for AI-powered research and automation tools. It uses a workspace-based architecture with multiple areas, each containing focused modules.
-
-## Architecture
-
-### Monorepo Structure
-
-The repository is organized into the following packages:
-
-> Note: each package should have a `justfile` to provide common devops operations like build, lint, install, etc.
+The repository is organized into the following package areas and packages:
 
 ```txt
-dockhand/
-├── unchained-ai/     # AI pipeline primitives and provider integrations
-│   ├── cli/          # Binary: `unchained` (agent status monitoring CLI)
-│   ├── gen/          # Binary: `gen-models` (provider model enum generator)
-│   ├── lib/          # Core AI pipeline library
-│   └── model_id/    # Proc-macro for model ID derivation
-├── biscuit-hash/     # Best-in-class hashing algorithms
-│   ├── cli/          # Binary: `bh` (hash CLI)
-│   └── lib/          # xxHash, BLAKE3, Argon2id hashing
-├── biscuit-speaks/   # Cross-platform TTS with multi-provider support
-│   ├── cli/          # Binary: `so-you-say` (TTS CLI)
-│   └── lib/          # Provider detection, voice caching, failover
-├── biscuit-terminal/ # Terminal detection and rich rendering
-│   ├── cli/          # Binary: `bt` (terminal inspector + diagram renderer)
-│   └── lib/          # Terminal capabilities, image rendering, mermaid diagrams
-├── claudine/         # Universal hook/event handler for agentic CLIs
-│   ├── cli/          # Binary: `claudine` (hook manager CLI)
-│   └── lib/          # Event model, provider adapters, skill linking
-├── darkmatter-cli/   # Binary: `md` (markdown terminal renderer)
-├── darkmatter-lib/   # Markdown parsing, mermaid diagrams, syntax highlighting
-├── homelab/          # Home automation AV equipment control
-│   ├── cli/          # Binary: `homey` (AV device control CLI)
-│   ├── lib/          # Arcam amplifier + Sony ES receiver libraries
-│   └── server/       # Binary: `homelab-server` (Axum REST API)
-├── model-citizen/    # Local LLM model management
-│   ├── cli/          # Binary: `model` (model inventory and management CLI)
-│   └── lib/          # Scanners, GGUF parsing, HuggingFace client, sharing
-├── queue/            # TUI command scheduler
-│   ├── cli/          # Binary: `queue` (TUI application)
-│   └── lib/          # Core library (types, persistence, execution, terminal detection)
-├── research/         # AI-powered library research tools
-│   ├── cli/          # Binary: `research`
-│   └── lib/          # Core research library
-├── schematic/        # Schema generation for REST API clients
-│   ├── define/       # API definition primitives (RestApi, Endpoint, AuthStrategy)
-│   ├── definitions/  # Pre-built API definitions (OpenAI, Ollama, ElevenLabs, HuggingFace)
-│   ├── gen/          # Code generator CLI with validate/generate subcommands
-│   └── schema/       # Generated API clients (auto-generated, do not edit)
-├── playa/            # Audio playback with host player detection
-│   ├── cli/          # Binary: `playa` (audio player)
-│   └── lib/          # Player detection, format detection, 88 sound effects
-├── sniff/
-│   ├── cli/          # Binary: `sniff`
-│   └── lib/          # OS, hardware, network, filesystem, programs, services detection
-├── tree-hugger/      # Tree-sitter symbol extraction
-│   ├── cli/          # Binary: `hug` (symbol/import/export CLI)
-│   └── lib/          # Symbol extraction library (16 languages)
-└── tui/              # Future: ratatui-based interactive chat
+• biscuit-file
+    • biscuit-file-cli v0.1.0 (biscuit-file/cli) [Rust]
+    • biscuit-file v0.1.0 (biscuit-file/lib) [Rust]
+• biscuit-hash
+    • biscuit-hash-cli v0.1.0 (biscuit-hash/cli) [Rust]
+    • biscuit-hash v0.1.0 (biscuit-hash/lib) [Rust]
+• biscuit-speaks
+    • biscuit-speaks-cli v0.1.0 (biscuit-speaks/cli) [Rust]
+    • biscuit-speaks v0.1.0 (biscuit-speaks/lib) [Rust]
+• biscuit-terminal
+    • biscuit-terminal-cli v0.1.0 (biscuit-terminal/cli) [Rust]
+    • biscuit-terminal v0.1.0 (biscuit-terminal/lib) [Rust]
+• claudine
+    • claudine-cli v0.1.0 (claudine/cli) [Rust]
+    • claudine v0.1.0 (claudine/lib) [Rust]
+• darkmatter
+    • darkmatter-cli v0.1.0 (darkmatter/cli) [Rust]
+    • darkmatter v0.1.0 (darkmatter/lib) [Rust]
+• homelab
+    • homelab-cli v0.1.0 (homelab/cli) [Rust]
+    • homelab v0.1.0 (homelab/lib) [Rust]
+    • homelab-server v0.1.0 (homelab/server) [Rust]
+• model-citizen
+    • model-citizen-cli v0.1.0 (model-citizen/cli) [Rust]
+    • model-citizen v0.1.0 (model-citizen/lib) [Rust]
+• unchained-ai
+    • model_id v0.1.0 (unchained-ai/model_id) [Rust]
+    • unchained-ai-cli v0.1.0 (unchained-ai/cli) [Rust]
+    • unchained-ai-gen v0.1.0 (unchained-ai/gen) [Rust]
+    • unchained-ai v0.1.0 (unchained-ai/lib) [Rust]
+• playa
+    • playa-cli v0.1.0 (playa/cli) [Rust]
+    • playa v0.1.0 (playa/lib) [Rust]
+• queue
+    • queue-cli v0.1.0 (queue/cli) [Rust]
+    • queue v0.1.0 (queue/lib) [Rust]
+• research
+    • research-cli v0.1.0 (research/cli) [Rust]
+    • research v0.1.0 (research/lib) [Rust]
+• schematic
+    • schematic-define v0.1.0 (schematic/define) [Rust]
+    • schematic-definitions v0.1.0 (schematic/definitions) [Rust]
+    • schematic-gen v0.1.0 (schematic/gen) [Rust]
+    • schematic-schema v0.1.0 (schematic/schema) [Rust]
+• sniff
+    • sniff-cli v0.1.0 (sniff/cli) [Rust]
+    • sniff v0.1.0 (sniff/lib) [Rust]
+• root
+    • tabby v0.1.0 (tabby) [Rust]
+    • tui v0.1.0 (tui) [Rust]
+• tabby
+    • ui v0.1.0 (tabby/ui) [Rust]
+• tree-hugger
+    • tree-hugger-cli v0.1.0 (tree-hugger/cli) [Rust]
+    • tree-hugger v0.1.0 (tree-hugger/lib) [Rust]
 ```
 
+## Common Commands
 
-### Key Architectural Patterns
+This monorepo uses the `just` runner and the root directory as well as every "package area" has a `justfile` so you can target either ALL packages (from root) or any package area by moving into that directory. Commands found everywhere are:
 
-#### 1. Two-Phase LLM Pipeline (Research)
+- `just test` - for running unit and integration tests
+- `just lint` - for running all lint tests
+- `just build` - build
+- `just install` - build for release and install all binary packages
 
-The research system uses a parallel two-phase approach:
+You should also use `just` and these **just** commands whenever you need to run tests, lints, builds (unless there is an explicit reason to revert to just the underlying commands which the runner uses).
 
-**Phase 1: Underlying Research** (parallel execution)
+## Local Skills
 
-- `overview.md` - Library features/API (ZAI GLM-4-7)
-- `similar_libraries.md` - Alternatives (Gemini Flash)
-- `integration_partners.md` - Ecosystem (Gemini Flash)
-- `use_cases.md` - Patterns (Gemini Flash)
-- `changelog.md` - Version history (OpenAI GPT-5.2)
-- `question_N.md` - Additional prompts (Gemini Flash)
-
-**Phase 2: Synthesis** (parallel, after Phase 1)
-
-- `skill/SKILL.md` - Claude Code skill format (OpenAI GPT-5.2)
-- `deep_dive.md` - Comprehensive reference (OpenAI GPT-5.2)
-- `brief.md` - Quick summary (Gemini Flash)
-
-**Incremental Research (DRY Approach)**:
-
-- Checks for `metadata.json` to detect existing research
-- New prompts are compared semantically using Gemini Flash for overlap detection
-- Interactive selection for conflicts (conflicting prompts unselected by default)
-- Re-runs Phase 2 synthesis with expanded corpus after adding new documents
-
-**Provider Strategy**:
-
-- **Fast models** (Gemini Flash): Phase 1 parallel research where speed matters
-- **Stronger models** (GPT-5.2): Phase 2 synthesis requiring cross-document reasoning, changelog analysis
-- All tasks in Phase 1 run concurrently via `tokio::join!`
-- Ctrl+C exits immediately (exit code 130), preserving completed results
-
-**Cancellation & Notifications**:
-
-- Graceful degradation: Phase 2 proceeds with available Phase 1 content
-- TTS completion announcement via system text-to-speech (skipped on cancellation)
-- Markdown normalization ensures consistent formatting (pulldown-cmark + extensions)
-
-#### 2. REST API Client Generation (Schematic)
-
-The `schematic` package provides type-safe REST API client generation:
-
-**Definition → Generation → Client:**
-- `schematic-define`: Primitives for describing APIs (`RestApi`, `Endpoint`, `AuthStrategy`, `Headers`)
-- `schematic-definitions`: Pre-built API definitions (Anthropic, OpenAI, HuggingFace, Ollama, ElevenLabs, EMQX)
-- `schematic-gen`: Code generator CLI with `validate`, `generate`, and `import` subcommands
-- `schematic-schema`: Generated API clients ready for consumption
-
-**Key CLI Commands:**
-```bash
-# Validate an API definition
-schematic-gen validate --api openai
-
-# Generate client code
-schematic-gen generate --api openai --output schematic/schema/src
-
-# Import from OpenAPI spec (feature-gated)
-schematic-gen import --input api.yaml --output schematic/schema/src
-
-# Generate with OpenAPI export
-schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
-
-# Regenerate all APIs
-just -f schematic/justfile generate
-```
-
-**Configuration Options:**
-- `module_path`: Override generated module name (for multi-API modules)
-- `request_suffix`: Customize wrapper struct suffix (default: "Request")
-- `env_mapping`: Alternative environment variable configuration for auth
-
-**Ergonomic Features:**
-- `DOCS_URL` constant on generated API structs (`Option<&'static str>`)
-- `From<&str>`/`From<String>` for single-param no-body request structs
-- `From<BodyType>` for body-only request structs
-- `#[must_use]` on all async request methods
-- `#[non_exhaustive]` on all public enums in `schematic-define` (match statements need wildcard arms)
-
-**Variant Builder & Response Hooks:**
-- `variant()` returns a `VariantBuilder` with fluent configuration (base URL, auth, headers)
-- `variant_with(base_url, env_auth, strategy)` convenience method for simple environment switching
-- `pre_response_json(hook)` transforms raw JSON before deserialization (e.g., unwrap envelopes)
-- `mutate_response::<RequestType>(hook)` for type-safe post-deserialization response mutation
-- `EndpointSpec` trait on generated request structs associates request → response types
-- `ResponseContext` provides hook callbacks with endpoint_id, method, path, url, status, headers
-
-**Headers Builder (Programmatic Auth):**
-- `Headers::default().use_bearer_token(token)` - Set bearer token programmatically
-- `Headers::default().use_basic_auth(user, pass)` - Set basic auth
-- `Headers::default().use_api_key(key, header)` - Set API key in custom header
-- `from_env()` / `try_from_env()` - Load credentials from environment variables
-- When `Headers` has auth set, env-based auth is automatically skipped
-
-**⚠️ CRITICAL - Response Type Selection:**
-
-When defining endpoints, choose the correct `ApiResponse`:
-
-| Response Type | Use For | Generated Method |
-|---------------|---------|------------------|
-| `ApiResponse::Json(schema)` | JSON responses | `request<T>()` |
-| `ApiResponse::Binary` | Audio, images, archives | `request_bytes()` |
-| `ApiResponse::Text` | Plain text | `request_text()` |
-| `ApiResponse::Empty` | 204 No Content | `request_empty()` |
-
-**⚠️ CRITICAL - Module Path for Multi-API Modules:**
-
-When multiple APIs share one definitions module (e.g., Ollama), you MUST set `module_path`:
-
-```rust
-// Both APIs in definitions/src/ollama/mod.rs
-RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()), ... }
-RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
-```
-
-**⚠️ CRITICAL - Testing Coverage & Gaps:**
-
-Schematic tests verify syntax and include E2E generation checks for response-method selection (`request_bytes()`/`request_text()`/`request_empty()`), but they still do **not** cover runtime HTTP behavior. After modifying:
-1. Run `cargo test -p schematic-gen`
-2. Run `just -f schematic/justfile generate`
-3. Run `cargo check -p schematic-schema`
-4. If response handling changed, **manually verify** generated methods: `grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs`
-
-#### 3. Tree-sitter Symbol Extraction (Tree Hugger)
-
-The `tree-hugger` package provides multi-language symbol extraction using Tree-sitter:
-
-- **16 supported languages**: Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, Perl, Bash, Zsh, Lua
-- **Symbol kind distinction**: Differentiates struct vs enum, class vs interface, trait vs module
-- **Rich metadata**: Extracts doc comments, function signatures, type parameters, struct fields, enum variants
-- **Query vendoring**: Uses `nvim-treesitter` query files in `lib/queries/vendor/<lang>/locals.scm`
-
-**IMPORTANT - Cross-Language Test Coverage**: When modifying tree-sitter queries or symbol extraction:
-1. Every language with type constructs must have type distinction tests
-2. All typed languages need `types.*` fixture files exercising their type system
-3. Bug fixes require regression tests that would fail without the fix
-4. Run `cargo test -p tree-hugger-lib` to verify all language tests pass
-
-#### 4. Queue TUI Command Scheduler
-
-The `queue` package provides a terminal-based task scheduler with async execution:
-
-**Architecture:**
-- **queue-lib**: Core library with data types, persistence, execution engine, terminal detection
-- **queue-cli**: ratatui-based TUI with modal forms and event handling
-
-**Key Components:**
-- **Terminal Detection**: Auto-detects 8 terminal types (Wezterm, iTerm2, Terminal.app, GNOME, etc.)
-- **Execution Targets**: NewPane (Wezterm), NewWindow (native terminal), Background (detached)
-- **Persistence**: JSONL file storage with cross-platform file locking (`~/.queue-history.jsonl`)
-- **Async Execution**: tokio-based task scheduling with mpsc event channels
-
-**Wezterm Split Workflow:**
-When running in Wezterm, Queue creates a split layout:
-- Top 80%: Task execution area (commands run in new splits here)
-- Bottom 20%: TUI control pane (schedule and monitor tasks)
-
-**Documentation Navigation:**
-| Document | Purpose |
-|----------|---------|
-| `queue/README.md` | High-level overview, quick start, key features |
-| `queue/lib/README.md` | Data types, persistence API, executor, terminal detection |
-| `queue/cli/README.md` | TUI architecture, keyboard shortcuts, modal system |
-
-### Local Skills
-
-This repository has local Claude Code skills in `.claude/skills/`:
+This repository has the following local Agent skills defined `.claude/skills/`:
 
 - `biscuit-hash` - Hashing trifecta: xxHash (fast), BLAKE3 (crypto), Argon2id (passwords)
 - `biscuit-speaks` - Cross-platform TTS library and CLI (`so-you-say`) with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
@@ -257,184 +99,9 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `thiserror` - Error derive macros
 - `unchained-ai` - LLM pipeline primitives, provider registry, model catalogs, rig-core integration, and agent status monitoring
 
-**Prefer using these local skills** as they contain project-specific research and are optimized for this codebase.
+**IMPORTANT:** All local skills are defined locally because they have strong relevance to some areas
 
-## Mandatory Workflows
-
-When working in this repository, you **must** follow these workflows:
-
-1. **Skill Usage**: Always use the `rig` skill when working with LLM interactions. Evaluate which links to follow within the skill's `SKILL.md` entry point. Always use the `rust` skill.
-
-2. **Module-Specific Skills**:
-   - Working in `tui/`? Use the `ratatui` skill
-   - Working in `research/`? Use the `research` skill
-   - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
-   - Working in `claudine/`? Use the `claudine` skill
-   - Working in `darkmatter/`? Use the `darkmatter` skill
-   - Working in `homelab/`? Use the `homelab` skill
-   - Working in `model-citizen/`? Use the `model-citizen` skill
-   - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
-   - Working in `biscuit-speaks/`? Use the `biscuit-speaks` and `so-you-say` skills
-   - Working in `playa/`? Use the `playa` skill
-   - Working in `sniff/`? Use the `sniff` skill
-   - Working in `unchained-ai/`? Use the `unchained-ai` skill
-
-3. **Dependency Management**: Before introducing new dependencies:
-   - Check `docs/dependencies.md` first (primary source)
-   - If missing, check `Cargo.toml` files
-   - Prefer existing dependencies over adding new ones with overlapping functionality
-
-4. **Report Skills Used**: At the start of work, explicitly state which skills you'll use to answer the request
-
-## Common Commands
-
-### Building
-
-```bash
-# Build all areas
-just build
-
-# Build specific area
-just -f research/justfile build
-just -f biscuit-speaks/justfile build
-
-# Build specific package
-cargo build -p research-cli
-cargo build -p research
-cargo build -p biscuit-speaks-cli
-```
-
-### Testing
-
-```sh
-# Test all areas
-just test
-
-# Test specific area
-just -f research/justfile test
-just -f biscuit-speaks/justfile test
-
-# Test specific package with additional args
-cargo test -p research --lib
-
-# Tree Hugger tests (16 languages - critical for cross-language coverage)
-cargo test -p tree-hugger-lib
-cargo test -p tree-hugger-cli
-
-# Queue tests
-cargo test -p queue-lib
-cargo test -p queue-cli
-```
-
-### Installing Binaries
-
-```bash
-# Install all binaries
-just install
-
-# Install specific binary
-just -f research/justfile install    # Installs `research`
-just -f biscuit-speaks/justfile install  # Installs `so-you-say`
-cargo install --path queue/cli       # Installs `queue`
-```
-
-### Running in Development
-
-```bash
-# Research CLI (debug mode)
-just research library clap "How does it compare to structopt?"
-# Or directly:
-just -f research/justfile cli library clap
-
-# Pull skill to repository
-research pull clap
-research pull tokio --local  # Also copy underlying research docs
-
-# Speak CLI (debug mode)
-just -f biscuit-speaks/justfile cli "Hello world"
-```
-
-### Linting
-
-```bash
-# Lint specific area
-just -f biscuit-speaks/justfile lint
-
-# Or use cargo clippy directly
-cargo clippy -p queue-lib -p queue-cli
-cargo clippy --workspace
-```
-
-## Environment Variables
-
-| Variable | Description | Required For |
-|----------|-------------|--------------|
-| `RESEARCH_DIR` | Base directory for research output (default: `$HOME`) | Research CLI |
-| `OPENAI_API_KEY` | OpenAI API key (GPT-5.2 for synthesis) | Research CLI |
-| `GEMINI_API_KEY` | Google Gemini API key (Flash for underlying research) | Research CLI |
-| `ZAI_API_KEY` | ZAI API key (GLM-4-7 for overview) | Research CLI |
-| `GITHUB_TOKEN` | GitHub PAT for changelog API requests (avoids rate limiting) | Research CLI (optional) |
-
-## Output Locations
-
-### Research Output
-
-Research is stored at: `${RESEARCH_DIR:-$HOME}/.research/library/<package-name>/`
-
-Example structure:
-
-```
-~/.research/library/clap/
-├── metadata.json
-├── overview.md
-├── similar_libraries.md
-├── integration_partners.md
-├── use_cases.md
-├── changelog.md
-├── question_1.md
-├── deep_dive.md
-├── brief.md
-└── skill/
-    └── SKILL.md
-```
-
-## Package Manager Detection
-
-The research system auto-detects package managers:
-
-| Manager | Language | Detection Method |
-|---------|----------|------------------|
-| crates.io | Rust | API query |
-| npm | JavaScript/TypeScript | Registry API |
-| PyPI | Python | JSON API |
-| Packagist | PHP | Search API |
-| LuaRocks | Lua | HEAD request |
-| pkg.go.dev | Go | HEAD request |
-
-## Key Dependencies
-
-### AI & LLM
-
-- **rig-core** (v0.27.0): LLM agent framework with completion models, embeddings, and RAG abstractions - powers the research system
-- **tokio** (v1.48.0): Async runtime for concurrent LLM operations
-
-### CLI & User Interaction
-
-- **clap** (v4.5.53): Command-line argument parser with derive API (see local skill `.claude/skills/clap/`)
-- **inquire** (v0.9): Interactive CLI prompts for overlap detection and user confirmation
-- **tts** (v0.26.3): Cross-platform text-to-speech for completion announcements
-
-### HTTP & Web
-
-- **reqwest** (v0.12): HTTP client for provider APIs and package manager queries
-- **scraper** (v0.20): HTML parsing with CSS selectors for web scraping tool
-
-### Serialization & Parsing
-
-- **serde/serde_json** (v1.0): JSON serialization for metadata and API responses
-- **pulldown-cmark** (v0.13.0): Markdown parsing for research document manipulation
-
-### Rust Documentation Best Practices
+## Rust Documentation Best Practices
 
 - Avoid explicit `# Heading` (H1) inside a `///` docblock unless intentionally titling the item
     - Rustdoc already supplies the item name as a top-level title.
@@ -465,51 +132,13 @@ The research system auto-detects package managers:
   6. `## Safety` (for unsafe APIs)
   7. `## Notes` or `## Implementation Notes`
 
-### Testing
+## Testing
 
 - **wiremock** (v0.6): HTTP mocking for provider API tests
 - **tempfile** (v3.15): Temporary directories for research output tests
 - **serial_test**: Test isolation for environment variable manipulation
 
 For complete dependency information, see `docs/dependencies.md`.
-
-## Development Notes
-
-### Test Isolation
-
-- Environment variable tests use `#[serial_test::serial]` to prevent race conditions
-
-### Tracing
-
-**Core Principles**:
-
-- **Libraries emit, applications configure**: Libraries (`research-lib`) only emit events/spans, never install subscribers
-- **Structured fields over messages**: Use machine-readable fields for filtering (e.g., `tool.name`, `tool.duration_ms`)
-- **Spans for context**: Group related events and measure durations with `#[instrument]`
-
-**Semantic Conventions** (OpenTelemetry):
-
-| Field | Description | Example |
-|-------|-------------| :---------: |
-| `tool.name` | Tool being called | `"brave_search"` |
-| `tool.query` | Search query/URL | `"rust async"` |
-| `tool.duration_ms` | Execution time | `1234` |
-| `tool.results_count` | Results returned | `10` |
-| `http.status_code` | HTTP response | `200` |
-| `otel.kind` | Span kind | `"client"` |
-
-**Levels** (CLI flags):
-
-- ERROR/WARN (default): Failures and recoverable issues
-- INFO (`-v`): Tool calls, phase transitions, research progress
-- DEBUG (`-vv`): Tool arguments, API requests, intermediate results
-- TRACE (`-vvv`): Request/response bodies, verbose internals
-
-**Security**: Always skip sensitive data: `#[tracing::instrument(skip(api_key))]`
-
-**Testing**: Use `tracing-test` crate with `#[traced_test]` attribute for assertions
-
-For complete tracing architecture, see `docs/tracing.md`.
 
 ### Error Handling
 
@@ -520,11 +149,13 @@ For complete tracing architecture, see `docs/tracing.md`.
 ### Documentation Conventions
 
 **Package READMEs** follow a layered structure (see `docs/package-structure.md` for full details):
-- **Base README** (package root): Functional goals, links to sub-module READMEs
-- **Sub-module READMEs** (lib/, cli/): Technical approach, key crates, lessons learned section
+
+- **Base README** (package area root): Functional goals, links to sub-module READMEs
+- **Sub-module READMEs** (lib/, cli/, etc.): Technical approach, key crates, lessons learned section
 - **`docs/` folder**: `dependencies.md` plus research/design documents
 
 **Avoiding Drift**: When modifying code, update relevant documentation in the same change:
+
 - READMEs when changing public APIs or behavior
 - `docs/dependencies.md` when adding or removing crates
 - Skill files (`.claude/skills/`) when changing patterns or architecture

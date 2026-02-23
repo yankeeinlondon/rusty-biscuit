@@ -9,3 +9,4 @@ pub mod link;
 pub mod providers;
 pub mod sync;
 pub mod uninstall;
+pub mod wrap;
