@@ -13,6 +13,7 @@ sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

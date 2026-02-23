@@ -7,3 +7,4 @@ pub mod error;
 pub mod events;
 pub mod linking;
 pub mod services;
+pub mod badges;
