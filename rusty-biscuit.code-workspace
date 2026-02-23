@@ -1,0 +1,86 @@
+{
+    "folders": [
+        {
+            "path": "biscuit-file",
+            "name": "biscuit-file"
+        },
+        {
+            "path": "biscuit-hash",
+            "name": "biscuit-hash"
+        },
+        {
+            "path": "biscuit-speaks",
+            "name": "biscuit-speaks"
+        },
+        {
+            "path": "biscuit-terminal",
+            "name": "biscuit-terminal"
+        },
+        {
+            "path": "claudine",
+            "name": "claudine"
+        },
+        {
+            "path": "darkmatter",
+            "name": "darkmatter"
+        },
+        {
+            "path": "homelab",
+            "name": "homelab"
+        },
+        {
+            "path": "model-citizen",
+            "name": "model-citizen"
+        },
+        {
+            "path": "playa",
+            "name": "playa"
+        },
+        {
+            "path": "queue",
+            "name": "queue"
+        },
+        {
+            "path": "research",
+            "name": "research"
+        },
+        {
+            "path": "schematic",
+            "name": "schematic"
+        },
+        {
+            "path": "sniff",
+            "name": "sniff"
+        },
+        {
+            "path": "tabby",
+            "name": "tabby"
+        },
+        {
+            "path": "tree-hugger",
+            "name": "tree-hugger"
+        },
+        {
+            "path": "tui",
+            "name": "tui"
+        },
+        {
+            "path": "unchained-ai",
+            "name": "unchained-ai"
+        },
+        {
+            "path": ".",
+            "name": "~ monorepo"
+        },
+        {
+            "path": ".ai"
+        }
+    ],
+    "settings": {
+        "editor.tabSize": 4,
+        "editor.detectIndentation": false,
+        "extensions.verifySignature": false,
+        "rust-analyzer.cargo.targetDir": true,
+        "rust-analyzer.files.excludeDirs": ["~ monorepo"]
+    }
+}

@@ -1093,6 +1093,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-hash",
  "biscuit-speaks",
+ "biscuit-terminal",
  "chrono",
  "dirs 6.0.0",
  "fs2",
