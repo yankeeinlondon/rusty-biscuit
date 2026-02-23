@@ -1,6 +1,10 @@
 {
     "folders": [
         {
+            "path": ".ai",
+            "name": "ai"
+        },
+        {
             "path": "biscuit-file",
             "name": "biscuit-file"
         },
@@ -72,9 +76,7 @@
             "path": ".",
             "name": "~ monorepo"
         },
-        {
-            "path": ".ai"
-        }
+
     ],
     "settings": {
         "editor.tabSize": 4,
