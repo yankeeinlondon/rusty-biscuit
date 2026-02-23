@@ -56,9 +56,14 @@ use crate::{
 /// - `<hidden>` for hidden text
 /// - `<strikethrough>` or `<~>` for strikethrough content
 /// - `<a href="...">content</a>` for an OSC8 link to a file or URL
-/// - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text
+/// - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text (comma-separated)
+/// - `<rgb 125 67 45>content</rgb>` for RGB colored foreground text (space-separated)
+/// - `<rgb #8B0000>content</rgb>` for RGB colored foreground text (hex with #)
+/// - `<rgb 8B0000>content</rgb>` for RGB colored foreground text (hex without #)
 /// - `<red>content</red>` for named color foreground text
-/// - `<bg-rgb 125,67,45>content</bg-rgb>` for RGB colored background text
+/// - `<bg-rgb 125,67,45>content</bg-rgb>` for RGB colored background text (comma-separated)
+/// - `<bg-rgb 125 67 45>content</bg-rgb>` for RGB colored background text (space-separated)
+/// - `<bg-rgb #8B0000>content</bg-rgb>` for RGB colored background text (hex with #)
 /// - `<bg-coral>content</bg-coral>` for named color (web) background text
 /// - `<bg-red-800>content</bg-red-800>` for Tailwind color background text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
@@ -80,6 +85,11 @@ impl Prose {
         }
     }
 
+    /// Returns the raw content as received.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
     /// Set the word wrap strategy.
     pub fn with_word_wrap(mut self, wrap: WordWrap) -> Self {
         self.layout.word_wrap = wrap;
@@ -99,157 +109,15 @@ impl Prose {
     }
 
     /// Parse and render the content, replacing tokens with ANSI escape codes.
-    fn parse_tokens(&self, _term: Option<&Terminal>) -> String {
-        let mut result = String::new();
-        let mut used_styles = false;
-        let mut chars = self.content.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            // Check for atomic tokens: {{token}}
-            if ch == '{' && chars.peek() == Some(&'{') {
-                chars.next(); // consume second '{'
-                let mut token = String::new();
-                let mut found_close = false;
-
-                while let Some(c) = chars.next() {
-                    if c == '}' && chars.peek() == Some(&'}') {
-                        chars.next(); // consume second '}'
-                        found_close = true;
-                        break;
-                    }
-                    token.push(c);
-                }
-
-                if found_close {
-                    if let Some(escape) = atomic_token_to_escape(&token) {
-                        result.push_str(escape);
-                        used_styles = true;
-                    } else {
-                        // Unknown token, output as-is
-                        result.push_str("{{");
-                        result.push_str(&token);
-                        result.push_str("}}");
-                    }
-                } else {
-                    // Unclosed token, output as-is
-                    result.push_str("{{");
-                    result.push_str(&token);
-                }
-                continue;
-            }
-
-            // Check for block tokens: <tag>content</tag>
-            if ch == '<' {
-                let mut tag_content = String::new();
-                let mut found_close = false;
-
-                // Collect until '>'
-                for c in chars.by_ref() {
-                    if c == '>' {
-                        found_close = true;
-                        break;
-                    }
-                    tag_content.push(c);
-                }
-
-                if found_close && !tag_content.starts_with('/') {
-                    // Parse the opening tag
-                    if let Some((tag_name, attrs)) = parse_opening_tag(&tag_content) {
-                        // Pre-compute tag patterns once (avoid repeated format! allocations)
-                        let closing_tag = format!("</{}>", tag_name);
-                        let opening_tag_full = format!("<{}>", tag_name);
-                        let opening_tag_with_space = format!("<{} ", tag_name);
-
-                        let mut inner_content = String::new();
-                        let mut depth = 1;
-
-                        // Use index-based matching instead of repeated ends_with
-                        // Track potential match positions for efficiency
-                        while depth > 0 {
-                            if let Some(c) = chars.next() {
-                                inner_content.push(c);
-                                let len = inner_content.len();
-
-                                // Only check for tag matches when we have enough characters
-                                // and the last character could complete a tag (i.e., '>' or ' ')
-                                if c == '>' {
-                                    // Check for nested opening tag: <tag_name>
-                                    if len >= opening_tag_full.len() {
-                                        let start = len - opening_tag_full.len();
-                                        if inner_content.get(start..).is_some_and(|slice| {
-                                            slice.eq_ignore_ascii_case(&opening_tag_full)
-                                        }) {
-                                            depth += 1;
-                                        }
-                                    }
-                                    // Check for closing tag: </tag_name>
-                                    if len >= closing_tag.len() {
-                                        let start = len - closing_tag.len();
-                                        if inner_content.get(start..).is_some_and(|slice| {
-                                            slice.eq_ignore_ascii_case(&closing_tag)
-                                        }) {
-                                            depth -= 1;
-                                            if depth == 0 {
-                                                // Remove the closing tag from content
-                                                inner_content.truncate(start);
-                                            }
-                                        }
-                                    }
-                                } else if c == ' ' {
-                                    // Check for opening tag with attributes: <tag_name ...
-                                    if len >= opening_tag_with_space.len() {
-                                        let start = len - opening_tag_with_space.len();
-                                        if inner_content.get(start..).is_some_and(|slice| {
-                                            slice.eq_ignore_ascii_case(&opening_tag_with_space)
-                                        }) {
-                                            depth += 1;
-                                        }
-                                    }
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-
-                        // Recursively parse inner content
-                        let inner_prose = Prose::new(inner_content);
-                        let parsed_inner = inner_prose.parse_tokens(_term);
-
-                        // Apply the block style
-                        if let Some((open, close)) = block_tag_to_escape(&tag_name, &attrs, _term) {
-                            result.push_str(&open);
-                            result.push_str(&parsed_inner);
-                            result.push_str(&close);
-                            used_styles = true;
-                        } else {
-                            // Unknown tag, output as-is
-                            result.push('<');
-                            result.push_str(&tag_content);
-                            result.push('>');
-                            result.push_str(&parsed_inner);
-                            result.push_str(&closing_tag);
-                        }
-                        continue;
-                    }
-                }
-
-                // Not a valid block tag, output as-is
-                result.push('<');
-                result.push_str(&tag_content);
-                if found_close {
-                    result.push('>');
-                }
-                continue;
-            }
-
-            result.push(ch);
-        }
-
-        // Add reset at the end if styles were used
-        if used_styles {
+    ///
+    /// Creates a fresh [`StyleState`] and delegates to [`parse_tokens_inner`].
+    /// Only this outermost call emits the final `\x1b[0m` reset.
+    fn parse_tokens(&self, term: Option<&Terminal>) -> String {
+        let mut state = StyleState::default();
+        let mut result = parse_tokens_inner(&self.content, term, &mut state);
+        if state.used_styles {
             result.push_str("\x1b[0m");
         }
-
         result
     }
 }
@@ -311,6 +179,10 @@ static ATOMIC_TOKEN_TABLE: &[(&str, &str)] = &[
     ("reset", "\x1b[0m"),
     ("reset-fg", "\x1b[39m"),
     ("reset-bg", "\x1b[49m"),
+    // Resets foreground color and all text decorations but preserves background.
+    // Equivalent to: normal-font-weight + not-italic + not-underline + not-blink
+    //                + not-inverse + not-hidden + not-strikethrough + reset-fg
+    ("reset-style", "\x1b[22;23;24;25;27;28;29;39m"),
     // Style-specific reset tokens (kebab-case standard)
     ("normal-font-weight", "\x1b[22m"), // Resets bold and dim
     ("not-italic", "\x1b[23m"),
@@ -381,45 +253,56 @@ fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>
     if parts.len() > 1 {
         // Parse attributes
         let attr_str = parts[1];
-        let mut current_attr = String::new();
-        let mut current_value = String::new();
-        let mut in_value = false;
-        let mut quote_char: Option<char> = None;
 
-        for c in attr_str.chars() {
-            if in_value {
-                if let Some(qc) = quote_char {
-                    if c == qc {
-                        attrs.push((current_attr.clone(), current_value.clone()));
-                        current_attr.clear();
-                        current_value.clear();
+        // Check if there's any '=' in the attribute string
+        // If not, treat the entire remainder as a positional value (empty key)
+        if !attr_str.contains('=') {
+            let value = attr_str.trim();
+            if !value.is_empty() {
+                attrs.push((value.to_string(), String::new()));
+            }
+        } else {
+            // Original parsing for key=value attributes
+            let mut current_attr = String::new();
+            let mut current_value = String::new();
+            let mut in_value = false;
+            let mut quote_char: Option<char> = None;
+
+            for c in attr_str.chars() {
+                if in_value {
+                    if let Some(qc) = quote_char {
+                        if c == qc {
+                            attrs.push((current_attr.clone(), current_value.clone()));
+                            current_attr.clear();
+                            current_value.clear();
+                            in_value = false;
+                            quote_char = None;
+                        } else {
+                            current_value.push(c);
+                        }
+                    } else if c == '"' || c == '\'' {
+                        quote_char = Some(c);
+                    } else if c.is_whitespace() {
+                        if !current_value.is_empty() {
+                            attrs.push((current_attr.clone(), current_value.clone()));
+                            current_attr.clear();
+                            current_value.clear();
+                        }
                         in_value = false;
-                        quote_char = None;
                     } else {
                         current_value.push(c);
                     }
-                } else if c == '"' || c == '\'' {
-                    quote_char = Some(c);
-                } else if c.is_whitespace() {
-                    if !current_value.is_empty() {
-                        attrs.push((current_attr.clone(), current_value.clone()));
-                        current_attr.clear();
-                        current_value.clear();
-                    }
-                    in_value = false;
-                } else {
-                    current_value.push(c);
+                } else if c == '=' {
+                    in_value = true;
+                } else if !c.is_whitespace() {
+                    current_attr.push(c);
                 }
-            } else if c == '=' {
-                in_value = true;
-            } else if !c.is_whitespace() {
-                current_attr.push(c);
             }
-        }
 
-        // Handle last attribute without closing quote
-        if !current_attr.is_empty() || !current_value.is_empty() {
-            attrs.push((current_attr, current_value));
+            // Handle last attribute without closing quote
+            if !current_attr.is_empty() || !current_value.is_empty() {
+                attrs.push((current_attr, current_value));
+            }
         }
     }
 
@@ -575,17 +458,58 @@ fn block_tag_to_escape(
     }
 }
 
-/// Parse an RGB string like "125,67,45" into (r, g, b).
+/// Parse an RGB string in multiple formats into (r, g, b).
+///
+/// Supported formats:
+/// - Comma-separated: "125,67,45"
+/// - Space-separated: "125 67 45"
+/// - Hex with #: "#8B0000"
+/// - Hex without #: "8B0000"
 fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let s = s.trim();
+
+    // Try hex format first (#RRGGBB or RRGGBB)
+    if let Some(hex_str) = s.strip_prefix('#') {
+        return parse_hex_rgb(hex_str);
+    }
+
+    // Check if it looks like a hex value (6 hex digits, no separators)
+    if s.len() == 6 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return parse_hex_rgb(s);
+    }
+
+    // Try comma-separated: "125,67,45"
     let parts: Vec<&str> = s.split(',').collect();
     if parts.len() == 3 {
         let r = parts[0].trim().parse::<u8>().ok()?;
         let g = parts[1].trim().parse::<u8>().ok()?;
         let b = parts[2].trim().parse::<u8>().ok()?;
-        Some((r, g, b))
-    } else {
-        None
+        return Some((r, g, b));
     }
+
+    // Try space-separated: "125 67 45"
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() == 3 {
+        let r = parts[0].parse::<u8>().ok()?;
+        let g = parts[1].parse::<u8>().ok()?;
+        let b = parts[2].parse::<u8>().ok()?;
+        return Some((r, g, b));
+    }
+
+    None
+}
+
+/// Parse a hex RGB string (6 hex digits) into (r, g, b).
+fn parse_hex_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    if hex.len() != 6 {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+
+    Some((r, g, b))
 }
 
 /// Resolve an href value, handling relative file paths.
@@ -1199,6 +1123,387 @@ fn lookup_tailwind_color(name: &str) -> Option<(u8, u8, u8)> {
         .map(|hdr| (hdr.red(), hdr.green(), hdr.blue()))
 }
 
+/// Independent style layers tracked by [`StyleState`].
+///
+/// Each variant maps to a single SGR attribute group. Block tags push/pop
+/// per-layer so that closing a tag restores the *parent's* value instead of
+/// issuing a nuclear `\x1b[0m` reset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StyleLayer {
+    FontWeight,
+    Foreground,
+    Background,
+    Italic,
+    Underline,
+    Strikethrough,
+    Blink,
+    Inverse,
+    Hidden,
+}
+
+impl StyleLayer {
+    /// The SGR code that clears this layer back to the terminal default.
+    fn default_reset(self) -> &'static str {
+        match self {
+            Self::FontWeight => "\x1b[22m",
+            Self::Foreground => "\x1b[39m",
+            Self::Background => "\x1b[49m",
+            Self::Italic => "\x1b[23m",
+            Self::Underline => "\x1b[24m",
+            Self::Strikethrough => "\x1b[29m",
+            Self::Blink => "\x1b[25m",
+            Self::Inverse => "\x1b[27m",
+            Self::Hidden => "\x1b[28m",
+        }
+    }
+}
+
+/// Tracks the current SGR escape code for each [`StyleLayer`].
+///
+/// Block tags call [`set`](StyleState::set) on open and
+/// [`restore`](StyleState::restore) on close, so nested tags of the same
+/// layer correctly restore the parent's value.
+#[derive(Debug, Default)]
+struct StyleState {
+    font_weight: Option<String>,
+    foreground: Option<String>,
+    background: Option<String>,
+    italic: Option<String>,
+    underline: Option<String>,
+    strikethrough: Option<String>,
+    blink: Option<String>,
+    inverse: Option<String>,
+    hidden: Option<String>,
+    /// True once any style escape has been emitted.
+    used_styles: bool,
+}
+
+impl StyleState {
+    fn get(&self, layer: StyleLayer) -> Option<&str> {
+        let slot = match layer {
+            StyleLayer::FontWeight => &self.font_weight,
+            StyleLayer::Foreground => &self.foreground,
+            StyleLayer::Background => &self.background,
+            StyleLayer::Italic => &self.italic,
+            StyleLayer::Underline => &self.underline,
+            StyleLayer::Strikethrough => &self.strikethrough,
+            StyleLayer::Blink => &self.blink,
+            StyleLayer::Inverse => &self.inverse,
+            StyleLayer::Hidden => &self.hidden,
+        };
+        slot.as_deref()
+    }
+
+    /// Set a layer's active escape code. Returns the previous value.
+    fn set(&mut self, layer: StyleLayer, code: &str) -> Option<String> {
+        self.used_styles = true;
+        let slot = self.slot_mut(layer);
+        let prev = slot.take();
+        *slot = Some(code.to_string());
+        prev
+    }
+
+    /// Restore a layer to a previous value (typically from [`set`](Self::set)).
+    fn restore(&mut self, layer: StyleLayer, prev: Option<String>) {
+        *self.slot_mut(layer) = prev;
+    }
+
+    /// The escape code to emit when closing a block tag on `layer`.
+    ///
+    /// Returns the parent's code if one exists, otherwise the layer's
+    /// default reset.
+    fn close_code(&self, layer: StyleLayer) -> &str {
+        self.get(layer).unwrap_or(layer.default_reset())
+    }
+
+    /// Clear all layers (used by `{{reset}}`).
+    fn clear_all(&mut self) {
+        self.font_weight = None;
+        self.foreground = None;
+        self.background = None;
+        self.italic = None;
+        self.underline = None;
+        self.strikethrough = None;
+        self.blink = None;
+        self.inverse = None;
+        self.hidden = None;
+    }
+
+    /// Clear all layers except background (used by `{{reset-style}}`).
+    fn clear_all_except_background(&mut self) {
+        self.font_weight = None;
+        self.foreground = None;
+        // background intentionally preserved
+        self.italic = None;
+        self.underline = None;
+        self.strikethrough = None;
+        self.blink = None;
+        self.inverse = None;
+        self.hidden = None;
+    }
+
+    fn slot_mut(&mut self, layer: StyleLayer) -> &mut Option<String> {
+        match layer {
+            StyleLayer::FontWeight => &mut self.font_weight,
+            StyleLayer::Foreground => &mut self.foreground,
+            StyleLayer::Background => &mut self.background,
+            StyleLayer::Italic => &mut self.italic,
+            StyleLayer::Underline => &mut self.underline,
+            StyleLayer::Strikethrough => &mut self.strikethrough,
+            StyleLayer::Blink => &mut self.blink,
+            StyleLayer::Inverse => &mut self.inverse,
+            StyleLayer::Hidden => &mut self.hidden,
+        }
+    }
+}
+
+/// Map a block tag name to its style layer.
+///
+/// Returns `None` for structural tags (`a`, `clipboard`) that don't
+/// correspond to an SGR attribute.
+fn block_tag_layer(tag_name: &str) -> Option<StyleLayer> {
+    match tag_name {
+        "bold" | "b" | "dim" => Some(StyleLayer::FontWeight),
+        "italic" | "i" => Some(StyleLayer::Italic),
+        "underline" | "u" | "double-underline" | "uu" | "curly-underline"
+        | "dotted-underline" | "dashed-underline" => Some(StyleLayer::Underline),
+        "blink" => Some(StyleLayer::Blink),
+        "inverse" | "reverse" => Some(StyleLayer::Inverse),
+        "hidden" => Some(StyleLayer::Hidden),
+        "strikethrough" | "~" => Some(StyleLayer::Strikethrough),
+        // Structural tags — no SGR layer
+        "a" | "clipboard" => None,
+        // Named foreground colors + rgb
+        "rgb" | "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
+        | "bright-black" | "bright-red" | "bright-green" | "bright-yellow" | "bright-blue"
+        | "bright-magenta" | "bright-cyan" | "bright-white" => Some(StyleLayer::Foreground),
+        // Background rgb
+        "bg-rgb" => Some(StyleLayer::Background),
+        // Catch-all for web/tailwind colors
+        _ => {
+            if tag_name.starts_with("bg-") {
+                Some(StyleLayer::Background)
+            } else {
+                // Safe default for web/tailwind foreground colors.
+                // If block_tag_to_escape returns None the layer is never used.
+                Some(StyleLayer::Foreground)
+            }
+        }
+    }
+}
+
+/// Classify an atomic token for layer tracking.
+///
+/// Returns `Some((layer, true))` for set-tokens (e.g. `bold`, `red`),
+/// `Some((layer, false))` for clear-tokens (e.g. `normal-font-weight`),
+/// and `None` for `reset`/`reset-style` (handled by the caller) or
+/// unknown tokens.
+///
+/// Expects a **lowercased** token string.
+fn atomic_token_layer(token: &str) -> Option<(StyleLayer, bool)> {
+    match token {
+        // --- setters ---
+        "bold" | "dim" => Some((StyleLayer::FontWeight, true)),
+        "italic" => Some((StyleLayer::Italic, true)),
+        "underline" | "double-underline" | "curly-underline" | "dotted-underline"
+        | "dashed-underline" => Some((StyleLayer::Underline, true)),
+        "blink" => Some((StyleLayer::Blink, true)),
+        "reverse" => Some((StyleLayer::Inverse, true)),
+        "hidden" => Some((StyleLayer::Hidden, true)),
+        "strikethrough" => Some((StyleLayer::Strikethrough, true)),
+        // Foreground colors
+        "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
+        | "bright-black" | "bright-red" | "bright-green" | "bright-yellow" | "bright-blue"
+        | "bright-magenta" | "bright-cyan" | "bright-white" => {
+            Some((StyleLayer::Foreground, true))
+        }
+        // Background colors
+        "bg-black" | "bg-red" | "bg-green" | "bg-yellow" | "bg-blue" | "bg-magenta"
+        | "bg-cyan" | "bg-white" | "bg-bright-black" | "bg-bright-red" | "bg-bright-green"
+        | "bg-bright-yellow" | "bg-bright-blue" | "bg-bright-magenta" | "bg-bright-cyan"
+        | "bg-bright-white" => Some((StyleLayer::Background, true)),
+        // --- clearers ---
+        "normal-font-weight" => Some((StyleLayer::FontWeight, false)),
+        "not-italic" => Some((StyleLayer::Italic, false)),
+        "not-underline" => Some((StyleLayer::Underline, false)),
+        "not-blink" => Some((StyleLayer::Blink, false)),
+        "not-inverse" => Some((StyleLayer::Inverse, false)),
+        "not-hidden" => Some((StyleLayer::Hidden, false)),
+        "not-strikethrough" => Some((StyleLayer::Strikethrough, false)),
+        "reset-fg" => Some((StyleLayer::Foreground, false)),
+        "reset-bg" => Some((StyleLayer::Background, false)),
+        // reset / reset-style → caller handles via clear_all / clear_all_except_background
+        _ => None,
+    }
+}
+
+/// Inner token parser that shares a [`StyleState`] across recursion levels.
+///
+/// Block tags with a style layer push/pop via [`StyleState::set`] and
+/// [`StyleState::restore`] so that closing a tag emits the *parent's*
+/// escape code (or the layer's default reset) instead of `\x1b[0m`.
+fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleState) -> String {
+    let mut result = String::new();
+    let mut chars = content.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        // ── Atomic tokens: {{token}} ──────────────────────────────────
+        if ch == '{' && chars.peek() == Some(&'{') {
+            chars.next(); // consume second '{'
+            let mut token = String::new();
+            let mut found_close = false;
+
+            while let Some(c) = chars.next() {
+                if c == '}' && chars.peek() == Some(&'}') {
+                    chars.next(); // consume second '}'
+                    found_close = true;
+                    break;
+                }
+                token.push(c);
+            }
+
+            if found_close {
+                if let Some(escape) = atomic_token_to_escape(&token) {
+                    result.push_str(escape);
+                    state.used_styles = true;
+
+                    // Update layer tracking
+                    let token_lower = token.to_ascii_lowercase();
+                    if token_lower == "reset" {
+                        state.clear_all();
+                    } else if token_lower == "reset-style" {
+                        state.clear_all_except_background();
+                    } else if let Some((layer, is_set)) = atomic_token_layer(&token_lower) {
+                        if is_set {
+                            state.set(layer, escape);
+                        } else {
+                            state.restore(layer, None);
+                        }
+                    }
+                } else {
+                    // Unknown token, output as-is
+                    result.push_str("{{");
+                    result.push_str(&token);
+                    result.push_str("}}");
+                }
+            } else {
+                // Unclosed token, output as-is
+                result.push_str("{{");
+                result.push_str(&token);
+            }
+            continue;
+        }
+
+        // ── Block tokens: <tag>content</tag> ──────────────────────────
+        if ch == '<' {
+            let mut tag_content = String::new();
+            let mut found_close = false;
+
+            // Collect until '>'
+            for c in chars.by_ref() {
+                if c == '>' {
+                    found_close = true;
+                    break;
+                }
+                tag_content.push(c);
+            }
+
+            if found_close && !tag_content.starts_with('/') {
+                // Parse the opening tag
+                if let Some((tag_name, attrs)) = parse_opening_tag(&tag_content) {
+                    // Pre-compute tag patterns once
+                    let closing_tag = format!("</{}>", tag_name);
+                    let opening_tag_full = format!("<{}>", tag_name);
+                    let opening_tag_with_space = format!("<{} ", tag_name);
+
+                    let mut inner_content = String::new();
+                    let mut depth = 1;
+
+                    while depth > 0 {
+                        if let Some(c) = chars.next() {
+                            inner_content.push(c);
+                            let len = inner_content.len();
+
+                            if c == '>' {
+                                if len >= opening_tag_full.len() {
+                                    let start = len - opening_tag_full.len();
+                                    if inner_content.get(start..).is_some_and(|slice| {
+                                        slice.eq_ignore_ascii_case(&opening_tag_full)
+                                    }) {
+                                        depth += 1;
+                                    }
+                                }
+                                if len >= closing_tag.len() {
+                                    let start = len - closing_tag.len();
+                                    if inner_content.get(start..).is_some_and(|slice| {
+                                        slice.eq_ignore_ascii_case(&closing_tag)
+                                    }) {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            inner_content.truncate(start);
+                                        }
+                                    }
+                                }
+                            } else if c == ' '
+                                && len >= opening_tag_with_space.len()
+                            {
+                                let start = len - opening_tag_with_space.len();
+                                if inner_content.get(start..).is_some_and(|slice| {
+                                    slice.eq_ignore_ascii_case(&opening_tag_with_space)
+                                }) {
+                                    depth += 1;
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Apply the block style
+                    if let Some((open, close)) = block_tag_to_escape(&tag_name, &attrs, term) {
+                        let layer = block_tag_layer(&tag_name);
+                        state.used_styles = true;
+
+                        if let Some(layer) = layer {
+                            // Styled tag: layer-aware push/pop
+                            let prev = state.set(layer, &open);
+                            result.push_str(&open);
+                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                            state.restore(layer, prev);
+                            result.push_str(state.close_code(layer));
+                        } else {
+                            // Structural tag (a, clipboard): emit open/close as-is
+                            result.push_str(&open);
+                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                            result.push_str(&close);
+                        }
+                    } else {
+                        // Unknown tag, output as-is
+                        result.push('<');
+                        result.push_str(&tag_content);
+                        result.push('>');
+                        result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                        result.push_str(&closing_tag);
+                    }
+                    continue;
+                }
+            }
+
+            // Not a valid block tag, output as-is
+            result.push('<');
+            result.push_str(&tag_content);
+            if found_close {
+                result.push('>');
+            }
+            continue;
+        }
+
+        result.push(ch);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1314,9 +1619,10 @@ mod tests {
     fn test_nested_block_tags() {
         let prose = Prose::new("<b><i>bold italic</i></b>");
         let result = prose.render(None);
+        // One final \x1b[0m, not two — inner recursion no longer adds its own reset
         assert_eq!(
             result,
-            "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[0m\x1b[22m\x1b[0m"
+            "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[22m\x1b[0m"
         );
     }
 
@@ -1495,6 +1801,58 @@ mod tests {
     }
 
     #[test]
+    fn test_rgb_hex_format() {
+        // Hex with # prefix
+        let prose = Prose::new("<rgb #FF0000>red</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;255;0;0m"));
+
+        // Hex without # prefix
+        let prose = Prose::new("<rgb FF0000>red</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;255;0;0m"));
+
+        // Dark red #8B0000
+        let prose = Prose::new("<rgb #8B0000>dark red</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;139;0;0m"));
+    }
+
+    #[test]
+    fn test_rgb_space_separated() {
+        // Space-separated values
+        let prose = Prose::new("<rgb 255 0 0>red</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;255;0;0m"));
+
+        // With extra spaces
+        let prose = Prose::new("<rgb  125  67  45 >brown</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;125;67;45m"));
+    }
+
+    #[test]
+    fn test_bg_rgb_hex_format() {
+        // Hex with # prefix
+        let prose = Prose::new("<bg-rgb #00FF00>green bg</bg-rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;0;255;0m"));
+
+        // Hex without # prefix
+        let prose = Prose::new("<bg-rgb 0000FF>blue bg</bg-rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;0;0;255m"));
+    }
+
+    #[test]
+    fn test_bg_rgb_space_separated() {
+        // Space-separated values
+        let prose = Prose::new("<bg-rgb 255 128 0>orange bg</bg-rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;255;128;0m"));
+    }
+
+    #[test]
     fn test_bg_web_color_block() {
         // coral is RGB(255, 127, 80)
         let prose = Prose::new("<bg-coral>coral bg</bg-coral>");
@@ -1529,5 +1887,93 @@ mod tests {
         let prose = Prose::new("<a href=\"/usr/local/bin/test\">link</a>");
         let result = prose.render(None);
         assert!(result.contains("file:///usr/local/bin/test"));
+    }
+
+    // ── Style-layer tracking tests ───────────────────────────────────
+
+    #[test]
+    fn test_same_layer_fg_nesting_restores_parent() {
+        // </red> should restore blue, not reset to default
+        let prose = Prose::new("<blue>before <red>red</red> after</blue>");
+        let result = prose.render(None);
+        assert_eq!(
+            result,
+            "\x1b[34mbefore \x1b[31mred\x1b[34m after\x1b[39m\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn test_atomic_then_block_restores_atomic() {
+        // {{blue}} sets foreground, then <red> opens a new scope.
+        // </red> should restore to \x1b[34m (the atomic blue).
+        let prose = Prose::new("{{blue}}<red>red</red>blue");
+        let result = prose.render(None);
+        assert_eq!(
+            result,
+            "\x1b[34m\x1b[31mred\x1b[34mblue\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn test_no_mid_content_resets() {
+        // Only one \x1b[0m should appear, at the very end
+        let prose = Prose::new("<b><i>text</i> more</b>");
+        let result = prose.render(None);
+        let reset_count = result.matches("\x1b[0m").count();
+        assert_eq!(reset_count, 1, "Expected exactly one \\x1b[0m, got: {:?}", result);
+        assert!(result.ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_deep_nesting_three_layers() {
+        let prose = Prose::new("<b><red><i>deep</i></red></b>");
+        let result = prose.render(None);
+        // bold → red → italic → close italic (→ \x1b[23m]) → close red (→ \x1b[39m]) → close bold (→ \x1b[22m]) → final reset
+        assert_eq!(
+            result,
+            "\x1b[1m\x1b[31m\x1b[3mdeep\x1b[23m\x1b[39m\x1b[22m\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn test_reset_style_preserves_background() {
+        // {{reset-style}} should clear everything except background
+        let prose = Prose::new("{{bg-red}}{{bold}}text{{reset-style}}still bg");
+        let result = prose.render(None);
+        // After reset-style: background layer should still be Some
+        // The escape sequence \x1b[22;23;24;25;27;28;29;39m is emitted,
+        // but background \x1b[41m stays active in the state.
+        assert!(result.contains("\x1b[41m")); // bg-red open
+        assert!(result.contains("\x1b[1m")); // bold
+        assert!(result.contains("\x1b[22;23;24;25;27;28;29;39m")); // reset-style
+        assert!(result.contains("still bg"));
+    }
+
+    #[test]
+    fn test_single_block_no_extra_reset() {
+        // Single block tag should produce exactly one \x1b[0m
+        let prose = Prose::new("<red>hello</red>");
+        let result = prose.render(None);
+        assert_eq!(result, "\x1b[31mhello\x1b[39m\x1b[0m");
+    }
+
+    #[test]
+    fn test_block_tag_layer_classification() {
+        assert_eq!(block_tag_layer("b"), Some(StyleLayer::FontWeight));
+        assert_eq!(block_tag_layer("bold"), Some(StyleLayer::FontWeight));
+        assert_eq!(block_tag_layer("dim"), Some(StyleLayer::FontWeight));
+        assert_eq!(block_tag_layer("i"), Some(StyleLayer::Italic));
+        assert_eq!(block_tag_layer("italic"), Some(StyleLayer::Italic));
+        assert_eq!(block_tag_layer("u"), Some(StyleLayer::Underline));
+        assert_eq!(block_tag_layer("red"), Some(StyleLayer::Foreground));
+        assert_eq!(block_tag_layer("bright-cyan"), Some(StyleLayer::Foreground));
+        assert_eq!(block_tag_layer("rgb"), Some(StyleLayer::Foreground));
+        assert_eq!(block_tag_layer("bg-rgb"), Some(StyleLayer::Background));
+        assert_eq!(block_tag_layer("bg-red-800"), Some(StyleLayer::Background));
+        assert_eq!(block_tag_layer("a"), None);
+        assert_eq!(block_tag_layer("clipboard"), None);
+        // Web/tailwind colors fall through to Foreground
+        assert_eq!(block_tag_layer("coral"), Some(StyleLayer::Foreground));
+        assert_eq!(block_tag_layer("bg-coral"), Some(StyleLayer::Background));
     }
 }
