@@ -34,9 +34,12 @@ pub struct LanguageStats {
     pub files: Vec<PathBuf>,
 }
 
-/// Non-programming languages that should not be considered as "primary".
+/// Languages that should not be considered as "primary" for a package.
 ///
-/// These are documentation or data formats, not programming languages.
+/// Includes documentation/data formats and build/config languages that rarely
+/// represent the main source code of a project. Notably, `.scm` files are
+/// detected as "Scheme" by hyperpolyglot but are almost always Tree-sitter
+/// query files in modern codebases.
 const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
     "Markdown",
     "JSON",
@@ -64,6 +67,7 @@ const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
     "CMake",
     "Meson",
     "Nix",
+    "Scheme",
 ];
 
 /// Checks if a language is a programming language (not just markup/config/data).
@@ -283,11 +287,38 @@ mod tests {
         assert!(!is_programming_language("YAML"));
         assert!(!is_programming_language("TOML"));
 
+        // Scheme (.scm) is excluded — almost always Tree-sitter query files
+        assert!(!is_programming_language("Scheme"));
+
         // Real programming languages
         assert!(is_programming_language("Rust"));
         assert!(is_programming_language("JavaScript"));
         assert!(is_programming_language("Python"));
         assert!(is_programming_language("Go"));
+    }
+
+    #[test]
+    fn test_primary_skips_scheme_for_programming_language() {
+        let dir = TempDir::new().unwrap();
+        // Simulate tree-hugger layout: many .scm query files outnumbering .rs files
+        let queries_dir = dir.path().join("queries");
+        fs::create_dir(&queries_dir).unwrap();
+        for lang in &["rust", "python", "go"] {
+            let lang_dir = queries_dir.join(lang);
+            fs::create_dir(&lang_dir).unwrap();
+            fs::write(lang_dir.join("highlights.scm"), "(comment) @comment").unwrap();
+            fs::write(lang_dir.join("locals.scm"), "(function) @local").unwrap();
+        }
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+
+        let result = detect_languages(dir.path()).unwrap();
+        // Primary should be Rust, not Scheme (even though .scm files outnumber .rs)
+        assert_eq!(result.primary.as_deref(), Some("Rust"));
+        // Scheme should still appear in the breakdown
+        assert!(result.languages.iter().any(|l| l.language == "Scheme"));
     }
 
     #[test]
