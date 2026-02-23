@@ -52,8 +52,13 @@ const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 /// Keep provider names from wrapping into multi-line labels in narrow terminals.
 const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
 
+/// Wrap a header label in bold ANSI escape codes.
+fn bold(label: &str) -> String {
+    format!("\x1b[1m{}\x1b[22m", label)
+}
+
 fn provider_column() -> TableColumn {
-    TableColumn::new("Provider")
+    TableColumn::new(bold("Provider"))
         .with_min_width(PROVIDER_COLUMN_MIN_WIDTH)
         .with_word_wrap(WordWrap::None)
 }
@@ -156,12 +161,11 @@ fn format_event_with_color(
 ) -> String {
     let display = event_name_pascal(event);
     if is_unsupported {
-        // Unsupported events get red + strikethrough
-        format!("{{{{red}}}}{{{{strikethrough}}}}{display}{{{{reset}}}}")
+        format!("<red><strikethrough>{display}</strikethrough></red>")
     } else if is_stale {
-        format!("{{{{red}}}}{display}{{{{reset}}}}")
+        format!("<red>{display}</red>")
     } else if is_missing {
-        format!("{{{{yellow}}}}{display}{{{{reset}}}}")
+        format!("<yellow>{display}</yellow>")
     } else {
         display
     }
@@ -332,12 +336,17 @@ fn normalize_effect_name(name: &str) -> String {
         .to_lowercase()
 }
 
+/// Dim+italic opener for action parameters (inside parentheses, not the parens themselves).
+const DI: &str = "{{dim}}{{italic}}";
+/// Undo dim+italic only (preserves background for table striping).
+const DI_R: &str = "{{normal-font-weight}}{{not-italic}}";
+
 /// Format an action for display in the detailed provider view.
 fn format_action(action: &HookAction) -> String {
     match action {
         HookAction::Speak { message } => {
             format!(
-                "{{{{cyan}}}}Speak{{{{reset}}}} \"{}\"",
+                "<cyan>Speak</cyan>({DI}\"{}\"{DI_R})",
                 truncate_string(message, 40)
             )
         }
@@ -346,58 +355,87 @@ fn format_action(action: &HookAction) -> String {
             volume,
             speed,
         } => {
-            let mut parts = vec![format!("{{{{magenta}}}}SoundEffect{{{{reset}}}} {}", name)];
+            let mut params = Vec::new();
             if *volume != 1.0 {
-                parts.push(format!("vol={:.1}", volume));
+                params.push(format!("vol={:.1}", volume));
             }
             if *speed != 1.0 {
-                parts.push(format!("speed={:.1}", speed));
+                params.push(format!("speed={:.1}", speed));
             }
-            parts.join(" ")
+            let params_str = if params.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", params.join(", "))
+            };
+            format!("<magenta>SoundEffect</magenta>({DI}{}{}{DI_R})", name, params_str)
         }
         HookAction::Log { target } => match target {
-            LogTarget::File { path, .. } => {
-                let display = path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "~/.claudine/logs/YYYY-MM-DD.jsonl".to_string());
-                format!("{{{{blue}}}}Log{{{{reset}}}} → {display}")
+            LogTarget::File { path, rotate_daily } => {
+                let has_params = path.is_some() || !*rotate_daily;
+                if has_params {
+                    let mut params = Vec::new();
+                    if let Some(p) = path {
+                        params.push(format!("path={}", p.display()));
+                    }
+                    if !*rotate_daily {
+                        params.push("rotate_daily=false".to_string());
+                    }
+                    format!("<blue>Log</blue>({DI}{}{DI_R})", params.join(", "))
+                } else {
+                    "<blue>Log</blue>()".to_string()
+                }
             }
-            LogTarget::Server { url, .. } => {
-                format!("{{{{blue}}}}Log{{{{reset}}}} → {}", url)
+            LogTarget::Server { url, timeout_ms, .. } => {
+                let has_params = *timeout_ms != 10_000;
+                if has_params {
+                    format!("<blue>Log</blue>({DI}url={}, timeout_ms={}{DI_R})", url, timeout_ms)
+                } else {
+                    format!("<blue>Log</blue>({DI}url={}{DI_R})", url)
+                }
             }
-            _ => "{{blue}}Log{{reset}}".to_string(),
+            _ => "<blue>Log</blue>()".to_string(),
         },
-        HookAction::Report { handler } => match handler {
-            None => "{{yellow}}Report{{reset}} (default)".to_string(),
-            Some(h) => {
-                let format_str = match h.format {
+        HookAction::Report { handler } => {
+            let format_str = handler
+                .as_ref()
+                .map(|h| match h.format {
                     ReportFormat::Text => "text",
                     ReportFormat::Json => "json",
                     ReportFormat::Compact => "compact",
                     _ => "text",
-                };
-                if let Some(template) = &h.template {
-                    format!(
-                        "{{{{yellow}}}}Report{{{{reset}}}} [{}] \"{}\"",
-                        format_str,
-                        truncate_string(template, 30)
-                    )
-                } else {
-                    format!("{{{{yellow}}}}Report{{{{reset}}}} [{}]", format_str)
-                }
-            }
-        },
-        HookAction::FireAndForget { command, args } => {
-            let cmd_str = if let Some(a) = args {
-                format!("{} {}", command, a.join(" "))
+                })
+                .unwrap_or("text");
+
+            let has_template = handler.as_ref().and_then(|h| h.template.as_ref()).is_some();
+            if has_template {
+                let template = handler
+                    .as_ref()
+                    .and_then(|h| h.template.as_ref())
+                    .map(|t| truncate_string(t, 30))
+                    .unwrap_or_default();
+                format!(
+                    "<yellow>Report</yellow>({DI}format={}, template=\"{}\"{DI_R})",
+                    format_str, template
+                )
             } else {
-                command.clone()
-            };
-            format!(
-                "{{{{green}}}}FireAndForget{{{{reset}}}} `{}`",
-                truncate_string(&cmd_str, 35)
-            )
+                format!("<yellow>Report</yellow>({DI}format={}{DI_R})", format_str)
+            }
+        }
+        HookAction::FireAndForget { command, args } => {
+            let has_args = args.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
+            if has_args {
+                let args_str = args
+                    .as_ref()
+                    .map(|a| a.join(" "))
+                    .unwrap_or_default();
+                format!(
+                    "<green>FireAndForget</green>({DI}\"{} {}\"{DI_R})",
+                    command,
+                    truncate_string(&args_str, 30)
+                )
+            } else {
+                format!("<green>FireAndForget</green>({DI}\"{}\"{DI_R})", command)
+            }
         }
         HookAction::Call {
             command,
@@ -405,18 +443,27 @@ fn format_action(action: &HookAction) -> String {
             timeout_ms,
             ..
         } => {
-            let cmd_str = if let Some(a) = args {
-                format!("{} {}", command, a.join(" "))
+            let mut params = Vec::new();
+            if let Some(a) = args {
+                if !a.is_empty() {
+                    params.push(a.join(" "));
+                }
+            }
+            if let Some(t) = timeout_ms {
+                params.push(format!("timeout={}ms", t));
+            }
+            let params_str = if params.is_empty() {
+                String::new()
             } else {
-                command.clone()
+                format!(", {}", params.join(", "))
             };
             format!(
-                "{{{{green}}}}Call{{{{reset}}}} `{}` {{{{dim}}}}timeout={:?}{{{{reset}}}}",
-                truncate_string(&cmd_str, 35),
-                timeout_ms
+                "<green>Call</green>({DI}\"{}{}\"{DI_R})",
+                truncate_string(command, 30),
+                params_str
             )
         }
-        _ => format!("{{{{dim}}}}{action:?}{{{{reset}}}}"),
+        _ => format!("<dim>{action:?}</dim>"),
     }
 }
 
@@ -462,12 +509,14 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
 
     // Build table
     let columns = vec![
-        TableColumn::new("Event"),
-        TableColumn::new("Support"),
-        TableColumn::new("Status"),
-        TableColumn::new("Actions"),
+        TableColumn::new(bold("Event")),
+        TableColumn::new(bold("Support")),
+        TableColumn::new(bold("Actions")),
     ];
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new()
+        .with_columns(columns)
+        .prefer_cursor_alignment()
+        .alternate_background_color();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     for (event, binding) in &event_rows {
@@ -482,86 +531,43 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
                 .into(),
         };
 
-        let (status_cell, actions_cell): (TableCellContent, TableCellContent) = match binding {
-            None => {
-                if support_level.is_supported() {
-                    (
-                        Prose::new("{{dim}}not configured{{reset}}")
-                            .fallback_render(&term)
-                            .into(),
-                        "-".into(),
-                    )
-                } else {
-                    ("-".into(), "-".into())
-                }
-            }
-            Some(b) if !b.enabled => (
-                Prose::new("{{yellow}}disabled{{reset}}")
-                    .fallback_render(&term)
-                    .into(),
-                "-".into(),
-            ),
+        let actions_cell: TableCellContent = match binding {
+            None => "-".into(),
+            Some(b) if !b.enabled => "-".into(),
             Some(b) => {
-                // Check if event is unsupported but enabled (configuration error)
-                let is_unsupported = !support_level.is_hook();
-
-                let status = if is_unsupported {
-                    // Red warning for unsupported events
-                    "{{red}}{{bold}}⚠ unsupported{{reset}}".to_string()
-                } else if b.matcher.is_some() {
-                    format!(
-                        "{{{{green}}}}enabled{{{{reset}}}} {{{{dim}}}}(filter: {}){{{{reset}}}}",
-                        b.matcher.as_ref().unwrap()
-                    )
+                if b.actions.is_empty() {
+                    Prose::new("{{dim}}(no actions){{reset}}")
+                        .fallback_render(&term)
+                        .into()
                 } else {
-                    "{{green}}enabled{{reset}}".to_string()
-                };
-
-                let actions_str = if b.actions.is_empty() {
-                    "{{dim}}(no actions){{reset}}".to_string()
-                } else {
-                    b.actions
+                    let text = b
+                        .actions
                         .iter()
                         .map(format_action)
                         .collect::<Vec<_>>()
-                        .join("\n")
-                };
-
-                (
-                    Prose::new(status).fallback_render(&term).into(),
-                    Prose::new(actions_str).fallback_render(&term).into(),
-                )
+                        .join("\n");
+                    Prose::new(text).fallback_render(&term).into()
+                }
             }
         };
 
-        table.add_row(vec![
-            event.as_pascal_case().into(),
-            support_cell,
-            status_cell,
-            actions_cell,
-        ]);
+        table.add_row(vec![event.as_pascal_case().into(), support_cell, actions_cell]);
     }
 
     let rendered = table.fallback_render(&term);
     log::data(&rendered);
 
     // Summary stats
+    let total_unified_events = AgenticEvent::ALL.len();
     let configured_count = event_rows
         .iter()
         .filter(|row| row.1.is_some_and(|eb| eb.enabled))
         .count();
-    let total_actions: usize = event_rows
-        .iter()
-        .filter_map(|row| {
-            row.1
-                .map(|eb| if eb.enabled { eb.actions.len() } else { 0 })
-        })
-        .sum();
 
     log::data("");
     let summary = Prose::new(format!(
-        "{{{{dim}}}}Configured: {} events, {} total actions{{{{reset}}}}",
-        configured_count, total_actions
+        "{{{{bold}}}}{}{{{{reset}}}} supports {{{{yellow}}}}{}{{{{reset}}}} of the {{{{bold}}}}{{{{yellow}}}}{}{{{{reset}}}} unified events",
+        provider, configured_count, total_unified_events
     ));
     log::data(&format!(" {}", summary.fallback_render(&term)));
 
@@ -582,18 +588,19 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         log::data("");
         let enabled_header = if unsupported_count > 0 {
             Prose::new(format!(
-                "{{{{bold}}}}Enabled Events{{{{reset}}}} {{{{red}}}}(⚠ {} unsupported){{{{reset}}}}",
+                "{{{{bold}}}}Event Descriptions{{{{reset}}}} {{{{red}}}}(⚠ {} unsupported){{{{reset}}}}",
                 unsupported_count
             ))
         } else {
-            Prose::new("{{bold}}Enabled Events{{reset}}")
+            Prose::new("{{bold}}Event Descriptions{{reset}}")
         };
         log::data(&format!(" {}", enabled_header.fallback_render(&term)));
 
-        let desc_columns = vec![TableColumn::new("Event"), TableColumn::new("Description")];
+        let desc_columns = vec![TableColumn::new(bold("Event")), TableColumn::new(bold("Description"))];
         let mut desc_table = Table::new()
             .with_columns(desc_columns)
-            .prefer_cursor_alignment();
+            .prefer_cursor_alignment()
+            .alternate_background_color();
         desc_table.layout_mut().left_margin = Margin::Chars(1);
 
         for event in enabled_events {
@@ -759,8 +766,8 @@ fn run_simple(
 ) -> Result<()> {
     let mut table = Table::new().with_columns(vec![
         provider_column(),
-        TableColumn::new("Installed"),
-        TableColumn::new("Subscribed Hooks"),
+        TableColumn::new(bold("Installed")),
+        TableColumn::new(bold("Subscribed Hooks")),
     ]);
     table.layout_mut().left_margin = Margin::Chars(1);
 
@@ -887,11 +894,11 @@ fn run_verbose(
     config: Option<&HookerConfig>,
 ) -> Result<()> {
     // Build columns: Provider, ∃ (exists/installed), then one per event
-    let mut columns = vec![provider_column(), TableColumn::new("∃")]; // existence symbol for installed
+    let mut columns = vec![provider_column(), TableColumn::new(bold("∃"))]; // existence symbol for installed
 
     // Add a column for each event using abbreviations
     for event in AgenticEvent::ALL {
-        let mut column = TableColumn::new(event.abbrev());
+        let mut column = TableColumn::new(bold(event.abbrev()));
         if matches!(
             event,
             AgenticEvent::SubagentStart | AgenticEvent::SubagentStop
@@ -989,9 +996,9 @@ fn run_support() -> Result<()> {
     let matrix = event_support_matrix(&ALL_PROVIDERS);
 
     // Build columns: Event name (left-aligned), then one per provider (centered)
-    let mut columns = vec![TableColumn::new("Event")];
+    let mut columns = vec![TableColumn::new(bold("Event"))];
     for provider in ALL_PROVIDERS {
-        columns.push(TableColumn::new(provider.to_string()).with_alignment(Alignment::Center));
+        columns.push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
@@ -1050,9 +1057,9 @@ fn run_mapping() -> Result<()> {
 /// Build a mapping table for a subset of providers.
 fn build_mapping_table(providers: &[Provider]) -> Table {
     // Build columns: Event name (left-aligned), then one per provider (center-aligned)
-    let mut columns = vec![TableColumn::new("Event")];
+    let mut columns = vec![TableColumn::new(bold("Event"))];
     for provider in providers {
-        columns.push(TableColumn::new(provider.to_string()).with_alignment(Alignment::Center));
+        columns.push(TableColumn::new(bold(&provider.to_string())).with_alignment(Alignment::Center));
     }
 
     let mut table = Table::new().with_columns(columns);
@@ -1080,10 +1087,10 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
 /// Show event descriptions and schemas.
 fn run_describe() -> Result<()> {
     let columns = vec![
-        TableColumn::new("Event"),
-        TableColumn::new("Response Schema"),
-        TableColumn::new("Return Schema"),
-        TableColumn::new("Description"),
+        TableColumn::new(bold("Event")),
+        TableColumn::new(bold("Response Schema")),
+        TableColumn::new(bold("Return Schema")),
+        TableColumn::new(bold("Description")),
     ];
 
     let term = Terminal::new();
@@ -1135,9 +1142,9 @@ fn run_variables() -> Result<()> {
 
     // Event fields table
     let columns = vec![
-        TableColumn::new("Variable"),
-        TableColumn::new("Description"),
-        TableColumn::new("Available For"),
+        TableColumn::new(bold("Variable")),
+        TableColumn::new(bold("Description")),
+        TableColumn::new(bold("Available For")),
     ];
     let mut table = Table::new().with_columns(columns);
     table.layout_mut().left_margin = Margin::Chars(1);
@@ -1169,9 +1176,9 @@ fn run_variables() -> Result<()> {
     let dummy_meta = EventMeta::dummy_with_env(env_context);
 
     let ctx_columns = vec![
-        TableColumn::new("Variable"),
-        TableColumn::new("Description"),
-        TableColumn::new("Current Value"),
+        TableColumn::new(bold("Variable")),
+        TableColumn::new(bold("Description")),
+        TableColumn::new(bold("Current Value")),
     ];
     let mut ctx_table = Table::new().with_columns(ctx_columns);
     ctx_table.layout_mut().left_margin = Margin::Chars(1);
