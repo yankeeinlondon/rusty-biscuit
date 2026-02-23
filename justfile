@@ -291,8 +291,8 @@ lint:
 # commits all the staged changes using GPT 5.2 (via Opencode)
 commit:
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
+    @echo "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
     @opencode run "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, etc.) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message. If no files are staged for commit then communicate this to the user and exit." --model "${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}}"
     @if command -v so-you-say >/dev/null 2>&1; then \
