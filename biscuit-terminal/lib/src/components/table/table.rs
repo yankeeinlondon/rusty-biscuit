@@ -1,5 +1,6 @@
 use crate::{
     components::renderable::Renderable,
+    components::prose::Prose,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
@@ -247,6 +248,8 @@ impl Conditional {
 pub struct TableColumn {
     /// Header text for the column
     pub header: String,
+    /// Optional styled header using Prose (takes precedence over `header` when rendering)
+    pub header_prose: Option<Prose>,
     /// Fixed width for the column (overrides header/data widths when set)
     pub fixed_width: Option<usize>,
     /// Minimum width for the column (optional)
@@ -282,6 +285,26 @@ impl TableColumn {
     pub fn new<T: Into<String>>(header: T) -> Self {
         TableColumn {
             header: header.into(),
+            header_prose: None,
+            fixed_width: None,
+            min_width: None,
+            max_width: None,
+            column_type: ColumnType::default(),
+            alignment: None,
+            word_wrap: None,
+            vertical_align: VerticalAlign::default(),
+            uniform_alignment: false,
+            when: Conditional::default(),
+        }
+    }
+
+    /// Create a new column with a bold header.
+    pub fn new_with_bold<T: Into<String>>(header: T) -> Self {
+        let text = header.into();
+        let prose = Prose::new(format!("<bold>{text}</bold>"));
+        TableColumn {
+            header: text,
+            header_prose: Some(prose),
             fixed_width: None,
             min_width: None,
             max_width: None,
@@ -595,7 +618,13 @@ impl Table {
                 continue;
             }
 
-            widths[i] = visible_width(&col.header) as usize;
+            // Use prose header for width calculation if present, otherwise use plain header
+            let header_width = if let Some(ref prose) = col.header_prose {
+                visible_width(prose.content())
+            } else {
+                visible_width(&col.header)
+            };
+            widths[i] = header_width as usize;
             if let Some(min) = col.min_width {
                 widths[i] = widths[i].max(min);
             }
@@ -776,8 +805,14 @@ impl Table {
                 .enumerate()
                 .map(|(i, col)| {
                     let width = widths.get(i).copied().unwrap_or(col.header.len());
+                    // Use prose content for header if present, otherwise use plain header
+                    let header_content = col
+                        .header_prose
+                        .as_ref()
+                        .map(|p| p.content())
+                        .unwrap_or(&col.header);
                     // Headers use None strategy (no word wrap), only split on explicit newlines
-                    wrap_cell_content(&col.header, &WordWrap::None, width)
+                    wrap_cell_content(header_content, &WordWrap::None, width)
                 })
                 .collect();
 
@@ -1100,7 +1135,13 @@ impl Table {
                 .enumerate()
                 .map(|(i, col)| {
                     let width = widths.get(i).copied().unwrap_or(col.header.len());
-                    wrap_cell_content(&col.header, &WordWrap::None, width)
+                    // Use prose content for header if present, otherwise use plain header
+                    let header_content = col
+                        .header_prose
+                        .as_ref()
+                        .map(|p| p.content())
+                        .unwrap_or(&col.header);
+                    wrap_cell_content(header_content, &WordWrap::None, width)
                 })
                 .collect();
 
