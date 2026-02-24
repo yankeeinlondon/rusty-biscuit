@@ -245,6 +245,29 @@ mod cli {
             json: bool,
         },
 
+        /// Get frontmatter properties from a markdown document.
+        Get {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+            input: PathBuf,
+
+            /// Frontmatter property names to retrieve
+            #[arg(value_name = "PROP", required = true, num_args = 1..)]
+            props: Vec<String>,
+
+            /// Output as JSON5
+            #[arg(long)]
+            json5: bool,
+
+            /// Output as YAML
+            #[arg(long)]
+            yaml: bool,
+
+            /// Output as TOML
+            #[arg(long)]
+            toml: bool,
+        },
+
         /// Hash a markdown document's frontmatter and body.
         Hash {
             /// Input file path (use "-" for stdin)

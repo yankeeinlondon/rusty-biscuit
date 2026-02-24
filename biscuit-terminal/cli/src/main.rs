@@ -1197,6 +1197,52 @@ enum Command {
         #[command(flatten)]
         layout: LayoutArgs,
     },
+
+    /// Display a directory tree with icons and gitignore awareness
+    ///
+    /// Renders a filesystem tree with Nerd Font icons, gitignore-aware
+    /// dimming, and optional depth/filter controls.
+    #[command(
+        display_order = 15,
+        after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Current directory:
+    bt dir
+
+  Specific path:
+    bt dir /path/to/project
+
+  Limit depth:
+    bt dir --depth 2
+
+  Filter by extension:
+    bt dir --filter \".rs\"
+    bt dir -f \".rs\" -f \".toml\"
+
+  Combined:
+    bt dir src --depth 3 --filter \".rs\"
+"
+    )]
+    Dir {
+        /// Directory path to display (defaults to current directory)
+        #[arg(value_name = "PATH", default_value = ".")]
+        path: String,
+
+        /// Maximum depth to recurse
+        #[arg(long, short = 'd', value_name = "N")]
+        depth: Option<u32>,
+
+        /// Filter pattern (can be repeated, e.g., \".rs\", \".toml\")
+        #[arg(long, short = 'f', value_name = "PATTERN")]
+        filter: Vec<String>,
+
+        /// Hide the root directory header line
+        #[arg(long)]
+        skip_root: bool,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1692,6 +1738,15 @@ fn main() -> color_eyre::Result<()> {
             ref layout,
         }) => {
             return render_columns(left, right, gap, left_width.as_deref(), layout);
+        }
+        Some(Command::Dir {
+            ref path,
+            depth,
+            ref filter,
+            skip_root,
+            ref layout,
+        }) => {
+            return render_dir(path, depth, filter, skip_root, layout);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -4027,4 +4082,64 @@ fn render_columns(
         println!("{}", output);
         Ok(())
     })
+}
+
+/// Render a directory tree.
+fn render_dir(
+    path: &str,
+    depth: Option<u32>,
+    filter: &[String],
+    skip_root: bool,
+    layout: &LayoutArgs,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::filesystem::FileSystem;
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::Margin;
+
+    let mut fs = FileSystem::new_with_formatting(path)?;
+
+    if let Some(d) = depth {
+        fs = fs.depth(d);
+    }
+
+    for pat in filter {
+        fs = fs.filter(pat);
+    }
+
+    if skip_root {
+        fs = fs.show_root(false);
+    }
+
+    // Apply layout properties to the FileSystem component
+    if let Some(left) = layout.margin_left {
+        fs = fs.left_margin(Margin::Chars(left));
+    }
+    if let Some(right) = layout.margin_right {
+        fs = fs.right_margin(Margin::Chars(right));
+    }
+    if let Some(align) = layout.alignment {
+        fs = fs.alignment(align);
+    }
+
+    fs.ensure_tree_built();
+
+    let term = Terminal::new();
+    let output = fs.fallback_render(&term);
+
+    // Vertical margins on stderr so they don't pollute piped output
+    let top = layout.margin_top.unwrap_or(1);
+    for _ in 0..top {
+        eprintln!();
+    }
+
+    // Print tree content, trimming trailing newline to avoid extra blank line
+    print!("{}", output.trim_end_matches('\n'));
+    println!();
+
+    let bottom = layout.margin_bottom.unwrap_or(0);
+    for _ in 0..bottom {
+        eprintln!();
+    }
+
+    Ok(())
 }

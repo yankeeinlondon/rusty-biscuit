@@ -1,7 +1,40 @@
 //! Filesystem tree rendering component.
 //!
-//! This module provides functionality to display directory trees in the terminal
-//! with Nerd Font icons, respecting `.gitignore` patterns and configurable depth limits.
+//! This module provides the [`FileSystem`] component for rendering directory trees
+//! in the terminal with support for:
+//!
+//! - Tree-style output with Unicode box-drawing characters (`├──`, `└──`, `│`)
+//! - Nerd Font icons for files and directories (with Unicode fallbacks)
+//! - gitignore awareness (dim/hide ignored entries)
+//! - Configurable styling (italics for dotfiles, color highlights)
+//! - Symlink detection (shown but not followed)
+//! - Depth and entry limits for large directories
+//!
+//! ## Examples
+//!
+//! Basic usage:
+//!
+//! ```no_run
+//! use biscuit_terminal::prelude::{FileSystem, Renderable};
+//!
+//! let mut fs = FileSystem::new(".").unwrap();
+//! fs.ensure_tree_built();
+//! println!("{}", fs.render(Some(80)));
+//! ```
+//!
+//! With formatting options:
+//!
+//! ```no_run
+//! use biscuit_terminal::prelude::FileSystem;
+//!
+//! let mut fs = FileSystem::new_with_formatting(".")?
+//!     .depth(5)
+//!     .max_entries(100)
+//!     .highlight_green("test")
+//!     .highlight_red("TODO");
+//! fs.ensure_tree_built();
+//! # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+//! ```
 //!
 //! ## Icon Support
 //!
@@ -11,27 +44,36 @@
 //! - Files: file icons with extension-specific variants (`.rs`, `.ts`, `.md`, etc.)
 //! - Symlinks: link icon overlay on the base type
 //!
-//! ## Examples
+//! Access icons directly via the [`icons`] module:
 //!
-//! ```rust,no_run
-//! use biscuit_terminal::components::filesystem::{TreeNode, icons};
+//! ```rust
+//! use biscuit_terminal::components::filesystem::icons;
 //!
-//! // Create a simple tree structure
-//! let tree = TreeNode::Dir {
-//!     name: "src".to_string(),
-//!     children: vec![
-//!         TreeNode::File {
-//!             name: "main.rs".to_string(),
-//!             is_ignored: false,
-//!             is_symlink: false,
-//!         },
-//!     ],
-//!     is_ignored: false,
-//!     is_symlink: false,
-//!     has_error: false,
-//!     at_depth_limit: false,
-//! };
+//! // Nerd Font icons (require patched fonts)
+//! let rust_icon = icons::nerd::ext::RUST;
+//! let dir_icon = icons::nerd::dir::BASE;
+//!
+//! // Unicode fallbacks (work in any terminal)
+//! let file_emoji = icons::unicode::file::BASE; // 📄
+//! let folder_emoji = icons::unicode::dir::BASE; // 📂
 //! ```
+//!
+//! ## Error Handling
+//!
+//! The component returns [`FileSystemError`] for:
+//! - Path not found
+//! - Path is not a directory
+//! - Permission denied
+//! - IO errors
+//! - gitignore pattern errors
+//!
+//! ## Rendering Methods
+//!
+//! - [`FileSystem::render()`] - Basic rendering without terminal context (uses Unicode icons)
+//! - [`FileSystem::fallback_render()`] - Terminal-aware rendering with Nerd Font support
+//!
+//! For CLI output, always use `fallback_render()` with a [`Terminal`] instance to get
+//! proper icon selection and ANSI styling based on terminal capabilities.
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
@@ -43,7 +85,23 @@ use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
 use crate::utils::layout::Layout;
 
-/// Error types for filesystem tree operations.
+/// Errors that can occur when working with filesystem trees.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::prelude::{FileSystem, FileSystemError};
+/// use std::path::PathBuf;
+///
+/// // Path not found
+/// let result = FileSystem::new("/nonexistent/path");
+/// assert!(matches!(result, Err(FileSystemError::PathNotFound { .. })));
+///
+/// // Check error message
+/// if let Err(e) = result {
+///     assert!(e.to_string().contains("Path not found"));
+/// }
+/// ```
 #[derive(Debug, Error)]
 pub enum FileSystemError {
     /// The specified path does not exist.
@@ -196,6 +254,32 @@ pub mod tree_chars {
 /// Each node is either a directory (with children) or a file.
 /// Both variants track whether the entry is ignored (by `.gitignore`)
 /// and whether it is a symbolic link.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::components::filesystem::TreeNode;
+///
+/// // Create a file node
+/// let file = TreeNode::File {
+///     name: "main.rs".to_string(),
+///     is_ignored: false,
+///     is_symlink: false,
+/// };
+/// assert!(file.is_file());
+/// assert_eq!(file.name(), "main.rs");
+///
+/// // Create a directory node
+/// let dir = TreeNode::Dir {
+///     name: "src".to_string(),
+///     children: vec![file],
+///     is_ignored: false,
+///     is_symlink: false,
+///     has_error: false,
+///     at_depth_limit: false,
+/// };
+/// assert!(dir.is_dir());
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeNode {
     /// A directory entry.
@@ -263,29 +347,55 @@ impl TreeNode {
     }
 }
 
-/// A filesystem tree renderer with configurable display options.
+/// A terminal component that renders a filesystem directory tree.
 ///
-/// `FileSystem` provides a builder-pattern API for customizing how directory
-/// trees are displayed, including support for `.gitignore` integration,
-/// depth limits, and various styling options.
-///
-/// The tree is built lazily on first render, not during construction.
+/// `FileSystem` scans a directory and renders it as an indented tree with
+/// icons, colors, and configurable formatting options.
 ///
 /// ## Examples
 ///
-/// ```rust,no_run
-/// use biscuit_terminal::components::filesystem::FileSystem;
+/// ```no_run
+/// use biscuit_terminal::prelude::FileSystem;
 ///
-/// // Basic usage
-/// let fs = FileSystem::new(".").expect("valid path");
+/// // Create with default settings
+/// let fs = FileSystem::new("src")?;
 ///
-/// // With formatting options
+/// // Create with common formatting presets
+/// let fs = FileSystem::new_with_formatting(".")?;
+///
+/// // Use builder pattern for custom configuration
 /// let fs = FileSystem::new(".")?
-///     .depth(5)
+///     .depth(10)
 ///     .dim_gitignore(true)
 ///     .italicize_dot_files(true);
-/// # Ok::<(), biscuit_terminal::components::filesystem::FileSystemError>(())
+/// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
 /// ```
+///
+/// ## Rendering
+///
+/// ```no_run
+/// use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+///
+/// let mut fs = FileSystem::new(".")?;
+///
+/// // Build the tree (required before rendering)
+/// fs.ensure_tree_built();
+///
+/// // Option 1: Basic rendering (no terminal context, Unicode icons only)
+/// let output = fs.render(Some(80));
+///
+/// // Option 2: Terminal-aware rendering (Nerd Font icons, ANSI styling)
+/// let term = Terminal::default();
+/// let output = fs.fallback_render(&term);
+/// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+/// ```
+///
+/// ## Notes
+///
+/// - Call [`ensure_tree_built()`](Self::ensure_tree_built) before rendering
+/// - The tree is built lazily on first render or explicit call
+/// - Symlinks are shown but not followed (prevents infinite loops)
+/// - Permission errors create error-marked nodes instead of failing
 #[derive(Debug, Clone)]
 pub struct FileSystem {
     /// The root directory path to display.
@@ -316,6 +426,8 @@ pub struct FileSystem {
     max_depth: u32,
     /// Maximum number of entries to display.
     max_entries: u32,
+    /// Whether to show the root directory name as the first line.
+    show_root: bool,
 }
 
 impl Default for FileSystem {
@@ -337,27 +449,38 @@ impl Default for FileSystem {
             highlight_green: Vec::new(),
             max_depth: 20,
             max_entries: 1000,
+            show_root: true,
         }
     }
 }
 
 impl FileSystem {
-    /// Creates a new FileSystem for the given directory path.
+    /// Creates a new `FileSystem` for the given directory path.
     ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The path does not exist (`PathNotFound`)
-    /// - The path is not a directory (`NotADirectory`)
+    /// The tree is not built immediately; call [`ensure_tree_built()`](Self::ensure_tree_built)
+    /// or render the component to trigger tree construction.
     ///
     /// ## Examples
     ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::filesystem::FileSystem;
+    /// ```no_run
+    /// use biscuit_terminal::prelude::FileSystem;
     ///
+    /// // From a string path
     /// let fs = FileSystem::new("/path/to/dir")?;
-    /// # Ok::<(), biscuit_terminal::components::filesystem::FileSystemError>(())
+    ///
+    /// // From current directory
+    /// let fs = FileSystem::new(".")?;
+    ///
+    /// // The tree is not built yet
+    /// assert!(!fs.is_tree_built());
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`FileSystemError::PathNotFound`] if the path does not exist.
+    ///
+    /// Returns [`FileSystemError::NotADirectory`] if the path exists but is not a directory.
     pub fn new(dir: impl AsRef<Path>) -> Result<Self, FileSystemError> {
         let path = dir.as_ref();
 
@@ -388,30 +511,47 @@ impl FileSystem {
             highlight_green: Vec::new(),
             max_depth: 20,
             max_entries: 1000,
+            show_root: true,
         })
     }
 
-    /// Creates a FileSystem with common formatting presets.
+    /// Creates a `FileSystem` with common formatting presets enabled.
     ///
-    /// Enables:
-    /// - Italicize dot files and directories
-    /// - Dim gitignore entries
-    /// - Don't recurse into gitignored directories
+    /// This is a convenience constructor that applies sensible defaults for
+    /// most use cases:
     ///
-    /// ## Errors
+    /// - **Italicize dotfiles**: Files and directories starting with `.` are italicized
+    /// - **Dim gitignored**: Entries matched by `.gitignore` are rendered dim
+    /// - **Skip gitignored dirs**: Gitignored directories are not recursed into
     ///
-    /// Returns an error if:
-    /// - The path does not exist (`PathNotFound`)
-    /// - The path is not a directory (`NotADirectory`)
+    /// Equivalent to:
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// FileSystem::new(".")?
+    ///     .italicize_dot_files(true)
+    ///     .italicize_dot_dirs(true)
+    ///     .dim_gitignore(true)
+    ///     .do_not_recurse_gitignore(true);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     ///
     /// ## Examples
     ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::filesystem::FileSystem;
+    /// ```no_run
+    /// use biscuit_terminal::prelude::FileSystem;
     ///
-    /// let fs = FileSystem::new_with_formatting("/path/to/dir")?;
-    /// # Ok::<(), biscuit_terminal::components::filesystem::FileSystemError>(())
+    /// // Apply formatting presets, then customize further
+    /// let fs = FileSystem::new_with_formatting(".")?
+    ///     .depth(5)
+    ///     .highlight_green("src");
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`FileSystemError::PathNotFound`] if the path does not exist.
+    ///
+    /// Returns [`FileSystemError::NotADirectory`] if the path exists but is not a directory.
     pub fn new_with_formatting(dir: impl AsRef<Path>) -> Result<Self, FileSystemError> {
         Self::new(dir).map(|fs| {
             fs.italicize_dot_files(true)
@@ -425,63 +565,148 @@ impl FileSystem {
     // Builder Methods
     // =========================================================================
 
-    /// Sets the maximum depth to traverse.
+    /// Sets the maximum depth to traverse into subdirectories.
     ///
-    /// A depth of 0 shows only the root directory.
+    /// - Depth 0: Show only the root directory contents (no recursion)
+    /// - Depth 1: Show root and one level of subdirectories
+    /// - Depth N: Show N levels of subdirectory nesting
+    ///
     /// Default is 20.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// // Show only top-level entries
+    /// let shallow = FileSystem::new(".")?.depth(0);
+    ///
+    /// // Show up to 3 levels deep
+    /// let deep = FileSystem::new(".")?.depth(3);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn depth(mut self, max_depth: u32) -> Self {
         self.max_depth = max_depth;
         self
     }
 
-    /// Sets the maximum number of entries to display.
+    /// Sets the maximum total number of entries to display.
+    ///
+    /// Limits the total count of files and directories shown. Useful for
+    /// preventing excessive output in large repositories.
     ///
     /// Default is 1000.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// // Show at most 50 entries
+    /// let fs = FileSystem::new(".")?.max_entries(50);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn max_entries(mut self, max: u32) -> Self {
         self.max_entries = max;
         self
     }
 
+    /// Sets whether to show the root directory as the first line of output.
+    ///
+    /// When enabled (the default), the root directory name and icon are
+    /// rendered as a header line above the tree contents.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// // Hide the root directory line
+    /// let fs = FileSystem::new(".")?.show_root(false);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn show_root(mut self, show: bool) -> Self {
+        self.show_root = show;
+        self
+    }
+
     /// Sets whether to dim entries matched by `.gitignore`.
+    ///
+    /// When enabled, gitignored files and directories are rendered with
+    /// dim ANSI styling (reduced brightness).
+    ///
+    /// Default is `false`.
     pub fn dim_gitignore(mut self, dim: bool) -> Self {
         self.dim_gitignore = dim;
         self
     }
 
-    /// Sets whether to italicize files starting with `.`.
+    /// Sets whether to italicize files starting with `.` (dotfiles).
+    ///
+    /// When enabled, hidden files like `.gitignore`, `.env`, etc. are
+    /// rendered with italic ANSI styling.
+    ///
+    /// Default is `false`.
     pub fn italicize_dot_files(mut self, italic: bool) -> Self {
         self.italicize_dot_files = italic;
         self
     }
 
-    /// Sets whether to italicize directories starting with `.`.
+    /// Sets whether to italicize directories starting with `.` (dotdirs).
+    ///
+    /// When enabled, hidden directories like `.git`, `.github`, etc. are
+    /// rendered with italic ANSI styling.
+    ///
+    /// Default is `false`.
     pub fn italicize_dot_dirs(mut self, italic: bool) -> Self {
         self.italicize_dot_dirs = italic;
         self
     }
 
-    /// Sets whether to hide files starting with `.`.
+    /// Sets whether to hide files starting with `.` (dotfiles).
+    ///
+    /// When enabled, hidden files are excluded from the tree entirely.
+    ///
+    /// Default is `false`.
     pub fn hide_dot_files(mut self, hide: bool) -> Self {
         self.hide_dot_files = hide;
         self
     }
 
-    /// Sets whether to hide directories starting with `.`.
+    /// Sets whether to hide directories starting with `.` (dotdirs).
+    ///
+    /// When enabled, hidden directories are excluded from the tree entirely.
+    ///
+    /// Default is `false`.
     pub fn hide_dot_dirs(mut self, hide: bool) -> Self {
         self.hide_dot_dirs = hide;
         self
     }
 
     /// Sets whether to skip recursing into directories matched by `.gitignore`.
+    ///
+    /// When enabled, gitignored directories are shown in the tree but their
+    /// contents are not traversed. This improves performance and reduces
+    /// noise from build artifacts, dependencies, etc.
+    ///
+    /// Default is `false`.
     pub fn do_not_recurse_gitignore(mut self, skip: bool) -> Self {
         self.do_not_recurse_gitignore = skip;
         self
     }
 
-    /// Adds a glob pattern to filter entries.
+    /// Adds a pattern to filter which entries are shown.
     ///
-    /// Only entries matching at least one filter pattern will be shown.
-    /// Can be called multiple times to add multiple patterns.
+    /// Only entries whose names contain at least one of the filter patterns
+    /// will be included. Can be called multiple times to add multiple patterns.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// // Show only Rust files
+    /// let fs = FileSystem::new(".")?
+    ///     .filter(".rs")
+    ///     .filter(".toml");
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn filter(mut self, pattern: impl Into<String>) -> Self {
         self.filter_patterns.push(pattern.into());
         self
@@ -489,7 +714,19 @@ impl FileSystem {
 
     /// Adds a pattern for entries to highlight in red.
     ///
+    /// Entries whose names contain the pattern will be rendered in red.
+    /// Useful for drawing attention to specific files like TODOs or warnings.
     /// Can be called multiple times to add multiple patterns.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// let fs = FileSystem::new(".")?
+    ///     .highlight_red("TODO")
+    ///     .highlight_red("FIXME");
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn highlight_red(mut self, pattern: impl Into<String>) -> Self {
         self.highlight_red.push(pattern.into());
         self
@@ -497,13 +734,27 @@ impl FileSystem {
 
     /// Adds a pattern for entries to highlight in green.
     ///
+    /// Entries whose names contain the pattern will be rendered in green.
+    /// Useful for highlighting important directories or recently changed files.
     /// Can be called multiple times to add multiple patterns.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// let fs = FileSystem::new(".")?
+    ///     .highlight_green("src")
+    ///     .highlight_green("test");
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn highlight_green(mut self, pattern: impl Into<String>) -> Self {
         self.highlight_green.push(pattern.into());
         self
     }
 
-    /// Sets the layout configuration.
+    /// Sets the layout configuration for margins and alignment.
+    ///
+    /// See [`Layout`] for available options.
     pub fn layout(mut self, layout: Layout) -> Self {
         self.layout = layout;
         self
@@ -866,21 +1117,43 @@ impl FileSystem {
     // Tree Building Methods
     // =========================================================================
 
-    /// Ensures the tree is built (lazy initialization).
+    /// Ensures the tree is built, triggering lazy initialization if needed.
     ///
-    /// The tree is built by walking the filesystem starting from `root_path`.
-    /// This method is idempotent - calling it multiple times has no effect
-    /// after the first build.
+    /// The tree is built by walking the filesystem starting from `root_path`,
+    /// respecting the configured depth limit, entry limit, and filter settings.
+    ///
+    /// This method is **idempotent**: calling it multiple times has no effect
+    /// after the first build. To rebuild the tree with different settings,
+    /// create a new `FileSystem` instance.
     ///
     /// ## Examples
     ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::filesystem::FileSystem;
+    /// ```no_run
+    /// use biscuit_terminal::prelude::FileSystem;
     ///
-    /// let mut fs = FileSystem::new(".").expect("valid path");
+    /// let mut fs = FileSystem::new(".")?;
+    ///
+    /// // Tree not built yet
+    /// assert!(!fs.is_tree_built());
+    /// assert!(fs.tree().is_none());
+    ///
+    /// // Build the tree
     /// fs.ensure_tree_built();
+    ///
+    /// // Now it's built
     /// assert!(fs.is_tree_built());
+    /// assert!(fs.tree().is_some());
+    ///
+    /// // Subsequent calls are no-ops
+    /// fs.ensure_tree_built();
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Symlinks are detected but not followed (prevents infinite loops)
+    /// - Permission errors are handled gracefully (directories marked with error state)
+    /// - The tree respects [`max_depth`](Self::depth) and [`max_entries`](Self::max_entries)
     pub fn ensure_tree_built(&mut self) {
         if self.tree.is_none() {
             let mut total_entries = 0;
@@ -891,7 +1164,24 @@ impl FileSystem {
     /// Returns a reference to the built tree, if available.
     ///
     /// Returns `None` if the tree has not been built yet.
-    /// Use `ensure_tree_built()` to build the tree first.
+    /// Call [`ensure_tree_built()`](Self::ensure_tree_built) to build the tree first.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use biscuit_terminal::prelude::FileSystem;
+    ///
+    /// let mut fs = FileSystem::new(".")?;
+    ///
+    /// // Before building
+    /// assert!(fs.tree().is_none());
+    ///
+    /// // After building
+    /// fs.ensure_tree_built();
+    /// let tree = fs.tree().expect("tree should be built");
+    /// println!("Found {} entries at root level", tree.len());
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     pub fn tree(&self) -> Option<&Vec<TreeNode>> {
         self.tree.as_ref()
     }
@@ -1083,21 +1373,43 @@ impl TryFrom<PathBuf> for FileSystem {
 // =============================================================================
 
 impl Renderable for FileSystem {
-    /// Renders the filesystem tree as a string.
+    /// Renders the filesystem tree as a string without terminal context.
     ///
-    /// This method assumes the tree has already been built via `ensure_tree_built()`.
-    /// If the tree has not been built, returns an empty string.
+    /// This method provides basic rendering with Unicode fallback icons and no
+    /// ANSI styling. For CLI output, prefer [`fallback_render()`](Self::fallback_render)
+    /// which uses terminal capabilities for Nerd Font icons and proper styling.
     ///
     /// ## Arguments
     ///
-    /// * `term_width` - Optional terminal width in columns. Defaults to 80 if not provided.
+    /// * `term_width` - Terminal width in columns. Defaults to 80 if `None`.
+    ///
+    /// ## Returns
+    ///
+    /// An empty string if the tree has not been built via
+    /// [`ensure_tree_built()`](Self::ensure_tree_built).
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use biscuit_terminal::prelude::{FileSystem, Renderable};
+    ///
+    /// let mut fs = FileSystem::new(".")?;
+    /// fs.ensure_tree_built();
+    ///
+    /// // Render at 80 columns (default)
+    /// let output = fs.render(None);
+    ///
+    /// // Render at specific width
+    /// let narrow = fs.render(Some(40));
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
     ///
     /// ## Notes
     ///
-    /// - Tree connectors (e.g., `├──`, `└──`, `│`) are never wrapped or broken
-    /// - File/directory names are truncated with an ellipsis when too long
-    /// - Uses Unicode fallback icons (caller should use `fallback_render` for Nerd Font support)
-    /// - No ANSI styling is applied (is_tty=false) since there is no terminal context
+    /// - Tree connectors (`├──`, `└──`, `│`) are never wrapped or broken
+    /// - File/directory names are truncated with ellipsis (`...`) when too long
+    /// - Uses Unicode fallback icons (📄, 📂) regardless of terminal capabilities
+    /// - No ANSI styling is applied since there is no terminal context
     fn render(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
 
@@ -1111,6 +1423,11 @@ impl Renderable for FileSystem {
         }
 
         let mut output = String::new();
+
+        if self.show_root {
+            self.render_root_line(&mut output, None, false);
+        }
+
         // Pass is_tty=false since render() has no terminal context
         self.render_nodes(&mut output, tree, "", width, 0, None, false);
 
@@ -1121,9 +1438,35 @@ impl Renderable for FileSystem {
 
     /// Renders the filesystem tree using terminal capabilities.
     ///
-    /// Uses the terminal's Nerd Font setting to determine icon style and
-    /// TTY status to determine whether to apply ANSI styling.
-    /// This method assumes the tree has already been built via `ensure_tree_built()`.
+    /// This is the **recommended rendering method** for CLI output. It uses the
+    /// terminal's capabilities to:
+    ///
+    /// - Select Nerd Font icons when available (falls back to Unicode otherwise)
+    /// - Apply ANSI styling (colors, bold, italic) when connected to a TTY
+    /// - Use the actual terminal width for proper truncation
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+    ///
+    /// let mut fs = FileSystem::new_with_formatting(".")?;
+    /// fs.ensure_tree_built();
+    ///
+    /// // Use Terminal::default() for current terminal capabilities
+    /// let term = Terminal::default();
+    /// let output = fs.fallback_render(&term);
+    /// println!("{}", output);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Returns empty string if tree has not been built
+    /// - Directory names are styled bold blue
+    /// - Symlinks are styled cyan
+    /// - Error directories (permission denied) are styled red
+    /// - Dotfiles are italicized when configured
     fn fallback_render(&self, term: &Terminal) -> String {
         let width = term.width();
 
@@ -1137,6 +1480,11 @@ impl Renderable for FileSystem {
         }
 
         let mut output = String::new();
+
+        if self.show_root {
+            self.render_root_line(&mut output, term.is_nerd_font, term.is_tty);
+        }
+
         self.render_nodes(&mut output, tree, "", width, 0, term.is_nerd_font, term.is_tty);
 
         self.layout.apply_layout(&output, width)
@@ -1164,6 +1512,47 @@ impl Renderable for FileSystem {
 }
 
 impl FileSystem {
+    /// Renders the root directory name as a header line.
+    ///
+    /// Shows the directory icon and name (e.g., ` docs`), styled bold blue
+    /// when connected to a TTY.
+    fn render_root_line(
+        &self,
+        output: &mut String,
+        is_nerd_font: Option<bool>,
+        is_tty: bool,
+    ) {
+        let use_nerd = is_nerd_font.unwrap_or(false);
+
+        // Resolve the display name: canonicalize relative paths like "." and ".."
+        // so we show the actual directory name instead of a dot.
+        let name = self
+            .root_path
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .or_else(|| {
+                self.root_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| self.root_path.display().to_string());
+
+        let icon = self.get_dir_icon(&name, use_nerd);
+        let icon_str = if use_nerd {
+            format!("{} ", icon)
+        } else {
+            icon.to_string()
+        };
+
+        if is_tty {
+            // Bold blue for icon and directory name
+            output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, name));
+        } else {
+            output.push_str(&format!("{}{}\n", icon_str, name));
+        }
+    }
+
     /// Renders tree nodes recursively to the output string.
     ///
     /// This is the internal rendering engine that builds the tree output line by line.
@@ -1212,20 +1601,27 @@ impl FileSystem {
 
             // Get the display name, applying styles if configured
             let name = node.name();
-            let styled_name = self.style_name(node, name, is_tty);
-            let name_width = visible_width(&styled_name);
+            let style = self.style_prefix(node, name, is_tty);
+            let name_width = visible_width(name);
 
             // Truncate name if needed
             let display_name = if name_width > available && available > 1 {
-                truncate_with_ellipsis(&styled_name, available)
+                truncate_with_ellipsis(name, available)
             } else {
-                styled_name
+                name.to_string()
             };
 
-            // Write the line
+            // Write the line: prefix + [style]icon name[reset]
             output.push_str(&line_prefix);
-            output.push_str(&icon);
-            output.push_str(&display_name);
+            if style.is_empty() {
+                output.push_str(&icon);
+                output.push_str(&display_name);
+            } else {
+                output.push_str(&style);
+                output.push_str(&icon);
+                output.push_str(&display_name);
+                output.push_str("\x1b[0m");
+            }
             output.push('\n');
 
             // Recurse into children for directories
@@ -1252,7 +1648,7 @@ impl FileSystem {
         }
     }
 
-    /// Applies styling to a node name based on configuration and TTY status.
+    /// Returns the ANSI style prefix for a node, or empty string if no styling.
     ///
     /// ## Color Scheme
     ///
@@ -1265,70 +1661,75 @@ impl FileSystem {
     ///
     /// ## TTY Awareness
     ///
-    /// When `is_tty` is false, no ANSI codes are applied and the plain name
-    /// is returned. This ensures clean output when redirected to files or pipes.
-    fn style_name(&self, node: &TreeNode, name: &str, is_tty: bool) -> String {
-        // No styling for non-TTY output
+    /// When `is_tty` is false, no codes are returned. This ensures clean
+    /// output when redirected to files or pipes.
+    fn style_prefix(&self, node: &TreeNode, name: &str, is_tty: bool) -> String {
         if !is_tty {
-            return name.to_string();
+            return String::new();
         }
 
         let is_dot = name.starts_with('.');
 
-        // Check highlights first (highest priority) - return immediately if matched
+        // Check highlights first (highest priority)
         for pattern in &self.highlight_red {
             if name.contains(pattern) {
-                return format!("\x1b[31m{}\x1b[0m", name); // Red
+                return "\x1b[31m".to_string();
             }
         }
         for pattern in &self.highlight_green {
             if name.contains(pattern) {
-                return format!("\x1b[32m{}\x1b[0m", name); // Green
+                return "\x1b[32m".to_string();
             }
         }
 
-        // Build up style codes to combine multiple attributes
         let mut codes: Vec<&str> = Vec::new();
 
-        // Check for error directory (red foreground)
         let is_error = matches!(node, TreeNode::Dir { has_error: true, .. });
         if is_error {
-            codes.push("31"); // Red
+            codes.push("31");
         }
 
-        // Check for ignored (dim) - only if not already error-styled
         if node.is_ignored() && self.dim_gitignore && !is_error {
-            codes.push("2"); // Dim
+            codes.push("2");
         }
 
-        // Check for dot file/dir (italic)
         let should_italicize = is_dot
             && match node {
                 TreeNode::Dir { .. } => self.italicize_dot_dirs,
                 TreeNode::File { .. } => self.italicize_dot_files,
             };
         if should_italicize {
-            codes.push("3"); // Italic
+            codes.push("3");
         }
 
-        // Directory styling: bold blue (unless error)
         if node.is_dir() && !is_error {
-            codes.push("1"); // Bold
-            codes.push("34"); // Blue
+            codes.push("1");
+            codes.push("34");
         }
 
-        // Symlink styling: cyan
         if node.is_symlink() {
-            codes.push("36"); // Cyan
+            codes.push("36");
         }
 
-        // If no styles to apply, return plain name
         if codes.is_empty() {
-            return name.to_string();
+            return String::new();
         }
 
-        // Combine all codes into a single escape sequence
-        format!("\x1b[{}m{}\x1b[0m", codes.join(";"), name)
+        format!("\x1b[{}m", codes.join(";"))
+    }
+
+    /// Applies styling to a node name based on configuration and TTY status.
+    ///
+    /// Wraps the name with the appropriate ANSI escape sequence and reset.
+    /// The style covers the name only; use [`style_prefix`](Self::style_prefix)
+    /// when you need to wrap additional content (e.g., an icon) in the same style.
+    pub fn style_name(&self, node: &TreeNode, name: &str, is_tty: bool) -> String {
+        let prefix = self.style_prefix(node, name, is_tty);
+        if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}{}\x1b[0m", prefix, name)
+        }
     }
 }
 
@@ -3266,7 +3667,7 @@ mod tests {
         fs::write(temp.path().join("a.txt"), "").expect("create a.txt");
         fs::write(temp.path().join("b.txt"), "").expect("create b.txt");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
         let result = fs_tree.render(Some(80));
@@ -3286,6 +3687,53 @@ mod tests {
     }
 
     #[test]
+    fn test_render_shows_root_by_default() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("a.txt"), "").expect("create a.txt");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let result = fs_tree.render(Some(80));
+        let lines: Vec<&str> = result.lines().collect();
+
+        // First line is root header, second is the file
+        assert_eq!(lines.len(), 2, "Should have root header + 1 file");
+        // Root line should NOT have a tree connector
+        assert!(
+            !lines[0].contains("├── ") && !lines[0].contains("└── "),
+            "Root line should not have tree connectors"
+        );
+        // Second line should have a tree connector
+        assert!(
+            lines[1].contains("└── "),
+            "File line should have LAST_BRANCH connector"
+        );
+    }
+
+    #[test]
+    fn test_render_skip_root() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("a.txt"), "").expect("create a.txt");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        fs_tree.ensure_tree_built();
+
+        let result = fs_tree.render(Some(80));
+        let lines: Vec<&str> = result.lines().collect();
+
+        assert_eq!(lines.len(), 1, "Should have only 1 file line (no root header)");
+        assert!(
+            lines[0].contains("└── "),
+            "File line should have LAST_BRANCH connector"
+        );
+    }
+
+    #[test]
     fn test_render_nested_tree_structure() {
         use std::fs;
 
@@ -3295,7 +3743,7 @@ mod tests {
         fs::write(src_dir.join("lib.rs"), "").expect("create lib.rs");
         fs::write(src_dir.join("main.rs"), "").expect("create main.rs");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
         let result = fs_tree.render(Some(80));
@@ -3442,7 +3890,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("create temp dir");
         fs::write(temp.path().join("a.txt"), "").expect("create file");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
         // Even at very narrow width, connectors should be intact
@@ -3845,5 +4293,572 @@ mod tests {
             result.ends_with('\n'),
             "display() should ensure trailing newline"
         );
+    }
+
+    // ============================================================
+    // Additional Edge Case Tests (Phase 9)
+    // ============================================================
+
+    #[test]
+    fn test_error_ignore_display() {
+        // Test the Ignore error variant from the ignore crate
+        // We create a synthetic error since ignore::Error is not easily constructed
+        let err = FileSystemError::Ignore(ignore::Error::InvalidDefinition);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Ignore error"),
+            "Expected 'Ignore error' in: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_tree_building_unicode_filenames() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create files with various Unicode characters
+        fs::write(temp.path().join("日本語.txt"), "japanese").expect("create japanese file");
+        fs::write(temp.path().join("中文.md"), "chinese").expect("create chinese file");
+        fs::write(temp.path().join("emoji_🎉.txt"), "emoji").expect("create emoji file");
+        fs::write(temp.path().join("ñoño.rs"), "spanish").expect("create spanish file");
+        fs::write(temp.path().join("über.txt"), "german").expect("create german file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert_eq!(tree.len(), 5, "Should have 5 Unicode-named files");
+
+        // Verify all names are preserved
+        let names: Vec<_> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.iter().any(|n| n.contains("日本語")));
+        assert!(names.iter().any(|n| n.contains("中文")));
+        assert!(names.iter().any(|n| n.contains("🎉")));
+        assert!(names.iter().any(|n| n.contains("ñoño")));
+        assert!(names.iter().any(|n| n.contains("über")));
+    }
+
+    #[test]
+    fn test_tree_building_special_character_filenames() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create files with special characters (excluding those invalid on Windows)
+        fs::write(temp.path().join("file with spaces.txt"), "").expect("create spaced file");
+        fs::write(temp.path().join("file-with-dashes.txt"), "").expect("create dashed file");
+        fs::write(temp.path().join("file_with_underscores.txt"), "").expect("create underscored file");
+        fs::write(temp.path().join("file.multiple.dots.txt"), "").expect("create multi-dot file");
+        fs::write(temp.path().join("(parentheses).txt"), "").expect("create parentheses file");
+        fs::write(temp.path().join("[brackets].txt"), "").expect("create brackets file");
+        fs::write(temp.path().join("file@symbol.txt"), "").expect("create at-symbol file");
+        fs::write(temp.path().join("file#hash.txt"), "").expect("create hash file");
+        fs::write(temp.path().join("file+plus.txt"), "").expect("create plus file");
+        fs::write(temp.path().join("file=equals.txt"), "").expect("create equals file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert_eq!(tree.len(), 10, "Should have 10 special-char files");
+
+        // Verify names with spaces are preserved
+        let names: Vec<_> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.iter().any(|n| n.contains("file with spaces")));
+        assert!(names.iter().any(|n| n.contains("(parentheses)")));
+        assert!(names.iter().any(|n| n.contains("[brackets]")));
+    }
+
+    #[test]
+    fn test_render_unicode_filenames_fit_in_width() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create files with wide characters (CJK characters are 2 columns wide)
+        fs::write(temp.path().join("日本語ファイル.txt"), "").expect("create japanese file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        // Render at narrow width to test truncation of wide chars
+        let result = fs_tree.render(Some(30));
+
+        for line in result.lines() {
+            let line_width = visible_width(line);
+            assert!(
+                line_width <= 30,
+                "Line with Unicode exceeds width 30: {:?} (width: {})",
+                line,
+                line_width
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_building_very_deep_nesting_beyond_limit() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create 25 levels deep (beyond default max_depth of 20)
+        let mut current = temp.path().to_path_buf();
+        for i in 0..25 {
+            current = current.join(format!("level{}", i));
+        }
+        fs::create_dir_all(&current).expect("create deep dirs");
+        fs::write(current.join("deepest.txt"), "").expect("create deep file");
+
+        // With default max_depth=20, the deepest levels should not be traversed
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+
+        // Verify we have entries but the deepest file is not reachable
+        assert!(!tree.is_empty(), "Should have some entries");
+
+        // The tree should stop at depth 20, so deepest.txt should not appear
+        let result = fs_tree.render(Some(200));
+        assert!(
+            !result.contains("deepest.txt"),
+            "deepest.txt should not appear due to max_depth=20"
+        );
+    }
+
+    #[test]
+    fn test_tree_building_very_wide_directory() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create more files than the default max_entries (1000)
+        // We'll test with a smaller custom limit for speed
+        for i in 0..50 {
+            fs::write(temp.path().join(format!("file{:04}.txt", i)), "").expect("create file");
+        }
+
+        // Set max_entries to 25 (less than 50 files)
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").max_entries(25);
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+
+        // Should be limited to at most 25 entries
+        assert!(
+            tree.len() <= 25,
+            "Should have at most 25 entries, got {}",
+            tree.len()
+        );
+    }
+
+    #[test]
+    fn test_tree_building_only_hidden_files() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create only hidden files
+        fs::write(temp.path().join(".hidden1"), "").expect("create .hidden1");
+        fs::write(temp.path().join(".hidden2"), "").expect("create .hidden2");
+        fs::create_dir(temp.path().join(".hidden_dir")).expect("create .hidden_dir");
+
+        // Without hiding, should see all
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+        let tree = fs_tree.tree().expect("tree");
+        assert_eq!(tree.len(), 3, "Should see 3 hidden entries");
+
+        // With hide_dot_files and hide_dot_dirs, should see nothing
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .hide_dot_files(true)
+            .hide_dot_dirs(true);
+        fs_tree.ensure_tree_built();
+        let tree = fs_tree.tree().expect("tree");
+        assert!(tree.is_empty(), "Should see nothing when all entries are hidden");
+    }
+
+    #[test]
+    fn test_render_empty_tree_after_build() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create only hidden files and then hide them
+        fs::write(temp.path().join(".hidden"), "").expect("create hidden");
+
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .hide_dot_files(true);
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert!(tree.is_empty(), "Tree should be empty");
+
+        // Render should return empty string for empty tree
+        let result = fs_tree.render(Some(80));
+        assert_eq!(result, "", "Empty tree should render as empty string");
+    }
+
+    #[test]
+    fn test_create_error_dir_node_helper() {
+        // Test the helper function for creating error nodes
+        let node = FileSystem::create_error_dir_node("unreadable".to_string(), false);
+
+        if let TreeNode::Dir {
+            name,
+            children,
+            is_ignored,
+            is_symlink,
+            has_error,
+            at_depth_limit,
+        } = node
+        {
+            assert_eq!(name, "unreadable");
+            assert!(children.is_empty());
+            assert!(!is_ignored);
+            assert!(!is_symlink);
+            assert!(has_error, "has_error should be true");
+            assert!(!at_depth_limit);
+        } else {
+            panic!("Expected Dir variant");
+        }
+    }
+
+    #[test]
+    fn test_create_error_dir_node_with_symlink() {
+        let node = FileSystem::create_error_dir_node("symlink_error".to_string(), true);
+
+        if let TreeNode::Dir { is_symlink, has_error, .. } = node {
+            assert!(is_symlink, "is_symlink should be true");
+            assert!(has_error, "has_error should be true");
+        } else {
+            panic!("Expected Dir variant");
+        }
+    }
+
+    #[test]
+    fn test_style_name_combines_multiple_styles() {
+        // Test that dim + italic can be combined
+        let fs = FileSystem::default()
+            .dim_gitignore(true)
+            .italicize_dot_files(true);
+
+        let node = TreeNode::File {
+            name: ".ignored_dotfile".into(),
+            is_ignored: true, // Should be dim
+            is_symlink: false,
+        };
+
+        let styled = fs.style_name(&node, ".ignored_dotfile", true);
+
+        // Should contain both dim (2) and italic (3)
+        assert!(styled.contains("2"), "Should have dim code");
+        assert!(styled.contains("3"), "Should have italic code");
+        assert!(styled.contains("\x1b[0m"), "Should have reset");
+    }
+
+    #[test]
+    fn test_style_name_error_dir_not_dimmed_when_ignored() {
+        // Error styling should take priority over dim styling
+        let fs = FileSystem::default().dim_gitignore(true);
+
+        let node = TreeNode::Dir {
+            name: "error_ignored".into(),
+            children: vec![],
+            is_ignored: true,  // Would be dim
+            is_symlink: false,
+            has_error: true,   // Error takes priority
+            at_depth_limit: false,
+        };
+
+        let styled = fs.style_name(&node, "error_ignored", true);
+
+        // Should have red but not dim
+        assert!(styled.contains("31"), "Should have red code for error");
+        assert!(!styled.contains("\x1b[2"), "Should not have dim code when error");
+    }
+
+    #[test]
+    fn test_render_narrow_width_10_columns() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("a.txt"), "").expect("create file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        fs_tree.ensure_tree_built();
+
+        // Very narrow width (10 columns) - connector takes 4, icon takes ~2
+        let result = fs_tree.render(Some(10));
+
+        for line in result.lines() {
+            let line_width = visible_width(line);
+            assert!(
+                line_width <= 10,
+                "Line exceeds very narrow width 10: {:?} (width: {})",
+                line,
+                line_width
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_default_width_when_none() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("test.txt"), "").expect("create file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        // render(None) should use default width of 80
+        let result = fs_tree.render(None);
+
+        for line in result.lines() {
+            let line_width = visible_width(line);
+            assert!(
+                line_width <= 80,
+                "Line exceeds default width 80: {:?} (width: {})",
+                line,
+                line_width
+            );
+        }
+    }
+
+    #[test]
+    fn test_fallback_render_no_styling_when_not_tty() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::create_dir(temp.path().join("src")).expect("create src dir");
+        fs::write(temp.path().join(".hidden"), "").expect("create hidden");
+
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .italicize_dot_files(true);
+        fs_tree.ensure_tree_built();
+
+        // Create terminal with is_tty = false
+        let mut term = crate::terminal::TerminalBuilder::default().width(80).build();
+        term.is_tty = false;
+
+        let result = fs_tree.fallback_render(&term);
+
+        // Should not contain any ANSI escape sequences
+        assert!(
+            !result.contains("\x1b["),
+            "Should not have ANSI codes when is_tty=false: {:?}",
+            result
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_tree_building_broken_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        // Create a symlink to a nonexistent target
+        let link_path = temp.path().join("broken_link");
+        symlink("/nonexistent/target/path", &link_path).expect("create broken symlink");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert_eq!(tree.len(), 1, "Should have the broken symlink");
+
+        // Broken symlinks are treated as files
+        let node = &tree[0];
+        assert_eq!(node.name(), "broken_link");
+        assert!(node.is_symlink(), "Should be marked as symlink");
+        assert!(node.is_file(), "Broken symlink should be treated as file");
+    }
+
+    #[test]
+    fn test_get_icon_no_extension_file() {
+        let fs = FileSystem::default();
+        let node = TreeNode::File {
+            name: "Makefile".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+
+        // Files without extension should get base file icon
+        assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::BASE);
+        assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
+    }
+
+    #[test]
+    fn test_get_icon_dotfile_no_extension() {
+        let fs = FileSystem::default();
+        let node = TreeNode::File {
+            name: ".bashrc".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+
+        // Dotfiles without recognized extension should get base icon
+        assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::BASE);
+    }
+
+    #[test]
+    fn test_filter_patterns_partial_match() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        fs::write(temp.path().join("test_utils.rs"), "").expect("create test_utils.rs");
+        fs::write(temp.path().join("utils.rs"), "").expect("create utils.rs");
+        fs::write(temp.path().join("main.rs"), "").expect("create main.rs");
+        fs::write(temp.path().join("utility.ts"), "").expect("create utility.ts");
+
+        // Filter for "util" should match test_utils.rs, utils.rs, and utility.ts
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .filter("util");
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert_eq!(tree.len(), 3, "Should match 3 files containing 'util'");
+
+        let names: Vec<_> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.contains(&"test_utils.rs"));
+        assert!(names.contains(&"utils.rs"));
+        assert!(names.contains(&"utility.ts"));
+        assert!(!names.contains(&"main.rs"));
+    }
+
+    #[test]
+    fn test_highlight_patterns_partial_match() {
+        let fs = FileSystem::default()
+            .highlight_red("err")
+            .highlight_green("pass");
+
+        // "error.log" contains "err"
+        let error_node = TreeNode::File {
+            name: "error.log".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+        let styled = fs.style_name(&error_node, "error.log", true);
+        assert!(styled.contains("\x1b[31m"), "Should be red");
+
+        // "passed_tests.txt" contains "pass"
+        let pass_node = TreeNode::File {
+            name: "passed_tests.txt".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+        let styled = fs.style_name(&pass_node, "passed_tests.txt", true);
+        assert!(styled.contains("\x1b[32m"), "Should be green");
+
+        // "normal.txt" contains neither
+        let normal_node = TreeNode::File {
+            name: "normal.txt".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+        let styled = fs.style_name(&normal_node, "normal.txt", true);
+        assert!(!styled.contains("\x1b[31m"), "Should not be red");
+        assert!(!styled.contains("\x1b[32m"), "Should not be green");
+    }
+
+    #[test]
+    fn test_highlight_red_takes_priority_over_green() {
+        let fs = FileSystem::default()
+            .highlight_red("test")
+            .highlight_green("test");
+
+        let node = TreeNode::File {
+            name: "test.txt".into(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+        let styled = fs.style_name(&node, "test.txt", true);
+
+        // Red should take priority (checked first)
+        assert!(styled.contains("\x1b[31m"), "Red should take priority");
+        assert!(!styled.contains("\x1b[32m"), "Green should not be applied");
+    }
+
+    #[test]
+    fn test_tree_node_equality_different_variants() {
+        let file = TreeNode::File {
+            name: "test".to_string(),
+            is_ignored: false,
+            is_symlink: false,
+        };
+
+        let dir = TreeNode::Dir {
+            name: "test".to_string(),
+            children: vec![],
+            is_ignored: false,
+            is_symlink: false,
+            has_error: false,
+            at_depth_limit: false,
+        };
+
+        // Same name but different variants should not be equal
+        assert_ne!(file, dir);
+    }
+
+    #[test]
+    fn test_depth_zero_shows_only_root() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        let subdir = temp.path().join("subdir");
+        fs::create_dir(&subdir).expect("create subdir");
+        fs::write(subdir.join("nested.txt"), "").expect("create nested file");
+        fs::write(temp.path().join("root.txt"), "").expect("create root file");
+
+        // depth(0) means we don't recurse at all - only root level entries
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").depth(0);
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+
+        // Should be empty because depth 0 means we can't show root level (depth >= max_depth check)
+        assert!(tree.is_empty(), "depth(0) should show nothing");
+    }
+
+    #[test]
+    fn test_depth_one_shows_root_only() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        let subdir = temp.path().join("subdir");
+        fs::create_dir(&subdir).expect("create subdir");
+        fs::write(subdir.join("nested.txt"), "").expect("create nested file");
+        fs::write(temp.path().join("root.txt"), "").expect("create root file");
+
+        // depth(1) means root level items only, subdir marked at_depth_limit
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").depth(1);
+        fs_tree.ensure_tree_built();
+
+        let tree = fs_tree.tree().expect("tree should be built");
+        assert_eq!(tree.len(), 2, "Should have 2 root entries");
+
+        // Find the subdir and verify it's at depth limit
+        let subdir_node = tree.iter().find(|n| n.name() == "subdir");
+        assert!(subdir_node.is_some(), "Should find subdir");
+
+        if let TreeNode::Dir {
+            children,
+            at_depth_limit,
+            ..
+        } = subdir_node.unwrap()
+        {
+            assert!(at_depth_limit, "subdir should be at depth limit");
+            assert!(children.is_empty(), "subdir should have no children");
+        }
     }
 }

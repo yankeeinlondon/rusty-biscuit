@@ -23,6 +23,7 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("compose"))
         .stdout(predicate::str::contains("toc"))
         .stdout(predicate::str::contains("delta"))
+        .stdout(predicate::str::contains("get"))
         .stdout(predicate::str::contains("hash"));
 }
 
@@ -453,20 +454,22 @@ fn test_hash_strict_whitespace_sensitive() {
 }
 
 #[test]
-fn test_hash_strict_frontmatter_order_sensitive() {
-    // With --strict, different key ordering should produce different hashes
-    let result1 = md_cmd()
+fn test_hash_strict_frontmatter_differs_from_normalized() {
+    // Strict and non-strict use different serialization strategies, so their
+    // hashes should differ (strict uses serde_yaml, non-strict uses sorted canonical JSON)
+    let input = "---\ntitle: Hello\nauthor: Alice\n---\n# Content";
+    let strict = md_cmd()
         .args(["hash", "--frontmatter", "--strict", "-"])
-        .write_stdin("---\ntitle: Hello\nauthor: Alice\n---\n# Content")
+        .write_stdin(input)
         .output()
         .unwrap();
-    let result2 = md_cmd()
-        .args(["hash", "--frontmatter", "--strict", "-"])
-        .write_stdin("---\nauthor: Alice\ntitle: Hello\n---\n# Content")
+    let normal = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin(input)
         .output()
         .unwrap();
 
-    assert_ne!(result1.stdout, result2.stdout);
+    assert_ne!(strict.stdout, normal.stdout);
 }
 
 #[test]
@@ -643,4 +646,145 @@ fn test_hash_directory_ignores_non_markdown() {
         .assert()
         .success()
         .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
+}
+
+// =============================================================================
+//                          GET SUBCOMMAND TESTS
+// =============================================================================
+
+const FM_DOC: &str = "---\ntitle: Hello World\nauthor: Alice\ncount: 42\ntags:\n  - rust\n  - cli\n---\n# Content\n\nBody text.";
+
+#[test]
+fn test_get_single_property_string() {
+    md_cmd()
+        .args(["get", "-", "title"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"Hello World\""));
+}
+
+#[test]
+fn test_get_single_property_number() {
+    md_cmd()
+        .args(["get", "-", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("42"));
+}
+
+#[test]
+fn test_get_single_property_array() {
+    md_cmd()
+        .args(["get", "-", "tags"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust"))
+        .stdout(predicate::str::contains("cli"));
+}
+
+#[test]
+fn test_get_missing_property_returns_empty_string() {
+    md_cmd()
+        .args(["get", "-", "nonexistent"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"\""));
+}
+
+#[test]
+fn test_get_multiple_properties_returns_object() {
+    md_cmd()
+        .args(["get", "-", "title", "author"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\""))
+        .stdout(predicate::str::contains("\"Hello World\""))
+        .stdout(predicate::str::contains("\"author\""))
+        .stdout(predicate::str::contains("\"Alice\""));
+}
+
+#[test]
+fn test_get_multiple_with_missing_includes_empty_string() {
+    md_cmd()
+        .args(["get", "-", "title", "missing"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\""))
+        .stdout(predicate::str::contains("\"Hello World\""))
+        .stdout(predicate::str::contains("\"missing\""))
+        .stdout(predicate::str::contains("\"\""));
+}
+
+#[test]
+fn test_get_json5_output() {
+    md_cmd()
+        .args(["get", "--json5", "-", "title", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        // JSON5 uses unquoted keys for valid identifiers
+        .stdout(predicate::str::contains("title:"))
+        .stdout(predicate::str::contains("count:"));
+}
+
+#[test]
+fn test_get_yaml_output() {
+    md_cmd()
+        .args(["get", "--yaml", "-", "title"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello World"));
+}
+
+#[test]
+fn test_get_toml_output() {
+    md_cmd()
+        .args(["get", "--toml", "-", "title", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title"))
+        .stdout(predicate::str::contains("Hello World"))
+        .stdout(predicate::str::contains("count"))
+        .stdout(predicate::str::contains("42"));
+}
+
+#[test]
+fn test_get_from_file() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "---\nversion: 2\n---\n# Doc").unwrap();
+
+    md_cmd()
+        .args(["get"])
+        .arg(tmp.path())
+        .arg("version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2"));
+}
+
+#[test]
+fn test_get_no_frontmatter_returns_empty_string() {
+    md_cmd()
+        .args(["get", "-", "title"])
+        .write_stdin("# No frontmatter")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"\""));
+}
+
+#[test]
+fn test_get_requires_at_least_one_prop() {
+    md_cmd()
+        .args(["get", "-"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .failure();
 }

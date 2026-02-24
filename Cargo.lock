@@ -1604,6 +1604,7 @@ name = "darkmatter-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-file",
  "biscuit-hash",
  "clap 4.5.60",
  "clap_complete",

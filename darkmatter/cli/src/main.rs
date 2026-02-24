@@ -177,6 +177,15 @@ fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 print_delta(&delta, cli.verbose > 0, &base_md, &updated_md);
             }
         }
+        CliCommand::Get {
+            input,
+            props,
+            json5,
+            yaml,
+            toml,
+        } => {
+            run_get(&input, &props, json5, yaml, toml)?;
+        }
         CliCommand::Hash {
             input,
             body,
@@ -296,6 +305,91 @@ fn run_compose(
     }
 
     Ok(())
+}
+
+/// Get frontmatter properties from a markdown document.
+fn run_get(
+    input: &PathBuf,
+    props: &[String],
+    json5: bool,
+    yaml: bool,
+    toml: bool,
+) -> Result<()> {
+    let md = load_markdown(Some(input))?;
+    let fm = md.frontmatter();
+
+    let value = if props.len() == 1 {
+        // Single property: return the raw value (or empty string if missing)
+        fm.as_map()
+            .get(&props[0])
+            .cloned()
+            .unwrap_or(serde_json::Value::String(String::new()))
+    } else {
+        // Multiple properties: return a dictionary of requested keys
+        let mut map = serde_json::Map::new();
+        for prop in props {
+            let v = fm
+                .as_map()
+                .get(prop)
+                .cloned()
+                .unwrap_or(serde_json::Value::String(String::new()));
+            map.insert(prop.clone(), v);
+        }
+        serde_json::Value::Object(map)
+    };
+
+    let output = format_value(&value, json5, yaml, toml)?;
+    println!("{output}");
+
+    Ok(())
+}
+
+/// Format a `serde_json::Value` according to the requested output format.
+fn format_value(
+    value: &serde_json::Value,
+    json5: bool,
+    yaml: bool,
+    toml: bool,
+) -> Result<String> {
+    if json5 {
+        let json_str = serde_json::to_string(value)?;
+        let j5 = biscuit_file::Json5::from_str(&json_str)
+            .map_err(|e| eyre!("JSON5 conversion failed: {e}"))?;
+        Ok(j5.as_json5())
+    } else if yaml {
+        let json_str = serde_json::to_string(value)?;
+        let j5 = biscuit_file::Json5::from_str(&json_str)
+            .map_err(|e| eyre!("YAML conversion failed: {e}"))?;
+        let mut yaml_str = j5
+            .as_yaml()
+            .map_err(|e| eyre!("YAML conversion failed: {e}"))?;
+        // serde_yaml appends a trailing newline; trim for consistent output
+        if yaml_str.ends_with('\n') {
+            yaml_str.truncate(yaml_str.len() - 1);
+        }
+        Ok(yaml_str)
+    } else if toml {
+        // TOML requires a table at the top level; wrap scalar values
+        let toml_value = if value.is_object() {
+            value.clone()
+        } else {
+            serde_json::json!({ "value": value })
+        };
+        let json_str = serde_json::to_string(&toml_value)?;
+        let j5 = biscuit_file::Json5::from_str(&json_str)
+            .map_err(|e| eyre!("TOML conversion failed: {e}"))?;
+        let mut toml_str = j5
+            .as_toml()
+            .map_err(|e| eyre!("TOML conversion failed: {e}"))?;
+        // Trim trailing newline for consistent output
+        if toml_str.ends_with('\n') {
+            toml_str.truncate(toml_str.len() - 1);
+        }
+        Ok(toml_str)
+    } else {
+        // Default: JSON
+        Ok(serde_json::to_string_pretty(value)?)
+    }
 }
 
 /// Hash a markdown document's frontmatter and/or body.
