@@ -257,29 +257,35 @@ check:
 cli *args="":
     @cargo run -p {{CLI}} {{args}}
 
-# Open Opencode in yolo mode
+# Open Opencode
 oc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && claudine opencode {{args}}
+    @claudine opencode {{args}}
 
 # Open Claude Code
 cc *args="":
     @clear
-    @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && claudine claude --yolo {{args}}
+    @claudine claude {{args}}
 
-# Open Claude Code
+# Open Gemini CLI
 gem *args="":
     @clear
     @echo -e "Loading {{BOLD}}Gemini CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && AGENT="Gemini CLI" gemini -y {{args}}
+    @claudine gemini {{args}}
 
 # Open Codex CLI
 codex *args="":
     @clear
     @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && AGENT="Codex CLI" codex --dangerously-bypass-approvals-and-sandbox {{args}}
+    @claudine codex {{args}}
+
+acp-skill deploy:
+	@echo
+	@echo -e "Publishing the {{BOLD}}acp{{RESET}} skill to this monorepo"
+	@echo
+	@echo -e "{{DIM}}use the {{BLUE}}--deploy{{RESET}}{{DIM}} flag if you want to deploy to{{RESET}}"
+	@echo -e "{{DIM}}{{ITALIC}}user{{RESET}}{{DIM}} scope as well.{{RESET}}"
 
 # Show the dependencies for this package
 deps:
