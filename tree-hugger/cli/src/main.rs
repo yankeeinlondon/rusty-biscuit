@@ -13,7 +13,7 @@ use tree_hugger::{
     Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
     ImportSymbol, LintDiagnostic, PackageSummary, ParameterInfo, ProgrammingLanguage,
     SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError,
-    TypeMetadata, VariantInfo,
+    TypeMetadata, VariantInfo, find_git_root, find_package_root,
 };
 
 #[derive(Parser, Debug)]
@@ -60,16 +60,24 @@ impl Cli {
 #[derive(clap::Args, Debug, Clone)]
 struct CommonArgs {
     /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1..)]
+    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
     inputs: Vec<String>,
+
+    /// Process all source files from the nearest package/repo root
+    #[arg(long)]
+    all: bool,
 }
 
 /// Arguments for the classes command
 #[derive(clap::Args, Debug, Clone)]
 struct ClassArgs {
     /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1..)]
+    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
     inputs: Vec<String>,
+
+    /// Process all source files from the nearest package/repo root
+    #[arg(long)]
+    all: bool,
 
     /// Filter by class name
     #[arg(long, short = 'n')]
@@ -88,8 +96,12 @@ struct ClassArgs {
 #[derive(clap::Args, Debug, Clone)]
 struct LintArgs {
     /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1..)]
+    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
     inputs: Vec<String>,
+
+    /// Process all source files from the nearest package/repo root
+    #[arg(long)]
+    all: bool,
 
     /// Show only lint diagnostics (pattern-based and semantic rules)
     #[arg(long, conflicts_with = "syntax_only")]
@@ -154,6 +166,20 @@ impl Command {
             Self::Lint(args) => &args.inputs,
             Self::Classes(args) => &args.inputs,
             Self::Completions(_) => &[],
+        }
+    }
+
+    /// Returns whether the `--all` flag was set.
+    fn all(&self) -> bool {
+        match self {
+            Self::Functions(args)
+            | Self::Types(args)
+            | Self::Symbols(args)
+            | Self::Exports(args)
+            | Self::Imports(args) => args.all,
+            Self::Lint(args) => args.all,
+            Self::Classes(args) => args.all,
+            Self::Completions(_) => false,
         }
     }
 
@@ -356,12 +382,30 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let language = cli.language.map(ProgrammingLanguage::from);
     let inputs = cli.command.inputs();
+    let use_all = cli.command.all();
     let output_format = cli.output_format();
     let output_config = OutputConfig::new(output_format);
 
     let root_dir = current_dir()?;
-    let display_root = find_repo_root(&root_dir);
-    let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
+
+    let (files, display_root) = if use_all {
+        let git_root = find_git_root(&root_dir)?;
+        let pkg_root = find_package_root(&root_dir, &git_root);
+        let files = collect_files(&pkg_root, &[], &cli.ignore, language)?;
+        (files, Some(git_root))
+    } else {
+        if inputs.is_empty() {
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    "provide file glob patterns or use --all to process all source files",
+                )
+                .exit();
+        }
+        let display_root = find_repo_root(&root_dir);
+        let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
+        (files, display_root)
+    };
 
     let command_kind = cli.command.kind().expect("completions already handled");
 

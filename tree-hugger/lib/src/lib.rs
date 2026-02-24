@@ -12,5 +12,5 @@ pub use dead_code::{find_dead_code_after, is_terminal_statement};
 pub use error::TreeHuggerError;
 pub use file::tree_file::TreeFile;
 pub use ignore_directives::IgnoreDirectives;
-pub use package::tree_package::{TreePackage, TreePackageConfig};
+pub use package::tree_package::{TreePackage, TreePackageConfig, find_git_root, find_package_root};
 pub use shared::*;

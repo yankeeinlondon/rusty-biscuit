@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, bail};
 use sniff::filesystem::git::detect_git;
 use sniff::filesystem::repo::{Package, detect_repo};
 
-use super::profile::ProviderProfile;
+use super::profile::WrapperProfile;
 
 #[derive(Debug)]
 pub(crate) struct EnvPlan {
@@ -14,6 +14,7 @@ pub(crate) struct EnvPlan {
     pub(crate) removed: Vec<String>,
     pub(crate) added: Vec<(String, String)>,
     pub(crate) package_context: Option<PackageContext>,
+    pub(crate) repo_root: Option<PathBuf>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -25,7 +26,7 @@ pub(crate) struct PackageContext {
 }
 
 pub(crate) fn build_child_env(
-    profile: &ProviderProfile,
+    profile: &dyn WrapperProfile,
     include: &[String],
     yolo: bool,
     interactive: bool,
@@ -37,8 +38,14 @@ pub(crate) fn build_child_env(
     let (mut env, removed, mut warnings) = sanitize_process_env(&include_set);
     let mut added = BTreeMap::new();
 
-    let encoded_agent_params = serde_json::to_string(agent_params)?;
-    set_added_env(&mut env, &mut added, "AGENT", profile.agent_env.to_string());
+    let redacted_params = redact_sensitive_args(agent_params);
+    let encoded_agent_params = serde_json::to_string(&redacted_params)?;
+    set_added_env(
+        &mut env,
+        &mut added,
+        "AGENT",
+        profile.agent_env().to_string(),
+    );
     set_added_env(
         &mut env,
         &mut added,
@@ -66,22 +73,23 @@ pub(crate) fn build_child_env(
     }
 
     let mut package_context = None;
+    let mut repo_root = None;
     match resolve_monorepo_package_context(cwd) {
-        Ok((Some(package_ctx), mut package_warnings)) => {
-            package_context = Some(package_ctx.clone());
-            set_added_env(
-                &mut env,
-                &mut added,
-                "PACKAGE_AREA",
-                package_ctx.package_area,
-            );
-            if let Some(package) = package_ctx.package {
-                set_added_env(&mut env, &mut added, "PACKAGE", package);
+        Ok(repo_ctx) => {
+            repo_root = repo_ctx.repo_root;
+            if let Some(package_ctx) = repo_ctx.package_context {
+                set_added_env(
+                    &mut env,
+                    &mut added,
+                    "PACKAGE_AREA",
+                    package_ctx.package_area.clone(),
+                );
+                if let Some(ref package) = package_ctx.package {
+                    set_added_env(&mut env, &mut added, "PACKAGE", package.clone());
+                }
+                package_context = Some(package_ctx);
             }
-            warnings.append(&mut package_warnings);
-        }
-        Ok((None, mut package_warnings)) => {
-            warnings.append(&mut package_warnings);
+            warnings.extend(repo_ctx.warnings);
         }
         Err(error) => warnings.push(format!(
             "failed to resolve monorepo package metadata for '{}': {}",
@@ -95,6 +103,7 @@ pub(crate) fn build_child_env(
         removed,
         added: added.into_iter().collect(),
         package_context,
+        repo_root,
         warnings,
     })
 }
@@ -171,53 +180,133 @@ fn is_sensitive_key(key: &str) -> bool {
         || uppercase.contains("TOKEN")
         || uppercase.contains("PASSWORD")
         || uppercase.contains("SECRET")
+        || uppercase.contains("PRIVATE_KEY")
+        || uppercase.contains("CREDENTIAL")
+        || uppercase.contains("ACCESS_KEY")
+        || uppercase.contains("PASSPHRASE")
 }
 
-fn resolve_monorepo_package_context(cwd: &Path) -> Result<(Option<PackageContext>, Vec<String>)> {
+/// Redact values in CLI args that look like they contain secrets.
+///
+/// Scans for patterns like `--api-key=sk-...` or `--token sk-...` and
+/// replaces the value portion with `****`.
+fn redact_sensitive_args(args: &[String]) -> Vec<String> {
+    let sensitive_prefixes: &[&str] = &[
+        "--api-key",
+        "--token",
+        "--secret",
+        "--password",
+        "--credential",
+        "--access-key",
+        "--private-key",
+        "--passphrase",
+    ];
+
+    let mut result = Vec::with_capacity(args.len());
+    let mut redact_next = false;
+
+    for arg in args {
+        if redact_next {
+            result.push("****".to_string());
+            redact_next = false;
+            continue;
+        }
+
+        // Check for --flag=value format
+        let mut matched = false;
+        for prefix in sensitive_prefixes {
+            if let Some(rest) = arg.strip_prefix(prefix) {
+                if rest.starts_with('=') {
+                    result.push(format!("{prefix}=****"));
+                    matched = true;
+                    break;
+                }
+                if rest.is_empty() {
+                    // Next arg is the value
+                    result.push(arg.clone());
+                    redact_next = true;
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
+        if !matched {
+            result.push(arg.clone());
+        }
+    }
+
+    result
+}
+
+struct RepoContext {
+    package_context: Option<PackageContext>,
+    repo_root: Option<PathBuf>,
+    warnings: Vec<String>,
+}
+
+fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     let git_root = detect_git(cwd, false, 1)?.map(|info| info.repo_root);
-    let repo_probe_root = git_root.unwrap_or_else(|| cwd.to_path_buf());
+    let repo_probe_root = git_root
+        .clone()
+        .unwrap_or_else(|| cwd.to_path_buf());
     let Some(repo) = detect_repo(&repo_probe_root)? else {
-        return Ok((None, Vec::new()));
+        return Ok(RepoContext {
+            package_context: None,
+            repo_root: git_root,
+            warnings: Vec::new(),
+        });
     };
 
     if !repo.is_monorepo {
-        return Ok((None, Vec::new()));
+        return Ok(RepoContext {
+            package_context: None,
+            repo_root: git_root,
+            warnings: Vec::new(),
+        });
     }
 
     let Some(packages) = repo.packages else {
-        return Ok((
-            None,
-            vec![format!(
+        return Ok(RepoContext {
+            package_context: None,
+            repo_root: git_root,
+            warnings: vec![format!(
                 "monorepo detected at '{}' but no packages were reported",
                 repo.root.display()
             )],
-        ));
+        });
     };
 
     if let Some(package_ctx) = select_package_for_cwd(cwd, &packages) {
-        return Ok((Some(package_ctx), Vec::new()));
+        return Ok(RepoContext {
+            package_context: Some(package_ctx),
+            repo_root: git_root,
+            warnings: Vec::new(),
+        });
     }
 
     if let Some(package_area) = select_package_area_for_cwd(cwd, &repo.root, &packages) {
         let candidates = package_candidates_for_area(&package_area, &packages);
-        return Ok((
-            Some(PackageContext {
+        return Ok(RepoContext {
+            package_context: Some(PackageContext {
                 package_area,
                 package: None,
                 candidates,
             }),
-            Vec::new(),
-        ));
+            repo_root: git_root,
+            warnings: Vec::new(),
+        });
     }
 
-    Ok((
-        None,
-        vec![format!(
+    Ok(RepoContext {
+        package_context: None,
+        repo_root: git_root,
+        warnings: vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
             repo.root.display(),
             cwd.display()
         )],
-    ))
+    })
 }
 
 fn select_package_for_cwd(cwd: &Path, packages: &[Package]) -> Option<PackageContext> {
@@ -311,10 +400,70 @@ mod tests {
     }
 
     #[test]
+    fn sanitization_catches_new_sensitive_patterns() {
+        let include_set = HashSet::new();
+        let env = vec![
+            ("SSH_PRIVATE_KEY".to_string(), "secret".to_string()),
+            ("AWS_ACCESS_KEY_ID".to_string(), "secret".to_string()),
+            ("DB_CREDENTIAL".to_string(), "secret".to_string()),
+            ("KEY_PASSPHRASE".to_string(), "secret".to_string()),
+            ("NORMAL_VAR".to_string(), "ok".to_string()),
+        ];
+
+        let (kept, removed) = sanitize_env_for_test(&env, &include_set);
+        let kept_names: HashSet<_> = kept.into_iter().map(|(name, _)| name).collect();
+
+        assert!(!kept_names.contains("SSH_PRIVATE_KEY"));
+        assert!(!kept_names.contains("AWS_ACCESS_KEY_ID"));
+        assert!(!kept_names.contains("DB_CREDENTIAL"));
+        assert!(!kept_names.contains("KEY_PASSPHRASE"));
+        assert!(kept_names.contains("NORMAL_VAR"));
+        assert_eq!(removed.len(), 4);
+    }
+
+    #[test]
     fn include_names_must_be_valid_env_identifiers() {
         let includes = vec!["VALID_NAME".to_string(), "9INVALID".to_string()];
         let error = validate_include_names(&includes).unwrap_err();
         assert!(error.to_string().contains("invalid --include env name"));
+    }
+
+    #[test]
+    fn redact_sensitive_args_hides_secret_values() {
+        let args = vec![
+            "--api-key=sk-12345".to_string(),
+            "--token".to_string(),
+            "bearer-abc".to_string(),
+            "--model".to_string(),
+            "gpt-4o".to_string(),
+            "--password=hunter2".to_string(),
+        ];
+
+        let redacted = redact_sensitive_args(&args);
+        assert_eq!(
+            redacted,
+            vec![
+                "--api-key=****",
+                "--token",
+                "****",
+                "--model",
+                "gpt-4o",
+                "--password=****",
+            ]
+        );
+    }
+
+    #[test]
+    fn redact_sensitive_args_preserves_non_secret_args() {
+        let args = vec![
+            "--json".to_string(),
+            "summarize".to_string(),
+            "--model".to_string(),
+            "gpt-4o".to_string(),
+        ];
+
+        let redacted = redact_sensitive_args(&args);
+        assert_eq!(redacted, args);
     }
 
     #[test]

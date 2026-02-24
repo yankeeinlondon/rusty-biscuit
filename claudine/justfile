@@ -261,13 +261,13 @@ cli *args="":
 oc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && AGENT="Opencode" opencode {{args}}
+    @cd .. && claudine opencode {{args}}
 
 # Open Claude Code
 cc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
+    @cd .. && claudine claude --yolo {{args}}
 
 # Open Claude Code
 gem *args="":

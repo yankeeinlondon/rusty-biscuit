@@ -98,7 +98,12 @@ impl TreePackage {
     }
 }
 
-fn find_git_root(start: &Path) -> Result<PathBuf, TreeHuggerError> {
+/// Finds the git repository root by walking up from `start`.
+///
+/// ## Errors
+///
+/// Returns `TreeHuggerError::GitRootNotFound` if no `.git` directory is found.
+pub fn find_git_root(start: &Path) -> Result<PathBuf, TreeHuggerError> {
     for ancestor in start.ancestors() {
         if ancestor.join(".git").is_dir() {
             return Ok(ancestor.to_path_buf());
@@ -110,7 +115,11 @@ fn find_git_root(start: &Path) -> Result<PathBuf, TreeHuggerError> {
     })
 }
 
-fn find_package_root(start: &Path, git_root: &Path) -> PathBuf {
+/// Finds the nearest package root between `start` and `git_root`.
+///
+/// Walks up from `start` looking for manifest files (Cargo.toml, package.json, etc.).
+/// Falls back to `git_root` if no manifest is found.
+pub fn find_package_root(start: &Path, git_root: &Path) -> PathBuf {
     for ancestor in start.ancestors() {
         if ancestor == git_root {
             break;

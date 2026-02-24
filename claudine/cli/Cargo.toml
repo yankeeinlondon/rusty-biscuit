@@ -23,6 +23,10 @@ darkmatter = { path = "../../darkmatter/lib" }
 color-eyre = "0.6"
 serde_json = "1.0"
 dirs = "6"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+libc = "0.2"
 shellexpand = "3"
 url = "2"
 

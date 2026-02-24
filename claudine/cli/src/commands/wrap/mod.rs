@@ -1,6 +1,6 @@
 mod env;
 mod exec;
-mod profile;
+pub(crate) mod profile;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -9,9 +9,11 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use clap::Args;
 use claudine::badges::{NON_INTERACTIVE, YOLO};
+use claudine::events::Provider;
 use color_eyre::eyre::{Result, eyre};
+use profile::{OutputFormat, WrapperProfile};
 use sniff::programs::InstalledAiClients;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::log;
 
@@ -30,6 +32,34 @@ pub struct WrapperArgs {
     #[arg(short = 'n', long = "non-interactive", visible_alias = "ni")]
     pub non_interactive: bool,
 
+    /// Override the model used by the provider.
+    #[arg(short = 'm', long = "model", value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Set the output format (json, text, stream).
+    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
+    pub output: Option<String>,
+
+    /// Set or append a system prompt (string or file path).
+    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
+    pub system_prompt: Option<String>,
+
+    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid with -n.
+    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
+    pub timeout: Option<u64>,
+
+    /// Show what would be executed without launching the child.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Suppress the Claudine preflight summary banner.
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+
+    /// Enable provider-specific sandboxing.
+    #[arg(long)]
+    pub sandbox: bool,
+
     /// Arguments forwarded to the wrapped provider CLI.
     #[arg(
         value_name = "ARGS",
@@ -41,8 +71,8 @@ pub struct WrapperArgs {
 }
 
 /// Run a wrapped provider command.
-pub fn run_provider_wrapper(wrapper: &str, args: WrapperArgs) -> Result<()> {
-    let code = match run_provider_wrapper_inner(wrapper, args) {
+pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs) -> Result<()> {
+    let code = match run_provider_wrapper_inner(provider, args) {
         Ok(code) => code,
         Err(error) => {
             log::error(&error.to_string());
@@ -53,10 +83,11 @@ pub fn run_provider_wrapper(wrapper: &str, args: WrapperArgs) -> Result<()> {
     std::process::exit(code);
 }
 
-fn run_provider_wrapper_inner(wrapper: &str, args: WrapperArgs) -> Result<i32> {
-    let profile = profile::profile_for_wrapper(wrapper)
-        .ok_or_else(|| eyre!("unknown wrapper provider '{}'", wrapper))?;
+fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i32> {
+    let profile = profile::profile_for_provider(provider)
+        .ok_or_else(|| eyre!("'{}' cannot be wrapped (it is a VS Code extension)", provider))?;
     let cwd = std::env::current_dir()?;
+    let term = Terminal::new();
 
     let clients = InstalledAiClients::new();
     let binary_path = resolve_binary_path(profile, &clients)?;
@@ -71,30 +102,70 @@ fn run_provider_wrapper_inner(wrapper: &str, args: WrapperArgs) -> Result<i32> {
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    profile::reject_direct_yolo_passthrough(profile, &child_args)?;
+    // Validate: --timeout requires --non-interactive
+    if args.timeout.is_some() && !non_interactive_requested {
+        return Err(eyre!("--timeout can only be used with --non-interactive mode"));
+    }
+
+    profile.reject_direct_yolo(&child_args)?;
 
     if yolo_requested
-        && let Some(warn) =
-            profile::apply_yolo_mapping(profile, &mut child_args, &mut env_overrides)?
+        && let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
     {
         deferred_warnings.push(warn);
     }
-    if yolo_requested && !profile::has_supported_yolo(profile) {
+    if yolo_requested && !profile.has_supported_yolo() {
         yolo_enabled = false;
     }
 
     if non_interactive_requested {
-        profile::apply_non_interactive_mapping(profile, &mut child_args)?;
-        profile::apply_non_interactive_defaults(profile, &mut child_args);
-        if profile.wrapper == "opencode"
-            && let Some(model) = model_value_from_args(&child_args)
-        {
-            env_overrides.push(("MODEL".to_string(), model));
+        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_defaults(&mut child_args);
+    }
+
+    // Universal --model flag
+    if let Some(ref model) = args.model
+        && let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
+    {
+        deferred_warnings.push(warn);
+    }
+
+    // OpenCode non-interactive MODEL env var (from passthrough --model)
+    if provider == Provider::OpenCode
+        && non_interactive_requested
+        && args.model.is_none()
+        && let Some(model) = model_value_from_args(&child_args)
+    {
+        env_overrides.push(("MODEL".to_string(), model));
+    }
+
+    if provider == Provider::OpenCode && non_interactive_requested {
+        deferred_messages.push(opencode_non_interactive_model_hint());
+    }
+
+    // Universal --output flag
+    if let Some(ref output_str) = args.output {
+        let format: OutputFormat = output_str
+            .parse()
+            .map_err(|e: String| eyre!(e))?;
+        if let Some(warn) = profile.apply_output_format(&mut child_args, format) {
+            deferred_warnings.push(warn);
         }
     }
 
-    if profile.wrapper == "opencode" && non_interactive_requested {
-        deferred_messages.push(opencode_non_interactive_model_hint());
+    // Universal --system-prompt flag
+    if let Some(ref prompt) = args.system_prompt {
+        let resolved = resolve_system_prompt(prompt)?;
+        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
+            deferred_warnings.push(warn);
+        }
+    }
+
+    // Universal --sandbox flag
+    if args.sandbox
+        && let Some(warn) = profile.apply_sandbox(&mut child_args)
+    {
+        deferred_warnings.push(warn);
     }
 
     let env_plan = env::build_child_env(
@@ -107,38 +178,84 @@ fn run_provider_wrapper_inner(wrapper: &str, args: WrapperArgs) -> Result<i32> {
         &env_overrides,
     )?;
 
-    log_wrapper_summary(
-        yolo_enabled,
-        non_interactive_requested,
+    let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
+
+    // --dry-run: print what would be executed and exit
+    if args.dry_run {
+        log_dry_run(profile, &binary_path, &child_args, &env_plan, child_cwd, &term);
+        return Ok(0);
+    }
+
+    // --quiet: skip all summary output
+    if !args.quiet {
+        log_wrapper_summary(
+            profile,
+            yolo_enabled,
+            non_interactive_requested,
+            &child_args,
+            &env_plan,
+            &term,
+            args.verbose_level(),
+        );
+
+        if let Some(info_message) = removed_env_info_message(&env_plan.removed, &term) {
+            log::message(&info_message);
+        }
+        for warning in &env_plan.warnings {
+            log::message(&post_env_warning_message(warning, &term));
+        }
+        for warning in &deferred_warnings {
+            log::message(&post_env_warning_message(warning, &term));
+        }
+        for message in &deferred_messages {
+            log::message(&post_env_message(message, &term));
+        }
+    }
+
+    exec::run_child(
+        binary_path.as_path(),
         &child_args,
-        &env_plan,
-    );
+        &env_plan.env,
+        child_cwd,
+        args.timeout,
+    )
+}
 
-    if let Some(info_message) = removed_env_info_message(&env_plan.removed) {
-        log::message(&info_message);
+impl WrapperArgs {
+    /// Determine the effective verbosity level from the global -v/-vv flag.
+    ///
+    /// This reads the tracing subscriber level to determine verbosity:
+    /// - 0 = default (header + badges)
+    /// - 1 = verbose (+ env changes + warnings)
+    /// - 2 = debug (+ full command + all debug info)
+    fn verbose_level(&self) -> u8 {
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            2
+        } else if tracing::enabled!(tracing::Level::INFO) {
+            1
+        } else {
+            0
+        }
     }
-    for warning in &env_plan.warnings {
-        log::message(&post_env_warning_message(warning));
-    }
-    for warning in &deferred_warnings {
-        log::message(&post_env_warning_message(warning));
-    }
-    for message in &deferred_messages {
-        log::message(&post_env_message(message));
-    }
-
-    exec::run_child(binary_path.as_path(), &child_args, &env_plan.env, &cwd)
 }
 
 fn log_wrapper_summary(
+    profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive_requested: bool,
     child_args: &[String],
     env_plan: &env::EnvPlan,
+    term: &Terminal,
+    verbose: u8,
 ) {
-    let term = Terminal::new();
-    let mut header_parts: Vec<String> =
-        vec![Prose::new("<blue><bold>Claudine</bold></blue>").fallback_render(&term)];
+    // Header always includes: Claudine ▸ ProviderName [badges]
+    let mut header_parts: Vec<String> = vec![
+        Prose::new(format!(
+            "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
+            profile.provider()
+        ))
+        .fallback_render(term),
+    ];
 
     if yolo_requested {
         header_parts.push(YOLO.to_string());
@@ -153,41 +270,108 @@ fn log_wrapper_summary(
             Prose::new(format!(
                 "<green><bold>PACKAGE_NAME:</bold> {package_name}</green>"
             ))
-            .fallback_render(&term),
+            .fallback_render(term),
         );
     }
 
     let remaining = format_passthrough_args(child_args);
     if !remaining.is_empty() {
-        header_parts.push(Prose::new(format!("<dim>{remaining}</dim>")).fallback_render(&term));
+        header_parts.push(Prose::new(format!("<dim>{remaining}</dim>")).fallback_render(term));
     }
 
     log::message(&format!("\n{}", header_parts.join(" ")));
-    log::message(&Prose::new("<bold>Environment Variables:</bold>").fallback_render(&term));
 
+    // Verbose level 0: header only (no env details)
+    // Verbose level 1+: header + environment changes
+    if verbose > 0 || !env_plan.added.is_empty() || !env_plan.removed.is_empty() {
+        log::message(
+            &Prose::new("<bold>Environment Variables:</bold>").fallback_render(term),
+        );
+
+        let mut items: Vec<RenderableContent> = Vec::new();
+        for removed in &env_plan.removed {
+            items.push(RenderableContent::from(Prose::new(format!(
+                "<red><strikethrough>{removed}</strikethrough></red>"
+            ))));
+        }
+
+        for (key, value) in &env_plan.added {
+            items.push(RenderableContent::from(Prose::new(format!(
+                "<green>{key}</green><dim>={}</dim>",
+                summarize_value(key, value)
+            ))));
+        }
+
+        if items.is_empty() {
+            items.push(RenderableContent::from(Prose::new(
+                "<dim>no environment changes</dim>",
+            )));
+        }
+
+        let rendered = UnorderedList::from(items)
+            .with_bullet("• ")
+            .fallback_render(term);
+        log::message(&rendered);
+    }
+}
+
+fn log_dry_run(
+    profile: &dyn WrapperProfile,
+    binary_path: &Path,
+    child_args: &[String],
+    env_plan: &env::EnvPlan,
+    child_cwd: &Path,
+    term: &Terminal,
+) {
+    log::message(
+        &Prose::new(format!(
+            "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
+            profile.provider()
+        ))
+        .fallback_render(term),
+    );
+
+    // Working directory
+    log::message(
+        &Prose::new(format!(
+            "<bold>Working directory:</bold> <dim>{}</dim>",
+            child_cwd.display()
+        ))
+        .fallback_render(term),
+    );
+
+    // Full command line
+    let cmd_parts: Vec<String> = std::iter::once(binary_path.display().to_string())
+        .chain(child_args.iter().map(|a| shell_escape(a)))
+        .collect();
+    log::message(
+        &Prose::new(format!("<bold>Command:</bold> <dim>{}</dim>", cmd_parts.join(" ")))
+            .fallback_render(term),
+    );
+
+    // Environment changes
+    log::message(
+        &Prose::new("<bold>Environment Changes:</bold>").fallback_render(term),
+    );
     let mut items: Vec<RenderableContent> = Vec::new();
     for removed in &env_plan.removed {
         items.push(RenderableContent::from(Prose::new(format!(
             "<red><strikethrough>{removed}</strikethrough></red>"
         ))));
     }
-
     for (key, value) in &env_plan.added {
         items.push(RenderableContent::from(Prose::new(format!(
-            "<green>{key}</green><dim>={}</dim>",
-            summarize_value(key, value)
+            "<green>{key}</green><dim>={value}</dim>"
         ))));
     }
-
     if items.is_empty() {
         items.push(RenderableContent::from(Prose::new(
             "<dim>no environment changes</dim>",
         )));
     }
-
     let rendered = UnorderedList::from(items)
         .with_bullet("• ")
-        .fallback_render(&term);
+        .fallback_render(term);
     log::message(&rendered);
 }
 
@@ -209,35 +393,39 @@ fn package_name_display(env_plan: &env::EnvPlan) -> Option<String> {
 }
 
 fn opencode_non_interactive_model_hint() -> String {
-    "<bold><blue>Info:</blue></bold> Opencode requires a model be specified when run in non-interactive mode. You can specify with the --model switch or set either OPENCODE_MODEL or MODEL environement variables.".to_string()
+    "<bold><blue>Info:</blue></bold> Opencode requires a model be specified when run in \
+     non-interactive mode. You can specify with the --model switch or set either OPENCODE_MODEL \
+     or MODEL environment variables."
+        .to_string()
 }
 
-fn removed_env_info_message(removed_env: &[String]) -> Option<String> {
+fn removed_env_info_message(removed_env: &[String], term: &Terminal) -> Option<String> {
     let example_env = removed_env.first()?;
-    let term = Terminal::new();
     Some(
         Prose::new(format!(
-            "- <blue><bold>Info:</bold></blue> potentially dangerous ENV variables were removed; if you need one of these to be included use the <blue>--include <dim>{example_env}</dim></blue> CLI switch"
+            "- <blue><bold>Info:</bold></blue> potentially dangerous ENV variables were removed; \
+             if you need one of these to be included use the <blue>--include \
+             <dim>{example_env}</dim></blue> CLI switch"
         ))
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-        .fallback_render(&term),
+        .fallback_render(term),
     )
 }
 
-fn post_env_message(message: &str) -> String {
-    let term = Terminal::new();
+fn post_env_message(message: &str, term: &Terminal) -> String {
     let styled = style_cli_switches(message);
     Prose::new(format!("- {styled}"))
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-        .fallback_render(&term)
+        .fallback_render(term)
 }
 
-fn post_env_warning_message(message: &str) -> String {
-    let term = Terminal::new();
+fn post_env_warning_message(message: &str, term: &Terminal) -> String {
     let styled = style_cli_switches(message);
-    Prose::new(format!("- <orange><bold>Warning:</bold></orange> {styled}"))
-        .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-        .fallback_render(&term)
+    Prose::new(format!(
+        "- <orange><bold>Warning:</bold></orange> {styled}"
+    ))
+    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
+    .fallback_render(term)
 }
 
 fn style_cli_switches(message: &str) -> String {
@@ -361,17 +549,28 @@ fn shell_escape(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
+/// Resolve the `--system-prompt` value: if it looks like a file path and exists,
+/// read its contents; otherwise treat it as a literal prompt string.
+fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
+    let path = std::path::Path::new(prompt_or_file);
+    if path.exists() && path.is_file() {
+        Ok(std::fs::read_to_string(path)?)
+    } else {
+        Ok(prompt_or_file.to_string())
+    }
+}
+
 fn resolve_binary_path(
-    profile: &profile::ProviderProfile,
+    profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,
 ) -> Result<PathBuf> {
-    let ai_cli = profile.provider.sniff_ai_cli();
+    let ai_cli = profile.provider().sniff_ai_cli();
     clients.path(ai_cli).ok_or_else(|| {
         eyre!(
             "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
-            profile.wrapper,
-            profile.binary,
-            profile.provider.docs_url()
+            profile.provider(),
+            profile.binary(),
+            profile.provider().docs_url()
         )
     })
 }
@@ -384,12 +583,12 @@ mod tests {
     #[test]
     fn missing_binary_preflight_has_actionable_message() {
         let clients = InstalledAiClients::default();
-        let profile = profile::profile_for_wrapper("codex").unwrap();
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
 
         let error = resolve_binary_path(profile, &clients).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("cannot run wrapped codex session"));
+        assert!(message.contains("cannot run wrapped Codex session"));
         assert!(message.contains("docs:"));
     }
 
@@ -399,6 +598,7 @@ mod tests {
             env: HashMap::new(),
             removed: Vec::new(),
             added: Vec::new(),
+            repo_root: None,
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
@@ -418,6 +618,7 @@ mod tests {
             env: HashMap::new(),
             removed: Vec::new(),
             added: Vec::new(),
+            repo_root: None,
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,
@@ -452,5 +653,11 @@ mod tests {
 
         assert_eq!(model_value_from_args(&long_inline), Some("foo".to_string()));
         assert_eq!(model_value_from_args(&short_next), Some("bar".to_string()));
+    }
+
+    #[test]
+    fn resolve_system_prompt_returns_literal_for_non_file() {
+        let result = resolve_system_prompt("You are a helpful assistant.").unwrap();
+        assert_eq!(result, "You are a helpful assistant.");
     }
 }

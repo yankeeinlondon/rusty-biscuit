@@ -5,6 +5,8 @@ RESET := '\033[0m'
 RED := '\033[31m'
 DOCS := ""
 
+PACKAGE := "Tree Hugger"
+
 default:
     @echo "{{BOLD}}Tree Hugger{{RESET}} CLI and Library"
     @echo
@@ -164,3 +166,9 @@ drift *args="":
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- tree-hugger {{DOCS}} {{args}}
     @_speak "the drift recipe for the tree-hugger package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+
+# Open Claude Code
+cc *args="":
+    @clear
+    @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @claudine claude --yolo {{args}}
