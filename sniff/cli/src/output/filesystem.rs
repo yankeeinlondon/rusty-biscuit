@@ -10,7 +10,71 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
+use sniff::filesystem::repo::Package;
+
 use super::{format_number, relative_path};
+
+/// Parsed repo filter with support for negation (`!`) and area matching (`@`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepoFilter {
+    pub query: String,
+    pub by_area: bool,
+    pub negate: bool,
+}
+
+impl RepoFilter {
+    /// Parse a filter string, stripping `!` and `@` prefixes in any order.
+    pub fn parse(input: &str) -> Self {
+        let mut by_area = false;
+        let mut negate = false;
+        let mut rest = input;
+
+        loop {
+            if let Some(stripped) = rest.strip_prefix('!') {
+                negate = true;
+                rest = stripped;
+            } else if let Some(stripped) = rest.strip_prefix('@') {
+                by_area = true;
+                rest = stripped;
+            } else {
+                break;
+            }
+        }
+
+        Self {
+            query: rest.to_string(),
+            by_area,
+            negate,
+        }
+    }
+
+    /// Check whether a package matches this filter.
+    pub fn matches(&self, pkg: &Package) -> bool {
+        let haystack = if self.by_area {
+            &pkg.package_area
+        } else {
+            &pkg.name
+        };
+        let hit = haystack
+            .to_lowercase()
+            .contains(&self.query.to_lowercase());
+        if self.negate { !hit } else { hit }
+    }
+}
+
+/// Apply an optional filter to a package list, returning matching packages.
+pub(crate) fn filter_packages<'a>(
+    packages: &'a [Package],
+    repo_filter: Option<&str>,
+) -> Vec<&'a Package> {
+    match repo_filter {
+        Some(f) => {
+            let filter = RepoFilter::parse(f);
+            packages.iter().filter(|p| filter.matches(p)).collect()
+        }
+        None => packages.iter().collect(),
+    }
+}
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -479,13 +543,14 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 /// Print package names as a comma-separated plain text list.
 ///
 /// Writes to stderr and exits if the repo is not a monorepo.
-pub fn print_repo_packages(result: &sniff::SniffResult) {
+pub fn print_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
             if let Some(ref packages) = repo.packages {
-                let names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+                let filtered = filter_packages(packages, repo_filter);
+                let names: Vec<&str> = filtered.iter().map(|p| p.name.as_str()).collect();
                 println!("{}", names.join(", "));
             }
         }
@@ -499,13 +564,14 @@ pub fn print_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
     _repo_root: Option<&Path>,
+    repo_filter: Option<&str>,
 ) {
     if !repo.is_monorepo {
         let title = Prose::new("<b><u>Repository</u></b>");
         println!("\n{}\n", title.render(None));
         let items = vec![
-            Prose::new(&format!("<b>Type:</b> Single-package")).render(None),
-            Prose::new(&format!("<b>Root:</b> {}", repo.root.display())).render(None),
+            Prose::new("<b>Type:</b> Single-package").render(None),
+            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(None),
         ];
         let list = UnorderedList::new(items);
         println!("{}", list.render(None));
@@ -519,26 +585,33 @@ pub fn print_repo_section(
         .map(format_monorepo_tool)
         .unwrap_or("Unknown");
 
-    let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
-
-    let title = Prose::new(&format!(
-        "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
-        tool_name, pkg_count,
-    ));
-    println!("\n{}\n", title.render(None));
+    let total_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
 
     if let Some(ref packages) = repo.packages {
+        let filtered = filter_packages(packages, repo_filter);
+        let showing_count = filtered.len();
+
+        let title_suffix = if repo_filter.is_some() && showing_count != total_count {
+            format!(
+                " <dim>({} / showing {} of {} packages)</dim>",
+                tool_name, showing_count, total_count,
+            )
+        } else {
+            format!(" <dim>({} / {} packages)</dim>", tool_name, total_count)
+        };
+
+        let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
+        println!("\n{}\n", title.render(None));
+
         // Track whether any package has updatable deps or excluded packages for the key
-        let has_updatable = packages.iter().any(|pkg| pkg.is_updatable == Some(true));
-        let has_excluded = packages.iter().any(|pkg| pkg.is_excluded);
+        let has_updatable = filtered.iter().any(|pkg| pkg.is_updatable == Some(true));
+        let has_excluded = filtered.iter().any(|pkg| pkg.is_excluded);
 
         // Group packages by area, preserving discovery order
         let mut areas: Vec<String> = Vec::new();
-        let mut area_packages: std::collections::HashMap<
-            &str,
-            Vec<&sniff::filesystem::repo::Package>,
-        > = std::collections::HashMap::new();
-        for pkg in packages {
+        let mut area_packages: std::collections::HashMap<&str, Vec<&&Package>> =
+            std::collections::HashMap::new();
+        for pkg in &filtered {
             let area = pkg.package_area.as_str();
             if !area_packages.contains_key(area) {
                 areas.push(area.to_string());
@@ -549,7 +622,7 @@ pub fn print_repo_section(
         let mut outer_items: Vec<RenderableContent> = Vec::new();
         for area in &areas {
             // Area heading in blue
-            let label = Prose::new(&format!("<blue><b>{}</b></blue>", area)).render(None);
+            let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render(None);
             outer_items.push(RenderableContent::String(label));
 
             // Nested package list with left margin
@@ -581,7 +654,7 @@ pub fn print_repo_section(
             let mut legend = String::from("\n<dim>");
             if has_updatable {
                 legend.push_str("<yellow>*</yellow> dependency updates available");
-                let has_major = packages
+                let has_major = filtered
                     .iter()
                     .any(|pkg| pkg.has_major_update == Some(true));
                 if has_major {
@@ -599,6 +672,12 @@ pub fn print_repo_section(
             legend.push_str("</dim>");
             println!("{}", Prose::new(&legend).render(None));
         }
+    } else {
+        let title = Prose::new(format!(
+            "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
+            tool_name, total_count,
+        ));
+        println!("\n{}\n", title.render(None));
     }
 }
 
@@ -993,12 +1072,15 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
     Some(lines.join("\n"))
 }
 
-/// Render an internal dependency diagram for the repository.
+/// Render an internal dependency diagram for the repository as a Mermaid image.
 ///
 /// Builds a Mermaid flowchart from package dependency data and renders it
 /// inline using `MermaidRenderer`. Falls back to a code block if the
 /// terminal cannot display images or mmdc is not available.
-pub fn print_repo_deps(repo: &sniff::filesystem::repo::RepoInfo) {
+pub fn print_repo_deps_visual(
+    repo: &sniff::filesystem::repo::RepoInfo,
+    repo_filter: Option<&str>,
+) {
     if !repo.is_monorepo {
         println!("--deps requires a monorepo (no workspace packages found)");
         return;
@@ -1012,7 +1094,12 @@ pub fn print_repo_deps(repo: &sniff::filesystem::repo::RepoInfo) {
         }
     };
 
-    let mermaid = match build_deps_mermaid(packages) {
+    let filtered: Vec<Package> = filter_packages(packages, repo_filter)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    let mermaid = match build_deps_mermaid(&filtered) {
         Some(m) => m,
         None => {
             println!("No internal dependencies found between workspace packages");
@@ -1027,6 +1114,93 @@ pub fn print_repo_deps(repo: &sniff::filesystem::repo::RepoInfo) {
             renderer.print_fallback();
         }
     }
+}
+
+/// Render an internal dependency list for the repository as styled text.
+///
+/// Each package with dependencies or dependents is shown as a top-level item
+/// with `depends-on` and `used-by` sub-items. Isolates (packages with neither)
+/// are omitted unless an explicit filter is set.
+pub fn print_repo_deps_text(
+    repo: &sniff::filesystem::repo::RepoInfo,
+    repo_filter: Option<&str>,
+) {
+    if !repo.is_monorepo {
+        println!("--deps requires a monorepo (no workspace packages found)");
+        return;
+    }
+
+    let packages = match repo.packages {
+        Some(ref pkgs) => pkgs,
+        None => {
+            println!("No packages found in workspace");
+            return;
+        }
+    };
+
+    let filtered = filter_packages(packages, repo_filter);
+    let has_explicit_filter = repo_filter.is_some();
+
+    // Collect only packages that participate in dependency relationships
+    // (unless an explicit filter is set, in which case show all matched)
+    let relevant: Vec<&&Package> = filtered
+        .iter()
+        .filter(|pkg| has_explicit_filter || !pkg.depends_on.is_empty() || !pkg.used_by.is_empty())
+        .collect();
+
+    if relevant.is_empty() {
+        println!("No internal dependencies found between workspace packages");
+        return;
+    }
+
+    let title = if has_explicit_filter {
+        format!(
+            "<b><u>Dependencies</u></b> <dim>(showing {} of {} packages)</dim>",
+            filtered.len(),
+            packages.len(),
+        )
+    } else {
+        format!(
+            "<b><u>Dependencies</u></b> <dim>({} packages with dependencies)</dim>",
+            relevant.len(),
+        )
+    };
+    println!("\n{}\n", Prose::new(&title).render(None));
+
+    let mut outer_items: Vec<RenderableContent> = Vec::new();
+    for pkg in &relevant {
+        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(None);
+        outer_items.push(RenderableContent::String(label));
+
+        let mut detail_items: Vec<String> = Vec::new();
+        if !pkg.depends_on.is_empty() {
+            detail_items.push(
+                Prose::new(format!(
+                    "<b>depends-on:</b> {}",
+                    pkg.depends_on.join(", ")
+                ))
+                .render(None),
+            );
+        }
+        if !pkg.used_by.is_empty() {
+            detail_items.push(
+                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", "))).render(None),
+            );
+        }
+
+        if !detail_items.is_empty() {
+            let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
+            outer_items.push(RenderableContent::Component(Arc::new(detail_list)));
+        }
+    }
+
+    let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
+    println!("{}", list.render(None));
+
+    eprintln!(
+        "\n{}",
+        Prose::new("<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>").render(None)
+    );
 }
 
 #[cfg(test)]
@@ -1059,6 +1233,141 @@ mod tests {
             is_updatable: None,
             has_major_update: None,
             is_excluded: false,
+        }
+    }
+
+    mod repo_filter_parse {
+        use super::*;
+
+        #[test]
+        fn simple_name() {
+            let f = RepoFilter::parse("biscuit");
+            assert_eq!(f.query, "biscuit");
+            assert!(!f.by_area);
+            assert!(!f.negate);
+        }
+
+        #[test]
+        fn negated() {
+            let f = RepoFilter::parse("!biscuit");
+            assert_eq!(f.query, "biscuit");
+            assert!(!f.by_area);
+            assert!(f.negate);
+        }
+
+        #[test]
+        fn area() {
+            let f = RepoFilter::parse("@sniff");
+            assert_eq!(f.query, "sniff");
+            assert!(f.by_area);
+            assert!(!f.negate);
+        }
+
+        #[test]
+        fn negated_area() {
+            let f = RepoFilter::parse("!@sniff");
+            assert_eq!(f.query, "sniff");
+            assert!(f.by_area);
+            assert!(f.negate);
+        }
+
+        #[test]
+        fn area_negated() {
+            let f = RepoFilter::parse("@!sniff");
+            assert_eq!(f.query, "sniff");
+            assert!(f.by_area);
+            assert!(f.negate);
+        }
+    }
+
+    mod repo_filter_matches {
+        use super::*;
+
+        #[test]
+        fn name_substring_match() {
+            let pkg = make_package("biscuit-hash", "biscuit-hash", &[]);
+            let f = RepoFilter::parse("biscuit");
+            assert!(f.matches(&pkg));
+        }
+
+        #[test]
+        fn name_substring_no_match() {
+            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let f = RepoFilter::parse("biscuit");
+            assert!(!f.matches(&pkg));
+        }
+
+        #[test]
+        fn case_insensitive() {
+            let pkg = make_package("Biscuit-Hash", "biscuit-hash", &[]);
+            let f = RepoFilter::parse("biscuit");
+            assert!(f.matches(&pkg));
+        }
+
+        #[test]
+        fn area_match() {
+            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let f = RepoFilter::parse("@sniff");
+            assert!(f.matches(&pkg));
+        }
+
+        #[test]
+        fn area_no_match() {
+            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let f = RepoFilter::parse("@biscuit");
+            assert!(!f.matches(&pkg));
+        }
+
+        #[test]
+        fn negated_excludes() {
+            let pkg = make_package("biscuit-hash", "biscuit-hash", &[]);
+            let f = RepoFilter::parse("!biscuit");
+            assert!(!f.matches(&pkg));
+        }
+
+        #[test]
+        fn negated_includes_non_matching() {
+            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let f = RepoFilter::parse("!biscuit");
+            assert!(f.matches(&pkg));
+        }
+    }
+
+    mod filter_packages_tests {
+        use super::*;
+
+        #[test]
+        fn no_filter_returns_all() {
+            let packages = vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-b", &[]),
+            ];
+            let result = filter_packages(&packages, None);
+            assert_eq!(result.len(), 2);
+        }
+
+        #[test]
+        fn name_filter() {
+            let packages = vec![
+                make_package("biscuit-hash", "biscuit-hash", &[]),
+                make_package("sniff-cli", "sniff", &[]),
+                make_package("biscuit-file", "biscuit-file", &[]),
+            ];
+            let result = filter_packages(&packages, Some("biscuit"));
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|p| p.name.contains("biscuit")));
+        }
+
+        #[test]
+        fn area_filter() {
+            let packages = vec![
+                make_package("sniff-cli", "sniff", &[]),
+                make_package("sniff-lib", "sniff", &[]),
+                make_package("biscuit-hash", "biscuit-hash", &[]),
+            ];
+            let result = filter_packages(&packages, Some("@sniff"));
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|p| p.package_area == "sniff"));
         }
     }
 

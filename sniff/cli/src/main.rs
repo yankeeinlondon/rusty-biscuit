@@ -105,6 +105,11 @@ pub enum Commands {
         /// Output only package names as a comma-separated list
         #[arg(long)]
         packages: bool,
+        /// Use visual (Mermaid) rendering for --deps instead of text
+        #[arg(long)]
+        ui: bool,
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
     },
 
     /// Show only language detection results
@@ -304,6 +309,19 @@ impl Commands {
         matches!(self, Commands::Repo { packages: true, .. })
     }
 
+    /// Check if this is a repo command with `--ui` flag.
+    pub fn ui(&self) -> bool {
+        matches!(self, Commands::Repo { ui: true, .. })
+    }
+
+    /// Get the repo filter string if this is a repo command with a filter arg.
+    pub fn repo_filter(&self) -> Option<&str> {
+        match self {
+            Commands::Repo { filter, .. } => filter.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Get remote name/URL if this is a git command with a remote arg.
     pub fn git_remote(&self) -> Option<&str> {
         match self {
@@ -388,7 +406,13 @@ Commands:
     sniff git owner/repo             Inspect by owner/repo shorthand
     sniff git https://github.com/... Inspect a remote by URL
     sniff repo                       Show only repository/monorepo structure
-    sniff repo --deps                Show internal dependency diagram
+    sniff repo biscuit               Filter to packages matching \"biscuit\"
+    sniff repo !biscuit              Exclude packages matching \"biscuit\"
+    sniff repo @sniff                Filter to packages in the \"sniff\" area
+    sniff repo --deps                Show internal dependency list (text)
+    sniff repo --deps --ui           Show internal dependency diagram (Mermaid)
+    sniff repo --deps biscuit        Filtered text dependency list
+    sniff repo --packages biscuit    Filtered CSV package names
     sniff language                   Show only language detection results
     sniff docs                       Show markdown documents in the repository
     sniff docs --readme              Show only README.md files
@@ -628,6 +652,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let deps = cli.command.as_ref().is_some_and(|c| c.deps());
     let packages = cli.command.as_ref().is_some_and(|c| c.packages());
+    let ui = cli.command.as_ref().is_some_and(|c| c.ui());
+    let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
 
     let use_json = cli.command.is_none() || cli.json;
 
@@ -642,6 +668,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             &docs_filter,
             deps,
             packages,
+            ui,
+            repo_filter,
         );
     }
 
@@ -1051,6 +1079,60 @@ mod tests {
         }
 
         #[test]
+        fn repo_ui_flag_parses() {
+            let cli = parse_args(&["repo", "--deps", "--ui"]).unwrap();
+            if let Some(Commands::Repo { deps, ui, .. }) = cli.command {
+                assert!(deps);
+                assert!(ui);
+            } else {
+                panic!("Expected Repo command");
+            }
+        }
+
+        #[test]
+        fn repo_filter_parses() {
+            let cli = parse_args(&["repo", "biscuit"]).unwrap();
+            if let Some(Commands::Repo { filter, .. }) = cli.command {
+                assert_eq!(filter, Some("biscuit".to_string()));
+            } else {
+                panic!("Expected Repo command");
+            }
+        }
+
+        #[test]
+        fn repo_deps_with_filter_parses() {
+            let cli = parse_args(&["repo", "--deps", "biscuit"]).unwrap();
+            if let Some(Commands::Repo { deps, filter, ui, .. }) = cli.command {
+                assert!(deps);
+                assert!(!ui);
+                assert_eq!(filter, Some("biscuit".to_string()));
+            } else {
+                panic!("Expected Repo command");
+            }
+        }
+
+        #[test]
+        fn repo_deps_ui_with_filter_parses() {
+            let cli = parse_args(&["repo", "--deps", "--ui", "@homelab"]).unwrap();
+            if let Some(Commands::Repo { deps, ui, filter, .. }) = cli.command {
+                assert!(deps);
+                assert!(ui);
+                assert_eq!(filter, Some("@homelab".to_string()));
+            } else {
+                panic!("Expected Repo command");
+            }
+        }
+
+        #[test]
+        fn repo_accessor_methods() {
+            let cli = parse_args(&["repo", "--deps", "--ui", "test"]).unwrap();
+            let cmd = cli.command.as_ref().unwrap();
+            assert!(cmd.deps());
+            assert!(cmd.ui());
+            assert_eq!(cmd.repo_filter(), Some("test"));
+        }
+
+        #[test]
         fn language_subcommand_parses() {
             let cli = parse_args(&["language"]).unwrap();
             assert!(matches!(cli.command, Some(Commands::Language)));
@@ -1364,6 +1446,8 @@ mod tests {
             let cmd = Commands::Repo {
                 deps: false,
                 packages: false,
+                ui: false,
+                filter: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
