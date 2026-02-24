@@ -20,6 +20,7 @@ clap = ["dep:clap"]
 [dependencies]
 base64 = "0.22"
 biscuit-hash = { path = "../../biscuit-hash/lib" }
+ignore = "0.4"
 image = "0.25"
 sniff = { path = "../../sniff/lib" }
 serde = { version = "1.0.228", features = ["derive"] }

@@ -253,24 +253,29 @@ check:
 cli *args="":
     @cargo run -p {{CLI}} {{args}}
 
-# Open Opencode in yolo mode
+
+# Open Opencode
 oc *args="":
     @clear
     @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && AGENT="Opencode" opencode {{args}}
+    @claudine opencode {{args}}
 
 # Open Claude Code
 cc *args="":
     @clear
-    @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
+    @claudine claude {{args}}
+
+# Open Gemini CLI
+gem *args="":
+    @clear
+    @echo -e "Loading {{BOLD}}Gemini CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @claudine gemini {{args}}
 
 # Open Codex CLI
 codex *args="":
     @clear
     @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && AGENT="Codex CLI" codex --dangerously-bypass-approvals-and-sandbox {{args}}
-
+    @claudine codex {{args}}
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"

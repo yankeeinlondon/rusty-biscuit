@@ -1265,8 +1265,8 @@ fn block_tag_layer(tag_name: &str) -> Option<StyleLayer> {
     match tag_name {
         "bold" | "b" | "dim" => Some(StyleLayer::FontWeight),
         "italic" | "i" => Some(StyleLayer::Italic),
-        "underline" | "u" | "double-underline" | "uu" | "curly-underline"
-        | "dotted-underline" | "dashed-underline" => Some(StyleLayer::Underline),
+        "underline" | "u" | "double-underline" | "uu" | "curly-underline" | "dotted-underline"
+        | "dashed-underline" => Some(StyleLayer::Underline),
         "blink" => Some(StyleLayer::Blink),
         "inverse" | "reverse" => Some(StyleLayer::Inverse),
         "hidden" => Some(StyleLayer::Hidden),
@@ -1314,12 +1314,10 @@ fn atomic_token_layer(token: &str) -> Option<(StyleLayer, bool)> {
         // Foreground colors
         "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
         | "bright-black" | "bright-red" | "bright-green" | "bright-yellow" | "bright-blue"
-        | "bright-magenta" | "bright-cyan" | "bright-white" => {
-            Some((StyleLayer::Foreground, true))
-        }
+        | "bright-magenta" | "bright-cyan" | "bright-white" => Some((StyleLayer::Foreground, true)),
         // Background colors
-        "bg-black" | "bg-red" | "bg-green" | "bg-yellow" | "bg-blue" | "bg-magenta"
-        | "bg-cyan" | "bg-white" | "bg-bright-black" | "bg-bright-red" | "bg-bright-green"
+        "bg-black" | "bg-red" | "bg-green" | "bg-yellow" | "bg-blue" | "bg-magenta" | "bg-cyan"
+        | "bg-white" | "bg-bright-black" | "bg-bright-red" | "bg-bright-green"
         | "bg-bright-yellow" | "bg-bright-blue" | "bg-bright-magenta" | "bg-bright-cyan"
         | "bg-bright-white" => Some((StyleLayer::Background, true)),
         // --- clearers ---
@@ -1444,9 +1442,7 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                                         }
                                     }
                                 }
-                            } else if c == ' '
-                                && len >= opening_tag_with_space.len()
-                            {
+                            } else if c == ' ' && len >= opening_tag_with_space.len() {
                                 let start = len - opening_tag_with_space.len();
                                 if inner_content.get(start..).is_some_and(|slice| {
                                     slice.eq_ignore_ascii_case(&opening_tag_with_space)
@@ -1620,10 +1616,7 @@ mod tests {
         let prose = Prose::new("<b><i>bold italic</i></b>");
         let result = prose.render(None);
         // One final \x1b[0m, not two — inner recursion no longer adds its own reset
-        assert_eq!(
-            result,
-            "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[22m\x1b[0m"
-        );
+        assert_eq!(result, "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[22m\x1b[0m");
     }
 
     #[test]
@@ -1908,10 +1901,7 @@ mod tests {
         // </red> should restore to \x1b[34m (the atomic blue).
         let prose = Prose::new("{{blue}}<red>red</red>blue");
         let result = prose.render(None);
-        assert_eq!(
-            result,
-            "\x1b[34m\x1b[31mred\x1b[34mblue\x1b[0m"
-        );
+        assert_eq!(result, "\x1b[34m\x1b[31mred\x1b[34mblue\x1b[0m");
     }
 
     #[test]
@@ -1920,7 +1910,11 @@ mod tests {
         let prose = Prose::new("<b><i>text</i> more</b>");
         let result = prose.render(None);
         let reset_count = result.matches("\x1b[0m").count();
-        assert_eq!(reset_count, 1, "Expected exactly one \\x1b[0m, got: {:?}", result);
+        assert_eq!(
+            reset_count, 1,
+            "Expected exactly one \\x1b[0m, got: {:?}",
+            result
+        );
         assert!(result.ends_with("\x1b[0m"));
     }
 

@@ -1,6 +1,6 @@
 use crate::{
-    components::renderable::Renderable,
     components::prose::Prose,
+    components::renderable::Renderable,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
