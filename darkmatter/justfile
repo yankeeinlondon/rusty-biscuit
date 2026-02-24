@@ -253,25 +253,18 @@ cli *args="":
 
 # Open Opencode
 oc *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
     @claudine opencode {{args}}
 
 # Open Claude Code
 cc *args="":
-    @clear
     @claudine claude {{args}}
 
 # Open Gemini CLI
 gem *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Gemini CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @claudine gemini {{args}}
 
 # Open Codex CLI
 codex *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @claudine codex {{args}}
 # Show the dependencies for this package
 deps:
