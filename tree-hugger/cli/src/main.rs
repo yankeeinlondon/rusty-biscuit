@@ -555,10 +555,10 @@ fn collect_files(
             continue;
         }
 
-        if let Some(language) = language
-            && ProgrammingLanguage::from_path(entry.path()) != Some(language)
-        {
-            continue;
+        match language {
+            Some(lang) if ProgrammingLanguage::from_path(entry.path()) != Some(lang) => continue,
+            None if ProgrammingLanguage::from_path(entry.path()).is_none() => continue,
+            _ => {}
         }
 
         files.push(entry.into_path());
