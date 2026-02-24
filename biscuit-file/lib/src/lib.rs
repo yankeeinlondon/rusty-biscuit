@@ -4,6 +4,7 @@
 //!
 //! - **TOML**: Parse, convert to JSON/YAML, validate against schema
 //! - **YAML**: Parse, convert to JSON/TOML, validate against schema
+//! - **JSON5**: Parse, convert to JSON/YAML/TOML
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
 //!
 //! ## Feature Flags
@@ -12,6 +13,7 @@
 //! |---------|---------|-------------|
 //! | `toml` | Yes | TOML parsing and conversion |
 //! | `yaml` | Yes | YAML parsing and conversion |
+//! | `json5` | Yes | JSON5 parsing and conversion |
 //! | `extract` | Yes | PDF text extraction via pdf-extract |
 //! | `lopdf` | Yes | PDF TOC extraction via lopdf |
 //! | `pdfium` | No | High-fidelity PDF extraction via pdfium-render |
@@ -60,6 +62,9 @@ pub mod toml;
 #[cfg(feature = "yaml")]
 pub mod yaml;
 
+#[cfg(feature = "json5")]
+pub mod json5;
+
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub mod pdf;
 
@@ -75,6 +80,9 @@ pub use self::toml::{Toml, TomlError, TomlSource};
 
 #[cfg(feature = "yaml")]
 pub use self::yaml::{Yaml, YamlError, YamlSource};
+
+#[cfg(feature = "json5")]
+pub use self::json5::{Json5, Json5Error, Json5Source};
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};

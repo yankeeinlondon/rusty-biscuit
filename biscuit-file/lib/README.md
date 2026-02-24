@@ -8,6 +8,7 @@ Core library for file format parsing, conversion, and detection.
 |---------|:-------:|-------------|
 | `toml` | yes | TOML parsing and conversion |
 | `yaml` | yes | YAML parsing and conversion |
+| `json5` | yes | JSON5 parsing and conversion via `json-five` |
 | `extract` | yes | PDF text extraction via `pdf-extract` |
 | `lopdf` | yes | PDF table-of-contents extraction via `lopdf` |
 | `pdfium` | no | High-fidelity PDF extraction via `pdfium-render` |
@@ -29,7 +30,7 @@ assert_eq!(ft.extension(), Some("toml"));
 assert_eq!(ft.mime_type(), Some("application/toml"));
 ```
 
-Recognized extensions: `.toml`, `.yaml`, `.yml`, `.json`, `.md`, `.markdown`, `.mdx`, `.pdf`
+Recognized extensions: `.toml`, `.yaml`, `.yml`, `.json`, `.json5`, `.md`, `.markdown`, `.mdx`, `.pdf`
 
 ### `Toml`
 
@@ -50,6 +51,27 @@ let json_value: serde_json::Value = toml.as_json_value()?;
 let yaml: String = toml.as_yaml()?;       // requires `yaml` feature
 let raw: &str = toml.raw();                // original TOML text
 ```
+
+### `Json5`
+
+Parse JSON5 from files, strings, or bytes. Convert to JSON, YAML, or TOML.
+
+```rust
+use biscuit_file::Json5;
+
+let j = Json5::new("config.json5")?;
+let j = Json5::from_str("{ key: 'value', /* comment */ }")?;
+
+// Convert
+let json: String = j.as_json()?;
+let json_compact: String = j.as_json_compact()?;
+let json5: String = j.as_json5();            // pretty, idiomatic JSON5
+let json5_compact: String = j.as_json5_compact(); // single-line JSON5
+let yaml: String = j.as_yaml()?;             // requires `yaml` feature
+let toml: String = j.as_toml()?;             // requires `toml` feature
+```
+
+The JSON5 formatter outputs idiomatic syntax: unquoted keys (when valid identifiers), single-quoted strings, and trailing commas in pretty mode.
 
 ### `Yaml`
 
@@ -90,4 +112,8 @@ Backend selection is automatic based on enabled features, or can be specified vi
 
 ## Error Types
 
-Each module has a dedicated error type: `TomlError`, `YamlError`, `PdfError`. All implement `std::error::Error` and integrate with `thiserror`.
+Each module has a dedicated error type: `TomlError`, `YamlError`, `Json5Error`, `PdfError`. All implement `std::error::Error` and integrate with `thiserror`.
+
+### `to_json5_pretty` / `to_json5_compact`
+
+Standalone formatters for converting any `serde_json::Value` to JSON5 output, available via `biscuit_file::json5::{to_json5_pretty, to_json5_compact}`.

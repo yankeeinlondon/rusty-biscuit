@@ -6,11 +6,12 @@ description = "File format utilities for PDF, TOML, and YAML"
 license = "MIT"
 
 [features]
-default = ["toml", "yaml", "extract", "lopdf"]
+default = ["toml", "yaml", "json5", "extract", "lopdf"]
 
 # Format support
 toml = ["dep:toml"]
 yaml = ["dep:serde_yaml_ng"]
+json5 = ["dep:json-five"]
 
 # PDF backends
 extract = ["dep:pdf-extract"]
@@ -19,7 +20,7 @@ pdfium = ["dep:pdfium-render"]
 
 # Optional features
 schema = ["dep:jsonschema"]
-full = ["toml", "yaml", "extract", "lopdf", "pdfium", "schema"]
+full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema"]
 
 [dependencies]
 # Core serialization
@@ -35,6 +36,9 @@ toml = { version = "0.8", optional = true }
 
 # YAML support (optional, default)
 serde_yaml_ng = { version = "0.10", optional = true }
+
+# JSON5 support (optional, default)
+json-five = { version = "0.3", optional = true }
 
 # PDF backends
 pdf-extract = { version = "0.7", optional = true }

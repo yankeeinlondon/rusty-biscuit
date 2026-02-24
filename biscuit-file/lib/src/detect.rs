@@ -14,6 +14,8 @@ pub enum FileType {
     Yaml,
     /// JSON data file.
     Json,
+    /// JSON5 data file.
+    Json5,
     /// Markdown document.
     Markdown,
     /// PDF document.
@@ -30,6 +32,7 @@ impl FileType {
             Self::Toml => Some("toml"),
             Self::Yaml => Some("yaml"),
             Self::Json => Some("json"),
+            Self::Json5 => Some("json5"),
             Self::Markdown => Some("md"),
             Self::Pdf => Some("pdf"),
             Self::Unknown => None,
@@ -43,6 +46,7 @@ impl FileType {
             Self::Toml => Some("application/toml"),
             Self::Yaml => Some("application/yaml"),
             Self::Json => Some("application/json"),
+            Self::Json5 => Some("application/json5"),
             Self::Markdown => Some("text/markdown"),
             Self::Pdf => Some("application/pdf"),
             Self::Unknown => None,
@@ -106,6 +110,7 @@ fn detect_from_extension(path: &Path) -> FileType {
         Some("toml") => FileType::Toml,
         Some("yaml" | "yml") => FileType::Yaml,
         Some("json") => FileType::Json,
+        Some("json5") => FileType::Json5,
         Some("md" | "markdown" | "mdx") => FileType::Markdown,
         Some("pdf") => FileType::Pdf,
         _ => FileType::Unknown,
@@ -133,6 +138,7 @@ mod tests {
         assert_eq!(FileType::Toml.extension(), Some("toml"));
         assert_eq!(FileType::Yaml.extension(), Some("yaml"));
         assert_eq!(FileType::Json.extension(), Some("json"));
+        assert_eq!(FileType::Json5.extension(), Some("json5"));
         assert_eq!(FileType::Markdown.extension(), Some("md"));
         assert_eq!(FileType::Pdf.extension(), Some("pdf"));
         assert_eq!(FileType::Unknown.extension(), None);
@@ -143,6 +149,7 @@ mod tests {
         assert_eq!(FileType::Toml.mime_type(), Some("application/toml"));
         assert_eq!(FileType::Yaml.mime_type(), Some("application/yaml"));
         assert_eq!(FileType::Json.mime_type(), Some("application/json"));
+        assert_eq!(FileType::Json5.mime_type(), Some("application/json5"));
         assert_eq!(FileType::Markdown.mime_type(), Some("text/markdown"));
         assert_eq!(FileType::Pdf.mime_type(), Some("application/pdf"));
         assert_eq!(FileType::Unknown.mime_type(), None);
@@ -165,6 +172,10 @@ mod tests {
         assert_eq!(
             detect_from_extension(Path::new("data.json")),
             FileType::Json
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("config.json5")),
+            FileType::Json5
         );
         assert_eq!(
             detect_from_extension(Path::new("readme.md")),

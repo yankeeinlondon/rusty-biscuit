@@ -1,0 +1,6 @@
+{
+  // JSON5 sample config
+  name: 'example',
+  version: '1.0.0',
+  tags: ['rust', 'cli'],
+}

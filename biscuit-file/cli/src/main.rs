@@ -3,7 +3,8 @@
 //! Convert between TOML, YAML, JSON, and extract text/markdown from PDFs.
 //! For Markdown files, extracts and converts the frontmatter block.
 
-use biscuit_file::{FileType, Pdf, Toml, Yaml, detect_file_type};
+use biscuit_file::{FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
+use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
 use clap::{ArgGroup, Parser, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::Read;
@@ -20,7 +21,7 @@ use std::path::PathBuf;
 #[command(name = "bf", version, about, long_about = None)]
 #[command(group(
     ArgGroup::new("output_format")
-        .args(["json", "yaml", "toml", "md", "text"])
+        .args(["json", "json5", "yaml", "toml", "md", "text"])
 ))]
 struct Cli {
     /// Input file path (omit or use `-` for STDIN)
@@ -29,6 +30,10 @@ struct Cli {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+
+    /// Output as JSON5
+    #[arg(long)]
+    json5: bool,
 
     /// Output as YAML
     #[arg(long)]
@@ -46,6 +51,10 @@ struct Cli {
     #[arg(long)]
     text: bool,
 
+    /// Compact single-line output (JSON and JSON5 only)
+    #[arg(long)]
+    compact: bool,
+
     /// Force input format (override auto-detection, required for STDIN)
     #[arg(long)]
     input_format: Option<InputFormat>,
@@ -55,6 +64,7 @@ struct Cli {
 #[derive(Clone, Copy, Debug)]
 enum OutputFormat {
     Json,
+    Json5,
     Yaml,
     Toml,
     Text,
@@ -65,6 +75,8 @@ impl Cli {
     fn output_format(&self) -> Option<OutputFormat> {
         if self.json {
             Some(OutputFormat::Json)
+        } else if self.json5 {
+            Some(OutputFormat::Json5)
         } else if self.yaml {
             Some(OutputFormat::Yaml)
         } else if self.toml {
@@ -95,6 +107,8 @@ enum InputFormat {
     Yaml,
     /// JSON input
     Json,
+    /// JSON5 input
+    Json5,
     /// Markdown input (extracts frontmatter)
     Markdown,
     /// PDF input
@@ -113,6 +127,7 @@ fn main() -> Result<()> {
             InputFormat::Toml => FileType::Toml,
             InputFormat::Yaml => FileType::Yaml,
             InputFormat::Json => FileType::Json,
+            InputFormat::Json5 => FileType::Json5,
             InputFormat::Markdown => FileType::Markdown,
             InputFormat::Pdf => FileType::Pdf,
         }
@@ -123,6 +138,7 @@ fn main() -> Result<()> {
     };
 
     let format = cli.output_format();
+    let compact = cli.compact;
 
     // Read input content
     let content = if from_stdin {
@@ -132,16 +148,17 @@ fn main() -> Result<()> {
     };
 
     match input_format {
-        FileType::Toml => process_toml(&content, format)?,
-        FileType::Yaml => process_yaml(&content, format)?,
-        FileType::Json => process_json(&content, format)?,
-        FileType::Markdown => process_markdown(&content, format)?,
-        FileType::Pdf => process_pdf(&content, format)?,
+        FileType::Toml => process_toml(&content, format, compact)?,
+        FileType::Yaml => process_yaml(&content, format, compact)?,
+        FileType::Json => process_json(&content, format, compact)?,
+        FileType::Json5 => process_json5(&content, format, compact)?,
+        FileType::Markdown => process_markdown(&content, format, compact)?,
+        FileType::Pdf => process_pdf(&content, format, compact)?,
         FileType::Unknown => {
             bail!(
                 "Unknown file type. Use --input-format to specify the format, \
                  or ensure the file has a recognized extension \
-                 (.toml, .yaml, .yml, .json, .md, .markdown, .mdx, .pdf)"
+                 (.toml, .yaml, .yml, .json, .json5, .md, .markdown, .mdx, .pdf)"
             );
         }
     }
@@ -198,13 +215,38 @@ fn extract_frontmatter(input: &str) -> Result<(&str, FrontmatterFormat)> {
     Ok((frontmatter, fmt))
 }
 
+/// Format a JSON value as either compact or pretty-printed JSON.
+fn format_json(value: &serde_json::Value, compact: bool) -> Result<String> {
+    if compact {
+        serde_json::to_string(value).wrap_err("Failed to serialize JSON")
+    } else {
+        serde_json::to_string_pretty(value).wrap_err("Failed to serialize JSON")
+    }
+}
+
+/// Format a JSON value as either compact or pretty-printed JSON5.
+fn format_json5(value: &serde_json::Value, compact: bool) -> String {
+    if compact {
+        to_json5_compact(value)
+    } else {
+        to_json5_pretty(value)
+    }
+}
+
 /// Process TOML content.
-fn process_toml(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
+fn process_toml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let input = std::str::from_utf8(content).wrap_err("TOML input is not valid UTF-8")?;
     let toml = Toml::from_str(input).wrap_err("Failed to parse TOML")?;
 
     let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => toml.as_json().wrap_err("Failed to convert to JSON")?,
+        OutputFormat::Json => {
+            let json_value = toml.as_json_value().wrap_err("Failed to convert to JSON")?;
+            format_json(&json_value, compact)?
+        }
+        OutputFormat::Json5 => {
+            let json_value = toml.as_json_value().wrap_err("Failed to convert to JSON")?;
+            format_json5(&json_value, compact)
+        }
         OutputFormat::Yaml => toml.as_yaml().wrap_err("Failed to convert to YAML")?,
         OutputFormat::Toml => toml.raw().to_string(),
         OutputFormat::Text | OutputFormat::Markdown => {
@@ -217,13 +259,17 @@ fn process_toml(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
 }
 
 /// Process YAML content.
-fn process_yaml(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
+fn process_yaml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let yaml = Yaml::from_bytes(content).wrap_err("Failed to parse YAML")?;
 
     let output = match format.unwrap_or(OutputFormat::Json) {
         OutputFormat::Json => {
             let value = yaml.as_json().wrap_err("Failed to convert to JSON")?;
-            serde_json::to_string_pretty(&value).wrap_err("Failed to serialize JSON")?
+            format_json(&value, compact)?
+        }
+        OutputFormat::Json5 => {
+            let value = yaml.as_json().wrap_err("Failed to convert to JSON")?;
+            format_json5(&value, compact)
         }
         OutputFormat::Yaml => {
             serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?
@@ -242,14 +288,13 @@ fn process_yaml(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
 }
 
 /// Process JSON content.
-fn process_json(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
+fn process_json(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let value: serde_json::Value =
         serde_json::from_slice(content).wrap_err("Failed to parse JSON")?;
 
     let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => {
-            serde_json::to_string_pretty(&value).wrap_err("Failed to serialize JSON")?
-        }
+        OutputFormat::Json => format_json(&value, compact)?,
+        OutputFormat::Json5 => format_json5(&value, compact),
         OutputFormat::Yaml => {
             serde_yaml_ng::to_string(&value).wrap_err("Failed to convert to YAML")?
         }
@@ -269,19 +314,50 @@ fn process_json(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
     Ok(())
 }
 
+/// Process JSON5 content.
+fn process_json5(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
+    let input = std::str::from_utf8(content).wrap_err("JSON5 input is not valid UTF-8")?;
+    let json5 = Json5::from_str(input).wrap_err("Failed to parse JSON5")?;
+
+    let output = match format.unwrap_or(OutputFormat::Json) {
+        OutputFormat::Json => {
+            if compact {
+                json5.as_json_compact().wrap_err("Failed to convert to JSON")?
+            } else {
+                json5.as_json().wrap_err("Failed to convert to JSON")?
+            }
+        }
+        OutputFormat::Json5 => {
+            if compact {
+                json5.as_json5_compact()
+            } else {
+                json5.as_json5()
+            }
+        }
+        OutputFormat::Yaml => json5.as_yaml().wrap_err("Failed to convert to YAML")?,
+        OutputFormat::Toml => json5.as_toml().wrap_err("Failed to convert to TOML")?,
+        OutputFormat::Text | OutputFormat::Markdown => {
+            bail!("--text and --md are only supported for PDF files");
+        }
+    };
+
+    println!("{output}");
+    Ok(())
+}
+
 /// Process Markdown content by extracting frontmatter and converting it.
-fn process_markdown(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
+fn process_markdown(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let input = std::str::from_utf8(content).wrap_err("Markdown input is not valid UTF-8")?;
     let (frontmatter, fm_format) = extract_frontmatter(input)?;
 
     match fm_format {
-        FrontmatterFormat::Yaml => process_yaml(frontmatter.as_bytes(), format),
-        FrontmatterFormat::Toml => process_toml(frontmatter.as_bytes(), format),
+        FrontmatterFormat::Yaml => process_yaml(frontmatter.as_bytes(), format, compact),
+        FrontmatterFormat::Toml => process_toml(frontmatter.as_bytes(), format, compact),
     }
 }
 
 /// Process PDF content.
-fn process_pdf(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
+fn process_pdf(content: &[u8], format: Option<OutputFormat>, _compact: bool) -> Result<()> {
     let pdf = Pdf::from_bytes(content.to_vec()).wrap_err("Failed to parse PDF")?;
 
     let output = match format.unwrap_or(OutputFormat::Text) {
@@ -292,8 +368,8 @@ fn process_pdf(content: &[u8], format: Option<OutputFormat>) -> Result<()> {
                 .wrap_err("Failed to convert PDF to Markdown")?;
             md.content
         }
-        OutputFormat::Json | OutputFormat::Yaml | OutputFormat::Toml => {
-            bail!("--json, --yaml, and --toml are only supported for data file inputs");
+        OutputFormat::Json | OutputFormat::Json5 | OutputFormat::Yaml | OutputFormat::Toml => {
+            bail!("--json, --json5, --yaml, and --toml are only supported for data file inputs");
         }
     };
 

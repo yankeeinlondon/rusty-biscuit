@@ -19,6 +19,11 @@ pub enum BiscuitFileError {
     #[error("YAML error: {0}")]
     Yaml(#[from] crate::yaml::YamlError),
 
+    /// Error during JSON5 operations.
+    #[cfg(feature = "json5")]
+    #[error("JSON5 error: {0}")]
+    Json5(#[from] crate::json5::Json5Error),
+
     /// Error during PDF operations.
     #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
     #[error("PDF error: {0}")]

@@ -73,6 +73,70 @@ fn json_default_pretty_prints() {
         .stdout(predicate::str::contains(r#""name": "example""#));
 }
 
+// ── JSON5 format conversion ─────────────────────────────────────────
+
+#[test]
+fn json5_to_json_default() {
+    bf().arg(fixture("sample.json5"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""name": "example""#));
+}
+
+#[test]
+fn json5_to_yaml() {
+    bf().arg(fixture("sample.json5"))
+        .arg("--yaml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name: example"));
+}
+
+#[test]
+fn json5_to_toml() {
+    bf().arg(fixture("sample.json5"))
+        .arg("--toml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name = \"example\""));
+}
+
+#[test]
+fn json5_to_json5() {
+    bf().arg(fixture("sample.json5"))
+        .arg("--json5")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example"));
+}
+
+#[test]
+fn json_to_json5() {
+    bf().arg(fixture("sample.json"))
+        .arg("--json5")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example"));
+}
+
+#[test]
+fn toml_to_json5() {
+    bf().arg(fixture("sample.toml"))
+        .arg("--json5")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example"));
+}
+
+#[test]
+fn yaml_to_json5() {
+    bf().arg(fixture("sample.yaml"))
+        .arg("--json5")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example"));
+}
+
 // ── Markdown frontmatter extraction ─────────────────────────────────
 
 #[test]
@@ -212,6 +276,17 @@ fn stdin_markdown_to_json() {
 }
 
 #[test]
+fn stdin_json5_to_json() {
+    bf().arg("--input-format")
+        .arg("json5")
+        .arg("--json")
+        .write_stdin("{ greeting: 'hello' }")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""greeting": "hello""#));
+}
+
+#[test]
 fn stdin_dash_is_equivalent() {
     bf().arg("-")
         .arg("--input-format")
@@ -242,6 +317,94 @@ fn stdin_dash_missing_input_format_errors() {
         .stderr(predicate::str::contains(
             "--input-format is required when reading from STDIN",
         ));
+}
+
+// ── Compact output ──────────────────────────────────────────────────
+
+#[test]
+fn json_compact_single_line() {
+    bf().arg(fixture("sample.json"))
+        .arg("--json")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("{\""))
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn json5_compact_unquoted_keys() {
+    bf().arg(fixture("sample.json"))
+        .arg("--json5")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name: 'example'"))
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn json5_input_compact_json_output() {
+    bf().arg(fixture("sample.json5"))
+        .arg("--json")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn json5_input_compact_json5_output() {
+    bf().arg(fixture("sample.json5"))
+        .arg("--json5")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name: 'example'"))
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn toml_to_json_compact() {
+    bf().arg(fixture("sample.toml"))
+        .arg("--json")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn yaml_to_json5_compact() {
+    bf().arg(fixture("sample.yaml"))
+        .arg("--json5")
+        .arg("--compact")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name: 'example'"))
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() == 1
+        }));
+}
+
+#[test]
+fn default_json_is_pretty_not_compact() {
+    bf().arg(fixture("sample.json"))
+        .assert()
+        .success()
+        .stdout(predicate::function(|s: &str| {
+            s.trim().lines().count() > 1
+        }));
 }
 
 // ── Mutual exclusivity ──────────────────────────────────────────────
