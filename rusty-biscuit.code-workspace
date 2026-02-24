@@ -87,9 +87,15 @@
             "~ monorepo"
         ],
         "cSpell.words": [
+            "darkmatter",
+            "eaee",
+            "eafa",
+            "ebdf",
+            "eefc",
             "highspeed",
             "osascript",
-            "qwen"
+            "qwen",
+            "startswith"
         ]
     }
 }

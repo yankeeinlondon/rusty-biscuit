@@ -583,6 +583,7 @@ name = "biscuit-file"
 version = "0.1.0"
 dependencies = [
  "infer",
+ "json-five",
  "jsonschema",
  "lopdf 0.36.0",
  "pdf-extract",
@@ -674,6 +675,7 @@ dependencies = [
  "biscuit-hash",
  "chrono",
  "clap 4.5.60",
+ "ignore",
  "image",
  "libc",
  "predicates",
@@ -1602,12 +1604,14 @@ name = "darkmatter-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-hash",
  "clap 4.5.60",
  "clap_complete",
  "color-eyre",
  "darkmatter",
  "open",
  "predicates",
+ "rayon",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "tempfile",
@@ -3475,6 +3479,16 @@ checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "json-five"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "865f2d01a4549c1fd8c60640c03ae5249eb374cd8cde8b905628d4b1af95c87c"
+dependencies = [
+ "serde",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -8366,6 +8380,12 @@ name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-id"

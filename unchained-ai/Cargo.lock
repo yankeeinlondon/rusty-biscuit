@@ -335,6 +335,7 @@ dependencies = [
  "base64",
  "biscuit-hash",
  "chrono",
+ "ignore",
  "image",
  "libc",
  "regex",
