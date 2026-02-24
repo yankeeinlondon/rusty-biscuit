@@ -7,6 +7,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidRenderer;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
@@ -1082,14 +1083,14 @@ pub fn print_repo_deps_visual(
     repo_filter: Option<&str>,
 ) {
     if !repo.is_monorepo {
-        println!("--deps requires a monorepo (no workspace packages found)");
+        eprintln!("--deps requires a monorepo (no workspace packages found)");
         return;
     }
 
     let packages = match repo.packages {
         Some(ref pkgs) => pkgs,
         None => {
-            println!("No packages found in workspace");
+            eprintln!("No packages found in workspace");
             return;
         }
     };
@@ -1102,7 +1103,7 @@ pub fn print_repo_deps_visual(
     let mermaid = match build_deps_mermaid(&filtered) {
         Some(m) => m,
         None => {
-            println!("No internal dependencies found between workspace packages");
+            eprintln!("No internal dependencies found between workspace packages");
             return;
         }
     };
@@ -1126,14 +1127,14 @@ pub fn print_repo_deps_text(
     repo_filter: Option<&str>,
 ) {
     if !repo.is_monorepo {
-        println!("--deps requires a monorepo (no workspace packages found)");
+        eprintln!("--deps requires a monorepo (no workspace packages found)");
         return;
     }
 
     let packages = match repo.packages {
         Some(ref pkgs) => pkgs,
         None => {
-            println!("No packages found in workspace");
+            eprintln!("No packages found in workspace");
             return;
         }
     };
@@ -1149,7 +1150,7 @@ pub fn print_repo_deps_text(
         .collect();
 
     if relevant.is_empty() {
-        println!("No internal dependencies found between workspace packages");
+        eprintln!("No internal dependencies found between workspace packages");
         return;
     }
 
@@ -1165,11 +1166,12 @@ pub fn print_repo_deps_text(
             relevant.len(),
         )
     };
-    println!("\n{}\n", Prose::new(&title).render(None));
+    let term = Terminal::default();
+    eprintln!("\n{}\n", Prose::new(&title).fallback_render(&term));
 
     let mut outer_items: Vec<RenderableContent> = Vec::new();
     for pkg in &relevant {
-        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(None);
+        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).fallback_render(&term);
         outer_items.push(RenderableContent::String(label));
 
         let mut detail_items: Vec<String> = Vec::new();
@@ -1179,12 +1181,13 @@ pub fn print_repo_deps_text(
                     "<b>depends-on:</b> {}",
                     pkg.depends_on.join(", ")
                 ))
-                .render(None),
+                .fallback_render(&term),
             );
         }
         if !pkg.used_by.is_empty() {
             detail_items.push(
-                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", "))).render(None),
+                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", ")))
+                    .fallback_render(&term),
             );
         }
 
@@ -1195,11 +1198,12 @@ pub fn print_repo_deps_text(
     }
 
     let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-    println!("{}", list.render(None));
+    print!("{}", list.fallback_render(&term));
 
     eprintln!(
         "\n{}",
-        Prose::new("<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>").render(None)
+        Prose::new("<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>")
+            .fallback_render(&term)
     );
 }
 
