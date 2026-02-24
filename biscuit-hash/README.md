@@ -64,16 +64,19 @@ echo "mysecret" | bh --password -
 Enable tab completions by adding one line to your shell config:
 
 **Bash** (`~/.bashrc`):
+
 ```sh
 source <(COMPLETE=bash bh)
 ```
 
 **Zsh** (`~/.zshrc`):
+
 ```sh
 source <(COMPLETE=zsh bh)
 ```
 
 **Fish** (`~/.config/fish/config.fish`):
+
 ```sh
 COMPLETE=fish bh | source
 ```
@@ -126,11 +129,11 @@ The `HashVariant` enumeration provides the following options:
 - `TrailingWhitespace` - all whitespace at the _end of each line_ is removed
 - `InteriorWhitespace` - all _extra_ space (aka, after the first whitespace character) _on each line_ is removed.
 - `ReplacementMap(map)`
-    - The replacement map variant requires that you provide a `HashMap<String,String>` as configuration
-    - The hashmap provided represents a text replacement strategy where the _keys_ are the text we'll look for, and the _values_ are the text we'll replace it with
+  - The replacement map variant requires that you provide a `HashMap<String,String>` as configuration
+  - The hashmap provided represents a text replacement strategy where the _keys_ are the text we'll look for, and the _values_ are the text we'll replace it with
 - `DropChars(chars)`
-    - Removes all occurrences of the specified characters from the content before hashing
-    - Useful for ignoring specific punctuation or symbols
+  - Removes all occurrences of the specified characters from the content before hashing
+  - Useful for ignoring specific punctuation or symbols
 
 ### Using the `HashVariant` to Hash with xxHash
 
