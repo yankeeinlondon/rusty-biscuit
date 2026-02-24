@@ -244,6 +244,25 @@ mod cli {
             #[arg(long)]
             json: bool,
         },
+
+        /// Hash a markdown document's frontmatter and body.
+        Hash {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+            input: Option<PathBuf>,
+
+            /// Only output the body/prose hash
+            #[arg(long)]
+            body: bool,
+
+            /// Only output the frontmatter hash
+            #[arg(long)]
+            frontmatter: bool,
+
+            /// Strict mode: no whitespace normalization or key reordering
+            #[arg(long)]
+            strict: bool,
+        },
     }
 
     /// Command-line interface for the darkmatter markdown renderer.

@@ -1,6 +1,8 @@
+use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result, eyre};
+use rayon::prelude::*;
 use darkmatter::markdown::highlighting::{
     ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
@@ -175,6 +177,14 @@ fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 print_delta(&delta, cli.verbose > 0, &base_md, &updated_md);
             }
         }
+        CliCommand::Hash {
+            input,
+            body,
+            frontmatter,
+            strict,
+        } => {
+            run_hash(input.as_ref(), body, frontmatter, strict)?;
+        }
     }
 
     Ok(())
@@ -282,6 +292,155 @@ fn run_compose(
         OutputFormat::Json => {
             let artifact = json_artifact(&transformed)?;
             emit_or_show_artifact(artifact, show)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Hash a markdown document's frontmatter and/or body.
+///
+/// When the input is a directory, recursively finds all markdown files,
+/// hashes each in parallel, concatenates the per-file hashes, and
+/// produces a single aggregate hash.
+fn run_hash(
+    input: Option<&PathBuf>,
+    body_only: bool,
+    frontmatter_only: bool,
+    strict: bool,
+) -> Result<()> {
+    // Directory mode: aggregate hash over all markdown files
+    if let Some(path) = input
+        && path.is_dir()
+    {
+        let mut paths = collect_markdown_files(path)?;
+        paths.sort();
+
+        let per_file_hashes: Vec<String> = paths
+            .par_iter()
+            .map(|p| {
+                let md = Markdown::try_from(p.as_path())
+                    .unwrap_or_else(|_| Markdown::from(String::new()));
+                hash_single(&md, body_only, frontmatter_only, strict)
+            })
+            .collect();
+
+        let combined = per_file_hashes.join("\n");
+        let aggregate = xx_hash(&combined);
+
+        if body_only || frontmatter_only {
+            println!("{:016x}", aggregate);
+        } else {
+            // Split each per-file "fm-body" hash, aggregate fm and body separately
+            let (fm_parts, body_parts): (Vec<&str>, Vec<&str>) = per_file_hashes
+                .iter()
+                .filter_map(|h| h.split_once('-'))
+                .unzip();
+
+            let fm_aggregate = xx_hash(&fm_parts.join("\n"));
+            let body_aggregate = xx_hash(&body_parts.join("\n"));
+            println!("{:016x}-{:016x}", fm_aggregate, body_aggregate);
+        }
+
+        return Ok(());
+    }
+
+    // Single file / stdin mode
+    let md = load_markdown(input)?;
+    println!("{}", hash_single(&md, body_only, frontmatter_only, strict));
+    Ok(())
+}
+
+/// Produce the hash string for a single markdown document.
+fn hash_single(md: &Markdown, body_only: bool, frontmatter_only: bool, strict: bool) -> String {
+    if body_only {
+        format!("{:016x}", hash_body(md, strict))
+    } else if frontmatter_only {
+        format!("{:016x}", hash_frontmatter(md, strict))
+    } else {
+        format!(
+            "{:016x}-{:016x}",
+            hash_frontmatter(md, strict),
+            hash_body(md, strict)
+        )
+    }
+}
+
+/// Hash a markdown document's frontmatter.
+fn hash_frontmatter(md: &Markdown, strict: bool) -> u64 {
+    let map = md.frontmatter().as_map();
+    if map.is_empty() {
+        return xx_hash("");
+    }
+    if strict {
+        let yaml = serde_yaml::to_string(map).unwrap_or_default();
+        xx_hash(&yaml)
+    } else {
+        let mut keys: Vec<&String> = map.keys().collect();
+        keys.sort();
+        let canonical: String = keys
+            .iter()
+            .map(|k| {
+                let v = &map[*k];
+                format!("{}:{}", k, serde_json::to_string(v).unwrap_or_default())
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        xx_hash(&canonical)
+    }
+}
+
+/// Hash a markdown document's body/prose content.
+fn hash_body(md: &Markdown, strict: bool) -> u64 {
+    let content = md.content();
+    if strict {
+        xx_hash(content)
+    } else {
+        xx_hash_variant(
+            content,
+            vec![
+                HashVariant::LeadingWhitespace,
+                HashVariant::TrailingWhitespace,
+                HashVariant::BlankLine,
+            ],
+        )
+    }
+}
+
+/// Recursively collect all markdown files (`.md`, `.dm`) under a directory.
+fn collect_markdown_files(dir: &std::path::Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    collect_markdown_files_recursive(dir, &mut files)?;
+    Ok(files)
+}
+
+fn collect_markdown_files_recursive(
+    dir: &std::path::Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let entries =
+        std::fs::read_dir(dir).wrap_err_with(|| format!("Failed to read directory: {:?}", dir))?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Skip hidden directories
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'))
+            {
+                continue;
+            }
+            collect_markdown_files_recursive(&path, files)?;
+        } else if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("dm"))
+        {
+            files.push(path);
         }
     }
 

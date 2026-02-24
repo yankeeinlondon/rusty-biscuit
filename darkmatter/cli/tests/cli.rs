@@ -22,7 +22,8 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("clean"))
         .stdout(predicate::str::contains("compose"))
         .stdout(predicate::str::contains("toc"))
-        .stdout(predicate::str::contains("delta"));
+        .stdout(predicate::str::contains("delta"))
+        .stdout(predicate::str::contains("hash"));
 }
 
 #[test]
@@ -335,4 +336,311 @@ fn test_compose_state_requires_json_object() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("expected a JSON object"));
+}
+
+// =============================================================================
+//                          HASH SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_hash_default_outputs_two_hashes() {
+    // Default mode: frontmatter_hash-body_hash (each 16 hex chars)
+    md_cmd()
+        .args(["hash", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_body_only() {
+    md_cmd()
+        .args(["hash", "--body", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_frontmatter_only() {
+    md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_no_frontmatter() {
+    // Document with no frontmatter should still produce a valid hash pair
+    md_cmd()
+        .args(["hash", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_deterministic() {
+    // Same input should produce the same hash
+    let result1 = md_cmd()
+        .args(["hash", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .args(["hash", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .output()
+        .unwrap();
+
+    assert_eq!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_frontmatter_reordering() {
+    // Frontmatter with different key ordering should produce the same hash
+    let result1 = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: Hello\nauthor: Alice\n---\n# Content")
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\nauthor: Alice\ntitle: Hello\n---\n# Content")
+        .output()
+        .unwrap();
+
+    assert_eq!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_body_whitespace_insensitive() {
+    // Body with different whitespace should produce the same hash (non-strict)
+    let result1 = md_cmd()
+        .args(["hash", "--body", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .args(["hash", "--body", "-"])
+        .write_stdin("# Hello\n\n\nWorld")
+        .output()
+        .unwrap();
+
+    assert_eq!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_strict_whitespace_sensitive() {
+    // With --strict, different whitespace should produce different hashes
+    let result1 = md_cmd()
+        .args(["hash", "--body", "--strict", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .args(["hash", "--body", "--strict", "-"])
+        .write_stdin("# Hello\n\n\nWorld")
+        .output()
+        .unwrap();
+
+    assert_ne!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_strict_frontmatter_order_sensitive() {
+    // With --strict, different key ordering should produce different hashes
+    let result1 = md_cmd()
+        .args(["hash", "--frontmatter", "--strict", "-"])
+        .write_stdin("---\ntitle: Hello\nauthor: Alice\n---\n# Content")
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .args(["hash", "--frontmatter", "--strict", "-"])
+        .write_stdin("---\nauthor: Alice\ntitle: Hello\n---\n# Content")
+        .output()
+        .unwrap();
+
+    assert_ne!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_from_file() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "---\ntitle: File Test\n---\n# Hello\n\nWorld").unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
+}
+
+// =============================================================================
+//                      HASH DIRECTORY MODE TESTS
+// =============================================================================
+
+/// Helper: create a temp directory with markdown files and return the dir.
+fn create_hash_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+    // Nested subdirectory
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    std::fs::write(
+        dir.path().join("sub/c.md"),
+        "---\ntitle: Gamma\n---\n# Gamma\n\nThird file.",
+    )
+    .unwrap();
+    // Non-markdown file (should be ignored)
+    std::fs::write(dir.path().join("notes.txt"), "not markdown").unwrap();
+    dir
+}
+
+#[test]
+fn test_hash_directory_default() {
+    let dir = create_hash_dir();
+
+    md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_directory_body_only() {
+    let dir = create_hash_dir();
+
+    md_cmd()
+        .args(["hash", "--body"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_directory_frontmatter_only() {
+    let dir = create_hash_dir();
+
+    md_cmd()
+        .args(["hash", "--frontmatter"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}\n$").unwrap());
+}
+
+#[test]
+fn test_hash_directory_deterministic() {
+    let dir = create_hash_dir();
+
+    let result1 = md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let result2 = md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(result1.stdout, result2.stdout);
+}
+
+#[test]
+fn test_hash_directory_differs_from_single_file() {
+    let dir = create_hash_dir();
+
+    let dir_result = md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let file_result = md_cmd()
+        .arg("hash")
+        .arg(dir.path().join("a.md"))
+        .output()
+        .unwrap();
+
+    // Directory aggregate should differ from any single file hash
+    assert_ne!(dir_result.stdout, file_result.stdout);
+}
+
+#[test]
+fn test_hash_directory_skips_hidden_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.md"), "# Visible").unwrap();
+    std::fs::create_dir(dir.path().join(".hidden")).unwrap();
+    std::fs::write(dir.path().join(".hidden/secret.md"), "# Secret").unwrap();
+
+    // Hash with only visible file
+    let with_hidden = md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    // Hash a dir that only has the visible file (no hidden dir)
+    let dir2 = tempfile::tempdir().unwrap();
+    std::fs::write(dir2.path().join("a.md"), "# Visible").unwrap();
+
+    let without_hidden = md_cmd()
+        .arg("hash")
+        .arg(dir2.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(with_hidden.stdout, without_hidden.stdout);
+}
+
+#[test]
+fn test_hash_directory_strict() {
+    let dir = create_hash_dir();
+
+    let normal = md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let strict = md_cmd()
+        .args(["hash", "--strict"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    // Strict and normal should produce different hashes (different normalization)
+    assert_ne!(normal.stdout, strict.stdout);
+}
+
+#[test]
+fn test_hash_directory_ignores_non_markdown() {
+    // A directory with only non-markdown files should still produce a valid hash
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "not markdown").unwrap();
+    std::fs::write(dir.path().join("data.json"), "{}").unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
 }
