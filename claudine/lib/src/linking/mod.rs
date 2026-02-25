@@ -9,6 +9,7 @@ mod hashing;
 pub mod model;
 mod paths;
 mod report;
+pub mod skills;
 mod symlink;
 
 pub use canonical::{
@@ -29,6 +30,7 @@ pub use discovery::DiscoveredSkill;
 pub use execution::{ApplySummary, analyze_resource_links, apply_fixable_resources};
 pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
+pub use skills::{ExceptionType, SkillException, SkillInfo, SkillScope, SkillsReport, list_skills};
 pub use symlink::{LinkResult, category_link_target, relative_path};
 
 use crate::error::Result;
