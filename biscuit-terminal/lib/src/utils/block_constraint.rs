@@ -362,24 +362,34 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 break;
             }
 
-            // Check if remaining text fits - apply hanging indent if applicable
-            if visible_width(&remaining) <= width {
-                let final_text = match strategy {
+            // Check if remaining text fits - apply hanging indent if applicable.
+            // For continuation lines with hanging indent, the effective available
+            // width is reduced by the indent so the prepended spaces don't overflow.
+            {
+                let (indent, is_continuation) = match strategy {
                     WordWrap::WrapProse(_, hanging_indent)
                     | WordWrap::BespokeProse(_, _, hanging_indent) => {
                         let indent = hanging_indent.unwrap_or(0) as usize;
-                        let is_continuation =
+                        let is_cont =
                             !wrapped.is_empty() || visible_width(&remaining) != original_width;
-                        if is_continuation && indent > 0 {
-                            format!("{}{}", " ".repeat(indent), remaining)
-                        } else {
-                            remaining
-                        }
+                        (indent, is_cont)
                     }
-                    _ => remaining,
+                    _ => (0, false),
                 };
-                wrapped.push(final_text);
-                break;
+                let fits_width = if is_continuation && indent > 0 {
+                    width.saturating_sub(indent as u32)
+                } else {
+                    width
+                };
+                if visible_width(&remaining) <= fits_width {
+                    let final_text = if is_continuation && indent > 0 {
+                        format!("{}{}", " ".repeat(indent), remaining)
+                    } else {
+                        remaining
+                    };
+                    wrapped.push(final_text);
+                    break;
+                }
             }
 
             match strategy {
@@ -420,13 +430,9 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         if is_continuation && indent > 0 {
                             head = format!("{}{}", " ".repeat(indent), head);
                         }
-                        let tail = if is_whitespace {
-                            trim_leading_whitespace_preserve_escapes(
-                                &remaining[break_idx + break_len..],
-                            )
-                        } else {
-                            remaining[split_at..].to_string()
-                        };
+                        let tail = trim_leading_whitespace_preserve_escapes(
+                            &remaining[split_at..],
+                        );
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -483,13 +489,12 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         if is_continuation && indent > 0 {
                             head = format!("{}{}", " ".repeat(indent), head);
                         }
-                        let tail = if is_whitespace {
-                            trim_leading_whitespace_preserve_escapes(
-                                &remaining[break_idx + break_len..],
-                            )
-                        } else {
-                            remaining[split_at..].to_string()
-                        };
+                        // Always trim leading whitespace so that breaking on
+                        // non-whitespace chars (e.g. comma in "a, b") doesn't
+                        // carry a stray space into the next line.
+                        let tail = trim_leading_whitespace_preserve_escapes(
+                            &remaining[split_at..],
+                        );
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -744,6 +749,55 @@ mod tests {
                 "  friend".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn wrap_lines_hanging_indent_does_not_overflow_on_fits_check() {
+        // Regression: remaining text that fits within `width` but NOT within
+        // `width - indent` was accepted by the early-exit check and then
+        // prepended with indent spaces, producing a line wider than `width`.
+        let lines = wrap_lines(
+            vec!["aaa bbb ccc ddd eee".to_string()],
+            &WordWrap::BespokeProse(Some(50), vec![' '], Some(4)),
+            12,
+        );
+        // width=12, indent=4 → effective=8 for continuation lines.
+        // "aaa bbb ccc" (11 visible) fits the first line (no indent).
+        // "ddd eee" (7 visible) fits within effective=8 → "    ddd eee" (11 visible ≤ 12).
+        // Without the fix, "ddd eee" (7) passed the `<= 12` check and became
+        // "    ddd eee" (11) — correct here, but with tighter values it overflowed.
+        for line in &lines {
+            assert!(
+                visible_width(line) <= 12,
+                "line overflows width: {:?} (visible={})",
+                line,
+                visible_width(line),
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_lines_hanging_indent_remaining_exceeds_effective_width() {
+        // The remaining text fits in `width` but NOT in `width - indent`,
+        // so it must be wrapped further rather than emitted as-is.
+        let lines = wrap_lines(
+            vec!["aaaa bbbb cccccccc".to_string()],
+            &WordWrap::BespokeProse(Some(50), vec![' '], Some(6)),
+            14,
+        );
+        // width=14, indent=6 → effective=8 for continuation.
+        // First line: "aaaa bbbb" (9) fits width=14.
+        // Remaining: "cccccccc" (8) fits width=14 but NOT effective=8 → must still wrap.
+        // With indent: "      cccccccc" = 14 visible = exactly fits.
+        // But if remaining were 9 chars it would overflow without the fix.
+        for line in &lines {
+            assert!(
+                visible_width(line) <= 14,
+                "line overflows width: {:?} (visible={})",
+                line,
+                visible_width(line),
+            );
+        }
     }
 
     #[test]

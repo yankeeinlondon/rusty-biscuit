@@ -94,13 +94,14 @@ impl OrderedList {
     /// Block-level child components are rendered without a number
     /// prefix and their output is indented by `indent_children`
     /// spaces. Inline items and strings get the normal `"N. "` prefix.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
+    fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
         let indent = self.indent_children;
 
         for (i, item) in self.items.iter().enumerate() {
             let number = i + 1;
             let prefix = format!("{}. ", number);
+            let prefix_width = crate::utils::block_constraint::visible_width(&prefix);
 
             match item {
                 RenderableContent::String(s) => {
@@ -108,13 +109,9 @@ impl OrderedList {
                     result.push_str(s);
                 }
                 RenderableContent::Component(component) if component.is_block_level() => {
-                    // Block-level child: no prefix, reduced width, indent output
+                    // Block-level child: no prefix, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = if let Some(t) = term {
-                        component.fallback_render(t)
-                    } else {
-                        component.render(Some(child_width))
-                    };
+                    let content = component.render(Some(child_width));
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -125,13 +122,11 @@ impl OrderedList {
                     }
                 }
                 RenderableContent::Component(component) => {
-                    // Inline component: normal prefix
+                    // Inline component: normal prefix.
+                    // Width reduced by prefix since it is prepended.
                     result.push_str(&prefix);
-                    let content = if let Some(t) = term {
-                        component.fallback_render(t)
-                    } else {
-                        component.render(Some(term_width))
-                    };
+                    let child_width = term_width.saturating_sub(prefix_width);
+                    let content = component.render(Some(child_width));
                     result.push_str(&content);
                 }
             }
@@ -307,7 +302,7 @@ impl UnorderedList {
     /// Block-level child components are rendered without a bullet
     /// and their output is indented. Inline items and strings get
     /// the normal bullet prefix.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
+    fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
         let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet);
         let indent = self.indent_children.unwrap_or(bullet_width);
@@ -319,13 +314,10 @@ impl UnorderedList {
                     result.push_str(s);
                 }
                 RenderableContent::Component(component) if component.is_block_level() => {
-                    // Block-level child: no bullet, reduced width, indent output
+                    // Block-level child: no bullet, reduced width, indent output.
+                    // Width is reduced by indent since every line gets indented.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = if let Some(t) = term {
-                        component.fallback_render(t)
-                    } else {
-                        component.render(Some(child_width))
-                    };
+                    let content = component.render(Some(child_width));
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -336,13 +328,11 @@ impl UnorderedList {
                     }
                 }
                 RenderableContent::Component(component) => {
-                    // Inline component: normal bullet
+                    // Inline component: normal bullet prefix.
+                    // Width is reduced by bullet_width since the bullet is prepended.
                     result.push_str(&self.bullet);
-                    let content = if let Some(t) = term {
-                        component.fallback_render(t)
-                    } else {
-                        component.render(Some(term_width))
-                    };
+                    let child_width = term_width.saturating_sub(bullet_width);
+                    let content = component.render(Some(child_width));
                     result.push_str(&content);
                 }
             }
