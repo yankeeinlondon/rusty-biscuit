@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::events::Provider;
@@ -46,6 +47,53 @@ pub struct ResourceDefinition {
     pub body_hash: u64,
 }
 
+/// Root cause for an `IncompleteLink` classification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncompleteCause {
+    /// Canonical source reference has no definition (neither Source nor PartialSource).
+    NoCanonicalDefinition,
+    /// Target provider does not support custom resources for this type.
+    CustomNotSupported,
+    /// Target provider requires frontmatter properties that the canonical source lacks.
+    MissingProperties(Vec<String>),
+    /// Target provider has no configured resource format.
+    NoTargetFormat,
+    /// No conversion path exists between the canonical format and the target format.
+    NoConversionPath,
+    /// Existing symlink points to a different target than the canonical source.
+    WrongSymlinkTarget,
+    /// Target location is a symlink where a derived (non-symlink) artifact is expected.
+    UnexpectedSymlink,
+}
+
+impl fmt::Display for IncompleteCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IncompleteCause::NoCanonicalDefinition => {
+                write!(f, "no canonical definition available")
+            }
+            IncompleteCause::CustomNotSupported => {
+                write!(f, "custom resources not supported")
+            }
+            IncompleteCause::MissingProperties(props) => {
+                write!(f, "missing required properties: {}", props.join(", "))
+            }
+            IncompleteCause::NoTargetFormat => {
+                write!(f, "no target format configured")
+            }
+            IncompleteCause::NoConversionPath => {
+                write!(f, "no conversion path between formats")
+            }
+            IncompleteCause::WrongSymlinkTarget => {
+                write!(f, "symlink points to wrong target")
+            }
+            IncompleteCause::UnexpectedSymlink => {
+                write!(f, "unexpected symlink where derived artifact expected")
+            }
+        }
+    }
+}
+
 /// Detailed resource reference state used by analyze/list/fix workflows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceReference {
@@ -60,7 +108,7 @@ pub enum ResourceReference {
     /// Symlink should exist but is missing.
     LinkMissing(Provider, ResourceScope),
     /// Symlink blocked by incomplete canonical properties.
-    IncompleteLink(Provider, ResourceScope),
+    IncompleteLink(Provider, ResourceScope, IncompleteCause),
     /// Derived representation exists and matches canonical source hashes.
     DerivedLink(Provider, ResourceScope),
     /// Derived representation exists but is stale.
@@ -78,7 +126,7 @@ impl ResourceReference {
             | ResourceReference::Isolated(definition) => definition.provider,
             ResourceReference::Link(provider, _)
             | ResourceReference::LinkMissing(provider, _)
-            | ResourceReference::IncompleteLink(provider, _)
+            | ResourceReference::IncompleteLink(provider, _, _)
             | ResourceReference::DerivedLink(provider, _)
             | ResourceReference::DerivedStale(provider, _)
             | ResourceReference::DerivedMissing(provider, _) => *provider,
@@ -95,7 +143,7 @@ impl ResourceReference {
             ResourceReference::DerivedStale(_, _)
             | ResourceReference::DerivedMissing(_, _)
             | ResourceReference::LinkMissing(_, _) => ReferenceStatus::IsFixable,
-            ResourceReference::PartialSource(_, _) | ResourceReference::IncompleteLink(_, _) => {
+            ResourceReference::PartialSource(_, _) | ResourceReference::IncompleteLink(_, _, _) => {
                 ReferenceStatus::NeedsUserAttention
             }
         }
@@ -194,7 +242,7 @@ mod tests {
             ResourceReference::Isolated(definition),
             ResourceReference::Link(Provider::Codex, ResourceScope::Repo),
             ResourceReference::LinkMissing(Provider::Gemini, ResourceScope::Repo),
-            ResourceReference::IncompleteLink(Provider::OpenCode, ResourceScope::Repo),
+            ResourceReference::IncompleteLink(Provider::OpenCode, ResourceScope::Repo, IncompleteCause::NoCanonicalDefinition),
             ResourceReference::DerivedLink(Provider::QwenCode, ResourceScope::Repo),
             ResourceReference::DerivedStale(Provider::RooCode, ResourceScope::Repo),
             ResourceReference::DerivedMissing(Provider::Goose, ResourceScope::Repo),
@@ -239,7 +287,7 @@ mod tests {
                 ReferenceStatus::IsFixable,
             ),
             (
-                ResourceReference::IncompleteLink(Provider::Codex, ResourceScope::Repo),
+                ResourceReference::IncompleteLink(Provider::Codex, ResourceScope::Repo, IncompleteCause::CustomNotSupported),
                 ReferenceStatus::NeedsUserAttention,
             ),
             (
@@ -259,6 +307,39 @@ mod tests {
         for (reference, expected) in cases {
             assert_eq!(reference.status(), expected);
         }
+    }
+
+    #[test]
+    fn incomplete_cause_display() {
+        assert_eq!(
+            IncompleteCause::NoCanonicalDefinition.to_string(),
+            "no canonical definition available"
+        );
+        assert_eq!(
+            IncompleteCause::CustomNotSupported.to_string(),
+            "custom resources not supported"
+        );
+        assert_eq!(
+            IncompleteCause::MissingProperties(vec!["slug".into(), "roleDefinition".into()])
+                .to_string(),
+            "missing required properties: slug, roleDefinition"
+        );
+        assert_eq!(
+            IncompleteCause::NoTargetFormat.to_string(),
+            "no target format configured"
+        );
+        assert_eq!(
+            IncompleteCause::NoConversionPath.to_string(),
+            "no conversion path between formats"
+        );
+        assert_eq!(
+            IncompleteCause::WrongSymlinkTarget.to_string(),
+            "symlink points to wrong target"
+        );
+        assert_eq!(
+            IncompleteCause::UnexpectedSymlink.to_string(),
+            "unexpected symlink where derived artifact expected"
+        );
     }
 
     #[test]

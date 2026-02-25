@@ -6,7 +6,7 @@ use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::detector::DiscoveredResource;
-use super::model::{ResourceDefinition, ResourceReference, ResourceScope};
+use super::model::{IncompleteCause, ResourceDefinition, ResourceReference, ResourceScope};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedMarkdown {
@@ -79,25 +79,26 @@ pub fn classify_target_reference(
     scope: ResourceScope,
 ) -> ResourceReference {
     let Some(definition) = canonical_definition(canonical_source) else {
-        return ResourceReference::IncompleteLink(target_provider, scope);
+        return ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::NoCanonicalDefinition);
     };
 
     let capabilities = capabilities_for(target_provider);
     let support = capabilities.support_for(resource);
     if !support.level.allows_custom() {
-        return ResourceReference::IncompleteLink(target_provider, scope);
+        return ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::CustomNotSupported);
     }
 
-    let unmet = support
+    let missing: Vec<String> = support
         .required_properties()
         .iter()
         .filter(|required| {
             !property_is_satisfied(required, &definition.frontmatter, &definition.body)
         })
-        .count();
+        .map(|s| s.to_string())
+        .collect();
 
-    if unmet > 0 {
-        ResourceReference::IncompleteLink(target_provider, scope)
+    if !missing.is_empty() {
+        ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::MissingProperties(missing))
     } else {
         ResourceReference::LinkMissing(target_provider, scope)
     }
@@ -184,7 +185,10 @@ fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml::Mapping> {
         return Ok(serde_yaml::Mapping::new());
     }
 
-    let value: serde_yaml::Value = serde_yaml::from_str(raw)?;
+    let value: serde_yaml::Value = match serde_yaml::from_str(raw) {
+        Ok(value) => value,
+        Err(_) => return Ok(parse_frontmatter_lines(raw)),
+    };
     match value {
         serde_yaml::Value::Mapping(mapping) => Ok(mapping),
         serde_yaml::Value::Null => Ok(serde_yaml::Mapping::new()),
@@ -192,6 +196,31 @@ fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml::Mapping> {
             "frontmatter must be a YAML mapping".to_string(),
         )),
     }
+}
+
+/// Line-by-line fallback for frontmatter that isn't strict YAML.
+///
+/// Handles values like `argument-hint: [--force] [msg]` where square brackets
+/// are literal text, not YAML flow sequences.
+fn parse_frontmatter_lines(raw: &str) -> serde_yaml::Mapping {
+    let mut mapping = serde_yaml::Mapping::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once(": ") {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() && !key.contains(' ') {
+                mapping.insert(
+                    serde_yaml::Value::String(key.to_string()),
+                    serde_yaml::Value::String(value.to_string()),
+                );
+            }
+        }
+    }
+    mapping
 }
 
 fn write_markdown_document(path: &Path, parsed: &ParsedMarkdown) -> Result<()> {
@@ -606,7 +635,7 @@ mod tests {
         );
         assert!(matches!(
             for_kimi,
-            ResourceReference::IncompleteLink(Provider::KimiCode, ResourceScope::User)
+            ResourceReference::IncompleteLink(Provider::KimiCode, ResourceScope::User, _)
         ));
 
         let for_opencode = classify_target_reference(
@@ -619,5 +648,230 @@ mod tests {
             for_opencode,
             ResourceReference::LinkMissing(Provider::OpenCode, ResourceScope::User)
         ));
+    }
+
+    #[test]
+    fn frontmatter_with_yaml_incompatible_brackets_uses_fallback_parser() {
+        let content = "---\ndescription: Create commits\nargument-hint: [--force] [commit-message]\n---\nDo the thing.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert!(parsed.had_frontmatter);
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
+            Some(&serde_yaml::Value::String("Create commits".to_string()))
+        );
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml::Value::String("[--force] [commit-message]".to_string()))
+        );
+        assert_eq!(parsed.body, "Do the thing.\n");
+    }
+
+    #[test]
+    fn single_bracket_value_parsed_as_yaml_sequence() {
+        // serde_yaml interprets `[bug-description]` as a flow sequence.
+        // This is correct YAML behavior but means the value is a Sequence,
+        // not the literal string `[bug-description]`. Downstream consumers
+        // (mapping_to_string_map) re-serialize it as `- bug-description`.
+        let content = "---\nargument-hint: [bug-description]\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        let hint = parsed
+            .frontmatter
+            .get(serde_yaml::Value::String("argument-hint".to_string()))
+            .unwrap();
+        assert!(
+            hint.is_sequence(),
+            "YAML parses [value] as a flow sequence, not a string"
+        );
+    }
+
+    #[test]
+    fn angle_bracket_placeholders_are_plain_strings() {
+        let content =
+            "---\nargument-hint: <skill-name>\ndescription: Do something\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml::Value::String("<skill-name>".to_string()))
+        );
+    }
+
+    #[test]
+    fn mixed_angle_and_square_brackets_are_plain_strings() {
+        // `<source-file> [test-glob]` starts with `<`, so YAML treats
+        // the whole value as a plain scalar (the `[` is not at value start).
+        let content =
+            "---\nargument-hint: <source-file> [test-glob]\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml::Value::String("<source-file> [test-glob]".to_string()))
+        );
+    }
+
+    #[test]
+    fn allowed_tools_with_colons_and_parens_parse_as_strings() {
+        let content =
+            "---\nallowed-tools: Bash(git:*), Read\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("allowed-tools".to_string())),
+            Some(&serde_yaml::Value::String("Bash(git:*), Read".to_string()))
+        );
+    }
+
+    #[test]
+    fn allowed_tools_with_multiple_colons_parse_as_strings() {
+        let content =
+            "---\nallowed-tools: Bash(ping :*), Bash(traceroute :*), Bash(dig :*)\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("allowed-tools".to_string())),
+            Some(&serde_yaml::Value::String(
+                "Bash(ping :*), Bash(traceroute :*), Bash(dig :*)".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn quoted_field_value_strips_yaml_quotes() {
+        let content = "---\nname: \"code-review\"\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("name".to_string())),
+            Some(&serde_yaml::Value::String("code-review".to_string()))
+        );
+    }
+
+    #[test]
+    fn single_quoted_brackets_are_plain_strings() {
+        let content =
+            "---\nargument-hint: '[--force] [commit-message-hint]'\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml::Value::String("[--force] [commit-message-hint]".to_string()))
+        );
+    }
+
+    #[test]
+    fn description_with_nested_quotes_and_parens() {
+        let content = "---\ndescription: Evaluate \"drift\" (aka, docs out of sync)\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        let desc = parsed
+            .frontmatter
+            .get(serde_yaml::Value::String("description".to_string()))
+            .unwrap();
+        assert!(desc.is_string(), "description should parse as string");
+    }
+
+    #[test]
+    fn crlf_line_endings_in_frontmatter() {
+        let content = "---\r\ndescription: test\r\nname: example\r\n---\r\nBody.\r\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert!(parsed.had_frontmatter);
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
+            Some(&serde_yaml::Value::String("test".to_string()))
+        );
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("name".to_string())),
+            Some(&serde_yaml::Value::String("example".to_string()))
+        );
+    }
+
+    #[test]
+    fn bom_prefix_is_stripped_before_parsing() {
+        let content = "\u{feff}---\ndescription: test\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert!(parsed.had_frontmatter);
+        assert_eq!(
+            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
+            Some(&serde_yaml::Value::String("test".to_string()))
+        );
+    }
+
+    #[test]
+    fn no_frontmatter_returns_full_body() {
+        let content = "Just a body with no frontmatter.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert!(!parsed.had_frontmatter);
+        assert!(parsed.frontmatter.is_empty());
+        assert_eq!(parsed.body, content);
+    }
+
+    #[test]
+    fn empty_frontmatter_returns_empty_mapping() {
+        let content = "---\n---\nBody.\n";
+        let parsed = parse_markdown_document(content).unwrap();
+        assert!(parsed.had_frontmatter);
+        assert!(parsed.frontmatter.is_empty());
+        assert_eq!(parsed.body, "Body.\n");
+    }
+
+    #[test]
+    fn fallback_parser_skips_comments_and_empty_lines() {
+        let mapping = parse_frontmatter_lines("# comment\n\nname: test\n\ndescription: hello\n");
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(
+            mapping.get(serde_yaml::Value::String("name".to_string())),
+            Some(&serde_yaml::Value::String("test".to_string()))
+        );
+        assert_eq!(
+            mapping.get(serde_yaml::Value::String("description".to_string())),
+            Some(&serde_yaml::Value::String("hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn fallback_parser_ignores_lines_without_separator() {
+        let mapping = parse_frontmatter_lines("name: valid\nno-separator\nother: also-valid\n");
+        assert_eq!(mapping.len(), 2);
+        assert!(mapping.get(serde_yaml::Value::String("name".to_string())).is_some());
+        assert!(mapping.get(serde_yaml::Value::String("other".to_string())).is_some());
+    }
+
+    #[test]
+    fn fallback_parser_rejects_keys_with_spaces() {
+        let mapping = parse_frontmatter_lines("good-key: value\nbad key: value\n");
+        assert_eq!(mapping.len(), 1);
+        assert!(mapping.get(serde_yaml::Value::String("good-key".to_string())).is_some());
+    }
+
+    #[test]
+    fn classify_target_reference_captures_missing_property_names() {
+        use crate::linking::model::IncompleteCause;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_file = tmp.path().join("reviewer.md");
+        std::fs::write(
+            &agent_file,
+            "---\nname: reviewer\ndescription: Reviews changes\n---\nUse strict review standards.\n",
+        )
+        .unwrap();
+
+        let candidate = build_candidate("reviewer", agent_file, Provider::Claude, false);
+        let canonical =
+            classify_canonical_candidate(LinkableResource::Agent, &candidate, ResourceScope::User)
+                .unwrap();
+
+        let for_kimi = classify_target_reference(
+            LinkableResource::Agent,
+            &canonical,
+            Provider::KimiCode,
+            ResourceScope::User,
+        );
+        match for_kimi {
+            ResourceReference::IncompleteLink(_, _, IncompleteCause::MissingProperties(props)) => {
+                assert!(!props.is_empty(), "should capture missing property names");
+            }
+            ResourceReference::IncompleteLink(_, _, cause) => {
+                // CustomNotSupported is also valid if Kimi doesn't support custom agents
+                assert!(
+                    matches!(cause, IncompleteCause::CustomNotSupported),
+                    "unexpected cause: {cause}"
+                );
+            }
+            other => panic!("expected IncompleteLink, got {other:?}"),
+        }
     }
 }

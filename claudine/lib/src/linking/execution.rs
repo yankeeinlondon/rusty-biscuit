@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
@@ -11,7 +11,7 @@ use super::detector::{
     SkillsDetector, SlashCommandsDetector,
 };
 use super::model::{
-    Resource, ResourceDefinition, ResourceFormatConversion, ResourceReference,
+    IncompleteCause, Resource, ResourceDefinition, ResourceFormatConversion, ResourceReference,
     ResourceScope as ModelScope, ResourceType,
 };
 use super::paths::{ProviderSkillPaths, ResourceScope as PathScope};
@@ -36,6 +36,10 @@ struct DetectionSnapshot {
     canonical_by_name: HashMap<String, DiscoveredResource>,
     resources_by_provider_name: HashMap<(Provider, String), DiscoveredResource>,
     names: Vec<String>,
+    /// Providers whose resource root is a category-level symlink
+    /// (e.g. `.codex/skills -> .claude/skills`). All resources
+    /// reachable through such a symlink are treated as linked.
+    category_linked: HashSet<Provider>,
 }
 
 /// Analyze provider resource states for one resource type and scope.
@@ -84,6 +88,17 @@ pub fn analyze_resource_links(
 
         for provider in &snapshot.providers {
             if *provider == canonical.provider {
+                continue;
+            }
+
+            if snapshot.category_linked.contains(provider) {
+                analyzed.push(Resource {
+                    name: name.clone(),
+                    kind,
+                    scope: model_scope,
+                    provider: *provider,
+                    definition: ResourceReference::Link(*provider, model_scope),
+                });
                 continue;
             }
 
@@ -249,11 +264,26 @@ fn detect_snapshot(
             .or_insert_with(|| resource.clone());
     }
 
+    let mut category_linked = HashSet::new();
+    for provider in &providers {
+        if Some(*provider) == user_base_for_scope(scope, canonical_provider)
+            || Some(*provider) == repo_base_for_scope(scope, canonical_provider)
+        {
+            continue;
+        }
+        if let Some(dir) = paths.resource_dir(*provider, resource, scope) {
+            if category_link_target(&dir)?.is_some() {
+                category_linked.insert(*provider);
+            }
+        }
+    }
+
     Ok(DetectionSnapshot {
         providers,
         canonical_by_name: canonical_resources,
         resources_by_provider_name,
         names: names.into_iter().collect(),
+        category_linked,
     })
 }
 
@@ -304,14 +334,14 @@ fn classify_target_state(
 ) -> ResourceReference {
     let requirement_state =
         classify_target_reference(resource, canonical_ref, target_provider, model_scope);
-    if matches!(requirement_state, ResourceReference::IncompleteLink(_, _)) {
+    if matches!(requirement_state, ResourceReference::IncompleteLink(_, _, _)) {
         return requirement_state;
     }
 
     let capabilities = capabilities_for(target_provider);
     let support = capabilities.support_for(resource);
     let Some(target_format) = support.format else {
-        return ResourceReference::IncompleteLink(target_provider, model_scope);
+        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::NoTargetFormat);
     };
 
     if target_format == ResourceFormat::Markdown
@@ -329,7 +359,7 @@ fn classify_target_state(
 
     let conversion = conversion_for_formats(ResourceFormat::Markdown, target_format);
     if conversion.is_none() {
-        return ResourceReference::IncompleteLink(target_provider, model_scope);
+        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::NoConversionPath);
     }
 
     classify_derived_state(
@@ -360,7 +390,7 @@ fn classify_direct_state(
     if symlink_points_to_canonical(resource, path_scope, existing, canonical_ref) {
         ResourceReference::Link(target_provider, model_scope)
     } else {
-        ResourceReference::IncompleteLink(target_provider, model_scope)
+        ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::WrongSymlinkTarget)
     }
 }
 
@@ -376,7 +406,7 @@ fn classify_derived_state(
     };
 
     if existing.is_symlink {
-        return ResourceReference::IncompleteLink(target_provider, model_scope);
+        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::UnexpectedSymlink);
     }
 
     if derived_hashes_match(canonical_ref, &existing.path, target_format) {
@@ -1189,12 +1219,93 @@ mod tests {
         .unwrap();
         assert!(matches!(
             find_reference(&analyzed, "reviewer", Provider::KimiCode),
-            ResourceReference::IncompleteLink(Provider::KimiCode, ModelScope::User)
+            ResourceReference::IncompleteLink(Provider::KimiCode, ModelScope::User, _)
         ));
 
         let _summary =
             apply_fixable_resources(&paths, LinkableResource::Agent, PathScope::User, &analyzed)
                 .unwrap();
         assert!(!home.path().join(".kimi/agents/reviewer.yaml").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn category_level_symlink_marks_all_resources_as_linked() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        let paths = ProviderSkillPaths::from_roots_for_test(
+            home.path().to_path_buf(),
+            repo.path().to_path_buf(),
+        );
+
+        // Create a canonical skill in Claude's directory
+        write(
+            &home.path().join(".claude/skills/my-skill/SKILL.md"),
+            "---\ndescription: My skill\n---\nUse this skill.\n",
+        );
+
+        // Create a category-level symlink: .codex/skills -> .claude/skills
+        let codex_skills = home.path().join(".codex/skills");
+        std::fs::create_dir_all(codex_skills.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(
+            home.path().join(".claude/skills"),
+            &codex_skills,
+        )
+        .unwrap();
+
+        let analyzed = analyze_resource_links(
+            &paths,
+            LinkableResource::Skill,
+            PathScope::User,
+            Provider::Claude,
+        )
+        .unwrap();
+
+        // Codex should see the skill as Link (via category symlink),
+        // not IncompleteLink or Isolated
+        assert!(matches!(
+            find_reference(&analyzed, "my-skill", Provider::Codex),
+            ResourceReference::Link(Provider::Codex, ModelScope::User)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn category_level_symlink_bypasses_property_validation() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        let paths = ProviderSkillPaths::from_roots_for_test(
+            home.path().to_path_buf(),
+            repo.path().to_path_buf(),
+        );
+
+        // Create a skill WITHOUT description (normally IncompleteLink for Codex)
+        write(
+            &home.path().join(".claude/skills/bare-skill/SKILL.md"),
+            "---\n---\n# Bare skill body\n",
+        );
+
+        // Category-level symlink makes everything linked regardless
+        let codex_skills = home.path().join(".codex/skills");
+        std::fs::create_dir_all(codex_skills.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(
+            home.path().join(".claude/skills"),
+            &codex_skills,
+        )
+        .unwrap();
+
+        let analyzed = analyze_resource_links(
+            &paths,
+            LinkableResource::Skill,
+            PathScope::User,
+            Provider::Claude,
+        )
+        .unwrap();
+
+        // Even without required properties, category symlink means linked
+        assert!(matches!(
+            find_reference(&analyzed, "bare-skill", Provider::Codex),
+            ResourceReference::Link(Provider::Codex, ModelScope::User)
+        ));
     }
 }

@@ -280,7 +280,7 @@ codex *args="":
     @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @claudine codex {{args}}
 
-acp-skill deploy:
+skill-acp deploy:
 	@echo
 	@echo -e "Publishing the {{BOLD}}acp{{RESET}} skill to this monorepo"
 	@echo

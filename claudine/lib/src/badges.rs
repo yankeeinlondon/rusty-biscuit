@@ -53,4 +53,10 @@ pub static MASKED_REPO_SCOPED: LazyLock<String> = LazyLock::new(|| {
     .to_string()
 });
 
+pub static EXCEPTIONS: LazyLock<String> = LazyLock::new(|| {
+    Prose::new("<bg-red-800><bold><red-100><bold> Exceptions </bold></red-100></bold></bg-red-800>")
+        .render(None)
+        .to_string()
+});
+
 

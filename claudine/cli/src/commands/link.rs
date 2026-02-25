@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
@@ -63,7 +63,7 @@ pub struct LinkArgs {
     pub scope: LinkScopeArg,
 
     /// Apply fixable states (default is dry-run analysis only).
-    #[arg(long)]
+    #[arg(long, visible_alias = "fix")]
     pub apply: bool,
 
     /// Show detailed output.
@@ -155,6 +155,7 @@ fn run_link_strategy(args: LinkArgs) -> Result<()> {
 
     let mut sections = Vec::new();
     let mut attention = BTreeSet::new();
+    let mut incomplete_groups: BTreeMap<(String, String, String), Vec<String>> = BTreeMap::new();
     let mut total_apply = ApplySummary::default();
 
     for diagnostic in category_level_diagnostics(&paths, scope)? {
@@ -224,13 +225,16 @@ fn run_link_strategy(args: LinkArgs) -> Result<()> {
                         definition.filepath.display()
                     ));
                 }
-                ResourceReference::IncompleteLink(provider, _) => {
-                    attention.insert(format!(
-                        "{} '{}' for {} is IncompleteLink; manual fix required (requirements or existing target mismatch).",
-                        resource.name(),
-                        row.name,
-                        provider
-                    ));
+                ResourceReference::IncompleteLink(provider, _, cause) => {
+                    let key = (
+                        resource.name().to_string(),
+                        provider.to_string(),
+                        cause.to_string(),
+                    );
+                    incomplete_groups
+                        .entry(key)
+                        .or_default()
+                        .push(row.name.clone());
                 }
                 _ => {}
             }
@@ -242,6 +246,18 @@ fn run_link_strategy(args: LinkArgs) -> Result<()> {
             rows,
             apply_summary,
         });
+    }
+
+    for ((resource_name, provider_name, cause), names) in &incomplete_groups {
+        let detail = if names.len() <= 3 {
+            names.join(", ")
+        } else {
+            let examples: Vec<&str> = names.iter().take(3).map(String::as_str).collect();
+            format!("{} (e.g., {})", names.len(), examples.join(", "))
+        };
+        attention.insert(format!(
+            "{detail} {resource_name} for {provider_name}: {cause}."
+        ));
     }
 
     render_link_strategy(&args, &sections, &attention, total_apply);
@@ -359,6 +375,14 @@ fn render_link_strategy(
             let line = Prose::new(format!("{{{{yellow}}}}- {{{{reset}}}}{item}"));
             log::data(&format!(" {}", line.fallback_render(&term)));
         }
+
+        if !args.apply {
+            log::data("");
+            let fix_hint = Prose::new(
+                "{{dim}}{{i}}use {{red}}--fix{{reset}}{{dim}}{{i}} to attempt to fix the reported issues{{reset}}",
+            );
+            log::data(&format!(" {}", fix_hint.fallback_render(&term)));
+        }
     }
 }
 
@@ -456,7 +480,7 @@ fn reference_variant_name(reference: &ResourceReference) -> &'static str {
         ResourceReference::Isolated(_) => "Isolated",
         ResourceReference::Link(_, _) => "Link",
         ResourceReference::LinkMissing(_, _) => "LinkMissing",
-        ResourceReference::IncompleteLink(_, _) => "IncompleteLink",
+        ResourceReference::IncompleteLink(_, _, _) => "IncompleteLink",
         ResourceReference::DerivedLink(_, _) => "DerivedLink",
         ResourceReference::DerivedStale(_, _) => "DerivedStale",
         ResourceReference::DerivedMissing(_, _) => "DerivedMissing",
@@ -502,8 +526,8 @@ fn reference_details(reference: &ResourceReference, detailed: bool) -> String {
         ResourceReference::LinkMissing(_, _) => {
             "missing symlink (fixable with --apply)".to_string()
         }
-        ResourceReference::IncompleteLink(_, _) => {
-            "manual fix required (requirements/target mismatch)".to_string()
+        ResourceReference::IncompleteLink(_, _, cause) => {
+            cause.to_string()
         }
         ResourceReference::DerivedLink(_, _) => {
             if detailed {
@@ -786,7 +810,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use claudine::linking::model::{ResourceDefinition, ResourceScope as ModelScope};
+    use claudine::linking::model::{IncompleteCause, ResourceDefinition, ResourceScope as ModelScope};
 
     use super::*;
 
@@ -812,7 +836,7 @@ mod tests {
             ResourceReference::Isolated(definition),
             ResourceReference::Link(Provider::Codex, ModelScope::User),
             ResourceReference::LinkMissing(Provider::Codex, ModelScope::User),
-            ResourceReference::IncompleteLink(Provider::Codex, ModelScope::User),
+            ResourceReference::IncompleteLink(Provider::Codex, ModelScope::User, IncompleteCause::NoCanonicalDefinition),
             ResourceReference::DerivedLink(Provider::Codex, ModelScope::User),
             ResourceReference::DerivedStale(Provider::Codex, ModelScope::User),
             ResourceReference::DerivedMissing(Provider::Codex, ModelScope::User),

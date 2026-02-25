@@ -7,6 +7,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges;
 use claudine::linking::{
     ExceptionType, ProviderSkillPaths, SkillException, SkillInfo, SkillScope, list_skills,
@@ -40,6 +41,12 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     }
 
     let term = Terminal::new();
+    let header = Prose::new("<b>Skills</b>").fallback_render(&term);
+    log::data("");
+    log::data(&header);
+    log::data("==================");
+    log::data("");
+
     let verbose = verbose || report.skills.len() < 10;
 
     if verbose {
@@ -50,6 +57,12 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
 
     if !report.exceptions.is_empty() {
         render_exceptions(&term, &report.exceptions);
+
+        log::data("");
+        let fix_hint = Prose::new(
+            "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>",
+        );
+        log::data(&format!(" {}", fix_hint.fallback_render(&term)));
     }
 
     Ok(())
@@ -66,7 +79,7 @@ fn render_verbose(term: &Terminal, skills: &[SkillInfo]) {
             .as_deref()
             .unwrap_or("no description");
         let item = Prose::new(format!(
-            r#"{badge} <a href="{}"><b>{}</b></a> <dim><i>{desc}</i></dim>"#,
+            r#"<a href="{}"><b>{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
             skill.skill_md_path.display(),
             skill.name,
         ));
@@ -84,7 +97,8 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
     }
 
     for (scope, group) in &by_scope {
-        log::data(&format!("\n{}", scope_badge(*scope)));
+        log::data(scope_badge(*scope));
+        log::data("");
 
         let names: Vec<String> = group
             .iter()
@@ -98,7 +112,9 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
             .collect();
 
         let joined = names.join("  ");
-        let rendered = Prose::new(joined).fallback_render(term);
+        let rendered = Prose::new(joined)
+            .with_word_wrap(WordWrap::BespokeProse(Some(50), vec![' '], None))
+            .fallback_render(term);
         log::data(&rendered);
         log::data("");
     }
@@ -107,8 +123,8 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
 /// Render exceptions grouped by (provider, exception_type).
 fn render_exceptions(term: &Terminal, exceptions: &[SkillException]) {
     log::data("");
-    let header = Prose::new("{{bold}}Exceptions{{reset}}");
-    log::data(&format!(" {}", header.fallback_render(term)));
+    log::data(&*badges::EXCEPTIONS);
+    log::data("");
 
     // Group by provider
     let mut by_provider: BTreeMap<String, BTreeMap<ExceptionType, Vec<&SkillException>>> =
@@ -130,19 +146,30 @@ fn render_exceptions(term: &Terminal, exceptions: &[SkillException]) {
 
         let mut inner_list = UnorderedList::empty();
         for (exc_type, entries) in type_map {
+            let is_missing = *exc_type == ExceptionType::Missing;
+            let category_label = Prose::new(format!("<b>{exc_type}</b>"));
+            inner_list.add(category_label);
+
             let topics: Vec<String> = entries
                 .iter()
                 .map(|e| {
-                    format!(
-                        r#"<a href="{}">{}</a>"#,
-                        e.skill_md_path.display(),
-                        e.topic
-                    )
+                    if is_missing {
+                        e.topic.clone()
+                    } else {
+                        format!(
+                            r#"<a href="{}">{}</a>"#,
+                            e.skill_md_path.display(),
+                            e.topic
+                        )
+                    }
                 })
                 .collect();
 
-            let line = Prose::new(format!("<b>{exc_type}:</b> {}", topics.join(", ")));
-            inner_list.add(line);
+            let topic_line = Prose::new(topics.join(", "))
+                .with_word_wrap(WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)));
+            let mut topic_list = UnorderedList::empty();
+            topic_list.add(topic_line);
+            inner_list.add(topic_list);
         }
 
         outer_list.add(inner_list);
