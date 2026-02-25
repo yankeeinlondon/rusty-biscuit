@@ -4132,9 +4132,9 @@ fn render_dir(
         eprintln!();
     }
 
-    // Print tree content, trimming trailing newline to avoid extra blank line
-    print!("{}", output.trim_end_matches('\n'));
-    println!();
+    // Print tree content, trimming any trailing blank/whitespace-only lines
+    let output = output.trim_end();
+    println!("{output}");
 
     let bottom = layout.margin_bottom.unwrap_or(0);
     for _ in 0..bottom {

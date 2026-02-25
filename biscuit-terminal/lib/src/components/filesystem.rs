@@ -1275,17 +1275,10 @@ impl FileSystem {
                 }
             }
 
-            // Apply filter patterns (if any are specified, only matching entries are shown)
-            if !self.filter_patterns.is_empty() {
-                let matches_filter = self.filter_patterns.iter().any(|p| file_name.contains(p));
-                if !matches_filter {
-                    // For directories, we might still want to recurse to find matching children
-                    // But for now, we skip non-matching entries entirely
-                    continue;
-                }
-            }
-
-            *total_entries += 1;
+            // Apply filter patterns
+            let has_filters = !self.filter_patterns.is_empty();
+            let matches_filter =
+                has_filters && self.filter_patterns.iter().any(|p| file_name.contains(p));
 
             if is_dir {
                 // Don't follow symlinks to avoid infinite loops
@@ -1296,6 +1289,14 @@ impl FileSystem {
                     self.build_tree_recursive(&file_path, depth + 1, total_entries)
                 };
 
+                // When filters are active, only include directories that either
+                // match the filter themselves or have matching descendants.
+                if has_filters && !matches_filter && children.is_empty() {
+                    continue;
+                }
+
+                *total_entries += 1;
+
                 entries.push(TreeNode::Dir {
                     name: file_name,
                     children,
@@ -1305,6 +1306,13 @@ impl FileSystem {
                     at_depth_limit,
                 });
             } else {
+                // Skip non-matching files when filters are active
+                if has_filters && !matches_filter {
+                    continue;
+                }
+
+                *total_entries += 1;
+
                 entries.push(TreeNode::File {
                     name: file_name,
                     is_ignored: false, // Will be set properly with ignore crate in Phase 8
