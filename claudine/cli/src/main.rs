@@ -38,6 +38,8 @@ pub(crate) enum Commands {
     Hooks(commands::hooks::HooksArgs),
     /// Show which actions are configured and for which events.
     Actions(commands::actions::ActionsArgs),
+    /// List available skills and their scopes.
+    Skills(commands::skills::SkillsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers,
     /// Remove Claudine hooks from all agents.
@@ -82,6 +84,7 @@ async fn main() -> Result<()> {
         Some(Commands::Sync(args)) => commands::sync::run(args).await,
         Some(Commands::Hooks(args)) => commands::hooks::run(args, cli.verbose > 0),
         Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),
+        Some(Commands::Skills(args)) => commands::skills::run(args, cli.verbose > 0),
         Some(Commands::Providers) => commands::providers::run(),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         Some(Commands::Claude(args)) => commands::wrap::run_provider_wrapper(Provider::Claude, args),

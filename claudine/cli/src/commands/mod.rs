@@ -7,6 +7,7 @@ pub mod hooks;
 pub mod init;
 pub mod link;
 pub mod providers;
+pub mod skills;
 pub mod sync;
 pub mod uninstall;
 pub mod wrap;

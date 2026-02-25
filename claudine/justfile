@@ -286,6 +286,8 @@ acp-skill deploy:
 	@echo
 	@echo -e "{{DIM}}use the {{BLUE}}--deploy{{RESET}}{{DIM}} flag if you want to deploy to{{RESET}}"
 	@echo -e "{{DIM}}{{ITALIC}}user{{RESET}}{{DIM}} scope as well.{{RESET}}"
+	@echo
+	@just ask ""
 
 # Show the dependencies for this package
 deps:
