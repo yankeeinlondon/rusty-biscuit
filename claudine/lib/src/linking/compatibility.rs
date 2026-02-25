@@ -9,10 +9,10 @@ use super::detector::DiscoveredResource;
 use super::model::{ResourceDefinition, ResourceReference, ResourceScope};
 
 #[derive(Debug, Clone)]
-struct ParsedMarkdown {
-    frontmatter: serde_yaml::Mapping,
-    body: String,
-    had_frontmatter: bool,
+pub(crate) struct ParsedMarkdown {
+    pub(crate) frontmatter: serde_yaml::Mapping,
+    pub(crate) body: String,
+    pub(crate) had_frontmatter: bool,
 }
 
 /// Parse a canonical markdown candidate, apply deterministic compatibility upgrades,
@@ -145,7 +145,7 @@ fn canonical_file_path(resource: LinkableResource, path: &Path) -> Option<PathBu
     }
 }
 
-fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
+pub(crate) fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let Some(rest) = content
         .strip_prefix("---\n")
