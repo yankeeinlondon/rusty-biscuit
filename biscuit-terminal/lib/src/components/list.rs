@@ -1,9 +1,50 @@
+use std::sync::Arc;
+
 use crate::{
     components::renderable::{Renderable, RenderableContent},
     prelude::Prose,
     terminal::Terminal,
-    utils::layout::Layout,
+    utils::{
+        block_constraint::{split_lines, visible_width, wrap_lines},
+        layout::{Layout, WordWrap},
+    },
 };
+
+/// Configure word wrap on an inline component so that wrapped continuation
+/// lines align with content after the list prefix (bullet or number).
+///
+/// - `WordWrap::None` → upgraded to `WrapProse` with `hanging_indent`
+/// - `WrapProse(_, None)` → fills in the hanging indent
+/// - `BespokeProse(_, _, None)` → fills in the hanging indent
+/// - Already has an explicit hanging indent → left as-is
+/// - `Truncate` → left as-is
+fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32) {
+    if let RenderableContent::Component(arc) = content {
+        if let Some(component) = Arc::get_mut(arc) {
+            if component.is_block_level() {
+                return;
+            }
+            let layout = component.layout_mut();
+            match &layout.word_wrap {
+                WordWrap::None => {
+                    layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
+                }
+                WordWrap::WrapProse(offset, None) => {
+                    layout.word_wrap = WordWrap::WrapProse(*offset, Some(hanging_indent));
+                }
+                WordWrap::BespokeProse(offset, chars, None) => {
+                    layout.word_wrap =
+                        WordWrap::BespokeProse(*offset, chars.clone(), Some(hanging_indent));
+                }
+                _ => {} // Already has indent or uses Truncate
+            }
+        }
+    }
+}
+
+// =============================================================================
+// OrderedList
+// =============================================================================
 
 /// An **OrderedList** contains a list of renderable items
 /// which will be rendered into an **ordered** list.
@@ -67,7 +108,9 @@ impl OrderedList {
 
     /// Add an item that can be converted to RenderableContent.
     ///
-    /// This is a convenience method for building lists incrementally.
+    /// Inline components automatically get word wrap configured with
+    /// the correct hanging indent so continuation lines align after
+    /// the number prefix.
     ///
     /// ## Examples
     ///
@@ -79,7 +122,13 @@ impl OrderedList {
     /// list.add("First item").add("Second item");
     /// ```
     pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
-        self.items.push(item.into());
+        let mut content = item.into();
+        // Prefix width depends on the item number: "1. " = 3, "10. " = 4, etc.
+        let number = self.items.len() + 1;
+        let prefix = format!("{}. ", number);
+        let prefix_width = visible_width(&prefix);
+        configure_component_wrap(&mut content, prefix_width);
+        self.items.push(content);
         self
     }
 
@@ -91,9 +140,13 @@ impl OrderedList {
 
     /// Render the list with numbering.
     ///
-    /// Block-level child components are rendered without a number
-    /// prefix and their output is indented by `indent_children`
-    /// spaces. Inline items and strings get the normal `"N. "` prefix.
+    /// - **String items** are word-wrapped with the prefix width as
+    ///   hanging indent so continuation lines align after the number.
+    /// - **Inline components** are rendered at `child_width`; their
+    ///   word wrap was configured at add time so they handle their own
+    ///   continuation alignment.
+    /// - **Block-level components** are rendered without a prefix and
+    ///   their output is indented by `indent_children` spaces.
     fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
         let indent = self.indent_children;
@@ -101,12 +154,19 @@ impl OrderedList {
         for (i, item) in self.items.iter().enumerate() {
             let number = i + 1;
             let prefix = format!("{}. ", number);
-            let prefix_width = crate::utils::block_constraint::visible_width(&prefix);
+            let prefix_width = visible_width(&prefix);
 
             match item {
                 RenderableContent::String(s) => {
                     result.push_str(&prefix);
-                    result.push_str(s);
+                    let child_width = term_width.saturating_sub(prefix_width);
+                    let lines = split_lines(s.as_str());
+                    let wrapped = wrap_lines(
+                        lines,
+                        &WordWrap::WrapProse(None, Some(prefix_width)),
+                        child_width,
+                    );
+                    result.push_str(&wrapped.join("\n"));
                 }
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no prefix, reduced width, indent output.
@@ -122,8 +182,7 @@ impl OrderedList {
                     }
                 }
                 RenderableContent::Component(component) => {
-                    // Inline component: normal prefix.
-                    // Width reduced by prefix since it is prepended.
+                    // Inline component: word wrap was configured at add time.
                     result.push_str(&prefix);
                     let child_width = term_width.saturating_sub(prefix_width);
                     let content = component.render(Some(child_width));
@@ -170,6 +229,10 @@ impl Renderable for OrderedList {
     }
 }
 
+// =============================================================================
+// UnorderedList
+// =============================================================================
+
 /// An **UnorderedList** contains a list of renderable items
 /// which will be rendered into an **unordered** list, a bullet
 /// point will precede each line.
@@ -207,38 +270,54 @@ impl<T: Into<String>> From<Vec<T>> for UnorderedList {
 }
 
 impl From<Vec<RenderableContent>> for UnorderedList {
-    fn from(value: Vec<RenderableContent>) -> Self {
+    fn from(mut value: Vec<RenderableContent>) -> Self {
+        let list = UnorderedList::default();
+        if list.hanging_indent {
+            let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
+            for item in &mut value {
+                configure_component_wrap(item, indent);
+            }
+        }
         UnorderedList {
             items: value,
-            ..UnorderedList::default()
+            ..list
         }
     }
 }
 
 impl From<Vec<&RenderableContent>> for UnorderedList {
     fn from(value: Vec<&RenderableContent>) -> Self {
+        let mut items: Vec<RenderableContent> = value.into_iter().cloned().collect();
+        let list = UnorderedList::default();
+        if list.hanging_indent {
+            let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
+            for item in &mut items {
+                configure_component_wrap(item, indent);
+            }
+        }
         UnorderedList {
-            items: value.into_iter().cloned().collect(),
-            ..UnorderedList::default()
+            items,
+            ..list
         }
     }
 }
 
 impl From<Prose> for UnorderedList {
     fn from(value: Prose) -> Self {
-        UnorderedList {
-            items: vec![value.into()],
-            ..UnorderedList::default()
+        let mut list = UnorderedList::default();
+        let mut content: RenderableContent = value.into();
+        if list.hanging_indent {
+            let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
+            configure_component_wrap(&mut content, indent);
         }
+        list.items = vec![content];
+        list
     }
 }
 
 impl From<&Prose> for UnorderedList {
     fn from(value: &Prose) -> Self {
-        UnorderedList {
-            items: vec![value.clone().into()],
-            ..UnorderedList::default()
-        }
+        UnorderedList::from(value.clone())
     }
 }
 
@@ -255,7 +334,9 @@ impl UnorderedList {
 
     /// Add an item that can be converted to RenderableContent.
     ///
-    /// This is a convenience method for building lists incrementally.
+    /// When `hanging_indent` is enabled (the default), inline components
+    /// automatically get word wrap configured with the correct hanging
+    /// indent so continuation lines align after the bullet.
     ///
     /// ## Examples
     ///
@@ -267,7 +348,12 @@ impl UnorderedList {
     /// list.add("First item").add("Second item");
     /// ```
     pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
-        self.items.push(item.into());
+        let mut content = item.into();
+        if self.hanging_indent {
+            let indent = self.indent_children.unwrap_or(visible_width(&self.bullet));
+            configure_component_wrap(&mut content, indent);
+        }
+        self.items.push(content);
         self
     }
 
@@ -299,23 +385,37 @@ impl UnorderedList {
 
     /// Render the list with bullets.
     ///
-    /// Block-level child components are rendered without a bullet
-    /// and their output is indented. Inline items and strings get
-    /// the normal bullet prefix.
+    /// - **String items** are word-wrapped with the bullet width as
+    ///   hanging indent so continuation lines align after the bullet.
+    /// - **Inline components** are rendered at `child_width`; their
+    ///   word wrap was configured at add time so they handle their own
+    ///   continuation alignment.
+    /// - **Block-level components** are rendered without a bullet and
+    ///   their output is indented by `indent` spaces.
     fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
-        let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet);
+        let bullet_width = visible_width(&self.bullet);
         let indent = self.indent_children.unwrap_or(bullet_width);
 
         for item in &self.items {
             match item {
                 RenderableContent::String(s) => {
                     result.push_str(&self.bullet);
-                    result.push_str(s);
+                    if self.hanging_indent {
+                        let child_width = term_width.saturating_sub(bullet_width);
+                        let lines = split_lines(s.as_str());
+                        let wrapped = wrap_lines(
+                            lines,
+                            &WordWrap::WrapProse(None, Some(indent)),
+                            child_width,
+                        );
+                        result.push_str(&wrapped.join("\n"));
+                    } else {
+                        result.push_str(s);
+                    }
                 }
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no bullet, reduced width, indent output.
-                    // Width is reduced by indent since every line gets indented.
                     let child_width = term_width.saturating_sub(indent);
                     let content = component.render(Some(child_width));
                     let indent_str = " ".repeat(indent as usize);
@@ -328,8 +428,7 @@ impl UnorderedList {
                     }
                 }
                 RenderableContent::Component(component) => {
-                    // Inline component: normal bullet prefix.
-                    // Width is reduced by bullet_width since the bullet is prepended.
+                    // Inline component: word wrap was configured at add time.
                     result.push_str(&self.bullet);
                     let child_width = term_width.saturating_sub(bullet_width);
                     let content = component.render(Some(child_width));
@@ -379,7 +478,6 @@ impl Renderable for UnorderedList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_ordered_list_simple() {
@@ -429,22 +527,15 @@ mod tests {
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
-        // "First" gets prefix "1. First"
-        // The nested OrderedList is block-level, so it gets indented (4 spaces)
         assert_eq!(result, "1. First\n    1. Nested A\n    2. Nested B\n");
     }
 
     #[test]
     fn test_three_level_nesting_width_compounds() {
-        // Inner-most list
         let inner = OrderedList::new(vec!["Deep"]);
-        // Middle list containing the inner
         let middle = OrderedList::from(vec![RenderableContent::Component(Arc::new(inner))]);
-        // Outer list containing middle
         let outer = OrderedList::from(vec![RenderableContent::Component(Arc::new(middle))]);
-
         let result = outer.render(Some(80));
-        // outer indents middle by 4, middle indents inner by 4 = 8 total
         assert_eq!(result, "        1. Deep\n");
     }
 
@@ -456,18 +547,14 @@ mod tests {
         let prose = Prose::new("Inline text");
         let items = vec![
             RenderableContent::String("Plain string".to_string()),
-            RenderableContent::Component(Arc::new(prose)), // inline (is_block_level = false)
-            RenderableContent::Component(Arc::new(inner_list)), // block-level
+            RenderableContent::Component(Arc::new(prose)),
+            RenderableContent::Component(Arc::new(inner_list)),
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
-
         let lines: Vec<&str> = result.lines().collect();
-        // String: "1. Plain string"
         assert_eq!(lines[0], "1. Plain string");
-        // Prose (inline): "2. Inline text"
         assert_eq!(lines[1], "2. Inline text");
-        // Block-level OrderedList: indented, no prefix
         assert_eq!(lines[2], "    1. Sub item");
     }
 
@@ -480,9 +567,6 @@ mod tests {
         ];
         let list = UnorderedList::from(items);
         let result = list.render(Some(80));
-
-        // "Top" gets bullet "• Top"
-        // The nested UnorderedList is block-level, indented by bullet width (2 for "• ")
         assert_eq!(result, "• Top\n  • Sub A\n  • Sub B\n");
     }
 
@@ -508,8 +592,6 @@ mod tests {
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
-        // Empty nested list renders as empty string with no lines to indent
-        // The separator newlines still appear between items
         assert_eq!(result, "1. Before\n\n3. After\n");
     }
 
@@ -520,16 +602,92 @@ mod tests {
         let list = OrderedList::from(items);
         let width = 40u32;
         let result = list.render(Some(width));
-
         for line in result.lines() {
-            let visible = crate::utils::block_constraint::visible_width(line) as u32;
-            assert!(
-                visible <= width,
-                "Line exceeds term_width {}: \"{}\" (visible width: {})",
-                width,
-                line,
-                visible
-            );
+            let vis = visible_width(line) as u32;
+            assert!(vis <= width, "Line exceeds width {}: {:?} ({})", width, line, vis);
+        }
+    }
+
+    // =========================================================================
+    // Hanging Indent Tests
+    // =========================================================================
+
+    #[test]
+    fn test_unordered_string_wraps_with_hanging_indent() {
+        // "• " is 2 chars wide, so with width=20 content gets 18 chars.
+        let list = UnorderedList::new(vec!["This is a long item that wraps"]);
+        let result = list.render(Some(20));
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
+        assert!(lines[0].starts_with("• "));
+        for line in &lines[1..] {
+            assert!(line.starts_with("  "), "Should have 2-space indent: {:?}", line);
+            assert!(!line.starts_with("   "), "Should not exceed 2-space indent: {:?}", line);
+        }
+    }
+
+    #[test]
+    fn test_unordered_prose_gets_automatic_wrap() {
+        // A Prose with no explicit word wrap gets WrapProse at add time.
+        use crate::components::prose::Prose;
+
+        let mut list = UnorderedList::empty();
+        list.add(Prose::new("This is a long prose item that should wrap automatically"));
+        let result = list.render(Some(25));
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
+        assert!(lines[0].starts_with("• "));
+        // Continuation lines aligned after bullet (2 spaces)
+        for line in &lines[1..] {
+            assert!(line.starts_with("  "), "Should align after bullet: {:?}", line);
+        }
+    }
+
+    #[test]
+    fn test_unordered_prose_bespoke_wrap_no_double_indent() {
+        // A Prose with BespokeProse(_, _, None) gets hanging indent filled
+        // by the list. No double-indentation.
+        use crate::components::prose::Prose;
+
+        let prose = Prose::new("aaa, bbb, ccc, ddd, eee, fff, ggg")
+            .with_word_wrap(WordWrap::BespokeProse(Some(50), vec![' ', ','], None));
+        let mut list = UnorderedList::empty();
+        list.add(prose);
+
+        let result = list.render(Some(20));
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
+        assert!(lines[0].starts_with("• "));
+        for line in &lines[1..] {
+            assert!(line.starts_with("  "), "Should have 2-space indent: {:?}", line);
+            assert!(!line.starts_with("    "), "Should NOT have 4-space double indent: {:?}", line);
+        }
+    }
+
+    #[test]
+    fn test_unordered_no_hanging_indent() {
+        let list = UnorderedList::new(vec!["Short"]).without_hanging_indent();
+        let result = list.render(Some(80));
+        assert_eq!(result, "• Short\n");
+    }
+
+    #[test]
+    fn test_prose_explicit_indent_respected() {
+        // When a Prose explicitly sets its own hanging indent, the list
+        // should not override it.
+        use crate::components::prose::Prose;
+
+        let prose = Prose::new("aaa bbb ccc ddd eee fff")
+            .with_word_wrap(WordWrap::WrapProse(None, Some(4)));
+        let mut list = UnorderedList::empty();
+        list.add(prose);
+
+        let result = list.render(Some(20));
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
+        // Explicit Some(4) should be preserved, not overwritten to 2
+        for line in &lines[1..] {
+            assert!(line.starts_with("    "), "Should have 4-space indent: {:?}", line);
         }
     }
 }
