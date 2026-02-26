@@ -132,6 +132,10 @@ enum Commands {
         /// Destination directory
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+
+        /// Remove any existing partial download (`.tmp`) files before downloading
+        #[arg(long)]
+        remove_partial: bool,
     },
 
     /// Remove a model
@@ -240,6 +244,7 @@ async fn main() -> Result<()> {
             sort,
             verbose,
             output,
+            remove_partial,
         } => {
             let query = if query.is_empty() {
                 None
@@ -252,6 +257,7 @@ async fn main() -> Result<()> {
                 sort.into(),
                 verbose,
                 output.as_deref(),
+                remove_partial,
             )
             .await?;
         }

@@ -46,6 +46,8 @@ Sort options: `downloads` (default), `likes`, `trending`, `created`, `modified`
 ### `model download [query...]`
 
 Searches and downloads GGUF variants from HuggingFace with `indicatif` progress bars.
+Downloads are resumable from partial `*.tmp` files. On transient network failures,
+the downloader retries for up to 5 minutes before failing.
 
 ```bash
 model download bartowski/Qwen2.5-7B-Instruct-GGUF  # Direct repo ID (contains /)
@@ -53,9 +55,15 @@ model download llama gguf                            # Search, then select repo
 model download --sort trending                       # Browse top models (no query)
 model download phi --limit 10 --sort likes           # Search with options
 model download phi --verbose                         # Show created/modified dates
+model download phi --remove-partial                 # Delete partial files and restart
 ```
 
 If query contains `/`, treated as direct repo ID (skips search). Otherwise searches HuggingFace and presents interactive repo selection. When no query is provided, shows "Browsing top models by [sort]..." and lists results by sort order. Always shows interactive multi-select for variant choice with size/RAM estimates.
+
+When a partial `*.tmp` file is found for a selected variant, the CLI prompts to:
+- resume the download
+- remove the partial download and restart
+- skip that file
 
 Output directory priority: `--output` flag > `MODELS_DIR` env > shared models dir from config > current directory.
 

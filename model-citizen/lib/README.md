@@ -52,7 +52,7 @@ Three scanners are provided:
 
 - Search models with sort options (downloads, likes, trending, created, modified)
 - List GGUF variants for a repository
-- Stream downloads with progress callbacks and `.tmp` file safety
+- Stream downloads with progress callbacks, resumable `.tmp` partials, and retry-on-network-failure (up to 5 minutes)
 - Optional auth via `HF_TOKEN` / `HUGGING_FACE_API_KEY` / `HF_API_KEY`
 
 ### Sharing (`sharing` module)

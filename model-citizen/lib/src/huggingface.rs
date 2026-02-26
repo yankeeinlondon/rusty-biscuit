@@ -6,6 +6,15 @@
 use crate::gguf::quantization_from_filename;
 use crate::{ModelCitizenError, QuantizationType};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+const DOWNLOAD_RETRY_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Debug)]
+enum DownloadAttemptError {
+    Retryable(ModelCitizenError),
+    Fatal(ModelCitizenError),
+}
 
 /// A GGUF variant available for download from HuggingFace.
 #[derive(Debug, Clone)]
@@ -192,6 +201,34 @@ impl HuggingFaceClient {
         limit: usize,
         sort: SortOrder,
     ) -> Result<Vec<SearchResult>, ModelCitizenError> {
+        self.search_models_with_filter(query, limit, sort, None).await
+    }
+
+    /// Searches for GGUF models on HuggingFace.
+    ///
+    /// Uses server-side GGUF filtering (`filter=gguf`) so the results are
+    /// immediately suitable for GGUF download flows.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the API request fails.
+    pub async fn search_gguf_models(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+        sort: SortOrder,
+    ) -> Result<Vec<SearchResult>, ModelCitizenError> {
+        self.search_models_with_filter(query, limit, sort, Some("gguf"))
+            .await
+    }
+
+    async fn search_models_with_filter(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+        sort: SortOrder,
+        filter: Option<&str>,
+    ) -> Result<Vec<SearchResult>, ModelCitizenError> {
         let mut url = format!(
             "{}/api/models?limit={}&sort={}&full=false",
             self.base_url,
@@ -201,6 +238,9 @@ impl HuggingFaceClient {
 
         if let Some(q) = query {
             url.push_str(&format!("&search={}", urlencoding::encode(q)));
+        }
+        if let Some(filter) = filter {
+            url.push_str(&format!("&filter={}", urlencoding::encode(filter)));
         }
 
         let mut request = self.client.get(&url);
@@ -348,54 +388,219 @@ impl HuggingFaceClient {
     where
         F: FnMut(u64, u64),
     {
+        let started_at = Instant::now();
+        let mut attempt: u32 = 0;
+
+        loop {
+            match self
+                .download_once(repo_id, filename, dest_dir, &mut progress)
+                .await
+            {
+                Ok(path) => return Ok(path),
+                Err(DownloadAttemptError::Fatal(err)) => return Err(err),
+                Err(DownloadAttemptError::Retryable(err)) => {
+                    let elapsed = started_at.elapsed();
+                    if elapsed >= DOWNLOAD_RETRY_WINDOW {
+                        return Err(ModelCitizenError::network(format!(
+                            "{err} (retry window of {}s exhausted)",
+                            DOWNLOAD_RETRY_WINDOW.as_secs()
+                        )));
+                    }
+
+                    attempt = attempt.saturating_add(1);
+                    let delay = Self::retry_delay(attempt);
+                    let remaining = DOWNLOAD_RETRY_WINDOW.saturating_sub(elapsed);
+                    tokio::time::sleep(delay.min(remaining)).await;
+                }
+            }
+        }
+    }
+
+    async fn download_once<F>(
+        &self,
+        repo_id: &str,
+        filename: &str,
+        dest_dir: &Path,
+        progress: &mut F,
+    ) -> Result<PathBuf, DownloadAttemptError>
+    where
+        F: FnMut(u64, u64),
+    {
         let url = format!(
             "https://huggingface.co/{}/resolve/main/{}",
             repo_id, filename
         );
 
+        let dest_path = Self::destination_path(dest_dir, filename);
+        let tmp_path = Self::temp_download_path(dest_dir, filename);
+        let mut resume_from = std::fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+
+        if let Some(parent) = tmp_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(ModelCitizenError::from)
+                .map_err(DownloadAttemptError::Fatal)?;
+        }
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(ModelCitizenError::from)
+                .map_err(DownloadAttemptError::Fatal)?;
+        }
+
         let mut request = self.client.get(&url);
         if let Some(ref token) = self.token {
             request = request.header("Authorization", format!("Bearer {}", token));
         }
+        if resume_from > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
+        }
 
-        let response = request.send().await?;
+        let response = request.send().await.map_err(Self::classify_reqwest_error)?;
+        let status = response.status();
 
-        if !response.status().is_success() {
-            return Err(ModelCitizenError::network(format!(
-                "Download failed: {}",
-                response.status()
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && resume_from > 0 {
+            // The remote file may already be complete locally, or the partial is invalid.
+            if let Some(total_size) = Self::content_range_total(response.headers())
+                && total_size == resume_from
+            {
+                std::fs::rename(&tmp_path, &dest_path)
+                    .map_err(ModelCitizenError::from)
+                    .map_err(DownloadAttemptError::Fatal)?;
+                progress(total_size, total_size);
+                return Ok(dest_path);
+            }
+
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(DownloadAttemptError::Retryable(ModelCitizenError::network(
+                "Partial download out of sync; restarting from scratch",
             )));
         }
 
-        let total_size = response
-            .content_length()
-            .ok_or_else(|| ModelCitizenError::network("Unknown content length"))?;
+        if !status.is_success() {
+            let err = ModelCitizenError::network(format!(
+                "Download failed: {}",
+                status
+            ));
+            return if Self::is_retryable_status(status) {
+                Err(DownloadAttemptError::Retryable(err))
+            } else {
+                Err(DownloadAttemptError::Fatal(err))
+            };
+        }
 
-        // Create destination path with .tmp suffix
-        std::fs::create_dir_all(dest_dir)?;
-        let dest_path = dest_dir.join(filename);
-        let tmp_path = dest_dir.join(format!("{}.tmp", filename));
+        let append_mode = resume_from > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
+        if !append_mode {
+            resume_from = 0;
+        }
 
-        // Download to temp file
-        let mut file = std::fs::File::create(&tmp_path)?;
-        let mut downloaded: u64 = 0;
+        let remaining = response.content_length();
+        let total_size = if append_mode {
+            Self::content_range_total(response.headers())
+                .or_else(|| remaining.map(|n| resume_from.saturating_add(n)))
+                .unwrap_or_else(|| resume_from.max(1))
+        } else {
+            remaining.unwrap_or(1)
+        };
+
+        // Download to temp file and then atomically rename.
+        let mut file = if append_mode {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tmp_path)
+                .map_err(ModelCitizenError::from)
+                .map_err(DownloadAttemptError::Fatal)?
+        } else {
+            std::fs::File::create(&tmp_path)
+                .map_err(ModelCitizenError::from)
+                .map_err(DownloadAttemptError::Fatal)?
+        };
+        let mut downloaded: u64 = resume_from;
 
         use futures::StreamExt;
         use std::io::Write;
 
+        progress(downloaded, total_size);
+
         let mut stream = response.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| ModelCitizenError::network(e.to_string()))?;
-            file.write_all(&chunk)?;
+            let chunk = chunk.map_err(Self::classify_reqwest_error)?;
+            file.write_all(&chunk)
+                .map_err(ModelCitizenError::from)
+                .map_err(DownloadAttemptError::Fatal)?;
             downloaded += chunk.len() as u64;
             progress(downloaded, total_size);
         }
 
-        // Rename temp file to final destination
-        std::fs::rename(&tmp_path, &dest_path)?;
+        std::fs::rename(&tmp_path, &dest_path)
+            .map_err(ModelCitizenError::from)
+            .map_err(DownloadAttemptError::Fatal)?;
 
         Ok(dest_path)
+    }
+
+    /// Returns the temporary download path (`<filename>.tmp`) used for resumable downloads.
+    #[must_use]
+    pub fn temp_download_path(dest_dir: &Path, filename: &str) -> PathBuf {
+        dest_dir.join(format!("{filename}.tmp"))
+    }
+
+    /// Returns the final destination path for a downloaded file.
+    #[must_use]
+    pub fn destination_path(dest_dir: &Path, filename: &str) -> PathBuf {
+        dest_dir.join(filename)
+    }
+
+    /// Returns the current size of a partial download, if one exists.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if metadata cannot be read for reasons other than file-not-found.
+    pub fn partial_download_size(
+        dest_dir: &Path,
+        filename: &str,
+    ) -> Result<Option<u64>, ModelCitizenError> {
+        let tmp_path = Self::temp_download_path(dest_dir, filename);
+        match std::fs::metadata(tmp_path) {
+            Ok(meta) => Ok(Some(meta.len())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(ModelCitizenError::from(err)),
+        }
+    }
+
+    fn retry_delay(attempt: u32) -> Duration {
+        let shift = attempt.saturating_sub(1).min(4);
+        Duration::from_secs((1_u64 << shift).min(15))
+    }
+
+    fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+        status.is_server_error()
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::REQUEST_TIMEOUT
+    }
+
+    fn is_retryable_reqwest_error(err: &reqwest::Error) -> bool {
+        err.is_timeout() || err.is_connect() || err.is_request() || err.is_body()
+    }
+
+    fn classify_reqwest_error(err: reqwest::Error) -> DownloadAttemptError {
+        let retryable = Self::is_retryable_reqwest_error(&err);
+        let mapped = ModelCitizenError::network(err.to_string());
+        if retryable {
+            DownloadAttemptError::Retryable(mapped)
+        } else {
+            DownloadAttemptError::Fatal(mapped)
+        }
+    }
+
+    fn content_range_total(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+        let value = headers.get(reqwest::header::CONTENT_RANGE)?;
+        let as_str = value.to_str().ok()?;
+        let (_, total) = as_str.rsplit_once('/')?;
+        if total == "*" {
+            return None;
+        }
+        total.parse::<u64>().ok()
     }
 
     /// Cleans up incomplete download files.
@@ -407,10 +612,10 @@ impl HuggingFaceClient {
         let entries = std::fs::read_dir(dir)?;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "tmp") {
-                if std::fs::remove_file(&path).is_ok() {
-                    count += 1;
-                }
+            if path.extension().is_some_and(|ext| ext == "tmp")
+                && std::fs::remove_file(&path).is_ok()
+            {
+                count += 1;
             }
         }
 
@@ -533,5 +738,49 @@ mod tests {
         assert!(!temp_dir.path().join("other.gguf.tmp").exists());
         // Verify .gguf file is kept
         assert!(temp_dir.path().join("keep.gguf").exists());
+    }
+
+    #[test]
+    fn retryable_status_detection() {
+        assert!(HuggingFaceClient::is_retryable_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(HuggingFaceClient::is_retryable_status(
+            reqwest::StatusCode::BAD_GATEWAY
+        ));
+        assert!(!HuggingFaceClient::is_retryable_status(
+            reqwest::StatusCode::NOT_FOUND
+        ));
+    }
+
+    #[test]
+    fn retry_delay_caps_at_fifteen_seconds() {
+        assert_eq!(HuggingFaceClient::retry_delay(1), Duration::from_secs(1));
+        assert_eq!(HuggingFaceClient::retry_delay(2), Duration::from_secs(2));
+        assert_eq!(HuggingFaceClient::retry_delay(5), Duration::from_secs(15));
+        assert_eq!(HuggingFaceClient::retry_delay(8), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn temp_download_path_appends_tmp_suffix() {
+        let path = HuggingFaceClient::temp_download_path(Path::new("/tmp/models"), "foo.gguf");
+        assert_eq!(path, Path::new("/tmp/models/foo.gguf.tmp"));
+    }
+
+    #[test]
+    fn partial_download_size_reports_existing_tmp_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let tmp_path = HuggingFaceClient::temp_download_path(temp_dir.path(), "model.gguf");
+        std::fs::write(&tmp_path, [0_u8; 16]).unwrap();
+
+        let size = HuggingFaceClient::partial_download_size(temp_dir.path(), "model.gguf").unwrap();
+        assert_eq!(size, Some(16));
+    }
+
+    #[test]
+    fn partial_download_size_returns_none_when_missing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let size = HuggingFaceClient::partial_download_size(temp_dir.path(), "missing.gguf").unwrap();
+        assert_eq!(size, None);
     }
 }

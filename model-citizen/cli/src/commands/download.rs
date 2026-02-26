@@ -13,6 +13,7 @@ pub async fn run(
     sort: SortOrder,
     verbose: bool,
     output_dir: Option<&Path>,
+    remove_partial: bool,
 ) -> Result<()> {
     let client = HuggingFaceClient::new();
 
@@ -51,7 +52,7 @@ pub async fn run(
     std::fs::create_dir_all(&dest_dir)?;
 
     for variant in selected {
-        download_variant(&client, &repo_id, &variant, &dest_dir).await?;
+        download_variant(&client, &repo_id, &variant, &dest_dir, remove_partial).await?;
     }
 
     Ok(())
@@ -70,14 +71,7 @@ async fn search_and_select(
         None => println!("Browsing top models by {}...", sort.display_label()),
     }
 
-    // Over-fetch then filter to GGUF-tagged repos, since not all results are downloadable.
-    let results: Vec<SearchResult> = client
-        .search_models(query, limit.max(100), sort)
-        .await?
-        .into_iter()
-        .filter(|r| r.has_gguf())
-        .take(limit)
-        .collect();
+    let results: Vec<SearchResult> = client.search_gguf_models(query, limit, sort).await?;
 
     if results.is_empty() {
         match query {
@@ -95,7 +89,7 @@ async fn search_and_select(
     let idx = options
         .iter()
         .position(|o| *o == selection)
-        .expect("selection came from options");
+        .ok_or_else(|| eyre!("Failed to resolve selected model option"))?;
 
     Ok(results[idx].repo_id.clone())
 }
@@ -153,7 +147,13 @@ async fn download_variant(
     repo: &str,
     variant: &GgufVariant,
     dest_dir: &Path,
+    remove_partial: bool,
 ) -> Result<()> {
+    if !handle_partial_download(dest_dir, &variant.filename, remove_partial)? {
+        println!("Skipped {}", variant.filename);
+        return Ok(());
+    }
+
     let pb = ProgressBar::new(variant.size_bytes);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -177,8 +177,88 @@ async fn download_variant(
         }
         Err(e) => {
             pb.abandon_with_message(format!("Failed: {}", e));
-            let _ = HuggingFaceClient::cleanup_temp_files(dest_dir);
             Err(e.into())
         }
+    }
+}
+
+fn handle_partial_download(dest_dir: &Path, filename: &str, remove_partial: bool) -> Result<bool> {
+    let Some(partial_size) = HuggingFaceClient::partial_download_size(dest_dir, filename)? else {
+        return Ok(true);
+    };
+
+    if partial_size == 0 {
+        return Ok(true);
+    }
+
+    let tmp_path = HuggingFaceClient::temp_download_path(dest_dir, filename);
+
+    if remove_partial {
+        std::fs::remove_file(&tmp_path)?;
+        println!(
+            "Removed partial download for {} ({}). Starting fresh.",
+            filename,
+            format_bytes(partial_size)
+        );
+        return Ok(true);
+    }
+
+    let options = vec![
+        "Resume partial download (Recommended)".to_string(),
+        "Remove partial download and restart".to_string(),
+        "Skip this file".to_string(),
+    ];
+
+    let selection = Select::new(
+        &format!(
+            "Found partial download for {} ({}).",
+            filename,
+            format_bytes(partial_size)
+        ),
+        options.clone(),
+    )
+    .with_help_message("Choose how to continue")
+    .prompt()?;
+
+    let idx = options
+        .iter()
+        .position(|option| option == &selection)
+        .ok_or_else(|| eyre!("Failed to resolve selected partial-download option"))?;
+
+    match idx {
+        0 => Ok(true),
+        1 => {
+            std::fs::remove_file(&tmp_path)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const GB: u64 = 1024 * 1024 * 1024;
+    const MB: u64 = 1024 * 1024;
+    const KB: u64 = 1024;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_bytes_displays_expected_units() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1_536), "1.5 KB");
+        assert_eq!(format_bytes(5_242_880), "5.0 MB");
     }
 }

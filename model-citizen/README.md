@@ -7,7 +7,7 @@ Model Citizen provides:
 - A unified inventory of models downloaded for **Ollama**, **LM Studio**, and **Llama.cpp**
 - Symlink-based model sharing between runners (avoids duplicate storage)
 - Metadata inspection (quantization, architecture, context length, inference defaults)
-- HuggingFace search and GGUF model downloads with progress tracking
+- HuggingFace search and GGUF downloads with progress tracking, resumable partial downloads, and network retry handling
 - Support for both **GGUF** and **MLX/Safetensors** model formats
 
 ## CLI
