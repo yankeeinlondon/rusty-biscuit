@@ -76,8 +76,11 @@
 //! proper icon selection and ANSI styling based on terminal capabilities.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
+use paste::paste;
 use thiserror::Error;
 
 use crate::components::renderable::Renderable;
@@ -265,6 +268,7 @@ pub mod tree_chars {
 ///     name: "main.rs".to_string(),
 ///     is_ignored: false,
 ///     is_symlink: false,
+///     metrics: None,
 /// };
 /// assert!(file.is_file());
 /// assert_eq!(file.name(), "main.rs");
@@ -277,6 +281,7 @@ pub mod tree_chars {
 ///     is_symlink: false,
 ///     has_error: false,
 ///     at_depth_limit: false,
+///     metrics: None,
 /// };
 /// assert!(dir.is_dir());
 /// ```
@@ -299,6 +304,8 @@ pub enum TreeNode {
         /// When true, children are not populated and the directory
         /// is rendered with a special "depth limit" icon.
         at_depth_limit: bool,
+        /// Collected metrics for this directory (when metrics are configured).
+        metrics: Option<FileMetrics>,
     },
     /// A file entry.
     File {
@@ -308,6 +315,8 @@ pub enum TreeNode {
         is_ignored: bool,
         /// Whether this file is a symbolic link.
         is_symlink: bool,
+        /// Collected metrics for this file (when metrics are configured).
+        metrics: Option<FileMetrics>,
     },
 }
 
@@ -345,6 +354,91 @@ impl TreeNode {
     pub fn is_file(&self) -> bool {
         matches!(self, TreeNode::File { .. })
     }
+
+    /// Returns a reference to the metrics attached to this node, if any.
+    pub fn metrics(&self) -> Option<&FileMetrics> {
+        match self {
+            TreeNode::Dir { metrics, .. } | TreeNode::File { metrics, .. } => metrics.as_ref(),
+        }
+    }
+}
+
+/// The kind of metric that can be displayed alongside filesystem entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MetricKind {
+    /// File size in bytes, displayed as human-readable (e.g., "1.2 KB").
+    FileSize,
+    /// Estimated LLM token count based on file extension heuristics.
+    Tokens,
+    /// Absolute creation timestamp.
+    Created,
+    /// Relative creation time (e.g., "2 days ago").
+    CreatedSince,
+    /// Absolute modification timestamp.
+    Modified,
+    /// Relative modification time (e.g., "1 month ago").
+    ModifiedSince,
+    /// Symbolic permission string (e.g., ".rw-r--r--").
+    Permissions,
+    /// Numeric permission mode (e.g., "644").
+    PermissionsNumeric,
+    /// File owner username.
+    Owner,
+    /// File group name.
+    Group,
+}
+
+impl MetricKind {
+    /// Returns all metric kinds in their canonical display order.
+    fn all_in_order() -> &'static [MetricKind] {
+        &[
+            MetricKind::FileSize,
+            MetricKind::Tokens,
+            MetricKind::Permissions,
+            MetricKind::PermissionsNumeric,
+            MetricKind::Owner,
+            MetricKind::Group,
+            MetricKind::Created,
+            MetricKind::CreatedSince,
+            MetricKind::Modified,
+            MetricKind::ModifiedSince,
+        ]
+    }
+
+    /// Returns whether this metric is applicable to directories.
+    fn is_dir_applicable(self) -> bool {
+        !matches!(self, MetricKind::FileSize | MetricKind::Tokens)
+    }
+}
+
+/// Per-metric configuration (private).
+#[derive(Debug, Clone, Default)]
+struct MetricConfig {
+    enabled: bool,
+    filename_patterns: Vec<String>,
+    highlight_threshold: Option<u64>,
+}
+
+/// Collected file metrics for a single filesystem entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileMetrics {
+    /// File size in bytes.
+    pub file_size: Option<u64>,
+    /// Estimated LLM token count.
+    pub tokens: Option<u64>,
+    /// File creation timestamp.
+    pub created: Option<DateTime<Utc>>,
+    /// File modification timestamp.
+    pub modified: Option<DateTime<Utc>>,
+    /// Unix permission mode bits (e.g., 0o644).
+    #[cfg(unix)]
+    pub permissions_mode: Option<u32>,
+    /// File owner username.
+    #[cfg(unix)]
+    pub owner: Option<String>,
+    /// File group name.
+    #[cfg(unix)]
+    pub group: Option<String>,
 }
 
 /// A terminal component that renders a filesystem directory tree.
@@ -428,6 +522,10 @@ pub struct FileSystem {
     max_entries: u32,
     /// Whether to show the root directory name as the first line.
     show_root: bool,
+    /// Per-metric configuration (which metrics to show, filters, thresholds).
+    metric_configs: HashMap<MetricKind, MetricConfig>,
+    /// When true, directories also display applicable metrics (timestamps, permissions).
+    show_metrics_on_directories: bool,
 }
 
 impl Default for FileSystem {
@@ -450,6 +548,8 @@ impl Default for FileSystem {
             max_depth: 20,
             max_entries: 1000,
             show_root: true,
+            metric_configs: HashMap::new(),
+            show_metrics_on_directories: false,
         }
     }
 }
@@ -512,6 +612,8 @@ impl FileSystem {
             max_depth: 20,
             max_entries: 1000,
             show_root: true,
+            metric_configs: HashMap::new(),
+            show_metrics_on_directories: false,
         })
     }
 
@@ -760,6 +862,105 @@ impl FileSystem {
         self
     }
 
+    /// Enables metric display on directories for applicable metrics.
+    ///
+    /// When enabled, directories show timestamps and permissions (but not
+    /// file_size or tokens, which are file-only metrics).
+    pub fn show_on_directories(mut self) -> Self {
+        self.show_metrics_on_directories = true;
+        self
+    }
+
+    // =========================================================================
+    // Metric Builder Methods
+    // =========================================================================
+
+    /// Returns whether any metrics are configured to be shown.
+    fn has_any_metrics(&self) -> bool {
+        self.metric_configs.values().any(|c| c.enabled)
+    }
+
+    /// Checks if a metric should be shown for the given filename.
+    fn should_show_metric(&self, kind: MetricKind, filename: &str) -> bool {
+        let Some(config) = self.metric_configs.get(&kind) else {
+            return false;
+        };
+        if !config.enabled {
+            return false;
+        }
+        if config.filename_patterns.is_empty() {
+            return true;
+        }
+        let mut matched = false;
+        for pattern in &config.filename_patterns {
+            if let Some(neg) = pattern.strip_prefix('!') {
+                if glob_match(neg, filename) {
+                    return false;
+                }
+            } else if glob_match(pattern, filename) {
+                matched = true;
+            }
+        }
+        // If there are only negation patterns and none matched, show the metric.
+        // If there are positive patterns, at least one must match.
+        let has_positive = config
+            .filename_patterns
+            .iter()
+            .any(|p| !p.starts_with('!'));
+        if has_positive { matched } else { true }
+    }
+}
+
+/// Generates three builder methods per metric kind:
+/// - `show_{name}()` — enables the metric globally
+/// - `show_{name}_with_filename(globs)` — enables for matching filenames only
+/// - `show_{name}_highlight_greater_than(threshold)` — enables with highlight threshold
+macro_rules! metric_builder {
+    ($name:ident, $kind:expr) => {
+        paste! {
+            /// Enables the metric for all files.
+            pub fn [<show_ $name>](mut self) -> Self {
+                self.metric_configs.entry($kind).or_default().enabled = true;
+                self
+            }
+
+            /// Enables the metric only for files matching the given glob patterns.
+            ///
+            /// Patterns prefixed with `!` act as negation (exclude matching files).
+            pub fn [<show_ $name _with_filename>]<T: Into<String>>(mut self, globs: Vec<T>) -> Self {
+                let config = self.metric_configs.entry($kind).or_default();
+                config.enabled = true;
+                config.filename_patterns = globs.into_iter().map(|g| g.into()).collect();
+                self
+            }
+
+            /// Enables the metric with a highlight threshold.
+            ///
+            /// Values exceeding the threshold are rendered in bold yellow.
+            pub fn [<show_ $name _highlight_greater_than>](mut self, threshold: u64) -> Self {
+                let config = self.metric_configs.entry($kind).or_default();
+                config.enabled = true;
+                config.highlight_threshold = Some(threshold);
+                self
+            }
+        }
+    };
+}
+
+impl FileSystem {
+    metric_builder!(file_size, MetricKind::FileSize);
+    metric_builder!(tokens, MetricKind::Tokens);
+    metric_builder!(created, MetricKind::Created);
+    metric_builder!(created_since, MetricKind::CreatedSince);
+    metric_builder!(modified, MetricKind::Modified);
+    metric_builder!(modified_since, MetricKind::ModifiedSince);
+    metric_builder!(permissions, MetricKind::Permissions);
+    metric_builder!(permissions_numeric, MetricKind::PermissionsNumeric);
+    metric_builder!(owner, MetricKind::Owner);
+    metric_builder!(group, MetricKind::Group);
+}
+
+impl FileSystem {
     // =========================================================================
     // Accessor Methods
     // =========================================================================
@@ -820,6 +1021,7 @@ impl FileSystem {
     ///     name: "main.rs".into(),
     ///     is_ignored: false,
     ///     is_symlink: false,
+    ///     metrics: None,
     /// };
     ///
     /// // Nerd Font icon for Rust files
@@ -919,6 +1121,7 @@ impl FileSystem {
     ///     name: "main.rs".into(),
     ///     is_ignored: false,
     ///     is_symlink: false,
+    ///     metrics: None,
     /// };
     ///
     /// // Nerd Font: icon + space for PUA width compensation
@@ -1297,6 +1500,12 @@ impl FileSystem {
 
                 *total_entries += 1;
 
+                let dir_metrics =
+                    if self.has_any_metrics() && self.show_metrics_on_directories {
+                        self.collect_file_metrics(&file_path, &file_name, true)
+                    } else {
+                        None
+                    };
                 entries.push(TreeNode::Dir {
                     name: file_name,
                     children,
@@ -1304,6 +1513,7 @@ impl FileSystem {
                     is_symlink,
                     has_error: false,
                     at_depth_limit,
+                    metrics: dir_metrics,
                 });
             } else {
                 // Skip non-matching files when filters are active
@@ -1313,10 +1523,16 @@ impl FileSystem {
 
                 *total_entries += 1;
 
+                let file_metrics = if self.has_any_metrics() {
+                    self.collect_file_metrics(&file_path, &file_name, false)
+                } else {
+                    None
+                };
                 entries.push(TreeNode::File {
                     name: file_name,
                     is_ignored: false, // Will be set properly with ignore crate in Phase 8
                     is_symlink,
+                    metrics: file_metrics,
                 });
             }
         }
@@ -1336,6 +1552,213 @@ impl FileSystem {
             is_symlink,
             has_error: true,
             at_depth_limit: false,
+            metrics: None,
+        }
+    }
+
+    /// Collects file metrics for a single path based on configured metric kinds.
+    fn collect_file_metrics(
+        &self,
+        path: &Path,
+        filename: &str,
+        is_dir: bool,
+    ) -> Option<FileMetrics> {
+        let any_applicable = MetricKind::all_in_order().iter().any(|&kind| {
+            if is_dir && !kind.is_dir_applicable() {
+                return false;
+            }
+            self.should_show_metric(kind, filename)
+        });
+
+        if !any_applicable {
+            return None;
+        }
+
+        let metadata = std::fs::metadata(path).ok();
+        let mut fm = FileMetrics::default();
+
+        if !is_dir && self.should_show_metric(MetricKind::FileSize, filename) {
+            fm.file_size = metadata.as_ref().map(|m| m.len());
+        }
+
+        if !is_dir && self.should_show_metric(MetricKind::Tokens, filename) {
+            fm.tokens = estimate_tokens(path, metadata.as_ref());
+        }
+
+        if self.should_show_metric(MetricKind::Created, filename)
+            || self.should_show_metric(MetricKind::CreatedSince, filename)
+        {
+            fm.created = metadata
+                .as_ref()
+                .and_then(|m| m.created().ok())
+                .map(DateTime::<Utc>::from);
+        }
+
+        if self.should_show_metric(MetricKind::Modified, filename)
+            || self.should_show_metric(MetricKind::ModifiedSince, filename)
+        {
+            fm.modified = metadata
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .map(DateTime::<Utc>::from);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            if self.should_show_metric(MetricKind::Permissions, filename)
+                || self.should_show_metric(MetricKind::PermissionsNumeric, filename)
+            {
+                fm.permissions_mode = metadata.as_ref().map(|m| m.mode() & 0o777);
+            }
+
+            if self.should_show_metric(MetricKind::Owner, filename) {
+                fm.owner = metadata
+                    .as_ref()
+                    .and_then(|m| get_username_from_uid(m.uid()));
+            }
+
+            if self.should_show_metric(MetricKind::Group, filename) {
+                fm.group = metadata
+                    .as_ref()
+                    .and_then(|m| get_groupname_from_gid(m.gid()));
+            }
+        }
+
+        Some(fm)
+    }
+
+    /// Formats all enabled metrics for a node into a parenthesized string.
+    fn format_metrics(&self, metrics: &FileMetrics, filename: &str, is_tty: bool) -> String {
+        let parts: Vec<String> = MetricKind::all_in_order()
+            .iter()
+            .filter(|&&kind| self.should_show_metric(kind, filename))
+            .filter_map(|&kind| self.format_single_metric(kind, metrics, is_tty))
+            .collect();
+
+        if parts.is_empty() {
+            return String::new();
+        }
+
+        format!("( {} )", parts.join(", "))
+    }
+
+    /// Formats a single metric value with its label.
+    fn format_single_metric(
+        &self,
+        kind: MetricKind,
+        metrics: &FileMetrics,
+        is_tty: bool,
+    ) -> Option<String> {
+        let highlight = self.should_highlight_metric(kind, metrics);
+
+        match kind {
+            MetricKind::FileSize => {
+                let size = metrics.file_size?;
+                Some(format_metric_pair(
+                    "file size",
+                    &format_bytes(size),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            MetricKind::Tokens => {
+                let tokens = metrics.tokens?;
+                Some(format_metric_pair(
+                    "tokens",
+                    &format_token_count(tokens),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            MetricKind::Created => {
+                let dt = metrics.created?;
+                Some(format_metric_pair(
+                    "created",
+                    &dt.format("%Y-%m-%d %H:%M").to_string(),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            MetricKind::CreatedSince => {
+                let dt = metrics.created?;
+                Some(format_metric_pair(
+                    "created",
+                    &format_relative_time(dt),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            MetricKind::Modified => {
+                let dt = metrics.modified?;
+                Some(format_metric_pair(
+                    "modified",
+                    &dt.format("%Y-%m-%d %H:%M").to_string(),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            MetricKind::ModifiedSince => {
+                let dt = metrics.modified?;
+                Some(format_metric_pair(
+                    "modified",
+                    &format_relative_time(dt),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            #[cfg(unix)]
+            MetricKind::Permissions => {
+                let mode = metrics.permissions_mode?;
+                Some(format_metric_pair(
+                    "perm",
+                    &format_permissions_string(mode, is_tty),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            #[cfg(unix)]
+            MetricKind::PermissionsNumeric => {
+                let mode = metrics.permissions_mode?;
+                Some(format_metric_pair(
+                    "perm",
+                    &format!("{:o}", mode),
+                    is_tty,
+                    highlight,
+                ))
+            }
+            #[cfg(unix)]
+            MetricKind::Owner => {
+                let owner = metrics.owner.as_ref()?;
+                Some(format_metric_pair("owner", owner, is_tty, highlight))
+            }
+            #[cfg(unix)]
+            MetricKind::Group => {
+                let group = metrics.group.as_ref()?;
+                Some(format_metric_pair("group", group, is_tty, highlight))
+            }
+            #[cfg(not(unix))]
+            MetricKind::Permissions
+            | MetricKind::PermissionsNumeric
+            | MetricKind::Owner
+            | MetricKind::Group => None,
+        }
+    }
+
+    /// Checks if a metric value exceeds its configured highlight threshold.
+    fn should_highlight_metric(&self, kind: MetricKind, metrics: &FileMetrics) -> bool {
+        let Some(config) = self.metric_configs.get(&kind) else {
+            return false;
+        };
+        let Some(threshold) = config.highlight_threshold else {
+            return false;
+        };
+
+        match kind {
+            MetricKind::FileSize => metrics.file_size.is_some_and(|v| v > threshold),
+            MetricKind::Tokens => metrics.tokens.is_some_and(|v| v > threshold),
+            _ => false,
         }
     }
 }
@@ -1619,7 +2042,24 @@ impl FileSystem {
                 name.to_string()
             };
 
-            // Write the line: prefix + [style]icon name[reset]
+            // Format metrics suffix if available
+            let metrics_str = if let Some(metrics) = node.metrics() {
+                let is_dir = node.is_dir();
+                if is_dir && !self.show_metrics_on_directories {
+                    String::new()
+                } else {
+                    let formatted = self.format_metrics(metrics, name, is_tty);
+                    if formatted.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", formatted)
+                    }
+                }
+            } else {
+                String::new()
+            };
+
+            // Write the line: prefix + [style]icon name[reset] + metrics
             output.push_str(&line_prefix);
             if style.is_empty() {
                 output.push_str(&icon);
@@ -1630,6 +2070,7 @@ impl FileSystem {
                 output.push_str(&display_name);
                 output.push_str("\x1b[0m");
             }
+            output.push_str(&metrics_str);
             output.push('\n');
 
             // Recurse into children for directories
@@ -1761,6 +2202,212 @@ fn truncate_with_ellipsis(content: &str, max_width: u32) -> String {
     let truncate_at = max_width.saturating_sub(1);
     let (head, _tail) = split_at_visible_width(content, truncate_at);
     format!("{}\u{2026}", head)
+}
+
+/// Checks if a filename matches a glob pattern.
+fn glob_match(pattern: &str, filename: &str) -> bool {
+    globset::Glob::new(pattern)
+        .ok()
+        .map(|g| g.compile_matcher().is_match(filename))
+        .unwrap_or(false)
+}
+
+/// Formats a byte count as a human-readable string.
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * 1024 * 1024;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Formats a token count with comma separators.
+fn format_token_count(tokens: u64) -> String {
+    let s = tokens.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
+}
+
+/// Formats a datetime as a relative time string (e.g., "2 days ago").
+fn format_relative_time(dt: DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let duration = now.signed_duration_since(dt);
+
+    let seconds = duration.num_seconds();
+    if seconds < 60 {
+        return "just now".to_string();
+    }
+
+    let minutes = duration.num_minutes();
+    if minutes < 60 {
+        return if minutes == 1 {
+            "1 minute ago".to_string()
+        } else {
+            format!("{minutes} minutes ago")
+        };
+    }
+
+    let hours = duration.num_hours();
+    if hours < 24 {
+        return if hours == 1 {
+            "1 hour ago".to_string()
+        } else {
+            format!("{hours} hours ago")
+        };
+    }
+
+    let days = duration.num_days();
+    if days < 30 {
+        return if days == 1 {
+            "1 day ago".to_string()
+        } else {
+            format!("{days} days ago")
+        };
+    }
+
+    let months = days / 30;
+    if months < 12 {
+        return if months == 1 {
+            "1 month ago".to_string()
+        } else {
+            format!("{months} months ago")
+        };
+    }
+
+    let years = months / 12;
+    if years == 1 {
+        "1 year ago".to_string()
+    } else {
+        format!("{years} years ago")
+    }
+}
+
+/// Formats Unix permission mode bits as a symbolic string (e.g., ".rw-r--r--").
+///
+/// When `is_tty` is true, r/w/x characters are colored (green/red/yellow).
+#[cfg(unix)]
+fn format_permissions_string(mode: u32, is_tty: bool) -> String {
+    let mut s = String::with_capacity(64);
+    s.push('.');
+
+    let triples = [
+        (mode >> 6) & 0o7, // owner
+        (mode >> 3) & 0o7, // group
+        mode & 0o7,        // other
+    ];
+
+    for bits in triples {
+        // read
+        if bits & 0o4 != 0 {
+            if is_tty {
+                s.push_str("\x1b[32mr\x1b[0m");
+            } else {
+                s.push('r');
+            }
+        } else {
+            s.push('-');
+        }
+        // write
+        if bits & 0o2 != 0 {
+            if is_tty {
+                s.push_str("\x1b[31mw\x1b[0m");
+            } else {
+                s.push('w');
+            }
+        } else {
+            s.push('-');
+        }
+        // execute
+        if bits & 0o1 != 0 {
+            if is_tty {
+                s.push_str("\x1b[33mx\x1b[0m");
+            } else {
+                s.push('x');
+            }
+        } else {
+            s.push('-');
+        }
+    }
+
+    s
+}
+
+/// Formats a metric label/value pair with optional highlighting.
+fn format_metric_pair(label: &str, value: &str, is_tty: bool, highlight: bool) -> String {
+    if is_tty {
+        let dim_label = format!("\x1b[2m{}:\x1b[0m", label);
+        if highlight {
+            format!("{} \x1b[1;33m{}\x1b[0m", dim_label, value)
+        } else {
+            format!("{} {}", dim_label, value)
+        }
+    } else {
+        format!("{}: {}", label, value)
+    }
+}
+
+/// Estimates the number of LLM tokens for a file based on its extension and size.
+///
+/// Returns `None` for binary/unknown file types.
+fn estimate_tokens(path: &Path, metadata: Option<&std::fs::Metadata>) -> Option<u64> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    let size = metadata.map(|m| m.len())?;
+
+    let chars_per_token: f64 = match ext.as_str() {
+        "log" | "json" | "yaml" | "yml" | "toml" => 2.5,
+        "rs" | "ts" | "tsx" | "js" | "jsx" | "md" | "txt" | "py" | "go" | "java" | "c"
+        | "cpp" | "h" | "hpp" | "css" | "html" | "xml" | "sql" | "sh" | "bash" | "zsh"
+        | "fish" | "rb" | "php" | "swift" | "kt" | "scala" | "lua" | "r" | "pl" | "ex"
+        | "exs" | "elm" | "hs" | "ml" | "vim" | "conf" | "cfg" | "ini" | "env" | "csv"
+        | "tsv" => 4.0,
+        _ => return None,
+    };
+
+    Some((size as f64 / chars_per_token) as u64)
+}
+
+/// Resolves a Unix UID to a username.
+#[cfg(unix)]
+fn get_username_from_uid(uid: u32) -> Option<String> {
+    // SAFETY: getpwuid returns a pointer to a static struct or null.
+    // We only read from the returned pointer and copy the string immediately.
+    unsafe {
+        let pw = libc::getpwuid(uid);
+        if pw.is_null() {
+            return None;
+        }
+        let name = std::ffi::CStr::from_ptr((*pw).pw_name);
+        Some(name.to_string_lossy().into_owned())
+    }
+}
+
+/// Resolves a Unix GID to a group name.
+#[cfg(unix)]
+fn get_groupname_from_gid(gid: u32) -> Option<String> {
+    // SAFETY: getgrgid returns a pointer to a static struct or null.
+    // We only read from the returned pointer and copy the string immediately.
+    unsafe {
+        let gr = libc::getgrgid(gid);
+        if gr.is_null() {
+            return None;
+        }
+        let name = std::ffi::CStr::from_ptr((*gr).gr_name);
+        Some(name.to_string_lossy().into_owned())
+    }
 }
 
 #[cfg(test)]
@@ -1993,6 +2640,7 @@ mod tests {
             name: "main.rs".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         // Nerd Font icon for Rust files
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::RUST);
@@ -2009,6 +2657,7 @@ mod tests {
             name: "CLAUDE.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         // At root (depth 0) - special CLAUDE icon
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::CLAUDE);
@@ -2032,6 +2681,7 @@ mod tests {
             name: "Agents.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&agents_node, 0, Some(true)),
@@ -2047,6 +2697,7 @@ mod tests {
             name: "Gemini.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&gemini_node, 0, Some(true)),
@@ -2061,6 +2712,7 @@ mod tests {
             name: "SKILL.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         // SKILL.md gets special icon at any depth
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::SKILL);
@@ -2077,6 +2729,7 @@ mod tests {
             name: "README.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&readme_md, 0, Some(true)),
@@ -2092,6 +2745,7 @@ mod tests {
             name: "readme.md".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&readme_lower, 0, Some(true)),
@@ -2103,6 +2757,7 @@ mod tests {
             name: "README".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&readme_no_ext, 0, Some(true)),
@@ -2117,6 +2772,7 @@ mod tests {
             name: ".gitignore".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&node, 0, Some(true)),
@@ -2134,6 +2790,7 @@ mod tests {
                 name: name.into(),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2152,6 +2809,7 @@ mod tests {
                 name: name.into(),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2168,6 +2826,7 @@ mod tests {
             name: ".editorconfig".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&node, 0, Some(true)),
@@ -2184,6 +2843,7 @@ mod tests {
             name: "main.RS".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&upper, 0, Some(true)), icons::nerd::ext::RUST);
 
@@ -2192,6 +2852,7 @@ mod tests {
             name: "lib.Rs".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&mixed, 0, Some(true)), icons::nerd::ext::RUST);
     }
@@ -2205,6 +2866,7 @@ mod tests {
                 name: format!("file.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2223,6 +2885,7 @@ mod tests {
                 name: format!("file.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2241,6 +2904,7 @@ mod tests {
             name: "Cargo.toml".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&toml, 0, Some(true)), icons::nerd::ext::TOML);
 
@@ -2250,6 +2914,7 @@ mod tests {
                 name: format!("config.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2264,6 +2929,7 @@ mod tests {
                 name: format!("package.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2282,6 +2948,7 @@ mod tests {
                 name: format!("docs.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2298,6 +2965,7 @@ mod tests {
             name: "data.xyz".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::BASE);
         assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
@@ -2310,6 +2978,7 @@ mod tests {
             name: "main.rs".into(),
             is_ignored: false,
             is_symlink: true, // Symlink takes priority
+            metrics: None,
         };
         // Symlink icon takes priority over extension
         assert_eq!(
@@ -2332,6 +3001,7 @@ mod tests {
             is_symlink: true,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&node, 0, Some(true)),
@@ -2349,6 +3019,7 @@ mod tests {
             is_symlink: false,
             has_error: true, // Permission error
             at_depth_limit: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::dir::ERROR);
         assert_eq!(
@@ -2367,6 +3038,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: true,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&node, 0, Some(true)),
@@ -2390,6 +3062,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&git_dir, 0, Some(true)), icons::nerd::dir::GIT);
         assert_eq!(
@@ -2405,6 +3078,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
         assert_eq!(
             fs.get_icon(&github_dir, 0, Some(true)),
@@ -2420,6 +3094,7 @@ mod tests {
                 is_symlink: false,
                 has_error: false,
                 at_depth_limit: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2437,6 +3112,7 @@ mod tests {
                 is_symlink: false,
                 has_error: false,
                 at_depth_limit: false,
+            metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2456,6 +3132,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::dir::BASE);
         assert_eq!(
@@ -2471,6 +3148,7 @@ mod tests {
             name: "main.rs".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let padded = fs.get_icon_with_padding(&node, 0, Some(true));
         // Should be icon + space
@@ -2486,6 +3164,7 @@ mod tests {
             name: "main.rs".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let padded = fs.get_icon_with_padding(&node, 0, Some(false));
         // Should be just the icon (no padding)
@@ -2500,6 +3179,7 @@ mod tests {
             name: "main.rs".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         // None defaults to unicode (no padding)
         let padded = fs.get_icon_with_padding(&node, 0, None);
@@ -2540,6 +3220,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         assert_eq!(node.name(), "src");
@@ -2555,6 +3236,7 @@ mod tests {
             name: "main.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         assert_eq!(node.name(), "main.rs");
@@ -2570,6 +3252,7 @@ mod tests {
             name: "target".to_string(),
             is_ignored: true,
             is_symlink: false,
+            metrics: None,
         };
 
         assert!(node.is_ignored());
@@ -2584,6 +3267,7 @@ mod tests {
             is_symlink: true,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         assert!(node.is_symlink());
@@ -2595,6 +3279,7 @@ mod tests {
             name: "config".to_string(),
             is_ignored: false,
             is_symlink: true,
+            metrics: None,
         };
 
         assert!(node.is_symlink());
@@ -2606,11 +3291,13 @@ mod tests {
             name: "lib.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let child2 = TreeNode::File {
             name: "main.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let parent = TreeNode::Dir {
@@ -2620,6 +3307,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         if let TreeNode::Dir { children, .. } = parent {
@@ -2640,6 +3328,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: true,
+            metrics: None,
         };
 
         if let TreeNode::Dir { at_depth_limit, .. } = node {
@@ -2658,6 +3347,7 @@ mod tests {
             is_symlink: false,
             has_error: true,
             at_depth_limit: false,
+            metrics: None,
         };
 
         if let TreeNode::Dir { has_error, .. } = node {
@@ -2673,6 +3363,7 @@ mod tests {
             name: "test.rs".to_string(),
             is_ignored: true,
             is_symlink: true,
+            metrics: None,
         };
 
         let cloned = original.clone();
@@ -2685,6 +3376,7 @@ mod tests {
             name: "test.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let debug_str = format!("{:?}", node);
@@ -2698,18 +3390,21 @@ mod tests {
             name: "test.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let node2 = TreeNode::File {
             name: "test.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let node3 = TreeNode::File {
             name: "other.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         assert_eq!(node1, node2);
@@ -2723,12 +3418,14 @@ mod tests {
             name: "main.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let lib_rs = TreeNode::File {
             name: "lib.rs".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let src = TreeNode::Dir {
@@ -2738,12 +3435,14 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let cargo_toml = TreeNode::File {
             name: "Cargo.toml".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let target = TreeNode::Dir {
@@ -2753,6 +3452,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let root = TreeNode::Dir {
@@ -2762,6 +3462,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         // Verify structure
@@ -4074,6 +4775,7 @@ mod tests {
             name: "target".into(),
             is_ignored: true,
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "target", true);
@@ -4090,6 +4792,7 @@ mod tests {
             name: ".gitignore".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, ".gitignore", true);
@@ -4109,6 +4812,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, ".git", true);
@@ -4128,6 +4832,7 @@ mod tests {
             name: "error.log".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "error.log", true);
@@ -4144,6 +4849,7 @@ mod tests {
             name: "success.txt".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "success.txt", true);
@@ -4165,6 +4871,7 @@ mod tests {
             name: "target".into(),
             is_ignored: true,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&ignored_node, "target", false);
         assert_eq!(styled, "target", "No ANSI codes when is_tty=false");
@@ -4175,6 +4882,7 @@ mod tests {
             name: ".gitignore".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&dot_node, ".gitignore", false);
         assert_eq!(styled, ".gitignore", "No ANSI codes when is_tty=false");
@@ -4184,6 +4892,7 @@ mod tests {
             name: "error.log".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&error_node, "error.log", false);
         assert_eq!(styled, "error.log", "No ANSI codes when is_tty=false");
@@ -4199,6 +4908,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "src", true);
@@ -4216,6 +4926,7 @@ mod tests {
             name: "link.txt".into(),
             is_ignored: false,
             is_symlink: true,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "link.txt", true);
@@ -4235,6 +4946,7 @@ mod tests {
             is_symlink: false,
             has_error: true,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "unreadable", true);
@@ -4255,6 +4967,7 @@ mod tests {
             name: "target".into(),
             is_ignored: true, // This would normally be dimmed
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "target", true);
@@ -4274,6 +4987,7 @@ mod tests {
             is_symlink: true,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "linked_dir", true);
@@ -4522,6 +5236,7 @@ mod tests {
             is_symlink,
             has_error,
             at_depth_limit,
+            metrics,
         } = node
         {
             assert_eq!(name, "unreadable");
@@ -4530,6 +5245,7 @@ mod tests {
             assert!(!is_symlink);
             assert!(has_error, "has_error should be true");
             assert!(!at_depth_limit);
+            assert!(metrics.is_none());
         } else {
             panic!("Expected Dir variant");
         }
@@ -4558,6 +5274,7 @@ mod tests {
             name: ".ignored_dotfile".into(),
             is_ignored: true, // Should be dim
             is_symlink: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, ".ignored_dotfile", true);
@@ -4580,6 +5297,7 @@ mod tests {
             is_symlink: false,
             has_error: true,   // Error takes priority
             at_depth_limit: false,
+            metrics: None,
         };
 
         let styled = fs.style_name(&node, "error_ignored", true);
@@ -4695,6 +5413,7 @@ mod tests {
             name: "Makefile".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         // Files without extension should get base file icon
@@ -4709,6 +5428,7 @@ mod tests {
             name: ".bashrc".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         // Dotfiles without recognized extension should get base icon
@@ -4753,6 +5473,7 @@ mod tests {
             name: "error.log".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&error_node, "error.log", true);
         assert!(styled.contains("\x1b[31m"), "Should be red");
@@ -4762,6 +5483,7 @@ mod tests {
             name: "passed_tests.txt".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&pass_node, "passed_tests.txt", true);
         assert!(styled.contains("\x1b[32m"), "Should be green");
@@ -4771,6 +5493,7 @@ mod tests {
             name: "normal.txt".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&normal_node, "normal.txt", true);
         assert!(!styled.contains("\x1b[31m"), "Should not be red");
@@ -4787,6 +5510,7 @@ mod tests {
             name: "test.txt".into(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
         let styled = fs.style_name(&node, "test.txt", true);
 
@@ -4801,6 +5525,7 @@ mod tests {
             name: "test".to_string(),
             is_ignored: false,
             is_symlink: false,
+            metrics: None,
         };
 
         let dir = TreeNode::Dir {
@@ -4810,6 +5535,7 @@ mod tests {
             is_symlink: false,
             has_error: false,
             at_depth_limit: false,
+            metrics: None,
         };
 
         // Same name but different variants should not be equal
@@ -4868,5 +5594,387 @@ mod tests {
             assert!(at_depth_limit, "subdir should be at depth limit");
             assert!(children.is_empty(), "subdir should have no children");
         }
+    }
+
+    // ============================================================
+    // Metric Type Tests
+    // ============================================================
+
+    #[test]
+    fn test_metric_config_default() {
+        let config = MetricConfig::default();
+        assert!(!config.enabled);
+        assert!(config.filename_patterns.is_empty());
+        assert!(config.highlight_threshold.is_none());
+    }
+
+    #[test]
+    fn test_metric_kind_as_hashmap_key() {
+        let mut map = HashMap::new();
+        map.insert(MetricKind::FileSize, "size");
+        map.insert(MetricKind::Tokens, "tokens");
+        assert_eq!(map.get(&MetricKind::FileSize), Some(&"size"));
+        assert_eq!(map.get(&MetricKind::Tokens), Some(&"tokens"));
+        assert_eq!(map.get(&MetricKind::Owner), None);
+    }
+
+    #[test]
+    fn test_metric_kind_dir_applicability() {
+        assert!(!MetricKind::FileSize.is_dir_applicable());
+        assert!(!MetricKind::Tokens.is_dir_applicable());
+        assert!(MetricKind::Created.is_dir_applicable());
+        assert!(MetricKind::Modified.is_dir_applicable());
+        assert!(MetricKind::Permissions.is_dir_applicable());
+        assert!(MetricKind::Owner.is_dir_applicable());
+        assert!(MetricKind::Group.is_dir_applicable());
+    }
+
+    // ============================================================
+    // Format Helper Tests
+    // ============================================================
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(500), "500 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
+    }
+
+    #[test]
+    fn test_format_token_count() {
+        assert_eq!(format_token_count(0), "0");
+        assert_eq!(format_token_count(999), "999");
+        assert_eq!(format_token_count(1000), "1,000");
+        assert_eq!(format_token_count(1234567), "1,234,567");
+    }
+
+    #[test]
+    fn test_format_relative_time() {
+        let now = Utc::now();
+
+        // Just now
+        assert_eq!(format_relative_time(now), "just now");
+
+        // Minutes
+        let two_min_ago = now - chrono::Duration::minutes(2);
+        assert_eq!(format_relative_time(two_min_ago), "2 minutes ago");
+
+        let one_min_ago = now - chrono::Duration::minutes(1);
+        assert_eq!(format_relative_time(one_min_ago), "1 minute ago");
+
+        // Hours
+        let three_hours_ago = now - chrono::Duration::hours(3);
+        assert_eq!(format_relative_time(three_hours_ago), "3 hours ago");
+
+        // Days
+        let five_days_ago = now - chrono::Duration::days(5);
+        assert_eq!(format_relative_time(five_days_ago), "5 days ago");
+
+        // Months
+        let two_months_ago = now - chrono::Duration::days(65);
+        assert_eq!(format_relative_time(two_months_ago), "2 months ago");
+
+        // Years
+        let two_years_ago = now - chrono::Duration::days(750);
+        assert_eq!(format_relative_time(two_years_ago), "2 years ago");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_format_permissions_string_644() {
+        assert_eq!(format_permissions_string(0o644, false), ".rw-r--r--");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_format_permissions_string_755() {
+        assert_eq!(format_permissions_string(0o755, false), ".rwxr-xr-x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_format_permissions_string_000() {
+        assert_eq!(format_permissions_string(0o000, false), ".---------");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_format_permissions_string_777() {
+        assert_eq!(format_permissions_string(0o777, false), ".rwxrwxrwx");
+    }
+
+    // ============================================================
+    // Estimate Tokens Tests
+    // ============================================================
+
+    #[test]
+    fn test_estimate_tokens_json_file() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("data.json");
+        let content = "a".repeat(1000); // 1000 bytes, json uses 2.5 chars/token = 400
+        std::fs::write(&path, &content).expect("write");
+        let metadata = std::fs::metadata(&path).ok();
+        assert_eq!(estimate_tokens(&path, metadata.as_ref()), Some(400));
+    }
+
+    #[test]
+    fn test_estimate_tokens_rust_file() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("main.rs");
+        let content = "a".repeat(1000); // 1000 bytes, rs uses 4.0 chars/token = 250
+        std::fs::write(&path, &content).expect("write");
+        let metadata = std::fs::metadata(&path).ok();
+        assert_eq!(estimate_tokens(&path, metadata.as_ref()), Some(250));
+    }
+
+    #[test]
+    fn test_estimate_tokens_binary_returns_none() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("image.png");
+        std::fs::write(&path, "fake png data").expect("write");
+        let metadata = std::fs::metadata(&path).ok();
+        assert_eq!(estimate_tokens(&path, metadata.as_ref()), None);
+    }
+
+    // ============================================================
+    // Glob Match Tests
+    // ============================================================
+
+    #[test]
+    fn test_glob_match_basic() {
+        assert!(glob_match("*.rs", "main.rs"));
+        assert!(glob_match("*.rs", "lib.rs"));
+        assert!(!glob_match("*.rs", "main.ts"));
+    }
+
+    #[test]
+    fn test_glob_match_star() {
+        assert!(glob_match("*", "anything.txt"));
+        assert!(glob_match("test*", "test_file.rs"));
+    }
+
+    // ============================================================
+    // Builder Method Tests
+    // ============================================================
+
+    #[test]
+    fn test_show_file_size_builder() {
+        let fs = FileSystem::default().show_file_size();
+        assert!(fs.has_any_metrics());
+        assert!(fs.should_show_metric(MetricKind::FileSize, "anything.rs"));
+    }
+
+    #[test]
+    fn test_show_file_size_with_filename() {
+        let fs = FileSystem::default().show_file_size_with_filename(vec!["*.rs"]);
+        assert!(fs.should_show_metric(MetricKind::FileSize, "main.rs"));
+        assert!(!fs.should_show_metric(MetricKind::FileSize, "main.ts"));
+    }
+
+    #[test]
+    fn test_show_file_size_with_negation() {
+        let fs = FileSystem::default().show_file_size_with_filename(vec!["*", "!*.log"]);
+        assert!(fs.should_show_metric(MetricKind::FileSize, "main.rs"));
+        assert!(!fs.should_show_metric(MetricKind::FileSize, "app.log"));
+    }
+
+    #[test]
+    fn test_should_show_metric_disabled() {
+        let fs = FileSystem::default();
+        assert!(!fs.should_show_metric(MetricKind::FileSize, "anything.rs"));
+    }
+
+    #[test]
+    fn test_multiple_metrics_enabled() {
+        let fs = FileSystem::default().show_file_size().show_tokens();
+        assert!(fs.should_show_metric(MetricKind::FileSize, "test.rs"));
+        assert!(fs.should_show_metric(MetricKind::Tokens, "test.rs"));
+        assert!(!fs.should_show_metric(MetricKind::Owner, "test.rs"));
+    }
+
+    // ============================================================
+    // Integration Tests with tempfile
+    // ============================================================
+
+    #[test]
+    fn test_file_size_metric_on_real_file() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp.path().join("test.rs");
+        std::fs::write(&file_path, "fn main() {}").expect("write file");
+
+        let mut fs = FileSystem::new(temp.path()).unwrap().show_file_size();
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        assert_eq!(tree.len(), 1);
+
+        let file_node = &tree[0];
+        assert!(file_node.metrics().is_some());
+        let metrics = file_node.metrics().unwrap();
+        assert!(metrics.file_size.is_some());
+        assert_eq!(metrics.file_size.unwrap(), 12); // "fn main() {}" is 12 bytes
+    }
+
+    #[test]
+    fn test_tokens_metric_on_rs_file() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp.path().join("test.rs");
+        let content = "a".repeat(400); // 400 bytes, at 4 chars/token = 100 tokens
+        std::fs::write(&file_path, &content).expect("write file");
+
+        let mut fs = FileSystem::new(temp.path()).unwrap().show_tokens();
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        let file_node = &tree[0];
+        let metrics = file_node.metrics().unwrap();
+        assert_eq!(metrics.tokens, Some(100));
+    }
+
+    #[test]
+    fn test_file_size_with_glob_filter() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join("code.rs"), "let x = 1;").expect("write rs");
+        std::fs::write(temp.path().join("data.json"), r#"{"a":1}"#).expect("write json");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_file_size_with_filename(vec!["*.rs"]);
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        let rs_node = tree.iter().find(|n| n.name() == "code.rs").unwrap();
+        let json_node = tree.iter().find(|n| n.name() == "data.json").unwrap();
+
+        assert!(rs_node.metrics().is_some(), "rs file should have metrics");
+        assert!(
+            json_node.metrics().is_none(),
+            "json file should not have metrics"
+        );
+    }
+
+    #[test]
+    fn test_negation_glob_excludes_files() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join("app.rs"), "fn main() {}").expect("write rs");
+        std::fs::write(temp.path().join("app.log"), "log data").expect("write log");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_file_size_with_filename(vec!["*", "!*.log"]);
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        let rs_node = tree.iter().find(|n| n.name() == "app.rs").unwrap();
+        let log_node = tree.iter().find(|n| n.name() == "app.log").unwrap();
+
+        assert!(rs_node.metrics().is_some());
+        assert!(log_node.metrics().is_none());
+    }
+
+    #[test]
+    fn test_render_output_contains_file_size_label() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join("test.txt"), "hello world").expect("write");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_file_size()
+            .show_root(false);
+        fs.ensure_tree_built();
+
+        let output = fs.render(Some(120));
+        assert!(
+            output.contains("file size:"),
+            "output should contain 'file size:' label, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_multiple_metrics_render() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join("test.rs"), "fn main() {}").expect("write");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_file_size()
+            .show_tokens()
+            .show_root(false);
+        fs.ensure_tree_built();
+
+        let output = fs.render(Some(120));
+        assert!(output.contains("file size:"), "should have file size");
+        assert!(output.contains("tokens:"), "should have tokens");
+    }
+
+    #[test]
+    fn test_show_on_directories_with_modified() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let subdir = temp.path().join("subdir");
+        std::fs::create_dir(&subdir).expect("create dir");
+        std::fs::write(subdir.join("file.txt"), "data").expect("write");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_modified_since()
+            .show_on_directories()
+            .depth(2);
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        let dir_node = tree.iter().find(|n| n.name() == "subdir").unwrap();
+        assert!(
+            dir_node.metrics().is_some(),
+            "directory should have metrics when show_on_directories is enabled"
+        );
+    }
+
+    #[test]
+    fn test_no_metrics_on_dirs_without_show_on_directories() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let subdir = temp.path().join("subdir");
+        std::fs::create_dir(&subdir).expect("create dir");
+        std::fs::write(subdir.join("file.txt"), "data").expect("write");
+
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .show_file_size()
+            .depth(2);
+        fs.ensure_tree_built();
+
+        let tree = fs.tree().expect("tree built");
+        let dir_node = tree.iter().find(|n| n.name() == "subdir").unwrap();
+        assert!(
+            dir_node.metrics().is_none(),
+            "directory should NOT have metrics without show_on_directories"
+        );
+
+        // But files should still have metrics
+        if let TreeNode::Dir { children, .. } = dir_node {
+            let file_node = children.iter().find(|n| n.name() == "file.txt").unwrap();
+            assert!(file_node.metrics().is_some(), "file should have metrics");
+        }
+    }
+
+    #[test]
+    fn test_highlight_threshold() {
+        let fs = FileSystem::default().show_file_size_highlight_greater_than(1000);
+
+        let small_metrics = FileMetrics {
+            file_size: Some(500),
+            ..Default::default()
+        };
+        assert!(!fs.should_highlight_metric(MetricKind::FileSize, &small_metrics));
+
+        let large_metrics = FileMetrics {
+            file_size: Some(2000),
+            ..Default::default()
+        };
+        assert!(fs.should_highlight_metric(MetricKind::FileSize, &large_metrics));
     }
 }
