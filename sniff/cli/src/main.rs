@@ -95,6 +95,10 @@ pub enum Commands {
         /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
         #[arg(value_name = "REMOTE")]
         remote: Option<String>,
+
+        /// Print help
+        #[arg(long, action = clap::ArgAction::Help)]
+        help: Option<bool>,
     },
 
     /// Show only repository/monorepo structure
@@ -556,25 +560,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
     // Handle `sniff git <remote>` - resolve name/URL/shorthand, then fetch remote info
-    if let Some(ref cmd) = cli.command {
-        if let Some(remote_ref) = cmd.git_remote() {
-            if remote_ref.contains("://") || remote_ref.starts_with("git@") {
-                // URL: contains :// or starts with git@
-                return handle_remote_url(remote_ref, cli.json, cli.verbose).await;
-            } else if is_owner_repo_shorthand(remote_ref) {
-                // owner/repo shorthand: exactly one slash with non-empty parts
-                return handle_shorthand(remote_ref, cli.json, cli.verbose).await;
-            } else {
-                // Git remote name (e.g., "origin")
-                let url =
-                    resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
-                        format!(
-                            "Could not find remote '{}' in the current repository",
-                            remote_ref
-                        )
-                    })?;
-                return handle_remote_url(&url, cli.json, cli.verbose).await;
-            }
+    if let Some(ref cmd) = cli.command
+        && let Some(remote_ref) = cmd.git_remote()
+    {
+        if remote_ref.contains("://") || remote_ref.starts_with("git@") {
+            // URL: contains :// or starts with git@
+            return handle_remote_url(remote_ref, cli.json, cli.verbose).await;
+        } else if is_owner_repo_shorthand(remote_ref) {
+            // owner/repo shorthand: exactly one slash with non-empty parts
+            return handle_shorthand(remote_ref, cli.json, cli.verbose).await;
+        } else {
+            // Git remote name (e.g., "origin")
+            let url =
+                resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
+                    format!(
+                        "Could not find remote '{}' in the current repository",
+                        remote_ref
+                    )
+                })?;
+            return handle_remote_url(&url, cli.json, cli.verbose).await;
         }
     }
 
@@ -638,7 +642,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut result = detect_with_config(config)?;
 
     // Enrich dependencies with latest versions when --deep is enabled
-    if deep_enabled {
+    // Only for subcommands that display dependency info (repo, language, all)
+    if deep_enabled
+        && matches!(
+            output_filter,
+            OutputFilter::All
+                | OutputFilter::Filesystem
+                | OutputFilter::Repo
+                | OutputFilter::Language
+        )
+    {
         result = enrich_result_dependencies(result).await;
     }
 
@@ -704,10 +717,10 @@ fn wants_completions_help() -> bool {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     for (index, arg) in args.iter().enumerate() {
-        if arg == "--completions" {
-            if let Some(next) = args.get(index + 1) {
-                return next == "--help" || next == "-h";
-            }
+        if arg == "--completions"
+            && let Some(next) = args.get(index + 1)
+        {
+            return next == "--help" || next == "-h";
         }
     }
 
@@ -1021,7 +1034,7 @@ mod tests {
         #[test]
         fn git_subcommand_with_history_flag() {
             let cli = parse_args(&["git", "--history", "10"]).unwrap();
-            if let Some(Commands::Git { history, remote }) = cli.command {
+            if let Some(Commands::Git { history, remote, .. }) = cli.command {
                 assert_eq!(history, 10);
                 assert!(remote.is_none());
             } else {
@@ -1032,7 +1045,7 @@ mod tests {
         #[test]
         fn git_subcommand_with_short_history_flag() {
             let cli = parse_args(&["git", "-h", "3"]).unwrap();
-            if let Some(Commands::Git { history, remote }) = cli.command {
+            if let Some(Commands::Git { history, remote, .. }) = cli.command {
                 assert_eq!(history, 3);
                 assert!(remote.is_none());
             } else {
@@ -1043,7 +1056,7 @@ mod tests {
         #[test]
         fn git_subcommand_default_history() {
             let cli = parse_args(&["git"]).unwrap();
-            if let Some(Commands::Git { history, remote }) = cli.command {
+            if let Some(Commands::Git { history, remote, .. }) = cli.command {
                 assert_eq!(history, 5);
                 assert!(remote.is_none());
             } else {
@@ -1335,7 +1348,7 @@ mod tests {
         #[test]
         fn git_remote_name_parses() {
             let cli = parse_args(&["git", "origin"]).unwrap();
-            if let Some(Commands::Git { history, remote }) = cli.command {
+            if let Some(Commands::Git { history, remote, .. }) = cli.command {
                 assert_eq!(history, 5); // default
                 assert_eq!(remote, Some("origin".to_string()));
             } else {
@@ -1437,6 +1450,7 @@ mod tests {
             let cmd = Commands::Git {
                 history: 5,
                 remote: None,
+                help: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
         }
@@ -1501,6 +1515,7 @@ mod tests {
             let cmd = Commands::Git {
                 history: 5,
                 remote: Some("origin".to_string()),
+                help: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
         }

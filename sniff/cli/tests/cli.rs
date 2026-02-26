@@ -1009,11 +1009,12 @@ fn test_old_flag_syntax_fails() {
 
 #[test]
 fn test_git_remote_help() {
-    // git subcommand help should mention the REMOTE positional arg
+    // git subcommand --help should work and mention the REMOTE positional arg
     cargo_bin_cmd!("sniff")
-        .args(["git", "--history", "1", "--help"])
+        .args(["git", "--help"])
         .assert()
-        .failure(); // disable_help_flag means --help is not recognized, but -h works
+        .success()
+        .stdout(predicate::str::contains("[REMOTE]"));
 
     // Instead, verify via the main help text
     cargo_bin_cmd!("sniff")
