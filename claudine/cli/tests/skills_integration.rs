@@ -310,3 +310,143 @@ fn skills_fix_does_not_show_fix_hint() {
         "should not show --fix hint when already running with --fix"
     );
 }
+
+// ── Detail view ──────────────────────────────────────────────────────
+
+#[test]
+fn skills_detail_view_shows_filesystem() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    // Create a skill with an extra file so the tree is non-trivial
+    setup_skill(&skills_dir, "my-tool", "A useful tool");
+    fs::write(
+        skills_dir.join("my-tool/details.md"),
+        "# Extra detail file\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "my-tool"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Detail view renders a FileSystem tree which includes "SKILL.md"
+    assert!(
+        stdout.contains("SKILL.md"),
+        "detail view should show filesystem tree with SKILL.md, got:\n{stdout}"
+    );
+}
+
+// ── Exception filtering ──────────────────────────────────────────────
+
+#[test]
+fn skills_filter_suppresses_unrelated_exceptions() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "alpha", "Alpha skill");
+    // Create a skill with a broken link (exception source)
+    write(
+        &skills_dir.join("broken-tool/SKILL.md"),
+        "---\ndescription: Broken tool\n---\nSee [missing](./gone.md) for more.\n",
+    );
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "alpha"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // When filtering to "alpha", broken-tool exceptions should not appear
+    assert!(
+        !stdout.contains("broken-tool"),
+        "filtered output should not show unrelated exceptions, got:\n{stdout}"
+    );
+}
+
+// ── Footer messages ──────────────────────────────────────────────────
+
+#[test]
+fn skills_footer_shows_filter_hint() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "my-tool", "A tool");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .arg("skills")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("filters"),
+        "footer should show filter hint when no filters used, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn skills_footer_hides_filter_hint_with_filter() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "my-tool", "A tool");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "my-tool"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("filters"),
+        "footer should not show filter hint when filters are used, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn skills_not_in_git_repo_shows_user_only_hint() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    // Use a temp dir that is definitely not a git repo
+    let cwd = workspace.path().join("not-a-repo");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "my-tool", "A tool");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .arg("skills")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("not") && stdout.contains("git"),
+        "footer should indicate CWD is not a git repo, got:\n{stdout}"
+    );
+}
