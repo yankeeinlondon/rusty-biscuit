@@ -12,6 +12,7 @@ use super::profile::WrapperProfile;
 pub(crate) struct EnvPlan {
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) removed: Vec<String>,
+    pub(crate) included: Vec<String>,
     pub(crate) added: Vec<(String, String)>,
     pub(crate) package_context: Option<PackageContext>,
     pub(crate) repo_root: Option<PathBuf>,
@@ -35,7 +36,7 @@ pub(crate) fn build_child_env(
     env_overrides: &[(String, String)],
 ) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
-    let (mut env, removed, mut warnings) = sanitize_process_env(&include_set);
+    let (mut env, removed, included, mut warnings) = sanitize_process_env(&include_set);
     let mut added = BTreeMap::new();
 
     let redacted_params = redact_sensitive_args(agent_params);
@@ -101,6 +102,7 @@ pub(crate) fn build_child_env(
     Ok(EnvPlan {
         env,
         removed,
+        included,
         added: added.into_iter().collect(),
         package_context,
         repo_root,
@@ -144,18 +146,23 @@ fn is_valid_env_name(name: &str) -> bool {
 
 fn sanitize_process_env(
     include_set: &HashSet<String>,
-) -> (HashMap<OsString, OsString>, Vec<String>, Vec<String>) {
+) -> (HashMap<OsString, OsString>, Vec<String>, Vec<String>, Vec<String>) {
     let mut kept = HashMap::new();
     let mut removed = BTreeSet::new();
+    let mut included = BTreeSet::new();
     let mut present_keys = HashSet::new();
 
     for (key, value) in std::env::vars_os() {
         let key_display = key.to_string_lossy().to_string();
         present_keys.insert(key_display.clone());
 
-        if is_sensitive_key(&key_display) && !include_set.contains(&key_display) {
-            removed.insert(key_display);
-            continue;
+        if is_sensitive_key(&key_display) {
+            if include_set.contains(&key_display) {
+                included.insert(key_display);
+            } else {
+                removed.insert(key_display);
+                continue;
+            }
         }
 
         kept.insert(key, value);
@@ -171,7 +178,12 @@ fn sanitize_process_env(
         }
     }
 
-    (kept, removed.into_iter().collect(), warnings)
+    (
+        kept,
+        removed.into_iter().collect(),
+        included.into_iter().collect(),
+        warnings,
+    )
 }
 
 fn is_sensitive_key(key: &str) -> bool {

@@ -1,64 +1,14 @@
 use claudine::events::Provider;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser};
 use color_eyre::eyre::Result;
 use tracing::level_filters::LevelFilter;
 
+mod args;
 mod commands;
 mod log;
+mod output;
 
-/// Claudine — cross-agent hook/event system for agentic CLIs.
-#[derive(Parser)]
-#[command(name = "claudine", version, about)]
-pub(crate) struct Cli {
-    /// Increase verbosity (-v for info, -vv for debug).
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
-    verbose: u8,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-pub(crate) enum Commands {
-    /// Handle an incoming event from a provider hook.
-    Handle(commands::handle::HandleArgs),
-    /// Show what would happen for an event (no side effects).
-    DryRun(commands::dry_run::DryRunArgs),
-    /// Generate shell completions.
-    Completions(commands::completions::CompletionsArgs),
-    /// Show detailed help and usage information.
-    About,
-    /// Interactive setup wizard.
-    Init(commands::init::InitArgs),
-    /// Link skills and commands across providers.
-    Link(commands::link::LinkArgs),
-    /// Re-sync hook registrations with detected agents.
-    Sync(commands::sync::SyncArgs),
-    /// Show registered hooks for all detected agents.
-    Hooks(commands::hooks::HooksArgs),
-    /// Show which actions are configured and for which events.
-    Actions(commands::actions::ActionsArgs),
-    /// List available skills and their scopes.
-    Skills(commands::skills::SkillsArgs),
-    /// Show provider capability matrix (skill/slash/agent/hooks).
-    Providers,
-    /// Remove Claudine hooks from all agents.
-    Uninstall(commands::uninstall::UninstallArgs),
-    /// Wrap Claude Code with Claudine preflight/env handling.
-    Claude(commands::wrap::WrapperArgs),
-    /// Wrap Codex CLI with Claudine preflight/env handling.
-    Codex(commands::wrap::WrapperArgs),
-    /// Wrap Gemini CLI with Claudine preflight/env handling.
-    Gemini(commands::wrap::WrapperArgs),
-    /// Wrap Kimi Code with Claudine preflight/env handling.
-    Kimi(commands::wrap::WrapperArgs),
-    /// Wrap Qwen Code with Claudine preflight/env handling.
-    Qwen(commands::wrap::WrapperArgs),
-    /// Wrap OpenCode with Claudine preflight/env handling.
-    Opencode(commands::wrap::WrapperArgs),
-    /// Wrap Goose with Claudine preflight/env handling.
-    Goose(commands::wrap::WrapperArgs),
-}
+use args::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> Result<()> {
