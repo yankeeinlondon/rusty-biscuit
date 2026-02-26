@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use clap::builder::PossibleValue;
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -500,7 +500,7 @@ fn list_sound_effects(filter: Option<&str>) {
                     effect.description(),
                     format_duration(effect.duration_ms())
                 ));
-                RenderableContent::Component(Arc::new(styled))
+                RenderableContent::Component(Rc::new(styled))
             })
             .collect();
 
