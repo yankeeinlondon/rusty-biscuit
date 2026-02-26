@@ -194,6 +194,7 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+	@sniff git 2>/dev/null || exit 0
 
 refresh-skill:
     @clear
