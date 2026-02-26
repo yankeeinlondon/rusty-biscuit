@@ -649,7 +649,7 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 /// Returns an error if:
 /// - The repository exists but has no working directory (bare repo)
 /// - Git operations fail due to filesystem permissions or corruption
-pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
+pub fn detect_git(path: &Path, _deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     let repo = match Repository::discover(path) {
         Ok(r) => r,
         Err(_) => return Ok(None),
@@ -662,12 +662,10 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
     let current_branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
 
     let in_worktree = repo.is_worktree();
-    let recent = get_recent_commits(&repo, commit_count, deep);
-    let (mut status, file_changes) = get_repo_status_with_changes(&repo)?;
-    if deep {
-        status.is_behind = Some(check_behind_remotes(&repo));
-    }
-    let remotes = get_remotes(&repo, deep);
+
+    let recent = get_recent_commits(&repo, commit_count);
+    let (status, file_changes) = get_repo_status_with_changes(&repo)?;
+    let remotes = get_remotes(&repo);
     let worktrees = get_worktrees(&repo);
     let config = get_git_config(&repo);
     let branches = get_local_branches(&repo);
@@ -776,7 +774,7 @@ fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecor
 /// Gets the last N commits from HEAD using revwalk.
 ///
 /// When `deep` is true, also determines which remotes contain each commit.
-fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<CommitInfo> {
+fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
     let Ok(mut revwalk) = repo.revwalk() else {
@@ -798,12 +796,6 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
             continue;
         };
 
-        let remotes = if deep {
-            check_commit_on_remotes(repo, oid)
-        } else {
-            None
-        };
-
         // Get refs pointing to this commit
         let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
 
@@ -813,7 +805,7 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
             message: commit.message().unwrap_or("").trim().to_string(),
             author: author.name().unwrap_or("Unknown").to_string(),
             timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
-            remotes,
+            remotes: None,
             refs,
         });
     }
@@ -1138,10 +1130,9 @@ fn get_tracking_status(
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
 ///
-/// When `deep` is true, also fetches the list of branches from each remote
-/// using ls-remote. This requires network access and may fail for remotes
-/// that require authentication.
-fn get_remotes(repo: &Repository, deep: bool) -> Vec<RemoteInfo> {
+/// Also reads the list of branches from each remote via local tracking refs
+/// (no network access required).
+fn get_remotes(repo: &Repository) -> Vec<RemoteInfo> {
     repo.remotes()
         .map(|names| {
             names
@@ -1155,11 +1146,7 @@ fn get_remotes(repo: &Repository, deep: bool) -> Vec<RemoteInfo> {
                             .map(|u| HostingProvider::from_url(u))
                             .unwrap_or(HostingProvider::Unknown);
 
-                        let branches = if deep {
-                            get_remote_branches(repo, name)
-                        } else {
-                            None
-                        };
+                        let branches = get_remote_branches(repo, name);
 
                         RemoteInfo {
                             name: name.to_string(),
@@ -1174,126 +1161,31 @@ fn get_remotes(repo: &Repository, deep: bool) -> Vec<RemoteInfo> {
         .unwrap_or_default()
 }
 
-/// Fetches branch names from a remote using ls-remote with a timeout.
+/// Gets branch names for a remote from local tracking refs (`refs/remotes/<name>/*`).
 ///
-/// Returns `None` if the fetch fails, times out, or requires authentication.
-/// Uses a 5-second timeout to prevent hangs on SSH auth prompts.
+/// Reads locally cached remote branch info (updated on fetch/pull).
+/// No network access required.
 fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<String>> {
-    use std::sync::mpsc;
-    use std::time::Duration;
+    let pattern = format!("refs/remotes/{}/*", remote_name);
+    let refs = repo.references_glob(&pattern).ok()?;
+    let prefix = format!("refs/remotes/{}/", remote_name);
 
-    let repo_path = repo.path().to_path_buf();
-    let remote_name_owned = remote_name.to_string();
-
-    let (tx, rx) = mpsc::channel();
-
-    std::thread::spawn(move || {
-        let result = (|| -> Option<Vec<String>> {
-            let repo = Repository::open(&repo_path).ok()?;
-            let mut remote = repo.find_remote(&remote_name_owned).ok()?;
-
-            // Connect to remote - use default callbacks (no auth)
-            remote.connect_auth(git2::Direction::Fetch, None, None).ok()?;
-
-            let refs = remote.list().ok()?;
-
-            let branches: Vec<String> = refs
-                .iter()
-                .filter_map(|head| {
-                    let name = head.name();
-                    name.strip_prefix("refs/heads/").map(|branch| branch.to_string())
-                })
-                .collect();
-
-            if branches.is_empty() {
+    let mut branches: Vec<String> = refs
+        .flatten()
+        .filter_map(|r| {
+            let name = r.name()?;
+            let branch = name.strip_prefix(&prefix)?;
+            if branch == "HEAD" {
                 None
             } else {
-                Some(branches)
+                Some(branch.to_string())
             }
-        })();
-        let _ = tx.send(result);
-    });
+        })
+        .collect();
 
-    rx.recv_timeout(Duration::from_secs(5)).ok().flatten()
-}
+    branches.sort();
 
-/// Checks which remotes the local branch is behind.
-///
-/// Returns `BehindStatus::NotBehind` if local is up-to-date with all remotes,
-/// or `BehindStatus::Behind(vec![...])` with the list of remote names where
-/// the tracking branch has commits not in local.
-fn check_behind_remotes(repo: &Repository) -> BehindStatus {
-    let Some(head) = repo.head().ok() else {
-        return BehindStatus::NotBehind;
-    };
-    if !head.is_branch() {
-        return BehindStatus::NotBehind;
-    }
-
-    let Some(branch_name) = head.shorthand() else {
-        return BehindStatus::NotBehind;
-    };
-    let Ok(local_branch) = repo.find_branch(branch_name, git2::BranchType::Local) else {
-        return BehindStatus::NotBehind;
-    };
-    let Ok(local_commit) = local_branch.get().peel_to_commit() else {
-        return BehindStatus::NotBehind;
-    };
-
-    let mut behind_remotes = Vec::new();
-
-    // Check each remote for a tracking branch
-    if let Ok(remotes) = repo.remotes() {
-        for remote_name in remotes.iter().flatten() {
-            // Try to find the remote tracking branch (e.g., origin/main)
-            let remote_branch_name = format!("{}/{}", remote_name, branch_name);
-            if let Ok(remote_ref) =
-                repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
-                && let Ok(remote_commit) = remote_ref.peel_to_commit()
-                && let Ok((_ahead, behind)) =
-                    repo.graph_ahead_behind(local_commit.id(), remote_commit.id())
-                && behind > 0
-            {
-                behind_remotes.push(remote_name.to_string());
-            }
-        }
-    }
-
-    if behind_remotes.is_empty() {
-        BehindStatus::NotBehind
-    } else {
-        BehindStatus::Behind(behind_remotes)
-    }
-}
-
-/// Checks which remotes contain a specific commit.
-fn check_commit_on_remotes(repo: &Repository, commit_oid: git2::Oid) -> Option<Vec<String>> {
-    let mut containing_remotes = Vec::new();
-
-    if let Ok(remotes) = repo.remotes() {
-        for remote_name in remotes.iter().flatten() {
-            // Check all remote refs for this remote
-            if let Ok(refs) = repo.references_glob(&format!("refs/remotes/{}/*", remote_name)) {
-                for reference in refs.flatten() {
-                    if let Ok(target) = reference.peel_to_commit() {
-                        // Check if commit is reachable from this remote ref
-                        if repo.graph_descendant_of(target.id(), commit_oid).unwrap_or(false)
-                            || target.id() == commit_oid
-                        {
-                            containing_remotes.push(remote_name.to_string());
-                            break; // Found on this remote, no need to check other branches
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if containing_remotes.is_empty() {
-        None
-    } else {
-        Some(containing_remotes)
-    }
+    if branches.is_empty() { None } else { Some(branches) }
 }
 
 /// Retrieves all linked worktrees for the repository.
