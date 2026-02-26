@@ -61,6 +61,8 @@ pub use url_parser::*;
 
 use crate::error::SniffError;
 
+type RemoteCandidate = (&'static str, fn() -> Result<GitRemote, SniffError>);
+
 /// Unified remote repository provider.
 ///
 /// Use [`GitRemote::from_url`] to automatically detect the provider from a URL,
@@ -179,7 +181,7 @@ impl GitRemote {
     /// - `ShorthandNotFound` if all providers with credentials returned 404.
     /// - `InvalidCredentials` or `RateLimited` if a provider rejects immediately.
     pub async fn from_shorthand(owner: &str, repo: &str) -> Result<Self, SniffError> {
-        let candidates: Vec<(&str, fn() -> Result<GitRemote, SniffError>)> = vec![
+        let candidates: Vec<RemoteCandidate> = vec![
             ("GitHub", || GitHubRemote::new().map(GitRemote::GitHub)),
             ("GitLab", || GitLabRemote::new().map(GitRemote::GitLab)),
             ("Bitbucket", || BitbucketRemote::new().map(GitRemote::Bitbucket)),
