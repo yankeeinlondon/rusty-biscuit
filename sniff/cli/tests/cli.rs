@@ -1,5 +1,6 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use serde_json::Value;
 
 // ============================================================================
 // Help and Version Tests
@@ -726,12 +727,36 @@ fn test_programs_subcommand_text_output() {
 
 #[test]
 fn test_programs_subcommand_json_output() {
-    cargo_bin_cmd!("sniff")
+    let output = cargo_bin_cmd!("sniff")
         .args(["programs", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("editors"))
-        .stdout(predicate::str::contains("utilities"));
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let entries = json
+        .as_array()
+        .expect("programs --json should return an array");
+    assert!(!entries.is_empty(), "programs JSON should not be empty");
+
+    let first = entries[0]
+        .as_object()
+        .expect("programs JSON entries should be objects");
+    assert!(first.contains_key("name"));
+    assert!(first.contains_key("binary_name"));
+    assert!(first.contains_key("description"));
+    assert!(first.contains_key("website"));
+}
+
+#[test]
+fn test_programs_subcommand_rejects_json_format_flag() {
+    cargo_bin_cmd!("sniff")
+        .args(["programs", "--json-format", "full"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument '--json-format'"));
 }
 
 #[test]

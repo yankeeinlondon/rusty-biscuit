@@ -1,6 +1,12 @@
 //! Programs section output formatting (table and JSON).
 
-use biscuit_terminal::prelude::*;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::table::table::{
+    Table as TerminalTable, TableCellContent, TableColumn,
+};
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Alignment;
 use sniff::programs::{ExecutableSource, ProgramsInfo};
 
 use super::OutputFilter;
@@ -16,11 +22,13 @@ struct ProgramTableEntry {
     website: String,
 }
 
-fn name_with_url(name: &str, website: &str) -> String {
+fn linked_name_cell(name: &str, website: &str, term: &Terminal) -> String {
     if website.is_empty() {
         return name.to_string();
     }
-    format!("{name} [{website}]")
+
+    // Use Prose OSC8 support so links are clickable without burning table width.
+    Prose::new(format!(r#"<a href="{website}">{name}</a>"#)).fallback_render(term)
 }
 
 fn version_allowed(include_versions: bool, source: Option<ExecutableSource>) -> bool {
@@ -272,6 +280,7 @@ fn collect_program_entries(
 pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
     let include_versions = verbose > 1;
     let entries = collect_program_entries(programs, filter, include_versions);
+    let term = Terminal::default();
 
     let mut columns = vec![
         TableColumn::new("Name"),
@@ -290,11 +299,13 @@ pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: Out
 
     columns.push(TableColumn::new("Description"));
 
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = TerminalTable::new()
+        .with_columns(columns)
+        .prefer_cursor_alignment();
 
     for entry in &entries {
         let mut cells: Vec<TableCellContent> = vec![
-            name_with_url(&entry.name, &entry.website).into(),
+            linked_name_cell(&entry.name, &entry.website, &term).into(),
             (if entry.installed { "✅" } else { "❌" }).into(),
         ];
 
@@ -310,7 +321,6 @@ pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: Out
         table.add_row(cells);
     }
 
-    let term = Terminal::default();
     print!("{}", table.display(&term));
 }
 
@@ -327,39 +337,13 @@ struct ProgramJsonEntry {
 }
 
 /// Print programs information as JSON.
-///
-/// ## Arguments
-///
-/// * `format` - "simple" for backward-compatible output, "full" for rich metadata
 pub fn print_programs_json(
     programs: &ProgramsInfo,
     filter: OutputFilter,
-    format: &str,
 ) -> serde_json::Result<()> {
-    use serde_json::json;
     use sniff::programs::ProgramMetadata;
 
-    // Simple format: backward-compatible serialization
-    if format != "full" {
-        let json_value = match filter {
-            OutputFilter::Programs => serde_json::to_value(programs)?,
-            OutputFilter::Editors => serde_json::to_value(&programs.editors)?,
-            OutputFilter::Utilities => serde_json::to_value(&programs.utilities)?,
-            OutputFilter::LanguagePackageManagers => {
-                serde_json::to_value(&programs.language_package_managers)?
-            }
-            OutputFilter::OsPackageManagers => serde_json::to_value(&programs.os_package_managers)?,
-            OutputFilter::TtsClients => serde_json::to_value(&programs.tts_clients)?,
-            OutputFilter::TerminalApps => serde_json::to_value(&programs.terminal_apps)?,
-            OutputFilter::HeadlessAudio => serde_json::to_value(&programs.headless_audio)?,
-            OutputFilter::AiClients => serde_json::to_value(&programs.ai_clients)?,
-            _ => json!({}),
-        };
-        println!("{}", serde_json::to_string_pretty(&json_value)?);
-        return Ok(());
-    }
-
-    // Full format: rich metadata with version and path info
+    // JSON output always includes rich metadata with version and path info
     let build_entry = |name: &str,
                        binary: &str,
                        installed: bool,

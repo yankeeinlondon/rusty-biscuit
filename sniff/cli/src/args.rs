@@ -132,67 +132,31 @@ pub enum Commands {
     },
 
     /// Show all installed programs detection
-    Programs {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    Programs,
 
     /// Show only installed editors
-    Editors {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    Editors,
 
     /// Show only installed utilities
-    Utilities {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    Utilities,
 
     /// Show only language package managers
-    LanguagePackageManagers {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    LanguagePackageManagers,
 
     /// Show only OS package managers
-    OsPackageManagers {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    OsPackageManagers,
 
     /// Show only TTS clients
-    TtsClients {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    TtsClients,
 
     /// Show only terminal apps
-    TerminalApps {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    TerminalApps,
 
     /// Show only headless audio players
-    Audio {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    Audio,
 
     /// Show only AI agent/CLI tools
-    Agents {
-        /// JSON output format: "simple" (default) or "full" (rich metadata)
-        #[arg(long, value_name = "FORMAT")]
-        json_format: Option<String>,
-    },
+    Agents,
 
     /// Show only system services (init system and service list)
     Services {
@@ -220,15 +184,15 @@ impl Commands {
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
             Commands::Docs { .. } => OutputFilter::Docs,
-            Commands::Programs { .. } => OutputFilter::Programs,
-            Commands::Editors { .. } => OutputFilter::Editors,
-            Commands::Utilities { .. } => OutputFilter::Utilities,
-            Commands::LanguagePackageManagers { .. } => OutputFilter::LanguagePackageManagers,
-            Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
-            Commands::TtsClients { .. } => OutputFilter::TtsClients,
-            Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
-            Commands::Agents { .. } => OutputFilter::AiClients,
+            Commands::Programs => OutputFilter::Programs,
+            Commands::Editors => OutputFilter::Editors,
+            Commands::Utilities => OutputFilter::Utilities,
+            Commands::LanguagePackageManagers => OutputFilter::LanguagePackageManagers,
+            Commands::OsPackageManagers => OutputFilter::OsPackageManagers,
+            Commands::TtsClients => OutputFilter::TtsClients,
+            Commands::TerminalApps => OutputFilter::TerminalApps,
+            Commands::Audio => OutputFilter::HeadlessAudio,
+            Commands::Agents => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
         }
     }
@@ -237,32 +201,16 @@ impl Commands {
     pub fn is_programs_mode(&self) -> bool {
         matches!(
             self,
-            Commands::Programs { .. }
-                | Commands::Editors { .. }
-                | Commands::Utilities { .. }
-                | Commands::LanguagePackageManagers { .. }
-                | Commands::OsPackageManagers { .. }
-                | Commands::TtsClients { .. }
-                | Commands::TerminalApps { .. }
-                | Commands::Audio { .. }
-                | Commands::Agents { .. }
+            Commands::Programs
+                | Commands::Editors
+                | Commands::Utilities
+                | Commands::LanguagePackageManagers
+                | Commands::OsPackageManagers
+                | Commands::TtsClients
+                | Commands::TerminalApps
+                | Commands::Audio
+                | Commands::Agents
         )
-    }
-
-    /// Get json_format if this is a programs command.
-    pub fn json_format(&self) -> Option<&str> {
-        match self {
-            Commands::Programs { json_format, .. }
-            | Commands::Editors { json_format, .. }
-            | Commands::Utilities { json_format, .. }
-            | Commands::LanguagePackageManagers { json_format, .. }
-            | Commands::OsPackageManagers { json_format, .. }
-            | Commands::TtsClients { json_format, .. }
-            | Commands::TerminalApps { json_format, .. }
-            | Commands::Audio { json_format, .. }
-            | Commands::Agents { json_format, .. } => json_format.as_deref(),
-            _ => None,
-        }
     }
 
     /// Get state filter if this is a services command.
@@ -584,7 +532,7 @@ mod tests {
                 OutputFilter::Repo
             );
             assert_eq!(
-                Commands::Programs { json_format: None }.to_output_filter(),
+                Commands::Programs.to_output_filter(),
                 OutputFilter::Programs
             );
             assert_eq!(
@@ -598,15 +546,11 @@ mod tests {
 
         #[test]
         fn programs_mode_accessors_work() {
-            let cmd = Commands::Programs {
-                json_format: Some("full".to_string()),
-            };
+            let cmd = Commands::Programs;
             assert!(cmd.is_programs_mode());
-            assert_eq!(cmd.json_format(), Some("full"));
 
             let non_programs = Commands::Cpu;
             assert!(!non_programs.is_programs_mode());
-            assert_eq!(non_programs.json_format(), None);
         }
 
         #[test]

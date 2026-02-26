@@ -47,8 +47,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         if cmd.is_programs_mode() {
             let programs = ProgramsInfo::detect();
             if cli.json {
-                let format = cmd.json_format().unwrap_or("simple");
-                output::print_programs_json(&programs, output_filter, format)?;
+                output::print_programs_json(&programs, output_filter)?;
             } else {
                 output::print_programs_markdown(&programs, cli.verbose, output_filter);
             }

@@ -113,10 +113,8 @@ sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
 ```bash
 # Text output (default)
 sniff programs
-# JSON output with simple format (backward compatible)
-sniff programs --json
 # JSON output with full metadata
-sniff programs --json --json-format full
+sniff programs --json
 ```
 
 **Services Subcommand:**
@@ -255,22 +253,21 @@ Returns a structured JSON object with all detection results:
 sniff programs --json | jq .
 ```
 
-Returns installed programs organized by category:
+Returns rich program entries (including metadata and detection status):
 
 ```json
-{
-  "editors": ["vim", "code", "cursor"],
-  "utilities": ["ripgrep", "fzf", "bat", "jq"],
-  "language_package_managers": ["cargo", "npm", "pip"],
-  "os_package_managers": ["homebrew"],
-  "tts_clients": ["say"],
-  "terminal_apps": ["wezterm", "alacritty"],
-  "headless_audio": ["afplay"],
-  "ai_clients": ["claude", "aider"]
-}
+[
+  {
+    "name": "Neovim",
+    "binary_name": "nvim",
+    "installed": true,
+    "path": "/opt/homebrew/bin/nvim",
+    "version": "0.10.4",
+    "description": "Hyperextensible Vim-based text editor",
+    "website": "https://neovim.io"
+  }
+]
 ```
-
-With `--json-format full`, includes rich metadata (display name, description, website, version, source).
 
 ### Services Output
 

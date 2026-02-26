@@ -57,9 +57,8 @@ sniff hardware --json      # Subcommand with JSON output
 - No subcommand: JSON (all data)
 - With subcommand: Text (default), `--json` for JSON
 
-**Programs JSON formats:**
-- `sniff programs --json` - Simple format (backward compatible)
-- `sniff programs --json --json-format full` - Rich metadata
+**Programs JSON output:**
+- `sniff programs --json` - Rich metadata (default and only format)
 
 ## Key Types
 
