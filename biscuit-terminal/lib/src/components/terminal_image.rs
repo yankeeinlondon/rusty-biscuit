@@ -1285,6 +1285,37 @@ mod tests {
         assert_eq!(width, Some("50|extra".to_string()));
     }
 
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn prop_parse_width_spec_never_panics(s in ".*") {
+            let _ = parse_width_spec(&s);
+        }
+
+        #[test]
+        fn prop_parse_filepath_and_width_never_panics(s in ".*") {
+            let _ = parse_filepath_and_width(&s);
+        }
+        
+        #[test]
+        fn prop_parse_width_spec_valid_percentages(p in 1..=100u32) {
+            let s = format!("{}%", p);
+            let result = parse_width_spec(&s).unwrap();
+            let expected_float = (p as f32) / 100.0;
+            assert!(matches!(result, ImageWidth::Percent(val) if (val - expected_float).abs() < 0.001));
+        }
+
+        #[test]
+        fn prop_parse_width_spec_valid_characters(c in 1..=1000u32) {
+            let s = format!("{}", c);
+            assert!(matches!(parse_width_spec(&s).unwrap(), ImageWidth::Characters(val) if val == c));
+            
+            let s_ch = format!("{}ch", c);
+            assert!(matches!(parse_width_spec(&s_ch).unwrap(), ImageWidth::Characters(val) if val == c));
+        }
+    }
+
     // Image loading tests
     #[test]
     fn test_terminal_image_new_file_not_found() {

@@ -452,4 +452,41 @@ mod tests {
         // Should have been split into multiple lines
         assert!(result.contains('\n') || result.len() <= 80);
     }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn prop_layout_never_panics(
+            text in ".*",
+            terminal_width in 1..=500u32,
+            margin_left in 0..=100u32,
+            margin_right in 0..=100u32,
+            indentation in 0..=100u32
+        ) {
+            let layout = Layout {
+                left_margin: Margin::Chars(margin_left),
+                right_margin: Margin::Chars(margin_right),
+                word_wrap: WordWrap::WrapProse(Some(indentation), None),
+                ..Default::default()
+            };
+            let _ = layout.apply_layout(&text, terminal_width);
+            let _ = layout.available_width(terminal_width);
+        }
+
+        #[test]
+        fn prop_available_width_is_bounded(
+            terminal_width in 1..=1000u32,
+            margin_left in 0..=100u32,
+            margin_right in 0..=100u32
+        ) {
+            let layout = Layout {
+                left_margin: Margin::Chars(margin_left),
+                right_margin: Margin::Chars(margin_right),
+                ..Default::default()
+            };
+            let result = layout.available_width(terminal_width);
+            prop_assert!(result <= terminal_width.saturating_sub(margin_left).saturating_sub(margin_right));
+        }
+    }
 }

@@ -1391,3 +1391,48 @@ fn test_git_graph_example_renders() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_prose_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("Hello {{bold}}world{{reset}}!")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_columns_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("columns")
+        .arg("Left side")
+        .arg("Right side")
+        .arg("--gap")
+        .arg("5")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+        
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_actual_terminal_query_integration() {
+    use expectrl::{spawn, Expect};
+    
+    // We get the path to the 'bt' binary
+    let bin_path = assert_cmd::cargo::cargo_bin!("bt");
+    
+    // spawn a process in a PTY so that is_tty() is true
+    let mut p = spawn(bin_path.to_str().unwrap()).expect("Failed to spawn bt in PTY");
+    
+    // Check that we can read some terminal output (it implies the program ran successfully in a PTY)
+    // We expect it to print "Terminal Metadata"
+    p.expect("Terminal Metadata").expect("Did not find 'Terminal Metadata' in PTY output");
+}
+

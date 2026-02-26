@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/cli/tests/integration_test.rs
+expression: stdout
+---
+Hello [1mworld[0m![0m

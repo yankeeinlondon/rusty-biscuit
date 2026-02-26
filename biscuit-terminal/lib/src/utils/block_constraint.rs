@@ -143,7 +143,13 @@ fn escape_sequence_end(content: &str, start: usize) -> usize {
             }
             idx
         }
-        _ => (start + 2).min(bytes.len()),
+        _ => {
+            if let Some(ch) = content[start + 1..].chars().next() {
+                start + 1 + ch.len_utf8()
+            } else {
+                bytes.len()
+            }
+        }
     }
 }
 
