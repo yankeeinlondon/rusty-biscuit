@@ -1686,7 +1686,7 @@ pub fn render_quote(
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
     use biscuit_terminal::utils::layout::Margin;
-    use std::sync::Arc;
+    use std::rc::Rc;
 
     // Join all content pieces with spaces
     let text = content.join(" ");
@@ -1707,7 +1707,7 @@ pub fn render_quote(
     let prose = Prose::new(&text);
 
     // Build the BlockQuote with the Prose content
-    let mut quote = BlockQuote::new(RenderableContent::Component(Arc::new(prose)), attribution);
+    let mut quote = BlockQuote::new(RenderableContent::Component(Rc::new(prose)), attribution);
 
     // Configure margins
     if let Some(left) = layout.margin_left {
@@ -1743,7 +1743,7 @@ pub fn render_list(
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
     use biscuit_terminal::utils::layout::Margin;
-    use std::sync::Arc;
+    use std::rc::Rc;
 
     if items.is_empty() {
         return Err(color_eyre::eyre::eyre!(
@@ -1762,7 +1762,7 @@ pub fn render_list(
                 .replace("\\r", "\r");
 
             let prose = Prose::new(&text);
-            RenderableContent::Component(Arc::new(prose))
+            RenderableContent::Component(Rc::new(prose))
         })
         .collect();
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::{
     components::renderable::{Renderable, RenderableContent},
@@ -20,7 +20,7 @@ use crate::{
 /// - `Truncate` → left as-is
 fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32) {
     if let RenderableContent::Component(arc) = content
-        && let Some(component) = Arc::get_mut(arc)
+        && let Some(component) = Rc::get_mut(arc)
     {
         if component.is_block_level() {
             return;
@@ -523,7 +523,7 @@ mod tests {
         let inner = OrderedList::new(vec!["Nested A", "Nested B"]);
         let items = vec![
             RenderableContent::String("First".to_string()),
-            RenderableContent::Component(Arc::new(inner)),
+            RenderableContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
@@ -533,8 +533,8 @@ mod tests {
     #[test]
     fn test_three_level_nesting_width_compounds() {
         let inner = OrderedList::new(vec!["Deep"]);
-        let middle = OrderedList::from(vec![RenderableContent::Component(Arc::new(inner))]);
-        let outer = OrderedList::from(vec![RenderableContent::Component(Arc::new(middle))]);
+        let middle = OrderedList::from(vec![RenderableContent::Component(Rc::new(inner))]);
+        let outer = OrderedList::from(vec![RenderableContent::Component(Rc::new(middle))]);
         let result = outer.render(Some(80));
         assert_eq!(result, "        1. Deep\n");
     }
@@ -547,8 +547,8 @@ mod tests {
         let prose = Prose::new("Inline text");
         let items = vec![
             RenderableContent::String("Plain string".to_string()),
-            RenderableContent::Component(Arc::new(prose)),
-            RenderableContent::Component(Arc::new(inner_list)),
+            RenderableContent::Component(Rc::new(prose)),
+            RenderableContent::Component(Rc::new(inner_list)),
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
@@ -563,7 +563,7 @@ mod tests {
         let inner = UnorderedList::new(vec!["Sub A", "Sub B"]);
         let items = vec![
             RenderableContent::String("Top".to_string()),
-            RenderableContent::Component(Arc::new(inner)),
+            RenderableContent::Component(Rc::new(inner)),
         ];
         let list = UnorderedList::from(items);
         let result = list.render(Some(80));
@@ -575,7 +575,7 @@ mod tests {
         let inner = UnorderedList::new(vec!["Apple", "Banana"]);
         let items = vec![
             RenderableContent::String("Fruits:".to_string()),
-            RenderableContent::Component(Arc::new(inner)),
+            RenderableContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
@@ -587,7 +587,7 @@ mod tests {
         let inner = OrderedList::new(Vec::<String>::new());
         let items = vec![
             RenderableContent::String("Before".to_string()),
-            RenderableContent::Component(Arc::new(inner)),
+            RenderableContent::Component(Rc::new(inner)),
             RenderableContent::String("After".to_string()),
         ];
         let list = OrderedList::from(items);
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_no_output_exceeds_term_width() {
         let inner = OrderedList::new(vec!["Short"]);
-        let items = vec![RenderableContent::Component(Arc::new(inner))];
+        let items = vec![RenderableContent::Component(Rc::new(inner))];
         let list = OrderedList::from(items);
         let width = 40u32;
         let result = list.render(Some(width));

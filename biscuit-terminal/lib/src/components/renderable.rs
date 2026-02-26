@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::terminal::Terminal;
 use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
@@ -178,21 +178,21 @@ pub trait Renderable: std::fmt::Debug + Any {
 #[derive(Debug)]
 pub enum RenderableContent {
     String(String),
-    Component(Arc<dyn Renderable>),
+    Component(Rc<dyn Renderable>),
 }
 
 impl Clone for RenderableContent {
     fn clone(&self) -> Self {
         match self {
             RenderableContent::String(s) => RenderableContent::String(s.clone()),
-            RenderableContent::Component(c) => RenderableContent::Component(Arc::clone(c)),
+            RenderableContent::Component(c) => RenderableContent::Component(Rc::clone(c)),
         }
     }
 }
 
 impl<T: Renderable + 'static> From<T> for RenderableContent {
     fn from(value: T) -> Self {
-        RenderableContent::Component(Arc::new(value))
+        RenderableContent::Component(Rc::new(value))
     }
 }
 

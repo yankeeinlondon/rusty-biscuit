@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::{
     components::{
@@ -66,7 +66,7 @@ impl From<&str> for BlockQuote {
 impl From<Prose> for BlockQuote {
     fn from(value: Prose) -> Self {
         BlockQuote::new(
-            RenderableContent::Component(Arc::new(value)),
+            RenderableContent::Component(Rc::new(value)),
             None::<String>,
         )
     }
@@ -75,7 +75,7 @@ impl From<Prose> for BlockQuote {
 impl From<&Prose> for BlockQuote {
     fn from(value: &Prose) -> Self {
         BlockQuote::new(
-            RenderableContent::Component(Arc::new((*value).clone())),
+            RenderableContent::Component(Rc::new((*value).clone())),
             None::<String>,
         )
     }
@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn test_renderable_content_component_variant() {
         let prose = Prose::new("<b>bold content</b>");
-        let content = RenderableContent::Component(Arc::new(prose));
+        let content = RenderableContent::Component(Rc::new(prose));
         let quote = BlockQuote::new(content, None::<&str>);
         let result = quote.render(None);
         // The prose renders its bold content, which should appear in the quote
@@ -496,7 +496,7 @@ mod tests {
     fn test_prose_with_attribution() {
         let prose = Prose::new("<i>In the beginning...</i>");
         let quote = BlockQuote::new(
-            RenderableContent::Component(Arc::new(prose)),
+            RenderableContent::Component(Rc::new(prose)),
             Some("Genesis"),
         );
         let result = quote.render(None);
