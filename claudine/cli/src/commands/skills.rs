@@ -10,8 +10,8 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges;
 use claudine::linking::{
-    ExceptionType, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException, SkillInfo,
-    SkillScope, capabilities_for, list_skills, LinkableResource,
+    ExceptionType, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException, SkillFixSummary,
+    SkillInfo, SkillScope, capabilities_for, fix_missing_skills, list_skills, LinkableResource,
 };
 
 use crate::log;
@@ -22,11 +22,23 @@ pub struct SkillsArgs {
     /// Only show skills matching these terms (fuzzy, case-insensitive).
     #[arg(value_name = "FILTER")]
     pub filter: Vec<String>,
+
+    /// Fix missing skill links for non-Claude providers.
+    #[arg(long, visible_alias = "fix")]
+    pub apply: bool,
 }
 
 /// List available skills and their scopes.
 pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     let paths = ProviderSkillPaths::new();
+
+    // Apply fixes before listing if requested
+    let fix_summary = if args.apply {
+        Some(fix_missing_skills(&paths)?)
+    } else {
+        None
+    };
+
     let report = list_skills(&paths, &args.filter)?;
 
     if report.skills.is_empty() {
@@ -56,14 +68,20 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         render_normal(&term, &report.skills);
     }
 
+    if let Some(summary) = fix_summary {
+        render_fix_summary(&term, &summary);
+    }
+
     if !report.exceptions.is_empty() || !report.diagnostics.is_empty() {
         render_exceptions(&term, &report.exceptions, &report.diagnostics);
 
-        log::data("");
-        let fix_hint = Prose::new(
-            "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>",
-        );
-        log::data(&format!(" {}", fix_hint.fallback_render(&term)));
+        if !args.apply {
+            log::data("");
+            let fix_hint = Prose::new(
+                "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>",
+            );
+            log::data(&format!(" {}", fix_hint.fallback_render(&term)));
+        }
     }
 
     Ok(())
@@ -128,7 +146,7 @@ fn render_exceptions(
     diagnostics: &[SkillDirectoryDiagnostic],
 ) {
     log::data("");
-    log::data(&*badges::EXCEPTIONS);
+    log::data(&badges::EXCEPTIONS);
     log::data("");
 
     // Group exceptions by provider
@@ -177,11 +195,11 @@ fn render_exceptions(
 
                 // Show directory-level diagnostics before individual missing skills
                 let mut detail_list = UnorderedList::empty();
-                if is_missing {
-                    if let Some(provider_diags) = diag_by_provider.get(provider_name) {
-                        for diag in provider_diags {
-                            detail_list.add(Prose::new(diag.message.clone()));
-                        }
+                if is_missing
+                    && let Some(provider_diags) = diag_by_provider.get(provider_name)
+                {
+                    for diag in provider_diags {
+                        detail_list.add(Prose::new(diag.message.clone()));
                     }
                 }
 
@@ -221,6 +239,22 @@ fn render_exceptions(
     }
 
     log::data(&outer_list.fallback_render(term));
+}
+
+/// Render the summary of fix operations.
+fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
+    log::data("");
+    let header = Prose::new("<b>Fix Summary</b>").fallback_render(term);
+    log::data(&header);
+
+    let parts = [
+        format!("directories_created={}", summary.directories_created),
+        format!("links_created={}", summary.links_created),
+        format!("already_linked={}", summary.already_linked),
+        format!("skipped={}", summary.skipped),
+    ];
+    let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));
+    log::data(&format!(" {}", detail.fallback_render(term)));
 }
 
 /// Build the provider header line with user/repo skill paths.

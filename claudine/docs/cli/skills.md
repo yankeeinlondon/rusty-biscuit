@@ -35,13 +35,17 @@ The reporting is broken down into the following sections:
           - The beginning of the reporting in this mode is exactly the same as the verbose mode (below) but immediately following the `topic/scope/description` block we will use the `FileSystem` struct from biscuit-terminal to show the skill's files.
 
       - **Verbose**
-          - If the number of skills (_after filtering_) is less than 10 (and more than 1) we will report using the verbose style.
+          - If the number of skills (_after filtering_) is less than 6 (and more than 1) we will report using the verbose style.
           - If the user adds the `--verbose` or `-v` flag and there is more than 1 skill then we will also report using the verbose style.
           - This mode lists all skills available (after filter) as an unordered list (leveraging `UnorderedList` component from biscuit-terminal)
               - The list is sorted by "scope" first -- "User" -> "Repo (masked)" -> "Repo" -- and then alphabetically.
               - The topics are all OSC8 links to the `SKILL.md` file
               - 
       - **Normal**
+          - When we have more than 5 skills we do not want to overwhelm the terminal with information so instead of displaying in the format we do in verbose mode, we instead
+          - create sections for each scoping section ("scope" first -- "User" -> "Repo (masked)" -> "Repo")
+          - each scoping section will lead with the badge for that scope and a blank line following
+          - then we will list all the skills in a tab-delimited 
 
 3. Exceptions
 

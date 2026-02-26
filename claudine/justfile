@@ -17,7 +17,7 @@ CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
 CLI_PATH := "./cli"
-DOCS := ""
+
 
 
 default:

@@ -271,10 +271,10 @@ fn detect_snapshot(
         {
             continue;
         }
-        if let Some(dir) = paths.resource_dir(*provider, resource, scope) {
-            if category_link_target(&dir)?.is_some() {
-                category_linked.insert(*provider);
-            }
+        if let Some(dir) = paths.resource_dir(*provider, resource, scope)
+            && category_link_target(&dir)?.is_some()
+        {
+            category_linked.insert(*provider);
         }
     }
 

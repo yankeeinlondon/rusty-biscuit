@@ -230,3 +230,83 @@ fn skills_verbose_shows_descriptions() {
         .stdout(contains("my-tool"))
         .stdout(contains("A useful testing tool"));
 }
+
+// ── Fix flag ─────────────────────────────────────────────────────────
+
+#[test]
+fn skills_fix_flag_accepted() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&cwd).unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--fix"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skills_apply_flag_accepted() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::create_dir_all(&cwd).unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--apply"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skills_fix_shows_summary() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "fixable", "A fixable skill");
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--fix"])
+        .assert()
+        .success()
+        .stdout(contains("Fix Summary"));
+}
+
+#[test]
+fn skills_fix_does_not_show_fix_hint() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "my-skill", "A skill");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--fix"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // After running --fix, should not suggest using --fix again
+    assert!(
+        !stdout.contains("use --fix"),
+        "should not show --fix hint when already running with --fix"
+    );
+}
