@@ -1,0 +1,24 @@
+---
+source: claudine/cli/tests/wrap_commands.rs
+expression: strip_ansi(&stdout)
+---
+Wrap Codex CLI with Claudine preflight/env handling
+
+Usage: claudine codex [OPTIONS] [ARGS]...
+
+Arguments:
+  [ARGS]...  Arguments forwarded to the wrapped provider CLI
+
+Options:
+  -v, --verbose...                   Increase verbosity (-v for info, -vv for debug)
+  -y, --yolo                         Enable provider-specific YOLO/auto-approval mode
+      --include <ENV_NAME>           Preserve this env var even when it matches sensitive-name filters
+  -n, --non-interactive              Force provider-specific non-interactive mode [aliases: --ni]
+  -m, --model <MODEL>                Override the model used by the provider
+  -o, --output <FORMAT>              Set the output format (json, text, stream)
+  -s, --system-prompt <PROMPT|FILE>  Set or append a system prompt (string or file path)
+  -t, --timeout <SECONDS>            Timeout in seconds (sends SIGTERM then SIGKILL). Only valid with -n
+      --dry-run                      Show what would be executed without launching the child
+  -q, --quiet                        Suppress the Claudine preflight summary banner
+      --sandbox                      Enable provider-specific sandboxing
+  -h, --help                         Print help

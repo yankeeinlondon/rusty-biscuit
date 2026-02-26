@@ -1,0 +1,20 @@
+---
+source: claudine/cli/tests/wrap_commands.rs
+expression: strip_ansi(&stderr)
+---
+
+Claudine ▸ Codex PACKAGE_NAME: claudine-cli (area: claudine) --version
+Environment Variables:
+• GEMINI_API_KEY
+• INTERNAL_TOKEN
+• ZAI_API_KEY
+• OPENAI_API_KEY
+• AGENT=codex
+• AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
+• INTERACTIVE=true
+• PACKAGE=claudine-cli
+• PACKAGE_AREA=claudine
+• YOLO=false
+
+- Info: potentially dangerous ENV variables were removed; if you need one of
+   these to be included use the --include <ENV></env> CLI switch
