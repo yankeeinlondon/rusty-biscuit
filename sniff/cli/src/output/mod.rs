@@ -220,10 +220,10 @@ fn filter_docs(
             if filter.has_prompt && doc.prompt.is_none() {
                 return false;
             }
-            if let Some(ref substring) = filter.filter {
-                if !path_lower.contains(&substring.to_lowercase()) {
-                    return false;
-                }
+            if let Some(ref substring) = filter.filter
+                && !path_lower.contains(&substring.to_lowercase())
+            {
+                return false;
             }
 
             true

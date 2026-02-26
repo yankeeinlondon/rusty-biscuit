@@ -1,7 +1,7 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
 use std::path::Path;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidRenderer;
@@ -187,7 +187,7 @@ fn parse_git_url(
     let owner_repo = if url.contains('@') && url.contains(':') {
         // SSH format: git@github.com:owner/repo.git
         url.split(':')
-            .last()
+            .next_back()
             .map(|s| s.trim_end_matches(".git").to_string())
     } else if url.contains("://") {
         // HTTPS format: https://github.com/owner/repo.git
@@ -239,14 +239,17 @@ fn split_path(path: &str) -> (String, String) {
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
 pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize) {
+    let terminal = Terminal::default();
+
     // === Status Section ===
     let status_title = Prose::new("<b><u>Status</u></b>");
-    println!("\n{}\n", status_title.render(None));
+    println!("\n{}\n", status_title.fallback_render(&terminal));
 
     let mut status_items: Vec<String> = Vec::new();
 
-    // Recent commits with conventional commit parsing
-    for commit in git.recent.iter().take(history_count) {
+    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
+    let commits: Vec<_> = git.recent.iter().take(history_count).collect();
+    for commit in commits.iter().rev() {
         let cc = ConventionalCommit::parse(&commit.message);
         let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
         let sha = commit.sha[0..7].to_string();
@@ -313,9 +316,9 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let line = if dir.is_empty() {
-            format!("<red>modified: <b>{}</b></red>", name)
+            format!("<yellow>modified: <b>{}</b></yellow>", name)
         } else {
-            format!("<red>modified: {}<b>{}</b></red>", dir, name)
+            format!("<yellow>modified: {}<b>{}</b></yellow>", dir, name)
         };
         status_items.push(line);
     }
@@ -325,9 +328,9 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let line = if dir.is_empty() {
-            format!("<yellow>untracked: <b>{}</b></yellow>", name)
+            format!("<red>untracked: <b>{}</b></red>", name)
         } else {
-            format!("<yellow>untracked: {}<b>{}</b></yellow>", dir, name)
+            format!("<red>untracked: {}<b>{}</b></red>", dir, name)
         };
         status_items.push(line);
     }
@@ -336,18 +339,18 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     if !status_items.is_empty() {
         let rendered_items: Vec<String> = status_items
             .iter()
-            .map(|item| Prose::new(item.as_str()).render(None))
+            .map(|item| Prose::new(item.as_str()).fallback_render(&terminal))
             .collect();
         let list = UnorderedList::new(rendered_items);
-        println!("{}", list.render(None));
+        println!("{}", list.fallback_render(&terminal));
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
-        println!("  {}", clean.render(None));
+        println!("  {}", clean.fallback_render(&terminal));
     }
 
     // === Meta Section ===
     let meta_title = Prose::new("<b><u>Meta</u></b>");
-    println!("\n{}\n", meta_title.render(None));
+    println!("{}\n", meta_title.fallback_render(&terminal));
 
     let mut meta_items: Vec<String> = Vec::new();
 
@@ -396,16 +399,37 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                     format!("<b>{}</b>: {}{}", remote.name, tracking_part, repo_link)
                 };
 
-                Prose::new(&line).render(None)
+                Prose::new(&line).fallback_render(&terminal)
             })
             .collect();
 
         // Print "Remotes:" header followed by the list
         if !remote_items.is_empty() {
             let header = Prose::new("<b>Remotes:</b>");
-            println!("{}", header.render(None));
+            println!("{}", header.fallback_render(&terminal));
             let remote_list = UnorderedList::new(remote_items);
-            println!("{}", remote_list.render(None));
+            println!("{}", remote_list.fallback_render(&terminal));
+
+            // List remote branches under each remote
+            for remote in &git.remotes {
+                if let Some(ref branches) = remote.branches {
+                    let branch_header = Prose::new(format!(
+                        "<b>{}</b> <dim>branches ({}):</dim>",
+                        remote.name,
+                        branches.len()
+                    ));
+                    println!("{}", branch_header.fallback_render(&terminal));
+                    let branch_items: Vec<String> = branches
+                        .iter()
+                        .map(|b| {
+                            Prose::new(format!("<dim>{}</dim>", b))
+                                .fallback_render(&terminal)
+                        })
+                        .collect();
+                    let branch_list = UnorderedList::new(branch_items);
+                    println!("{}", branch_list.fallback_render(&terminal));
+                }
+            }
         }
     }
 
@@ -455,13 +479,11 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     if !meta_items.is_empty() {
         let rendered_items: Vec<String> = meta_items
             .iter()
-            .map(|item| Prose::new(item.as_str()).render(None))
+            .map(|item| Prose::new(item.as_str()).fallback_render(&terminal))
             .collect();
         let list = UnorderedList::new(rendered_items);
-        println!("{}", list.render(None));
+        println!("{}", list.fallback_render(&terminal));
     }
-
-    println!();
 }
 
 /// Format a MonorepoTool for display.
@@ -640,11 +662,11 @@ pub fn print_repo_section(
                         .map(|s| Prose::new(s).render(None))
                         .collect();
                     let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-                    inner_items.push(RenderableContent::Component(Arc::new(detail_list)));
+                    inner_items.push(RenderableContent::Component(Rc::new(detail_list)));
                 }
             }
             let inner_list = UnorderedList::from(inner_items);
-            outer_items.push(RenderableContent::Component(Arc::new(inner_list)));
+            outer_items.push(RenderableContent::Component(Rc::new(inner_list)));
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
@@ -927,7 +949,7 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
             .unwrap_or("Unknown");
         let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
 
-        let header = Prose::new(&format!(
+        let header = Prose::new(format!(
             "<b>Packages:</b> <dim>({} / {} packages)</dim>",
             tool_name, pkg_count,
         ));
@@ -1193,7 +1215,7 @@ pub fn print_repo_deps_text(
 
         if !detail_items.is_empty() {
             let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-            outer_items.push(RenderableContent::Component(Arc::new(detail_list)));
+            outer_items.push(RenderableContent::Component(Rc::new(detail_list)));
         }
     }
 

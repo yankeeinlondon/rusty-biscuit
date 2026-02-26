@@ -52,7 +52,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         ));
     }
     if !stats_parts.is_empty() {
-        print!("{}", Prose::new(&stats_parts.join("  ")).display(&term));
+        print!("{}", Prose::new(stats_parts.join("  ")).display(&term));
     }
 
     // === Metadata details ===
@@ -65,7 +65,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         let name = license
             .spdx_id
             .as_deref()
-            .unwrap_or_else(|| license.name.as_str());
+            .unwrap_or(license.name.as_str());
         detail_items.push(format!("<b>License:</b> {name}"));
     }
     detail_items.push(format!("<b>Branch:</b> {}", meta.default_branch));
@@ -146,17 +146,17 @@ fn print_documents(docs: &[DocumentRef], term: &Terminal) {
     let mut items = Vec::new();
 
     for doc in &readmes {
-        items.push(Prose::new(&format!("<b>{}</b>", doc.path)).fallback_render(term));
+        items.push(Prose::new(format!("<b>{}</b>", doc.path)).fallback_render(term));
     }
     if !doc_folder.is_empty() {
         items.push(
-            Prose::new(&format!("<dim>docs/</dim> ({} files)", doc_folder.len()))
+            Prose::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len()))
                 .fallback_render(term),
         );
     }
     for doc in &other_docs {
         if !doc.path.contains('/') {
-            items.push(Prose::new(&format!("<dim>{}</dim>", doc.path)).fallback_render(term));
+            items.push(Prose::new(format!("<dim>{}</dim>", doc.path)).fallback_render(term));
         }
     }
 
@@ -184,7 +184,7 @@ fn print_cicd(cicd: &[CiCdInfo], term: &Terminal) {
                 .as_ref()
                 .map(|p| format!(" <dim>({})</dim>", p))
                 .unwrap_or_default();
-            Prose::new(&format!("<b>{}</b>{}", ci.provider, path_info)).fallback_render(term)
+            Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).fallback_render(term)
         })
         .collect();
 
@@ -279,7 +279,7 @@ fn print_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) {
             } else {
                 ""
             };
-            Prose::new(&format!("<b>{}</b>{}", tag.name, annotated)).fallback_render(term)
+            Prose::new(format!("<b>{}</b>{}", tag.name, annotated)).fallback_render(term)
         })
         .collect();
 
@@ -292,7 +292,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     let mut items = Vec::new();
 
     items.push(
-        Prose::new(&format!(
+        Prose::new(format!(
             "<b>Repository:</b> <a href=\"{}\">{}</a>",
             urls.repo, urls.repo
         ))
@@ -301,7 +301,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
 
     if let Some(ref homepage) = urls.homepage {
         items.push(
-            Prose::new(&format!(
+            Prose::new(format!(
                 "<b>Homepage:</b> <a href=\"{homepage}\">{homepage}</a>"
             ))
             .fallback_render(term),
@@ -309,13 +309,13 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref issues) = urls.issues {
         items.push(
-            Prose::new(&format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"))
+            Prose::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"))
                 .fallback_render(term),
         );
     }
     if let Some(ref prs) = urls.pull_requests {
         items.push(
-            Prose::new(&format!(
+            Prose::new(format!(
                 "<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>"
             ))
             .fallback_render(term),
@@ -323,7 +323,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref releases) = urls.releases {
         items.push(
-            Prose::new(&format!(
+            Prose::new(format!(
                 "<b>Releases:</b> <a href=\"{releases}\">{releases}</a>"
             ))
             .fallback_render(term),
@@ -331,7 +331,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref wiki) = urls.wiki {
         items.push(
-            Prose::new(&format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"))
+            Prose::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"))
                 .fallback_render(term),
         );
     }
