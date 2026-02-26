@@ -68,6 +68,15 @@ use crate::{
 /// - `<bg-red-800>content</bg-red-800>` for Tailwind color background text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
+/// ## Escaping
+///
+/// Use a backslash to output literal characters that would otherwise be parsed:
+///
+/// - `\<` → literal `<`
+/// - `\>` → literal `>`
+/// - `\{` → literal `{`
+/// - `\\` → literal `\`
+///
 #[derive(Debug, Clone)]
 pub struct Prose {
     /// the raw content as received
@@ -1345,6 +1354,17 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
     let mut chars = content.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        // ── Backslash escapes: \< \> \{ \\ ──────────────────────────────
+        if ch == '\\' {
+            match chars.peek() {
+                Some(&'<') | Some(&'>') | Some(&'{') | Some(&'\\') => {
+                    result.push(chars.next().unwrap());
+                }
+                _ => result.push(ch),
+            }
+            continue;
+        }
+
         // ── Atomic tokens: {{token}} ──────────────────────────────────
         if ch == '{' && chars.peek() == Some(&'{') {
             chars.next(); // consume second '{'
@@ -1969,5 +1989,41 @@ mod tests {
         // Web/tailwind colors fall through to Foreground
         assert_eq!(block_tag_layer("coral"), Some(StyleLayer::Foreground));
         assert_eq!(block_tag_layer("bg-coral"), Some(StyleLayer::Background));
+    }
+
+    #[test]
+    fn test_escaped_angle_brackets() {
+        let prose = Prose::new("use \\<ENV\\> here");
+        let result = prose.render(None);
+        assert_eq!(result, "use <ENV> here");
+    }
+
+    #[test]
+    fn test_escaped_angle_brackets_inside_block_tag() {
+        let prose = Prose::new("<dim>\\<ENV\\></dim>");
+        let result = prose.render(None);
+        assert!(result.contains("<ENV>"));
+        assert!(result.contains("\x1b[2m")); // dim open
+    }
+
+    #[test]
+    fn test_escaped_backslash() {
+        let prose = Prose::new("path\\\\name");
+        let result = prose.render(None);
+        assert_eq!(result, "path\\name");
+    }
+
+    #[test]
+    fn test_escaped_open_brace() {
+        let prose = Prose::new("\\{not a token}}");
+        let result = prose.render(None);
+        assert!(result.contains("{not a token}}"));
+    }
+
+    #[test]
+    fn test_backslash_before_normal_char_preserved() {
+        let prose = Prose::new("hello\\nworld");
+        let result = prose.render(None);
+        assert_eq!(result, "hello\\nworld");
     }
 }
