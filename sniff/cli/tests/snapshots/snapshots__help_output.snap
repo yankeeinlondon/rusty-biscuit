@@ -1,6 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
-expression: "run_stdout(&[\"--help\"])"
+expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
 Detect system and repository information
@@ -54,6 +54,8 @@ Commands:
   Programs:
     sniff programs                   Show all installed programs
     sniff editors                    Show only installed editors
+    sniff editors install            Interactive install picker for editors
+    sniff editors install vim        Install vim directly
     sniff utilities                  Show only installed utilities
     sniff language-package-managers  Show only language package managers
     sniff os-package-managers        Show only OS package managers
@@ -77,4 +79,5 @@ Examples:
   sniff --json cpu           # Same as above (flag position flexible)
   sniff programs             # Programs as text
   sniff programs --json      # Programs as JSON
+  sniff editors install      # Interactive editor install picker
   sniff -b /path/to/repo filesystem  # Analyze specific directory

@@ -139,6 +139,8 @@ exit 0
     );
 
     let assert = cargo_bin_cmd!("claudine")
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("TERM_WIDTH", "80")

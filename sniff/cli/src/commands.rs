@@ -45,6 +45,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
         if cmd.is_programs_mode() {
+            // Check for install action FIRST
+            if cmd.is_install_action() {
+                let filter = cmd.to_output_filter();
+                return match cmd.install_program_name() {
+                    Some(name) => crate::install::direct_install(filter, name),
+                    None => crate::install::interactive_install(filter),
+                };
+            }
+
             let programs = ProgramsInfo::detect();
             if cli.json {
                 output::print_programs_json(&programs, output_filter)?;

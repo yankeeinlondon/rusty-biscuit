@@ -6,7 +6,9 @@ mod commands;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
+use clap_complete::engine::ArgValueCandidates;
 use color_eyre::eyre::Result;
+use commands::run::{RunOptions, RunnerFilter};
 
 const COMPLETIONS_HELP: &str = r#"
 SHELL COMPLETIONS
@@ -146,6 +148,53 @@ enum Commands {
         force: bool,
     },
 
+    /// Run a local GGUF model with llama-server
+    Run {
+        /// Model name or ID (omit for interactive selection)
+        #[arg(add = ArgValueCandidates::new(commands::run::run_model_candidates))]
+        model: Option<String>,
+
+        /// Filter models by runner (ollama, lmstudio, llamacpp)
+        #[arg(long, value_enum)]
+        runner: Option<RunnerFilter>,
+
+        /// Host interface for llama-server
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Port for llama-server
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+
+        /// Context size in tokens
+        #[arg(long)]
+        ctx_size: Option<u32>,
+
+        /// Number of CPU threads
+        #[arg(long)]
+        threads: Option<usize>,
+
+        /// Number of layers to offload to GPU
+        #[arg(long)]
+        n_gpu_layers: Option<i32>,
+
+        /// API key for llama-server
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// Path to llama-server binary
+        #[arg(long)]
+        llama_server_bin: Option<std::path::PathBuf>,
+
+        /// Do not open browser automatically
+        #[arg(long)]
+        no_browser: bool,
+
+        /// Print resolved command without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Show shell completions setup instructions
     #[command(after_help = COMPLETIONS_HELP)]
     Completions,
@@ -212,6 +261,34 @@ async fn main() -> Result<()> {
             force,
         } => {
             commands::remove::run(&model, runner.as_deref(), force).await?;
+        }
+        Commands::Run {
+            model,
+            runner,
+            host,
+            port,
+            ctx_size,
+            threads,
+            n_gpu_layers,
+            api_key,
+            llama_server_bin,
+            no_browser,
+            dry_run,
+        } => {
+            commands::run::run(RunOptions {
+                model,
+                runner,
+                host,
+                port,
+                ctx_size,
+                threads,
+                n_gpu_layers,
+                api_key,
+                llama_server_bin,
+                no_browser,
+                dry_run,
+            })
+            .await?;
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());

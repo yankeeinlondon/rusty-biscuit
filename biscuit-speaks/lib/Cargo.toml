@@ -30,6 +30,6 @@ gender_guesser = "0.2"
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 [dev-dependencies]
-reqwest = "0.12"
+reqwest = "0.13"
 serial_test = "3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }

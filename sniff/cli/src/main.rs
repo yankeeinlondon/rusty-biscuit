@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod install;
 mod output;
 
 #[tokio::main]

@@ -39,6 +39,101 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
+// ---------------------------------------------------------------------------
+// Per-category action enums with shell completion candidates
+// ---------------------------------------------------------------------------
+
+macro_rules! define_program_action {
+    ($action_name:ident, $candidates_fn:ident, $program_enum:ty) => {
+        fn $candidates_fn() -> Vec<clap_complete::engine::CompletionCandidate> {
+            use clap_complete::engine::CompletionCandidate;
+            use sniff::programs::ProgramMetadata;
+            use strum::IntoEnumIterator;
+
+            <$program_enum>::iter()
+                .flat_map(|p| {
+                    let mut candidates = vec![CompletionCandidate::new(p.binary_name())
+                        .help(Some(p.description().into()))];
+                    let snake = p.to_string();
+                    if snake != p.binary_name() {
+                        candidates.push(
+                            CompletionCandidate::new(snake)
+                                .help(Some(p.description().into())),
+                        );
+                    }
+                    candidates
+                })
+                .collect()
+        }
+
+        #[derive(Subcommand, Debug, Clone)]
+        pub enum $action_name {
+            /// Install a program (interactive picker if no name given)
+            Install {
+                /// Program name to install (binary name or identifier)
+                #[arg(add = clap_complete::engine::ArgValueCandidates::new($candidates_fn))]
+                program: Option<String>,
+            },
+        }
+    };
+}
+
+define_program_action!(EditorAction, editor_candidates, sniff::programs::Editor);
+define_program_action!(UtilityAction, utility_candidates, sniff::programs::Utility);
+define_program_action!(
+    LangPkgMgrAction,
+    lang_pkg_mgr_candidates,
+    sniff::programs::LanguagePackageManager
+);
+define_program_action!(
+    OsPkgMgrAction,
+    os_pkg_mgr_candidates,
+    sniff::programs::OsPackageManager
+);
+define_program_action!(
+    TtsClientAction,
+    tts_client_candidates,
+    sniff::programs::TtsClient
+);
+define_program_action!(
+    TerminalAppAction,
+    terminal_app_candidates,
+    sniff::programs::TerminalApp
+);
+define_program_action!(
+    AudioAction,
+    audio_candidates,
+    sniff::programs::HeadlessAudio
+);
+define_program_action!(AgentAction, agent_candidates, sniff::programs::AiCli);
+
+/// Generates merged completion candidates across all program categories.
+fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
+    let mut all = editor_candidates();
+    all.extend(utility_candidates());
+    all.extend(lang_pkg_mgr_candidates());
+    all.extend(os_pkg_mgr_candidates());
+    all.extend(tts_client_candidates());
+    all.extend(terminal_app_candidates());
+    all.extend(audio_candidates());
+    all.extend(agent_candidates());
+    all
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum AllProgramAction {
+    /// Install a program (interactive picker if no name given)
+    Install {
+        /// Program name to install (binary name or identifier)
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(all_program_candidates))]
+        program: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Main Commands enum
+// ---------------------------------------------------------------------------
+
 /// Subcommands for filtering output to specific sections.
 ///
 /// Each subcommand shows only the specified section of system information.
@@ -132,31 +227,58 @@ pub enum Commands {
     },
 
     /// Show all installed programs detection
-    Programs,
+    Programs {
+        #[command(subcommand)]
+        action: Option<AllProgramAction>,
+    },
 
     /// Show only installed editors
-    Editors,
+    Editors {
+        #[command(subcommand)]
+        action: Option<EditorAction>,
+    },
 
     /// Show only installed utilities
-    Utilities,
+    Utilities {
+        #[command(subcommand)]
+        action: Option<UtilityAction>,
+    },
 
     /// Show only language package managers
-    LanguagePackageManagers,
+    LanguagePackageManagers {
+        #[command(subcommand)]
+        action: Option<LangPkgMgrAction>,
+    },
 
     /// Show only OS package managers
-    OsPackageManagers,
+    OsPackageManagers {
+        #[command(subcommand)]
+        action: Option<OsPkgMgrAction>,
+    },
 
     /// Show only TTS clients
-    TtsClients,
+    TtsClients {
+        #[command(subcommand)]
+        action: Option<TtsClientAction>,
+    },
 
     /// Show only terminal apps
-    TerminalApps,
+    TerminalApps {
+        #[command(subcommand)]
+        action: Option<TerminalAppAction>,
+    },
 
     /// Show only headless audio players
-    Audio,
+    Audio {
+        #[command(subcommand)]
+        action: Option<AudioAction>,
+    },
 
     /// Show only AI agent/CLI tools
-    Agents,
+    Agents {
+        #[command(subcommand)]
+        action: Option<AgentAction>,
+    },
 
     /// Show only system services (init system and service list)
     Services {
@@ -184,15 +306,15 @@ impl Commands {
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
             Commands::Docs { .. } => OutputFilter::Docs,
-            Commands::Programs => OutputFilter::Programs,
-            Commands::Editors => OutputFilter::Editors,
-            Commands::Utilities => OutputFilter::Utilities,
-            Commands::LanguagePackageManagers => OutputFilter::LanguagePackageManagers,
-            Commands::OsPackageManagers => OutputFilter::OsPackageManagers,
-            Commands::TtsClients => OutputFilter::TtsClients,
-            Commands::TerminalApps => OutputFilter::TerminalApps,
-            Commands::Audio => OutputFilter::HeadlessAudio,
-            Commands::Agents => OutputFilter::AiClients,
+            Commands::Programs { .. } => OutputFilter::Programs,
+            Commands::Editors { .. } => OutputFilter::Editors,
+            Commands::Utilities { .. } => OutputFilter::Utilities,
+            Commands::LanguagePackageManagers { .. } => OutputFilter::LanguagePackageManagers,
+            Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
+            Commands::TtsClients { .. } => OutputFilter::TtsClients,
+            Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
+            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
         }
     }
@@ -201,16 +323,76 @@ impl Commands {
     pub fn is_programs_mode(&self) -> bool {
         matches!(
             self,
-            Commands::Programs
-                | Commands::Editors
-                | Commands::Utilities
-                | Commands::LanguagePackageManagers
-                | Commands::OsPackageManagers
-                | Commands::TtsClients
-                | Commands::TerminalApps
-                | Commands::Audio
-                | Commands::Agents
+            Commands::Programs { .. }
+                | Commands::Editors { .. }
+                | Commands::Utilities { .. }
+                | Commands::LanguagePackageManagers { .. }
+                | Commands::OsPackageManagers { .. }
+                | Commands::TtsClients { .. }
+                | Commands::TerminalApps { .. }
+                | Commands::Audio { .. }
+                | Commands::Agents { .. }
         )
+    }
+
+    /// Returns true if this command has an install action.
+    pub fn is_install_action(&self) -> bool {
+        matches!(
+            self,
+            Commands::Programs {
+                action: Some(AllProgramAction::Install { .. }),
+            } | Commands::Editors {
+                action: Some(EditorAction::Install { .. }),
+            } | Commands::Utilities {
+                action: Some(UtilityAction::Install { .. }),
+            } | Commands::LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::Install { .. }),
+            } | Commands::OsPackageManagers {
+                action: Some(OsPkgMgrAction::Install { .. }),
+            } | Commands::TtsClients {
+                action: Some(TtsClientAction::Install { .. }),
+            } | Commands::TerminalApps {
+                action: Some(TerminalAppAction::Install { .. }),
+            } | Commands::Audio {
+                action: Some(AudioAction::Install { .. }),
+            } | Commands::Agents {
+                action: Some(AgentAction::Install { .. }),
+            }
+        )
+    }
+
+    /// Returns the program name from an install action, if present.
+    pub fn install_program_name(&self) -> Option<&str> {
+        match self {
+            Commands::Programs {
+                action: Some(AllProgramAction::Install { program }),
+            }
+            | Commands::Editors {
+                action: Some(EditorAction::Install { program }),
+            }
+            | Commands::Utilities {
+                action: Some(UtilityAction::Install { program }),
+            }
+            | Commands::LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::Install { program }),
+            }
+            | Commands::OsPackageManagers {
+                action: Some(OsPkgMgrAction::Install { program }),
+            }
+            | Commands::TtsClients {
+                action: Some(TtsClientAction::Install { program }),
+            }
+            | Commands::TerminalApps {
+                action: Some(TerminalAppAction::Install { program }),
+            }
+            | Commands::Audio {
+                action: Some(AudioAction::Install { program }),
+            }
+            | Commands::Agents {
+                action: Some(AgentAction::Install { program }),
+            } => program.as_deref(),
+            _ => None,
+        }
     }
 
     /// Get state filter if this is a services command.
@@ -354,6 +536,8 @@ Commands:
   Programs:
     sniff programs                   Show all installed programs
     sniff editors                    Show only installed editors
+    sniff editors install            Interactive install picker for editors
+    sniff editors install vim        Install vim directly
     sniff utilities                  Show only installed utilities
     sniff language-package-managers  Show only language package managers
     sniff os-package-managers        Show only OS package managers
@@ -377,6 +561,7 @@ Examples:
   sniff --json cpu           # Same as above (flag position flexible)
   sniff programs             # Programs as text
   sniff programs --json      # Programs as JSON
+  sniff editors install      # Interactive editor install picker
   sniff -b /path/to/repo filesystem  # Analyze specific directory
 ";
 
@@ -512,6 +697,66 @@ mod tests {
                 panic!("Expected Repo command");
             }
         }
+
+        #[test]
+        fn editors_install_no_name_parses() {
+            let cli = parse_args(&["editors", "install"]).unwrap();
+            if let Some(Commands::Editors {
+                action: Some(EditorAction::Install { program }),
+            }) = cli.command
+            {
+                assert!(program.is_none());
+            } else {
+                panic!("Expected Editors install with no program");
+            }
+        }
+
+        #[test]
+        fn editors_install_with_name_parses() {
+            let cli = parse_args(&["editors", "install", "vim"]).unwrap();
+            if let Some(Commands::Editors {
+                action: Some(EditorAction::Install { program }),
+            }) = cli.command
+            {
+                assert_eq!(program.as_deref(), Some("vim"));
+            } else {
+                panic!("Expected Editors install with program name");
+            }
+        }
+
+        #[test]
+        fn editors_without_action_parses() {
+            let cli = parse_args(&["editors"]).unwrap();
+            if let Some(Commands::Editors { action }) = cli.command {
+                assert!(action.is_none());
+            } else {
+                panic!("Expected Editors with no action");
+            }
+        }
+
+        #[test]
+        fn programs_install_no_name_parses() {
+            let cli = parse_args(&["programs", "install"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Programs {
+                    action: Some(AllProgramAction::Install { program: None }),
+                })
+            ));
+        }
+
+        #[test]
+        fn programs_install_with_name_parses() {
+            let cli = parse_args(&["programs", "install", "nvim"]).unwrap();
+            if let Some(Commands::Programs {
+                action: Some(AllProgramAction::Install { program }),
+            }) = cli.command
+            {
+                assert_eq!(program.as_deref(), Some("nvim"));
+            } else {
+                panic!("Expected Programs install with program name");
+            }
+        }
     }
 
     mod accessors {
@@ -532,7 +777,7 @@ mod tests {
                 OutputFilter::Repo
             );
             assert_eq!(
-                Commands::Programs.to_output_filter(),
+                Commands::Programs { action: None }.to_output_filter(),
                 OutputFilter::Programs
             );
             assert_eq!(
@@ -546,11 +791,53 @@ mod tests {
 
         #[test]
         fn programs_mode_accessors_work() {
-            let cmd = Commands::Programs;
+            let cmd = Commands::Programs { action: None };
             assert!(cmd.is_programs_mode());
 
             let non_programs = Commands::Cpu;
             assert!(!non_programs.is_programs_mode());
+        }
+
+        #[test]
+        fn is_install_action_returns_true() {
+            let cmd = Commands::Editors {
+                action: Some(EditorAction::Install { program: None }),
+            };
+            assert!(cmd.is_install_action());
+
+            let cmd = Commands::Programs {
+                action: Some(AllProgramAction::Install {
+                    program: Some("vim".to_string()),
+                }),
+            };
+            assert!(cmd.is_install_action());
+        }
+
+        #[test]
+        fn is_install_action_returns_false() {
+            let cmd = Commands::Editors { action: None };
+            assert!(!cmd.is_install_action());
+
+            let cmd = Commands::Cpu;
+            assert!(!cmd.is_install_action());
+        }
+
+        #[test]
+        fn install_program_name_extracts_name() {
+            let cmd = Commands::Editors {
+                action: Some(EditorAction::Install {
+                    program: Some("vim".to_string()),
+                }),
+            };
+            assert_eq!(cmd.install_program_name(), Some("vim"));
+
+            let cmd = Commands::Editors {
+                action: Some(EditorAction::Install { program: None }),
+            };
+            assert_eq!(cmd.install_program_name(), None);
+
+            let cmd = Commands::Editors { action: None };
+            assert_eq!(cmd.install_program_name(), None);
         }
 
         #[test]

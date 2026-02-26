@@ -68,9 +68,34 @@ model remove mistral
 model remove mistral --runner ollama --force
 ```
 
+### `model run [model]`
+
+Runs a local GGUF model in `llama-server` and opens the browser GUI once the server is reachable.
+
+```bash
+model run llama3                              # Launch a specific model
+model run                                     # Interactive picker (TTY only)
+model run --runner llamacpp                   # Filter by source runner
+model run llama3 --host 127.0.0.1 --port 8081
+model run llama3 --ctx-size 8192 --threads 8 --n-gpu-layers 35
+model run llama3 --api-key my-secret --no-browser
+model run llama3 --llama-server-bin /opt/llama.cpp/llama-server
+model run llama3 --dry-run                    # Print command only
+```
+
+Behavior notes:
+- Only runnable GGUF file paths are considered (`.gguf` or valid GGUF header)
+- Ambiguous names prompt in interactive terminals; non-interactive mode returns an error
+- If `llama-server` is missing, the command explains how to set `--llama-server-bin`
+- Port conflicts are detected before launch with a clear error
+- Browser launch failures are warnings; the server stays running
+
 ### `model completions`
 
 Prints shell completion setup instructions for Bash, Zsh, and Fish.
+
+When dynamic completions are enabled (`COMPLETE=<shell> model`), `model run [model]`
+completes discovered runnable GGUF models (unique names plus full model IDs).
 
 ## Global Options
 

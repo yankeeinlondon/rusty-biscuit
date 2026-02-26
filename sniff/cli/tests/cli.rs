@@ -1058,3 +1058,74 @@ fn test_help_mentions_remote_via_git() {
         .stdout(predicate::str::contains("sniff git origin"))
         .stdout(predicate::str::contains("Inspect the 'origin' remote"));
 }
+
+// ============================================================================
+// Install Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_editors_still_shows_table_without_install() {
+    // Backward compat: `sniff editors` still produces table output
+    cargo_bin_cmd!("sniff")
+        .arg("editors")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Name"))
+        .stdout(predicate::str::contains("Installed"));
+}
+
+#[test]
+fn test_editors_install_invalid_name_fails() {
+    cargo_bin_cmd!("sniff")
+        .args(["editors", "install", "nonexistent-editor-xyz"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown editor"))
+        .stderr(predicate::str::contains("Valid names:"));
+}
+
+#[test]
+fn test_utilities_install_invalid_name_fails() {
+    cargo_bin_cmd!("sniff")
+        .args(["utilities", "install", "nonexistent-util-xyz"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown utility"))
+        .stderr(predicate::str::contains("Valid names:"));
+}
+
+#[test]
+fn test_programs_install_invalid_name_fails() {
+    cargo_bin_cmd!("sniff")
+        .args(["programs", "install", "nonexistent-program-xyz"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Unknown program"));
+}
+
+#[test]
+fn test_editors_install_help_works() {
+    cargo_bin_cmd!("sniff")
+        .args(["editors", "install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Install a program"));
+}
+
+#[test]
+fn test_help_mentions_install() {
+    cargo_bin_cmd!("sniff")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sniff editors install"));
+}
+
+#[test]
+fn test_editors_json_still_works_with_install_subcommand() {
+    // --json flag should still work for listing (no install action)
+    cargo_bin_cmd!("sniff")
+        .args(["editors", "--json"])
+        .assert()
+        .success();
+}

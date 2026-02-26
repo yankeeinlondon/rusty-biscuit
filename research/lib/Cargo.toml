@@ -29,8 +29,8 @@ pulldown-cmark = "0.13.0"
 termbg = "0.6"
 pulldown-cmark-to-cmark = "22.0.0"
 regex = "1.11"
-reqwest = { version = "0.12", features = ["json"] }
-rig-core = "0.29.0"
+reqwest = { version = "0.13", features = ["json"] }
+rig-core = "0.31.0"
 unchained-ai = { path = "../../unchained-ai/lib" }
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }

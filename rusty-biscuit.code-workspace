@@ -93,14 +93,20 @@
             "ebdf",
             "eefc",
             "expectrl",
+            "ffplay",
             "highspeed",
             "insta",
+            "Kokoro",
             "nextest",
+            "onnx",
             "osascript",
+            "pipewire",
             "proptest",
             "ptyprocess",
             "qwen",
-            "startswith"
+            "startswith",
+            "wezterm",
+            "winget"
         ]
     }
 }

@@ -1,13 +1,12 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 152
 expression: strip_ansi(&stderr)
 ---
 
 Claudine ▸ Codex PACKAGE_NAME: claudine-cli (area: claudine) --version
 Environment Variables:
-• GEMINI_API_KEY
 • INTERNAL_TOKEN
-• ZAI_API_KEY
 • OPENAI_API_KEY
 • AGENT=codex
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]

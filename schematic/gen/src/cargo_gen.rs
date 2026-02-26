@@ -23,7 +23,7 @@ description = "Generated REST API client code from schematic definitions"
 
 [dependencies]
 bytes = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 schematic-define = { version = "0.1.0", path = "{{DEFINE_PATH}}" }
 schematic-definitions = { version = "0.1.0", path = "{{DEFINITIONS_PATH}}" }
 serde = { version = "1.0", features = ["derive"] }
@@ -202,7 +202,7 @@ mod tests {
         let reqwest = deps.get("reqwest").unwrap().as_table().unwrap();
         let features = reqwest.get("features").unwrap().as_array().unwrap();
         assert!(features.iter().any(|f| f.as_str() == Some("json")));
-        assert!(features.iter().any(|f| f.as_str() == Some("rustls-tls")));
+        assert!(features.iter().any(|f| f.as_str() == Some("rustls")));
     }
 
     #[test]

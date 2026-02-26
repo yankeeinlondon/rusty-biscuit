@@ -231,6 +231,10 @@ commit:
     @just _speak "git commits completed in rusty-biscuit monorepo";
     @sniff git 2>/dev/null || exit 0
 
+# Outdated packages
+outdated:
+	@cargo outdated --root-deps-only
+
 # Install the CLI
 install *args="":
     @echo

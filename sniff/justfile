@@ -172,6 +172,10 @@ gem *args="":
 codex *args="":
     @claudine codex -y {{args}}
 
+# Outdated packages
+outdated:
+	@cargo outdated --root-deps-only
+
 
 # Use GPT 5.2 to commit staged changes
 # commits all the staged changes using GPT 5.2 (via Opencode)

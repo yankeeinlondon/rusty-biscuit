@@ -17,7 +17,7 @@ hyperpolyglot = "0.1.7"
 ignore = "0.4"
 rayon = "1.11.0"
 regex = "1.11"
-reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
+reqwest = { version = "0.13", features = ["json"], default-features = false, optional = true }
 schematic-schema = { path = "../../schematic/schema" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -33,7 +33,7 @@ which = { version = "8.0.0", features = ["regex", "tracing"] }
 
 [features]
 default = []
-network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls-tls"]
+network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
 remote = ["network"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -39,7 +39,7 @@ dirs = "6"
 url = { version = "2.5", features = ["serde"] }
 
 # HTTP client for log server
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 
 # TOML editing (preserves formatting)
 toml_edit = "0.22"

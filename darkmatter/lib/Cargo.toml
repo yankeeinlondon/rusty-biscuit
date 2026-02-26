@@ -32,7 +32,7 @@ tempfile = "3.8"
 chrono = "0.4"
 
 # HTTP and URLs
-reqwest = { version = "0.12", features = ["json", "gzip"] }
+reqwest = { version = "0.13", features = ["json", "gzip"] }
 url = "2.5"
 
 # Async runtime

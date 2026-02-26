@@ -21,6 +21,7 @@ Model Citizen provides:
 | `search [query...]` | Search for GGUF models on HuggingFace |
 | `download [query...]` | Search and download GGUF models interactively |
 | `remove <model>` | Remove a model (with confirmation) |
+| `run [model]` | Launch a local GGUF model with `llama-server` |
 | `completions` | Shell completion setup instructions |
 
 **Global options:** `--json`
@@ -40,6 +41,9 @@ model search "qwen2 7b"            # Search HuggingFace
 model search "phi" --sort likes     # Sort: downloads|likes|trending|created|modified
 model download bartowski/Qwen2.5-7B-Instruct-GGUF
 model remove mistral --force        # Skip confirmation
+model run llama3                    # Launch llama-server + open browser GUI
+model run --runner llamacpp         # Interactive pick from runnable GGUF models
+model run llama3 --dry-run          # Print resolved llama-server command only
 ```
 
 ## Configuration

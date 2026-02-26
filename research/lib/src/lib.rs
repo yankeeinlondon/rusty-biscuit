@@ -25,7 +25,7 @@ use inquire::{InquireError, Select};
 use pulldown_cmark::{Options, Parser};
 use pulldown_cmark_to_cmark::cmark;
 use reqwest::Client as HttpClient;
-use rig::agent::{Agent, CancelSignal, PromptHook};
+use rig::agent::{Agent, HookAction, PromptHook, ToolCallHookAction};
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{AssistantContent, CompletionModel, Message, Prompt, PromptError};
 use rig::message::{ToolResultContent, UserContent};
@@ -70,21 +70,20 @@ where
         &self,
         _prompt: &Message,
         history: &[Message],
-        _cancel_sig: CancelSignal,
-    ) {
+    ) -> HookAction {
         debug!(
             parent: &self.span,
             history_len = history.len(),
             "Sending prompt to model"
         );
+        HookAction::cont()
     }
 
     async fn on_completion_response(
         &self,
         _prompt: &Message,
         response: &rig::completion::CompletionResponse<M::Response>,
-        _cancel_sig: CancelSignal,
-    ) {
+    ) -> HookAction {
         let tool_call_count = response
             .choice
             .iter()
@@ -97,15 +96,16 @@ where
             tool_call_count,
             "Received model response"
         );
+        HookAction::cont()
     }
 
     async fn on_tool_call(
         &self,
         tool_name: &str,
         tool_call_id: Option<String>,
+        _internal_call_id: &str,
         args: &str,
-        _cancel_sig: CancelSignal,
-    ) {
+    ) -> ToolCallHookAction {
         info!(
             parent: &self.span,
             tool.name = %tool_name,
@@ -113,16 +113,17 @@ where
             tool.args = %args,
             "Invoking tool"
         );
+        ToolCallHookAction::cont()
     }
 
     async fn on_tool_result(
         &self,
         tool_name: &str,
         tool_call_id: Option<String>,
+        _internal_call_id: &str,
         _args: &str,
         result: &str,
-        _cancel_sig: CancelSignal,
-    ) {
+    ) -> HookAction {
         // Truncate result for logging (tool results can be large)
         let result_preview: String = result.chars().take(200).collect();
         let truncated = result.len() > 200;
@@ -136,6 +137,7 @@ where
             tool.result_len = result.len(),
             "Tool returned result"
         );
+        HookAction::cont()
     }
 }
 
@@ -1311,7 +1313,7 @@ pub fn tools_available() -> bool {
 ///
 /// This function iterates through all messages in the chat history and extracts
 /// the text content from any `ToolResult` entries. This is useful for recovering
-/// gathered information when a `MaxDepthError` occurs during an agentic loop.
+/// gathered information when a `MaxTurnsError` occurs during an agentic loop.
 ///
 /// ## Returns
 ///
@@ -1377,10 +1379,10 @@ where
     // Create a tracing hook for this task to emit tool call events
     let hook = TracingPromptHook::new(name);
 
-    // Use multi_turn(15) to allow up to 15 rounds of tool calls before final response
+    // Use max_turns(15) to allow up to 15 rounds of tool calls before final response
     // Higher limit needed as research tasks may require multiple search + scrape operations
     // If this still hits the limit, the preamble should guide the agent to synthesize earlier
-    let result = agent.prompt(&prompt).multi_turn(15).with_hook(hook).await;
+    let result = agent.prompt(&prompt).max_turns(15).with_hook(hook).await;
 
     // Check if cancelled after the request completed
     if cancelled.load(Ordering::SeqCst) {
@@ -1435,9 +1437,9 @@ where
                 }
             }
         }
-        Err(PromptError::MaxDepthError {
+        Err(PromptError::MaxTurnsError {
             chat_history,
-            max_depth,
+            max_turns,
             ..
         }) => {
             // The agent hit the maximum tool call limit without producing a final response.
@@ -1445,8 +1447,8 @@ where
             // We'll attempt to recover by extracting gathered tool results and synthesizing them.
             info!(
                 task = name,
-                max_depth = max_depth,
-                "MaxDepthError: attempting recovery by synthesizing gathered tool results"
+                max_turns = max_turns,
+                "MaxTurnsError: attempting recovery by synthesizing gathered tool results"
             );
             println!(
                 "  [{}] Max tool calls reached, synthesizing gathered results...",
@@ -1461,7 +1463,7 @@ where
                 warn!(
                     task = name,
                     elapsed_secs = elapsed,
-                    "MaxDepthError recovery failed: no tool results found in chat history"
+                    "MaxTurnsError recovery failed: no tool results found in chat history"
                 );
                 eprintln!(
                     "  [{}/{}] ✗ {} failed: max tool calls with no results ({:.1}s)",
@@ -1523,7 +1525,7 @@ where
                                     task = name,
                                     elapsed_secs = final_elapsed,
                                     content_len = normalized.len(),
-                                    "Task completed via MaxDepthError recovery"
+                                    "Task completed via MaxTurnsError recovery"
                                 );
                                 println!(
                                     "  [{}/{}] ✓ {} (recovered, {:.1}s)",
@@ -1553,7 +1555,7 @@ where
                         warn!(
                             task = name,
                             error = %e,
-                            "MaxDepthError recovery synthesis failed"
+                            "MaxTurnsError recovery synthesis failed"
                         );
                         eprintln!(
                             "  [{}/{}] ✗ {} recovery failed: {} ({:.1}s)",
@@ -1785,7 +1787,7 @@ where
     let hook = TracingPromptHook::new(name);
 
     // 4. Call LLM agent with tools
-    let result = agent.prompt(&prompt).multi_turn(15).with_hook(hook).await;
+    let result = agent.prompt(&prompt).max_turns(15).with_hook(hook).await;
 
     // Check if cancelled after the request completed
     if cancelled.load(Ordering::SeqCst) {
@@ -4229,6 +4231,7 @@ pub async fn research_api(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::tempdir;
 
     // ===========================================
@@ -4867,6 +4870,7 @@ Content with spaces in separator."#;
     // ===========================================
 
     #[test]
+    #[serial]
     fn test_tools_available_returns_true_when_api_key_set() {
         // Save original value if set
         let original = std::env::var("BRAVE_API_KEY").ok();
@@ -4891,6 +4895,7 @@ Content with spaces in separator."#;
     }
 
     #[test]
+    #[serial]
     fn test_tools_available_returns_false_when_api_key_not_set() {
         // Save original value if set
         let original = std::env::var("BRAVE_API_KEY").ok();
@@ -4914,6 +4919,7 @@ Content with spaces in separator."#;
     }
 
     #[test]
+    #[serial]
     fn test_tools_available_handles_empty_api_key() {
         // Save original value if set
         let original = std::env::var("BRAVE_API_KEY").ok();
@@ -4940,7 +4946,7 @@ Content with spaces in separator."#;
 
     // ===========================================
     // Tests for extract_tool_results_from_history
-    // Regression tests for MaxDepthError recovery
+    // Regression tests for MaxTurnsError recovery
     // ===========================================
 
     mod extract_tool_results_tests {
@@ -4995,7 +5001,7 @@ Content with spaces in separator."#;
 
         #[test]
         fn test_extract_multiple_tool_results() {
-            // Simulates a typical MaxDepthError scenario where multiple search/scrape
+            // Simulates a typical MaxTurnsError scenario where multiple search/scrape
             // operations were performed but the agent never produced a final answer.
             let search_result =
                 "Web search: colored-text crate is a Rust library for terminal colors.";

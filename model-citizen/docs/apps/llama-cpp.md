@@ -770,3 +770,34 @@ println!("Parsed Candidate: {:?}", candidate);
 In Python, if an LLM returns bad JSON, you wrap it in a `try/except` block and retry. In Rust, we prefer **compile-time guarantees**.
 
 GBNF acts like a **runtime compiler for the LLM**. It ensures that the "data types" returned by the probabilistic model match the strict types expected by your Rust `structs`.
+
+---
+
+## `model-citizen` Integration (`model run`)
+
+If you manage GGUF files with `model-citizen`, you can launch `llama-server` directly from the `model` CLI:
+
+```bash
+# Launch by model name and open browser when ready
+model run llama3
+
+# Filter to one runner, then pick interactively
+model run --runner llamacpp
+
+# Override server options
+model run llama3 --host 127.0.0.1 --port 8081 --ctx-size 8192 --threads 8 --n-gpu-layers 35
+
+# Protect API endpoints and skip auto-browser
+model run llama3 --api-key my-secret --no-browser
+
+# Print resolved command without executing
+model run llama3 --dry-run
+```
+
+`model run` behavior:
+
+- Resolves only runnable GGUF file paths (`.gguf` or valid GGUF header)
+- Validates `llama-server` availability (`PATH` or `--llama-server-bin`)
+- Detects port conflicts before launch and provides an actionable error
+- Polls `http://<host>:<port>/health` and opens browser when reachable
+- Leaves server running in foreground and terminates child process on Ctrl-C
