@@ -675,7 +675,7 @@ dependencies = [
  "biscuit-hash",
  "chrono",
  "clap 4.5.60",
- "expectrl",
+ "expectrl 0.8.0",
  "ignore",
  "image",
  "libc",
@@ -707,7 +707,7 @@ dependencies = [
  "clap 4.5.60",
  "clap_complete",
  "color-eyre",
- "expectrl",
+ "expectrl 0.8.0",
  "insta",
  "predicates",
  "serde",
@@ -1130,14 +1130,18 @@ dependencies = [
  "color-eyre",
  "darkmatter",
  "dirs 6.0.0",
+ "expectrl 0.7.1",
  "inquire 0.9.3",
+ "insta",
  "libc",
  "playa",
  "predicates",
+ "proptest",
  "serde_json",
  "shellexpand",
  "signal-hook",
  "sniff",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2054,13 +2058,25 @@ dependencies = [
 
 [[package]]
 name = "expectrl"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ede784925953fcab9a3351d5009bcb8d2b0c13e940924c88087e8e2ce0c4717a"
+dependencies = [
+ "conpty",
+ "nix 0.26.4",
+ "ptyprocess 0.4.1",
+ "regex",
+]
+
+[[package]]
+name = "expectrl"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0e0706d01b4f43adaf7e0fb460e07477c36b74ae60fdeb1d045001bd77b4bd1"
 dependencies = [
  "conpty",
  "nix 0.26.4",
- "ptyprocess",
+ "ptyprocess 0.5.0",
  "regex",
 ]
 
@@ -3304,6 +3320,7 @@ checksum = "e82db8c87c7f1ccecb34ce0c24399b8a73081427f3c7c50a5d597925356115e4"
 dependencies = [
  "console 0.15.11",
  "once_cell",
+ "serde",
  "similar",
  "tempfile",
 ]
@@ -4107,6 +4124,15 @@ checksum = "ac9557c559cd6fc9867e122e20d2cbefc9ca29d80d027a8e39310920ed2f0a97"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "nanoid"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -5215,6 +5241,15 @@ dependencies = [
 
 [[package]]
 name = "ptyprocess"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e05aef7befb11a210468a2d77d978dde2c6381a0381e33beb575e91f57fe8cf"
+dependencies = [
+ "nix 0.26.4",
+]
+
+[[package]]
+name = "ptyprocess"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "101be273c0b1680d7056afddbaa88f02b6e9f2dc161165c30bee9914b6025a79"
@@ -5827,7 +5862,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots",
 ]
@@ -5842,6 +5877,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -5852,6 +5888,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -5860,15 +5897,18 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -5891,7 +5931,7 @@ dependencies = [
  "pulldown-cmark-to-cmark",
  "regex",
  "reqwest 0.12.28",
- "rig-core",
+ "rig-core 0.29.0",
  "semver",
  "serde",
  "serde_json",
@@ -5962,13 +6002,45 @@ dependencies = [
  "futures-timer",
  "glob",
  "http",
- "lopdf 0.36.0",
  "mime",
  "mime_guess",
  "ordered-float 5.1.0",
  "pin-project-lite",
- "rayon",
  "reqwest 0.12.28",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+ "url",
+]
+
+[[package]]
+name = "rig-core"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "437fa2a15825caf2505411bbe55b05c8eb122e03934938b38f9ecaa1d6ded7c8"
+dependencies = [
+ "as-any",
+ "async-stream",
+ "base64",
+ "bytes",
+ "eventsource-stream",
+ "fastrand",
+ "futures",
+ "futures-timer",
+ "glob",
+ "http",
+ "lopdf 0.36.0",
+ "mime",
+ "mime_guess",
+ "nanoid",
+ "ordered-float 5.1.0",
+ "pin-project-lite",
+ "rayon",
+ "reqwest 0.13.2",
  "rig-derive",
  "rmcp",
  "schemars",
@@ -7144,6 +7216,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
+dependencies = [
+ "strum_macros 0.28.0",
+]
+
+[[package]]
 name = "strum_macros"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7161,6 +7242,18 @@ name = "strum_macros"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -8354,8 +8447,8 @@ dependencies = [
  "lazy_static",
  "model_id",
  "portable-pty",
- "reqwest 0.12.28",
- "rig-core",
+ "reqwest 0.13.2",
+ "rig-core 0.31.0",
  "scraper",
  "serde",
  "serde_json",
@@ -8363,7 +8456,7 @@ dependencies = [
  "serial_test",
  "sniff",
  "strip-ansi-escapes",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8396,10 +8489,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap 4.5.60",
- "reqwest 0.12.28",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8880,6 +8973,19 @@ name = "wasm-streams"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
 dependencies = [
  "futures-util",
  "js-sys",
