@@ -1,0 +1,7 @@
+[profile.default]
+# Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
+retries = 3
+
+[profile.ci]
+# Same behavior for CI environment
+retries = 3

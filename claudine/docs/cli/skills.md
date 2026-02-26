@@ -31,11 +31,16 @@ The reporting is broken down into the following sections:
 
       - **Detail View**
           - Shown when there is exactly 1 skill being shown (typically due to a filter condition)
-          - we 
+          - Whether the `-v` / `--verbose` flag was used has no effect
+          - The beginning of the reporting in this mode is exactly the same as the verbose mode (below) but immediately following the `topic/scope/description` block we will use the `FileSystem` struct from biscuit-terminal to show the skill's files.
 
       - **Verbose**
           - If the number of skills (_after filtering_) is less than 10 (and more than 1) we will report using the verbose style.
           - If the user adds the `--verbose` or `-v` flag and there is more than 1 skill then we will also report using the verbose style.
+          - This mode lists all skills available (after filter) as an unordered list (leveraging `UnorderedList` component from biscuit-terminal)
+              - The list is sorted by "scope" first -- "User" -> "Repo (masked)" -> "Repo" -- and then alphabetically.
+              - The topics are all OSC8 links to the `SKILL.md` file
+              - 
       - **Normal**
 
 3. Exceptions
@@ -56,6 +61,7 @@ The reporting is broken down into the following sections:
        - the message `<i><dull>the current working directory is </dull>not<dull> a <bold>git</bold> repo so we are only showing user-based scope</i>`
        - only shown when the CWD is not inside a git repo
    - **verbose**
-       - the message `<i><dull>using the <green>--verbose</green> switch will provide not only topic names but also descriptions
+       - the message `<i><dull>using the <green>--verbose</green> switch will provide not only topic names but also descriptions`
        - only shown when there is more than 10 skills listed and the user has not used the `--verbose`/`-v` flag
-   - 
+   - **filtering**
+       - the message `<i><dull>using parameters in the CLI call will act as <bold>filters</bold> as part of the CLI call </dull></i>`
