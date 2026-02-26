@@ -262,21 +262,17 @@ impl LmStudioScanner {
     /// - `num_attention_heads` → head_count
     /// - `num_hidden_layers` → layer_count
     fn metadata_from_mlx_config(config: &serde_json::Value) -> crate::ModelMetadata {
-        let mut meta = crate::ModelMetadata::default();
-
-        meta.context_length = config
-            .get("max_position_embeddings")
-            .or_else(|| config.get("max_seq_len"))
-            .or_else(|| config.get("max_sequence_length"))
-            .and_then(|v| v.as_u64());
-
-        meta.embedding_length = config.get("hidden_size").and_then(|v| v.as_u64());
-
-        meta.head_count = config.get("num_attention_heads").and_then(|v| v.as_u64());
-
-        meta.layer_count = config.get("num_hidden_layers").and_then(|v| v.as_u64());
-
-        meta
+        crate::ModelMetadata {
+            context_length: config
+                .get("max_position_embeddings")
+                .or_else(|| config.get("max_seq_len"))
+                .or_else(|| config.get("max_sequence_length"))
+                .and_then(|v| v.as_u64()),
+            embedding_length: config.get("hidden_size").and_then(|v| v.as_u64()),
+            head_count: config.get("num_attention_heads").and_then(|v| v.as_u64()),
+            layer_count: config.get("num_hidden_layers").and_then(|v| v.as_u64()),
+            ..Default::default()
+        }
     }
 
     /// Maps an MLX `model_type` string to a `ModelArchitecture`.

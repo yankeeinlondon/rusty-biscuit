@@ -60,14 +60,12 @@ impl LlamaCppScanner {
             let path = entry.path();
             if path.is_dir() {
                 Self::walk_directory(&path, models);
-            } else if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext.eq_ignore_ascii_case("gguf") {
-                        if let Some(model) = Self::parse_gguf_file(&path) {
-                            models.push(model);
-                        }
-                    }
-                }
+            } else if path.is_file()
+                && let Some(ext) = path.extension()
+                && ext.eq_ignore_ascii_case("gguf")
+                && let Some(model) = Self::parse_gguf_file(&path)
+            {
+                models.push(model);
             }
         }
     }

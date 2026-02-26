@@ -24,10 +24,10 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 color-eyre = "0.6"
 
 # Interactive prompts
-inquire = "0.7"
+inquire = "0.9"
 
 # Progress bars
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Serialization for JSON output
 serde_json = "1.0"

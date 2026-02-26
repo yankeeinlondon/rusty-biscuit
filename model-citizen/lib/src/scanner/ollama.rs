@@ -351,18 +351,18 @@ impl OllamaScanner {
         }
 
         // Extract HuggingFace repo from model_info
-        if meta.huggingface_repo.is_none() {
-            if let Some(info) = &show.model_info {
-                meta.huggingface_repo = info
-                    .get("general.source.huggingface.repository")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        info.get("general.source.url")
-                            .and_then(|v| v.as_str())
-                            .and_then(crate::huggingface_repo_from_url)
-                    });
-            }
+        if meta.huggingface_repo.is_none()
+            && let Some(info) = &show.model_info
+        {
+            meta.huggingface_repo = info
+                .get("general.source.huggingface.repository")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    info.get("general.source.url")
+                        .and_then(|v| v.as_str())
+                        .and_then(crate::huggingface_repo_from_url)
+                });
         }
 
         // Parse inference defaults from parameters string

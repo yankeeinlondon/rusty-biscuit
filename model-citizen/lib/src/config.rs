@@ -203,16 +203,16 @@ impl Config {
         let mut config = file_config.merge(env_config);
 
         // Include MODELS_DIR and default shared dir so downloaded models are discoverable.
-        if let Ok(models_dir) = std::env::var("MODELS_DIR") {
-            let path = PathBuf::from(models_dir);
-            if !config.llamacpp_models_dirs.contains(&path) {
-                config.llamacpp_models_dirs.push(path);
-            }
+        if let Ok(models_dir) = std::env::var("MODELS_DIR")
+            && let path = PathBuf::from(models_dir)
+            && !config.llamacpp_models_dirs.contains(&path)
+        {
+            config.llamacpp_models_dirs.push(path);
         }
-        if let Some(shared) = crate::sharing::default_shared_dir() {
-            if !config.llamacpp_models_dirs.contains(&shared) {
-                config.llamacpp_models_dirs.push(shared);
-            }
+        if let Some(shared) = crate::sharing::default_shared_dir()
+            && !config.llamacpp_models_dirs.contains(&shared)
+        {
+            config.llamacpp_models_dirs.push(shared);
         }
 
         Ok(config)

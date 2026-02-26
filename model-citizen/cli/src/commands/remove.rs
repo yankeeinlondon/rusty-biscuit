@@ -63,22 +63,21 @@ pub async fn run(model_name: &str, runner_filter: Option<&str>, force: bool) -> 
 
     // Warn about dependent symlinks for originals
     for model in &matching {
-        if !sharing::is_symlink(&model.path) {
-            if let Some(registry_path) = sharing::default_registry_path() {
-                if let Ok(share_registry) = sharing::ShareRegistry::load(&registry_path) {
-                    let shares = share_registry.get_shares(&model.path);
-                    if !shares.is_empty() {
-                        println!(
-                            "  Warning: {} has {} dependent symlinks that will break:",
-                            model.name,
-                            shares.len()
-                        );
-                        for share in shares {
-                            println!("    - {}", share.display());
-                        }
-                        println!();
-                    }
+        if !sharing::is_symlink(&model.path)
+            && let Some(registry_path) = sharing::default_registry_path()
+            && let Ok(share_registry) = sharing::ShareRegistry::load(&registry_path)
+        {
+            let shares = share_registry.get_shares(&model.path);
+            if !shares.is_empty() {
+                println!(
+                    "  Warning: {} has {} dependent symlinks that will break:",
+                    model.name,
+                    shares.len()
+                );
+                for share in shares {
+                    println!("    - {}", share.display());
                 }
+                println!();
             }
         }
     }
@@ -143,13 +142,12 @@ async fn remove_model(model: &UnifiedModel) -> Result<()> {
     }
 
     // Update share registry
-    if is_link {
-        if let Some(registry_path) = sharing::default_registry_path() {
-            if let Ok(mut share_registry) = sharing::ShareRegistry::load(&registry_path) {
-                share_registry.remove_share(&model.path);
-                let _ = share_registry.save(&registry_path);
-            }
-        }
+    if is_link
+        && let Some(registry_path) = sharing::default_registry_path()
+        && let Ok(mut share_registry) = sharing::ShareRegistry::load(&registry_path)
+    {
+        share_registry.remove_share(&model.path);
+        let _ = share_registry.save(&registry_path);
     }
 
     Ok(())

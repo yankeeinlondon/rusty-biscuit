@@ -232,25 +232,25 @@ fn build_registry(config: &Config, runner_filter: Option<RunnerFilter>) -> Resul
     let mut registry = ModelRegistry::new();
     let mut added = false;
 
-    if runner_filter.is_none() || runner_filter == Some(RunnerFilter::Ollama) {
-        if config.scanners.ollama.enabled {
-            registry.add_scanner(OllamaScanner::new(config));
-            added = true;
-        }
+    if (runner_filter.is_none() || runner_filter == Some(RunnerFilter::Ollama))
+        && config.scanners.ollama.enabled
+    {
+        registry.add_scanner(OllamaScanner::new(config));
+        added = true;
     }
 
-    if runner_filter.is_none() || runner_filter == Some(RunnerFilter::Lmstudio) {
-        if config.scanners.lmstudio.enabled {
-            registry.add_scanner(LmStudioScanner::new(config));
-            added = true;
-        }
+    if (runner_filter.is_none() || runner_filter == Some(RunnerFilter::Lmstudio))
+        && config.scanners.lmstudio.enabled
+    {
+        registry.add_scanner(LmStudioScanner::new(config));
+        added = true;
     }
 
-    if runner_filter.is_none() || runner_filter == Some(RunnerFilter::Llamacpp) {
-        if config.scanners.llamacpp.enabled {
-            registry.add_scanner(LlamaCppScanner::new(config));
-            added = true;
-        }
+    if (runner_filter.is_none() || runner_filter == Some(RunnerFilter::Llamacpp))
+        && config.scanners.llamacpp.enabled
+    {
+        registry.add_scanner(LlamaCppScanner::new(config));
+        added = true;
     }
 
     if !added {
@@ -762,7 +762,7 @@ fn open_browser(url: &str) -> Result<()> {
             .arg(url)
             .spawn()
             .wrap_err("Failed to execute `open`")?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -771,7 +771,7 @@ fn open_browser(url: &str) -> Result<()> {
             .arg(url)
             .spawn()
             .wrap_err("Failed to execute `xdg-open`")?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
@@ -780,7 +780,7 @@ fn open_browser(url: &str) -> Result<()> {
             .args(["/C", "start", "", url])
             .spawn()
             .wrap_err("Failed to execute `start`")?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
