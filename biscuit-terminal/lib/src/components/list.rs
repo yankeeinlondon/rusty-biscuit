@@ -19,25 +19,25 @@ use crate::{
 /// - Already has an explicit hanging indent → left as-is
 /// - `Truncate` → left as-is
 fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32) {
-    if let RenderableContent::Component(arc) = content {
-        if let Some(component) = Arc::get_mut(arc) {
-            if component.is_block_level() {
-                return;
+    if let RenderableContent::Component(arc) = content
+        && let Some(component) = Arc::get_mut(arc)
+    {
+        if component.is_block_level() {
+            return;
+        }
+        let layout = component.layout_mut();
+        match &layout.word_wrap {
+            WordWrap::None => {
+                layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
             }
-            let layout = component.layout_mut();
-            match &layout.word_wrap {
-                WordWrap::None => {
-                    layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
-                }
-                WordWrap::WrapProse(offset, None) => {
-                    layout.word_wrap = WordWrap::WrapProse(*offset, Some(hanging_indent));
-                }
-                WordWrap::BespokeProse(offset, chars, None) => {
-                    layout.word_wrap =
-                        WordWrap::BespokeProse(*offset, chars.clone(), Some(hanging_indent));
-                }
-                _ => {} // Already has indent or uses Truncate
+            WordWrap::WrapProse(offset, None) => {
+                layout.word_wrap = WordWrap::WrapProse(*offset, Some(hanging_indent));
             }
+            WordWrap::BespokeProse(offset, chars, None) => {
+                layout.word_wrap =
+                    WordWrap::BespokeProse(*offset, chars.clone(), Some(hanging_indent));
+            }
+            _ => {} // Already has indent or uses Truncate
         }
     }
 }

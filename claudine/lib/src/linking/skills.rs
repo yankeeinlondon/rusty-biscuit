@@ -72,6 +72,15 @@ pub struct SkillException {
     pub skill_md_path: PathBuf,
 }
 
+/// Directory-level diagnostic explaining why all skills for a scope are missing.
+#[derive(Debug, Clone)]
+pub struct SkillDirectoryDiagnostic {
+    /// Provider where the issue was found.
+    pub provider: Provider,
+    /// Human-readable diagnostic message.
+    pub message: String,
+}
+
 /// Complete report from skill discovery.
 #[derive(Debug, Clone)]
 pub struct SkillsReport {
@@ -79,6 +88,8 @@ pub struct SkillsReport {
     pub skills: Vec<SkillInfo>,
     /// Exceptions found during validation.
     pub exceptions: Vec<SkillException>,
+    /// Directory-level diagnostics (missing directories).
+    pub diagnostics: Vec<SkillDirectoryDiagnostic>,
 }
 
 /// Discover all skills from Claude's user and repo skill directories,
@@ -156,9 +167,13 @@ pub fn list_skills(
 
     skills.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let exceptions = gather_exceptions(paths, &user_skills, &repo_skills)?;
+    let (exceptions, diagnostics) = gather_exceptions(paths, &user_skills, &repo_skills)?;
 
-    Ok(SkillsReport { skills, exceptions })
+    Ok(SkillsReport {
+        skills,
+        exceptions,
+        diagnostics,
+    })
 }
 
 /// Scan a skill directory, returning `(name, path)` pairs for valid skill dirs.
@@ -212,8 +227,9 @@ fn gather_exceptions(
     paths: &ProviderSkillPaths,
     user_skills: &[(String, PathBuf)],
     repo_skills: &[(String, PathBuf)],
-) -> Result<Vec<SkillException>> {
+) -> Result<(Vec<SkillException>, Vec<SkillDirectoryDiagnostic>)> {
     let mut exceptions = Vec::new();
+    let mut diagnostics = Vec::new();
 
     // Canonical skill names from Claude (union of user + repo)
     let canonical: BTreeMap<&str, &PathBuf> = {
@@ -256,21 +272,16 @@ fn gather_exceptions(
             continue;
         }
 
-        // Check user scope
-        if let Some(provider_dir) =
-            paths.target_dir(provider, LinkableResource::Skill, ResourceScope::User)
-        {
-            for name in canonical.keys() {
-                let expected = provider_dir.join(name);
-                if !expected.exists() || !expected.join("SKILL.md").exists() {
-                    exceptions.push(SkillException {
-                        provider,
-                        exception_type: ExceptionType::Missing,
-                        topic: name.to_string(),
-                        skill_md_path: expected.join("SKILL.md"),
-                    });
-                }
-            }
+        // Check both user and repo scopes
+        for scope in [ResourceScope::User, ResourceScope::Repo] {
+            check_scope_missing(
+                paths,
+                provider,
+                scope,
+                &canonical,
+                &mut exceptions,
+                &mut diagnostics,
+            );
         }
     }
 
@@ -282,7 +293,59 @@ fn gather_exceptions(
             .then(a.topic.cmp(&b.topic))
     });
 
-    Ok(exceptions)
+    Ok((exceptions, diagnostics))
+}
+
+/// Check a single provider scope for missing skills or missing directories.
+fn check_scope_missing(
+    paths: &ProviderSkillPaths,
+    provider: Provider,
+    scope: ResourceScope,
+    canonical: &BTreeMap<&str, &PathBuf>,
+    exceptions: &mut Vec<SkillException>,
+    diagnostics: &mut Vec<SkillDirectoryDiagnostic>,
+) {
+    let scope_label = match scope {
+        ResourceScope::User => "user",
+        ResourceScope::Repo => "repo",
+    };
+
+    let Some(provider_dir) = paths.target_dir(provider, LinkableResource::Skill, scope) else {
+        return;
+    };
+
+    if !provider_dir.exists() {
+        // Directory doesn't exist — emit a directory-level diagnostic instead
+        // of listing every individual skill as missing.
+        let message = if provider_dir
+            .parent()
+            .is_some_and(|parent| parent.exists())
+        {
+            format!(
+                "All <b>{scope_label}</b> scoped skills are NOT currently linked because the skills directory for <b>{provider}</b> does not exist! Use the <red>--fix</red> flag to fix this.",
+            )
+        } else {
+            format!(
+                "All <b>{scope_label}</b> scoped skills are NOT currently linked because the base configuration directory for <b>{provider}</b> does not exist! Use the <red>--fix</red> flag to fix this.",
+            )
+        };
+
+        diagnostics.push(SkillDirectoryDiagnostic { provider, message });
+        return;
+    }
+
+    // Directory exists — check individual skills
+    for name in canonical.keys() {
+        let expected = provider_dir.join(name);
+        if !expected.exists() || !expected.join("SKILL.md").exists() {
+            exceptions.push(SkillException {
+                provider,
+                exception_type: ExceptionType::Missing,
+                topic: name.to_string(),
+                skill_md_path: expected.join("SKILL.md"),
+            });
+        }
+    }
 }
 
 /// Check if a SKILL.md is missing a `description` in frontmatter.
@@ -604,5 +667,145 @@ mod tests {
 
         let report = list_skills(&paths, &[]).unwrap();
         assert!(report.skills.is_empty());
+    }
+
+    /// Build paths with a non-Claude provider (Gemini) for testing missing dir diagnostics.
+    fn test_paths_with_gemini(base: &std::path::Path) -> ProviderSkillPaths {
+        let mut providers = HashMap::new();
+        for provider in ALL_PROVIDERS {
+            providers.insert(provider, empty_provider(provider));
+        }
+
+        providers.insert(
+            Provider::Claude,
+            ProviderPaths {
+                provider: Provider::Claude,
+                user_skills: Some(base.join("user/skills")),
+                repo_skills: Some(base.join("repo/skills")),
+                user_commands: None,
+                repo_commands: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+            },
+        );
+        providers.insert(
+            Provider::Gemini,
+            ProviderPaths {
+                provider: Provider::Gemini,
+                user_skills: Some(base.join("gemini/skills")),
+                repo_skills: Some(base.join("repo/.gemini/skills")),
+                user_commands: None,
+                repo_commands: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+            },
+        );
+
+        ProviderSkillPaths::from_providers_for_test(providers, base.to_path_buf())
+    }
+
+    #[test]
+    fn diagnostic_when_skills_dir_missing_but_parent_exists() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths_with_gemini(tmp.path());
+
+        // Create Claude skills
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "my-skill", "A skill", "# Body\n");
+
+        // Create Gemini parent but NOT the skills dir
+        fs::create_dir_all(tmp.path().join("gemini")).unwrap();
+
+        let report = list_skills(&paths, &[]).unwrap();
+        let gemini_diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.provider == Provider::Gemini)
+            .collect();
+        assert!(!gemini_diags.is_empty());
+        assert!(gemini_diags
+            .iter()
+            .any(|d| d.message.contains("skills directory")));
+    }
+
+    #[test]
+    fn diagnostic_when_base_config_dir_missing() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths_with_gemini(tmp.path());
+
+        // Create Claude skills
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "my-skill", "A skill", "# Body\n");
+
+        // Don't create the Gemini dir at all (no gemini/ parent)
+
+        let report = list_skills(&paths, &[]).unwrap();
+        let gemini_diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.provider == Provider::Gemini)
+            .collect();
+        assert!(!gemini_diags.is_empty());
+        assert!(gemini_diags
+            .iter()
+            .any(|d| d.message.contains("base configuration directory")));
+    }
+
+    #[test]
+    fn no_diagnostic_when_skills_dir_exists() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths_with_gemini(tmp.path());
+
+        // Create Claude skills
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "my-skill", "A skill", "# Body\n");
+
+        // Create Gemini skills directories for both scopes (exist but empty)
+        fs::create_dir_all(tmp.path().join("gemini/skills")).unwrap();
+        fs::create_dir_all(tmp.path().join("repo/.gemini/skills")).unwrap();
+
+        let report = list_skills(&paths, &[]).unwrap();
+        // Should have individual missing exceptions, NOT diagnostics
+        let gemini_diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.provider == Provider::Gemini)
+            .collect();
+        assert!(gemini_diags.is_empty());
+
+        let gemini_missing: Vec<_> = report
+            .exceptions
+            .iter()
+            .filter(|e| {
+                e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing
+            })
+            .collect();
+        // 1 missing in user scope + 1 missing in repo scope
+        assert_eq!(gemini_missing.len(), 2);
+        assert!(gemini_missing.iter().all(|e| e.topic == "my-skill"));
+    }
+
+    #[test]
+    fn repo_scope_diagnostic_when_repo_dir_missing() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths_with_gemini(tmp.path());
+
+        // Create Claude skills (repo scope)
+        let repo_dir = tmp.path().join("repo/skills");
+        setup_skill(&repo_dir, "repo-skill", "Repo skill", "# Body\n");
+
+        // Don't create the Gemini repo dir at all
+
+        let report = list_skills(&paths, &[]).unwrap();
+        let gemini_diags: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.provider == Provider::Gemini)
+            .collect();
+        // Should have diagnostics for both user and repo scopes
+        // Message contains Prose markup: "<b>repo</b> scoped"
+        assert!(gemini_diags
+            .iter()
+            .any(|d| d.message.contains("repo</b> scoped")));
     }
 }

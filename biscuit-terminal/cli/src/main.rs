@@ -12,6 +12,7 @@ use std::path::Path;
 use biscuit_terminal::{
     components::{
         mermaid::{MermaidRenderer, QuadrantTheme},
+        renderable::Renderable,
         terminal_image::{ImageWidth, TerminalImage, parse_filepath_and_width, parse_width_spec},
         two_column::{ColumnWidth, TwoColumn},
     },
@@ -64,8 +65,6 @@ fn settle_terminal() {
 }
 
 /// Emit rendered image output and flush immediately.
-///
-/// `render_to_terminal()` owns final cursor placement.
 fn emit_image_output(output: &str) -> color_eyre::Result<()> {
     use std::io::Write;
 
@@ -1971,9 +1970,7 @@ fn render_image(
     let pre_cursor = if debug { cursor_position() } else { None };
 
     // Render the image
-    let output = term_image
-        .render_to_terminal(&terminal)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+    let output = term_image.fallback_render(&terminal);
 
     // Output the result with vertical margins
     for _ in 0..layout.margin_top.unwrap_or(0) {
@@ -2152,16 +2149,8 @@ fn display_mermaid_diagram(
         println!();
     }
 
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => emit_image_output(&output)?,
-        Err(e) => {
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to display {}: {}",
-                diagram_type,
-                e
-            ));
-        }
-    }
+    let output = term_image.fallback_render(&terminal);
+    emit_image_output(&output)?;
 
     // Output metadata if requested
     if meta {
