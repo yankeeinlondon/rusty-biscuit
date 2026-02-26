@@ -8,6 +8,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use clap_complete::engine::ArgValueCandidates;
 use color_eyre::eyre::Result;
+use inquire::InquireError;
 use commands::run::{RunOptions, RunnerFilter};
 
 const COMPLETIONS_HELP: &str = r#"
@@ -212,7 +213,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    match cli.command {
+    let command_result = match cli.command {
         Commands::List {
             filter,
             runner,
@@ -220,10 +221,10 @@ async fn main() -> Result<()> {
             app,
             size,
         } => {
-            commands::list::run(filter, runner, cli.json, verbose, app, size).await?;
+            commands::list::run(filter, runner, cli.json, verbose, app, size).await
         }
         Commands::Info { model } => {
-            commands::info::run(&model, cli.json).await?;
+            commands::info::run(&model, cli.json).await
         }
         Commands::Search {
             query,
@@ -236,7 +237,7 @@ async fn main() -> Result<()> {
             } else {
                 Some(query.join(" "))
             };
-            commands::search::run(query.as_deref(), limit, sort.into(), cli.json, verbose).await?;
+            commands::search::run(query.as_deref(), limit, sort.into(), cli.json, verbose).await
         }
         Commands::Download {
             query,
@@ -259,14 +260,14 @@ async fn main() -> Result<()> {
                 output.as_deref(),
                 remove_partial,
             )
-            .await?;
+            .await
         }
         Commands::Remove {
             model,
             runner,
             force,
         } => {
-            commands::remove::run(&model, runner.as_deref(), force).await?;
+            commands::remove::run(&model, runner.as_deref(), force).await
         }
         Commands::Run {
             model,
@@ -294,12 +295,34 @@ async fn main() -> Result<()> {
                 no_browser,
                 dry_run,
             })
-            .await?;
+            .await
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());
+            Ok(())
         }
+    };
+
+    if let Err(err) = command_result {
+        if is_prompt_interrupt(&err) {
+            println!("Cancelled.");
+            return Ok(());
+        }
+        return Err(err);
     }
 
     Ok(())
+}
+
+fn is_prompt_interrupt(err: &color_eyre::Report) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<InquireError>()
+            .is_some_and(|inquire_err| {
+                matches!(
+                    inquire_err,
+                    InquireError::OperationCanceled | InquireError::OperationInterrupted
+                )
+            })
+    })
 }
