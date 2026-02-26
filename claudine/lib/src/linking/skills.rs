@@ -257,7 +257,7 @@ pub fn list_skills(
         });
     }
 
-    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills.sort_by(|a, b| a.scope.cmp(&b.scope).then(a.name.cmp(&b.name)));
 
     let (exceptions, diagnostics) = gather_exceptions(paths, &user_skills, &repo_skills)?;
 
@@ -750,6 +750,27 @@ mod tests {
         let report = list_skills(&paths, &[]).unwrap();
         assert_eq!(report.skills.len(), 1);
         assert_eq!(report.skills[0].name, "visible");
+    }
+
+    #[test]
+    fn sorts_by_scope_then_alpha() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(tmp.path());
+        let user_dir = tmp.path().join("user/skills");
+        let repo_dir = tmp.path().join("repo/skills");
+        setup_skill(&user_dir, "gamma", "Gamma skill", "# G\n");
+        setup_skill(&user_dir, "alpha", "Alpha skill", "# A\n");
+        setup_skill(&repo_dir, "beta", "Beta skill", "# B\n");
+
+        let report = list_skills(&paths, &[]).unwrap();
+        assert_eq!(report.skills.len(), 3);
+        // User scope first (alpha, gamma), then Repo scope (beta)
+        assert_eq!(report.skills[0].name, "alpha");
+        assert_eq!(report.skills[0].scope, SkillScope::User);
+        assert_eq!(report.skills[1].name, "gamma");
+        assert_eq!(report.skills[1].scope, SkillScope::User);
+        assert_eq!(report.skills[2].name, "beta");
+        assert_eq!(report.skills[2].scope, SkillScope::Repo);
     }
 
     #[test]
