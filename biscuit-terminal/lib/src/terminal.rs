@@ -1,9 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::Package;
-use sniff::filesystem::repo::detect_repo;
-
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
     ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
@@ -18,32 +14,28 @@ use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
 
+/// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = if start.is_absolute() {
+        start.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(start)
+    };
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 fn new_terminal() -> Terminal {
     let app = get_terminal_app();
     let config_file = get_terminal_config_path(&app);
-    let git_info = detect_git(Path::new("."), false, 0).ok().flatten();
-    let repo_root = git_info.as_ref().map(|info| info.repo_root.clone());
+    let repo_root = find_git_root(Path::new("."));
     let in_repo = repo_root.is_some();
-    let repo_info = repo_root
-        .as_ref()
-        .and_then(|root| detect_repo(root).ok().flatten());
-    let in_monorepo = repo_info
-        .as_ref()
-        .map(|info| info.is_monorepo)
-        .unwrap_or(false);
-    let cwd = std::env::current_dir().ok();
-    let package_root = match (cwd.as_ref(), repo_root.as_ref()) {
-        (Some(cwd), Some(repo_root)) => compute_package_root(
-            cwd,
-            repo_root,
-            in_monorepo,
-            repo_info
-                .as_ref()
-                .and_then(|info| info.packages.as_ref())
-                .map(|packages| packages.as_slice()),
-        ),
-        _ => None,
-    };
 
     Terminal {
         app,
@@ -62,9 +54,9 @@ fn new_terminal() -> Terminal {
         font_ligatures: font_ligatures(),
         is_nerd_font: detect_nerd_font(),
         in_repo,
-        in_monorepo,
+        in_monorepo: false,
         repo_root,
-        package_root,
+        package_root: None,
         remote: detect_connection(),
         char_encoding: CharEncoding::default(),
         locale: TerminalLocale::default(),
@@ -712,26 +704,6 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_package_root_none_for_non_monorepo() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path();
-        let cwd = root.join("project");
-        std::fs::create_dir_all(&cwd).unwrap();
-
-        let result = compute_package_root(&cwd, root, false, None);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_compute_package_root_repo_root_when_at_root() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path();
-
-        let result = compute_package_root(root, root, true, None);
-        assert_eq!(result, Some(root.to_string_lossy().to_string()));
-    }
-
-    #[test]
     fn test_terminal_new_optimistic_has_correct_width() {
         let term = Terminal::new_optimistic(80);
         assert_eq!(term.width(), 80);
@@ -773,63 +745,25 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_package_root_matches_package() {
+    fn test_find_git_root_finds_repo() {
         let temp = TempDir::new().unwrap();
-        let root = temp.path();
-        let package_path = root.join("packages").join("app");
-        std::fs::create_dir_all(&package_path).unwrap();
+        let git_dir = temp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let subdir = temp.path().join("src").join("lib");
+        std::fs::create_dir_all(&subdir).unwrap();
 
-        let packages = vec![Package {
-            name: "app".to_string(),
-            relative: "packages/app".to_string(),
-            package_area: "packages".to_string(),
-            path: package_path.clone(),
-            primary_language: None,
-            languages: Vec::new(),
-            configuration: Vec::new(),
-            documentation: Vec::new(),
-            editor_config: None,
-            command_runner: Vec::new(),
-            package_managers: Vec::new(),
-            version: None,
-            features: Vec::new(),
-            depends_on: Vec::new(),
-            used_by: Vec::new(),
-            dependencies: None,
-            dev_dependencies: None,
-            peer_dependencies: None,
-            optional_dependencies: None,
-            is_updatable: None,
-            has_major_update: None,
-            is_excluded: false,
-        }];
-
-        let cwd = package_path.join("src");
-        std::fs::create_dir_all(&cwd).unwrap();
-
-        let result = compute_package_root(&cwd, root, true, Some(&packages));
-        assert_eq!(result, Some(package_path.to_string_lossy().to_string()));
-    }
-}
-
-fn compute_package_root(
-    cwd: &Path,
-    repo_root: &Path,
-    in_monorepo: bool,
-    packages: Option<&[Package]>,
-) -> Option<String> {
-    if !in_monorepo {
-        return None;
+        let result = find_git_root(&subdir);
+        assert_eq!(
+            result.unwrap().canonicalize().unwrap(),
+            temp.path().canonicalize().unwrap()
+        );
     }
 
-    if cwd == repo_root {
-        return Some(repo_root.to_string_lossy().to_string());
+    #[test]
+    fn test_find_git_root_returns_none_outside_repo() {
+        let temp = TempDir::new().unwrap();
+        // No .git directory created
+        let result = find_git_root(temp.path());
+        assert!(result.is_none());
     }
-
-    packages.and_then(|packages| {
-        packages
-            .iter()
-            .find(|package| cwd.starts_with(&package.path))
-            .map(|package| package.path.to_string_lossy().to_string())
-    })
 }

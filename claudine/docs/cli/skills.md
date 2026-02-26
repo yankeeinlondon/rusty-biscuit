@@ -64,4 +64,9 @@ The reporting is broken down into the following sections:
        - the message `<i><dull>using the <green>--verbose</green> switch will provide not only topic names but also descriptions`
        - only shown when there is more than 10 skills listed and the user has not used the `--verbose`/`-v` flag
    - **filtering**
-       - the message `<i><dull>using parameters in the CLI call will act as <bold>filters</bold> as part of the CLI call </dull></i>`
+       - the message `<i><dull>using parameters in the CLI call will act as <bold>filters</bold> to help reduce the skills to only those you are interested in</dull></i>`
+
+	If only a message is to be displayed then it should just be displayed "as is" but with a leading blank line to separate it from the sections above.
+
+	If _more_ than one message is to be displayed then the messages should be added to an `UnorderedList` struct. The leading blank line should be added in this use-case too.
+

@@ -76,6 +76,7 @@ let cmd = get_versioned_install_command(&InstallationMethod::Cargo("bat"), "0.24
 ```
 
 **Security features:**
+
 - Input sanitization (rejects shell metacharacters)
 - `RemoteBash` blocked for automated execution (requires manual confirmation)
 - Dry-run mode for previewing commands
@@ -93,6 +94,7 @@ sniff programs --json --json-format full
 ```
 
 **Rich JSON output includes:**
+
 - `name`: Display name
 - `binary_name`: Executable name
 - `installed`: Boolean status

@@ -26,6 +26,7 @@ mod network;
 mod os;
 mod registry;
 mod stubs;
+mod versioning;
 
 // Re-export all public types for API stability
 pub use language::LanguagePackageManager;
@@ -37,3 +38,4 @@ pub use network::{
 pub use os::OsPackageManager;
 pub use registry::{get_package_manager, is_registered, registered_managers};
 pub use stubs::PackageInfo;
+pub use versioning::{is_major_update, is_owner_repo_shorthand};

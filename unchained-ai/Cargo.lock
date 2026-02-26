@@ -366,7 +366,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
- "sniff",
  "tempfile",
  "terminal_size",
  "termini",

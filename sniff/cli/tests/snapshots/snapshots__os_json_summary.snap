@@ -1,0 +1,13 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: normalized_os_summary(&stdout)
+---
+{
+  "distribution": "macos",
+  "kernel": "25.4.0",
+  "long_version": "macOS 26.4",
+  "manager_count": 2,
+  "name": "Darwin",
+  "os_type": "MacOS",
+  "version": "26.4"
+}

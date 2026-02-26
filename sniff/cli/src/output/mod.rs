@@ -18,7 +18,7 @@ use std::path::Path;
 
 use sniff::SniffResult;
 
-use crate::DocsFilter;
+use crate::args::DocsFilter;
 
 pub use filesystem::print_git_section;
 pub use programs::{print_programs_json, print_programs_markdown};

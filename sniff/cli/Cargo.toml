@@ -24,4 +24,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 assert_cmd = "2"
+expectrl = "0.8"
+insta = { version = "1", features = ["json"] }
 predicates = "3"

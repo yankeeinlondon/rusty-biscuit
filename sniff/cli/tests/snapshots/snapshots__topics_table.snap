@@ -1,0 +1,14 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: "run_stdout(&[\"topics\"])"
+---
+| hardware | filesystem | programs |
+| --- | --- | --- |
+| cpu | git | editors |
+| gpu | repo | utilities |
+| memory | language | language-package-managers |
+| storage |  | os-package-managers |
+|  |  | tts-clients |
+|  |  | terminal-apps |
+|  |  | audio |
+|  |  | agents |
