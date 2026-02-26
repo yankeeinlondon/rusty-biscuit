@@ -104,6 +104,8 @@
             "proptest",
             "ptyprocess",
             "qwen",
+            "rmcp",
+            "rustls",
             "startswith",
             "wezterm",
             "winget"
