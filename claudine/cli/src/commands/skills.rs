@@ -3,16 +3,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use biscuit_terminal::components::filesystem::FileSystem;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges;
+use claudine::dispatch::loader::load_config;
 use claudine::linking::{
-    ExceptionType, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException, SkillFixSummary,
-    SkillInfo, SkillScope, capabilities_for, fix_missing_skills, list_skills, LinkableResource,
+    ExceptionType, LinkableResource, ProviderSkillPaths, ResourceScope, SkillDirectoryDiagnostic,
+    SkillException, SkillFixSummary, SkillInfo, SkillScope, canonical_provider, capabilities_for,
+    fix_missing_skills, list_skills,
 };
+use sniff::filesystem::git::detect_git;
 
 use crate::log;
 
@@ -39,7 +43,17 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         None
     };
 
-    let report = list_skills(&paths, &args.filter)?;
+    let mut report = list_skills(&paths, &args.filter)?;
+
+    // Filter exceptions to match the same fuzzy filters applied to skills
+    if !args.filter.is_empty() {
+        let lowered: Vec<String> = args.filter.iter().map(|f| f.to_lowercase()).collect();
+        report.exceptions.retain(|exc| {
+            let topic_lower = exc.topic.to_lowercase();
+            lowered.iter().any(|filter| topic_lower.contains(filter))
+        });
+        report.diagnostics.clear();
+    }
 
     if report.skills.is_empty() {
         if args.filter.is_empty() {
@@ -54,15 +68,29 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     }
 
     let term = Terminal::new();
-    let header = Prose::new("<b>Skills</b>").fallback_render(&term);
+
+    // Git repo detection
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let is_git_repo = detect_git(&cwd, false, 1).ok().flatten().is_some();
+
+    // Header
+    let header = Prose::new("<blue><b>Skills</b></blue>").fallback_render(&term);
     log::data("");
     log::data(&header);
-    log::data("==================");
+    log::data(
+        &Prose::new("<blue>==================</blue>").fallback_render(&term),
+    );
     log::data("");
 
-    let verbose = verbose || report.skills.len() < 10;
+    // Canonical providers line
+    render_canonical_providers(&term, &paths, is_git_repo);
 
-    if verbose {
+    let skill_count = report.skills.len();
+
+    // Three-mode rendering
+    if skill_count == 1 {
+        render_detail(&term, &report.skills[0]);
+    } else if skill_count < 6 || verbose {
         render_verbose(&term, &report.skills);
     } else {
         render_normal(&term, &report.skills);
@@ -72,19 +100,85 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         render_fix_summary(&term, &summary);
     }
 
-    if !report.exceptions.is_empty() || !report.diagnostics.is_empty() {
+    let has_exceptions = !report.exceptions.is_empty() || !report.diagnostics.is_empty();
+    if has_exceptions {
         render_exceptions(&term, &report.exceptions, &report.diagnostics);
-
-        if !args.apply {
-            log::data("");
-            let fix_hint = Prose::new(
-                "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>",
-            );
-            log::data(&format!(" {}", fix_hint.fallback_render(&term)));
-        }
     }
 
+    render_footer(
+        &term,
+        has_exceptions,
+        args.apply,
+        is_git_repo,
+        skill_count,
+        verbose,
+        &args.filter,
+    );
+
     Ok(())
+}
+
+/// Render the canonical providers line from config (if available).
+fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_git_repo: bool) {
+    let repo_root = if is_git_repo {
+        Some(paths.repo_root())
+    } else {
+        None
+    };
+
+    let config = match load_config(None, repo_root) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let Some(linking_settings) = config.settings.linking else {
+        return;
+    };
+
+    let user_canonical =
+        canonical_provider(&linking_settings.canonical_provider, ResourceScope::User, LinkableResource::Skill);
+    let repo_canonical = if is_git_repo {
+        canonical_provider(&linking_settings.canonical_provider, ResourceScope::Repo, LinkableResource::Skill)
+    } else {
+        None
+    };
+
+    let line = match (user_canonical, repo_canonical) {
+        (Some(user), Some(repo)) => format!(
+            "<blue><b>Canonical Providers:</b></blue> user: <b>{user}</b>, repo: <b>{repo}</b>"
+        ),
+        (Some(user), None) => format!(
+            "<blue><b>Canonical Providers:</b></blue> user: <b>{user}</b>"
+        ),
+        (None, Some(repo)) => format!(
+            "<blue><b>Canonical Providers:</b></blue> repo: <b>{repo}</b>"
+        ),
+        (None, None) => return,
+    };
+
+    log::data(&Prose::new(line).fallback_render(term));
+    log::data("");
+}
+
+/// Detail mode: shown when exactly 1 skill matches. Shows badge/name/description + filesystem tree.
+fn render_detail(term: &Terminal, skill: &SkillInfo) {
+    let badge = scope_badge(skill.scope);
+    let desc = skill.description.as_deref().unwrap_or("no description");
+    let header = Prose::new(format!(
+        r#"{badge} <a href="{}"><b>{}</b></a> <dim><i>{desc}</i></dim>"#,
+        skill.skill_md_path.display(),
+        skill.name,
+    ));
+    log::data(&header.fallback_render(term));
+    log::data("");
+
+    if let Some(dir) = skill.skill_md_path.parent()
+        && let Some(dir_str) = dir.to_str()
+        && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
+    {
+        fs.ensure_tree_built();
+        log::data(&fs.fallback_render(term));
+    }
 }
 
 /// Verbose mode: single list with badge, name (as link), and description.
@@ -282,6 +376,64 @@ fn build_provider_header(provider_name: &str) -> String {
     format!(
         "<b>{provider_name}</b> [ <b>user:</b> {user_display}, <b>repo:</b> {repo_display} ]"
     )
+}
+
+/// Render footer messages based on current state.
+fn render_footer(
+    term: &Terminal,
+    has_exceptions: bool,
+    applied_fix: bool,
+    is_git_repo: bool,
+    skill_count: usize,
+    verbose: bool,
+    filters: &[String],
+) {
+    let mut messages = Vec::new();
+
+    if has_exceptions && !applied_fix {
+        messages.push(
+            "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>"
+                .to_string(),
+        );
+    }
+
+    if !is_git_repo {
+        messages.push(
+            "<dim><i>the current working directory is <b>not</b> a <b>git</b> repo so we are only showing user-based scope</i></dim>"
+                .to_string(),
+        );
+    }
+
+    if skill_count > 10 && !verbose {
+        messages.push(
+            "<dim><i>using the <green>--verbose</green> switch will provide not only topic names but also descriptions</i></dim>"
+                .to_string(),
+        );
+    }
+
+    if filters.is_empty() {
+        messages.push(
+            "<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the skills to only those you are interested in</i></dim>"
+                .to_string(),
+        );
+    }
+
+    if messages.is_empty() {
+        return;
+    }
+
+    log::data("");
+
+    if messages.len() == 1 {
+        let rendered = Prose::new(messages.into_iter().next().unwrap()).fallback_render(term);
+        log::data(&format!(" {rendered}"));
+    } else {
+        let mut list = UnorderedList::empty();
+        for msg in messages {
+            list.add(Prose::new(msg));
+        }
+        log::data(&list.fallback_render(term));
+    }
 }
 
 /// Return the rendered badge string for a scope.
