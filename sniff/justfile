@@ -158,26 +158,19 @@ docs_cli:
 
 # Open Opencode
 oc *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
-    @claudine opencode {{args}}
+    @claudine opencode -y {{args}}
 
 # Open Claude Code
 cc *args="":
-    @clear
-    @claudine claude {{args}}
+    @claudine claude -y {{args}}
 
 # Open Gemini CLI
 gem *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Gemini CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @claudine gemini {{args}}
+    @claudine gemini --include GEMINI_API_KEY -y {{args}}
 
 # Open Codex CLI
 codex *args="":
-    @clear
-    @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @claudine codex {{args}}
+    @claudine codex -y {{args}}
 
 
 # Use GPT 5.2 to commit staged changes
@@ -191,6 +184,7 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+    @sniff git 2>/dev/null || exit 0
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
