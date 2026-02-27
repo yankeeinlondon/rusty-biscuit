@@ -1,4 +1,5 @@
 ---
+name: indicatif
 description: Expert knowledge for building CLI progress indicators in Rust using indicatif - progress bars, spinners, multi-progress, download tracking, and async/tokio integration
 ---
 

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::filesystem::FileSystem;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -406,25 +407,28 @@ fn render_exceptions(
                                 );
                                 link_list.add(Prose::new(msg));
                             }
-                            detail_list.add(link_list);
-
-                            // In verbose mode, show the skill's file tree with token counts
-                            if verbose {
-                                if let Some(dir) = first.skill_md_path.parent()
-                                    && let Some(dir_str) = dir.to_str()
-                                    && let Ok(mut fs) =
-                                        FileSystem::new_with_formatting(dir_str)
-                                {
-                                    let layout = Layout {
-                                        left_margin: Margin::Chars(4),
-                                        ..Layout::default()
-                                    };
-                                    fs = fs.show_tokens().with_file_links().layout(layout);
-                                    fs.ensure_tree_built();
-                                    detail_list.add(Prose::new(""));
-                                    detail_list.add(fs);
-                                    detail_list.add(Prose::new(""));
-                                }
+                            // In verbose mode, compose broken link messages with file tree
+                            if verbose
+                                && let Some(dir) = first.skill_md_path.parent()
+                                && let Some(dir_str) = dir.to_str()
+                                && let Ok(mut fs) =
+                                    FileSystem::new_with_formatting(dir_str)
+                            {
+                                let layout = Layout {
+                                    left_margin: Margin::Chars(4),
+                                    ..Layout::default()
+                                };
+                                fs = fs.show_tokens().with_file_links().layout(layout);
+                                fs.ensure_tree_built();
+                                let mut composed = Compose::default();
+                                composed
+                                    .add_unordered_list(link_list)
+                                    .add_text("\n")
+                                    .add_file_system(fs)
+                                    .add_text("\n");
+                                detail_list.add(composed);
+                            } else {
+                                detail_list.add(link_list);
                             }
                         }
                     }

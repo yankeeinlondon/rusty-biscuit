@@ -1,8 +1,9 @@
-# serial_test
-
 ---
+name: serial_test
 description: Test isolation for Rust tests that share global state (environment variables, files, singletons)
 ---
+
+# serial_test
 
 Rust crate for serializing test execution when tests share mutable global state.
 

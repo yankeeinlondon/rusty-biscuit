@@ -1,4 +1,5 @@
 ---
+name: toml
 description: Parse and serialize TOML config files in Rust with serde, defaults, and helpful error messages
 ---
 

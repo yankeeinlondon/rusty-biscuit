@@ -108,7 +108,8 @@
             "rustls",
             "startswith",
             "wezterm",
-            "winget"
+            "winget",
+            "ZENMUX"
         ]
     }
 }
