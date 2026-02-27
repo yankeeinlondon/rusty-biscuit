@@ -20,6 +20,13 @@
 //! | `schema` | No | JSON Schema validation for TOML/YAML |
 //! | `full` | No | All features enabled |
 //!
+//! ## Re-exports
+//!
+//! For convenience, this crate re-exports types from underlying crates,
+//! allowing consumers to use `use biscuit_file::serde_yaml::Value` instead of
+//! `use serde_yaml::Value`. This facilitates migrating from direct crate
+//! dependencies to this unified library.
+//!
 //! ## Examples
 //!
 //! ### TOML Conversion
@@ -57,7 +64,7 @@ mod detect;
 mod error;
 
 #[cfg(feature = "toml")]
-pub mod toml;
+pub mod toml_impl;
 
 #[cfg(feature = "yaml")]
 pub mod yaml;
@@ -76,7 +83,7 @@ pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]
-pub use self::toml::{Toml, TomlError, TomlSource};
+pub use self::toml_impl::{Toml, TomlError, TomlSource};
 
 #[cfg(feature = "yaml")]
 pub use self::yaml::{Yaml, YamlError, YamlSource};
@@ -86,3 +93,34 @@ pub use self::json5::{Json5, Json5Error, Json5Source};
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
+
+// Re-export underlying crate types for convenience
+// This allows consumers to use `use biscuit_file::serde_yaml::Value`
+// instead of `use serde_yaml::Value`, facilitating migration.
+
+#[cfg(feature = "toml")]
+pub use toml as toml_crate;
+
+#[cfg(feature = "yaml")]
+pub use serde_yaml_ng;
+
+/// YAML value type for direct manipulation.
+#[cfg(feature = "yaml")]
+pub use serde_yaml_ng::Value as YamlValue;
+
+/// YAML mapping type for direct manipulation.
+#[cfg(feature = "yaml")]
+pub use serde_yaml_ng::Mapping as YamlMapping;
+
+/// Error type for YAML parsing.
+#[cfg(feature = "yaml")]
+pub use serde_yaml_ng::Error as YamlParseError;
+
+// Re-export TOML parsing error type
+#[cfg(feature = "toml")]
+mod toml_error_reexport {
+    pub use toml::de::Error;
+}
+
+#[cfg(feature = "toml")]
+pub use toml_error_reexport::Error as TomlDeError;

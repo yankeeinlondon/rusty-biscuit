@@ -12,7 +12,7 @@ pub enum BiscuitFileError {
     /// Error during TOML operations.
     #[cfg(feature = "toml")]
     #[error("TOML error: {0}")]
-    Toml(#[from] crate::toml::TomlError),
+    Toml(#[from] crate::toml_impl::TomlError),
 
     /// Error during YAML operations.
     #[cfg(feature = "yaml")]

@@ -32,7 +32,7 @@ thiserror = "2.0"
 infer = "0.19"
 
 # TOML support (optional, default)
-toml = { version = "0.8", optional = true }
+toml = { version = "1.0", optional = true }
 
 # YAML support (optional, default)
 serde_yaml_ng = { version = "0.10", optional = true }
@@ -41,9 +41,9 @@ serde_yaml_ng = { version = "0.10", optional = true }
 json-five = { version = "0.3", optional = true }
 
 # PDF backends
-pdf-extract = { version = "0.7", optional = true }
-lopdf = { version = "0.36", optional = true }
+pdf-extract = { version = "0.10", optional = true }
+lopdf = { version = "0.39", optional = true }
 pdfium-render = { version = "0.8", optional = true }
 
 # Schema validation
-jsonschema = { version = "0.28", optional = true }
+jsonschema = { version = "0.42", optional = true }

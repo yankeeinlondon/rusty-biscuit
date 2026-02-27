@@ -25,6 +25,10 @@ pub enum TomlError {
     #[error("TOML parse error: {0}")]
     Parse(#[from] toml::de::Error),
 
+    /// TOML serialization error.
+    #[error("TOML serialization error: {0}")]
+    Serialize(#[from] toml::ser::Error),
+
     /// JSON serialization error.
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
@@ -169,6 +173,22 @@ impl Toml {
         })
     }
 
+    /// Create a TOML document from an existing parsed value.
+    ///
+    /// This is useful when you've modified a value and want to serialize it.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if serialization to string fails.
+    pub fn from_value(value: toml::Value) -> Result<Self, TomlError> {
+        let raw = toml::to_string_pretty(&value)?;
+        Ok(Self {
+            source: TomlSource::Inline,
+            raw,
+            value,
+        })
+    }
+
     /// Returns a reference to the parsed TOML value.
     #[must_use]
     pub fn value(&self) -> &toml::Value {
@@ -179,6 +199,18 @@ impl Toml {
     #[must_use]
     pub fn raw(&self) -> &str {
         &self.raw
+    }
+
+    /// Serialize the TOML value back to a string.
+    ///
+    /// This is useful when you've modified the value and want to write it back.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn to_toml_string(&self) -> Result<String, TomlError> {
+        let toml_string = toml::to_string_pretty(&self.value)?;
+        Ok(toml_string)
     }
 
     /// Returns the source of this TOML document.

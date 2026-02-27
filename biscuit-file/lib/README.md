@@ -117,3 +117,79 @@ Each module has a dedicated error type: `TomlError`, `YamlError`, `Json5Error`, 
 ### `to_json5_pretty` / `to_json5_compact`
 
 Standalone formatters for converting any `serde_json::Value` to JSON5 output, available via `biscuit_file::json5::{to_json5_pretty, to_json5_compact}`.
+
+## Re-Exporting Underlying Crates
+
+For convenience, this crate re-exports types from its underlying dependencies. This allows other packages in this monorepo to migrate from direct dependencies to using `biscuit-file`, while maintaining the same import paths.
+
+### TOML Re-Exports
+
+```toml
+# Instead of this in your Cargo.toml:
+toml = "1.0"
+
+# Use this:
+biscuit-file = { path = ".../biscuit-file/lib", features = ["toml"] }
+```
+
+```rust
+// Instead of:
+use toml::Value;
+
+// Use:
+use biscuit_file::toml_crate::Value;
+
+// Or access the full crate:
+use biscuit_file::toml_crate;
+
+// For parsing errors:
+use biscuit_file::TomlDeError;
+```
+
+### YAML Re-Exports
+
+```toml
+# Instead of this in your Cargo.toml:
+serde_yaml = "0.10"
+
+# Use this:
+biscuit-file = { path = ".../biscuit-file/lib", features = ["yaml"] }
+```
+
+```rust
+// Instead of:
+use serde_yaml::Value;
+use serde_yaml::Mapping;
+
+// Use:
+use biscuit_file::serde_yaml_ng::Value;
+use biscuit_file::serde_yaml_ng::Mapping;
+
+// For direct access to the crate:
+use biscuit_file::serde_yaml_ng;
+
+// For parsing errors:
+use biscuit_file::YamlParseError;
+```
+
+### Migration Example
+
+Before (direct dependency):
+```rust
+use toml::Value;
+let value: Value = toml::from_str(&content)?;
+```
+
+After (via biscuit-file):
+```rust
+use biscuit_file::toml_crate::Value;
+let value: Value = biscuit_file::toml_crate::from_str(&content)?;
+```
+
+Or use the wrapper types directly:
+```rust
+use biscuit_file::Toml;
+let toml = Toml::from_str(&content)?;
+let value = toml.value();
+```
+
