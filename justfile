@@ -289,8 +289,7 @@ lint:
         fi
     done
 
-# Use GPT 5.2 to commit staged changes
-# commits all the staged changes using GPT 5.2 (via Opencode)
+# commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
 commit:
     @echo ""
     @echo "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
