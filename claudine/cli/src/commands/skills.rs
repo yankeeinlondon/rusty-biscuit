@@ -222,7 +222,11 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         && let Some(dir_str) = dir.to_str()
         && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
     {
-        fs = fs.show_tokens().with_file_links();
+        let layout = Layout {
+            left_margin: Margin::Chars(2),
+            ..Layout::default()
+        };
+        fs = fs.show_tokens().with_file_links().layout(layout);
         fs.ensure_tree_built();
         log::data(&fs.fallback_render(term));
     }
@@ -514,7 +518,7 @@ fn build_provider_header(provider_name: &str) -> String {
         .unwrap_or_else(|| "-".to_string());
 
     format!(
-        "<b>{provider_name}</b> [ <b>user:</b> {user_display}, <b>repo:</b> {repo_display} ]"
+        "<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]",
     )
 }
 
