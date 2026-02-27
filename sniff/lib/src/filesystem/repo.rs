@@ -1,5 +1,7 @@
 use super::languages::detect_languages;
 use crate::{Result, SniffError};
+use biscuit_file::toml_crate;
+use biscuit_file::serde_yaml_ng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -199,7 +201,7 @@ impl CargoLockVersions {
     /// Parse a Cargo.lock file and extract package versions.
     pub fn parse(lock_path: &Path) -> Option<Self> {
         let content = std::fs::read_to_string(lock_path).ok()?;
-        let parsed: toml::Value = toml::from_str(&content).ok()?;
+        let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
 
         let mut versions: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -284,7 +286,7 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let content = std::fs::read_to_string(&cargo_toml)?;
-    let parsed: toml::Value = toml::from_str(&content).map_err(|e| SniffError::SystemInfo {
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
         domain: "repo",
         message: e.to_string(),
     })?;
@@ -354,7 +356,7 @@ fn parse_cargo_dependencies(
     lock_versions: &Option<CargoLockVersions>,
 ) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>)> {
     let content = std::fs::read_to_string(toml_path).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
 
     let normal_deps =
         parse_cargo_dep_section(&parsed, "dependencies", DependencyKind::Normal, lock_versions);
@@ -372,7 +374,7 @@ fn parse_cargo_dependencies(
 
 /// Parses a single dependencies section from Cargo.toml.
 fn parse_cargo_dep_section(
-    parsed: &toml::Value,
+    parsed: &toml_crate::Value,
     section: &str,
     kind: DependencyKind,
     lock_versions: &Option<CargoLockVersions>,
@@ -384,8 +386,8 @@ fn parse_cargo_dep_section(
     deps.iter()
         .map(|(name, value)| {
             let (version_req, features, optional) = match value {
-                toml::Value::String(v) => (v.clone(), Vec::new(), false),
-                toml::Value::Table(t) => {
+                toml_crate::Value::String(v) => (v.clone(), Vec::new(), false),
+                toml_crate::Value::Table(t) => {
                     let version =
                         t.get("version").and_then(|v| v.as_str()).unwrap_or("*").to_string();
                     let features = t
@@ -541,7 +543,7 @@ fn parse_pyproject_dependencies(
     pyproject_path: &Path,
 ) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>)> {
     let content = std::fs::read_to_string(pyproject_path).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     let project = parsed.get("project")?;
 
     let dependencies = project
@@ -924,8 +926,8 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
 
 fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(pnpm_workspace_path)?;
-    let parsed: serde_yaml::Value =
-        serde_yaml::from_str(&content).map_err(|e| SniffError::SystemInfo {
+    let parsed: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&content).map_err(|e| SniffError::SystemInfo {
             domain: "repo",
             message: e.to_string(),
         })?;
@@ -1028,14 +1030,14 @@ fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
 /// Reads the package name from a Cargo.toml file.
 fn read_cargo_package_name(cargo_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     parsed.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Reads the package version from a Cargo.toml file.
 fn read_cargo_package_version(cargo_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     parsed.get("package").and_then(|p| p.get("version")).and_then(|v| v.as_str()).map(String::from)
 }
 
@@ -1056,14 +1058,14 @@ fn read_npm_package_version(package_json: &Path) -> Option<String> {
 /// Reads package name from a pyproject.toml `[project].name`.
 fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     parsed.get("project").and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Reads package version from a pyproject.toml `[project].version`.
 fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
+    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     parsed.get("project").and_then(|p| p.get("version")).and_then(|v| v.as_str()).map(String::from)
 }
 
@@ -1082,7 +1084,7 @@ fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    let parsed: toml::Value = match toml::from_str(&content) {
+    let parsed: toml_crate::Value = match toml_crate::from_str(&content) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };

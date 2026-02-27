@@ -1,5 +1,6 @@
 use super::repo::detect_repo;
 use crate::{Result, SniffError};
+use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use ignore::WalkBuilder;
@@ -163,7 +164,7 @@ fn parse_markdown_meta(
 ///
 /// Returns the parsed frontmatter map and the body (content after frontmatter).
 /// If no valid frontmatter is found, returns an empty map and the full content.
-fn extract_frontmatter(content: &str) -> (HashMap<String, serde_yaml::Value>, &str) {
+fn extract_frontmatter(content: &str) -> (HashMap<String, serde_yaml_ng::Value>, &str) {
     let empty = (HashMap::new(), content);
 
     if !content.starts_with("---") {
@@ -200,18 +201,18 @@ fn extract_frontmatter(content: &str) -> (HashMap<String, serde_yaml::Value>, &s
         return (HashMap::new(), body);
     }
 
-    match serde_yaml::from_str::<HashMap<String, serde_yaml::Value>>(yaml_str) {
+    match serde_yaml_ng::from_str::<HashMap<String, serde_yaml_ng::Value>>(yaml_str) {
         Ok(map) => (map, body),
         Err(_) => (HashMap::new(), content),
     }
 }
 
 /// Extract a string field from the frontmatter map.
-fn get_string_field(frontmatter: &HashMap<String, serde_yaml::Value>, key: &str) -> Option<String> {
+fn get_string_field(frontmatter: &HashMap<String, serde_yaml_ng::Value>, key: &str) -> Option<String> {
     frontmatter.get(key).and_then(|v| match v {
-        serde_yaml::Value::String(s) => Some(s.clone()),
-        serde_yaml::Value::Bool(b) => Some(b.to_string()),
-        serde_yaml::Value::Number(n) => Some(format!("{n}")),
+        serde_yaml_ng::Value::String(s) => Some(s.clone()),
+        serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),
+        serde_yaml_ng::Value::Number(n) => Some(format!("{n}")),
         _ => None,
     })
 }
@@ -222,9 +223,9 @@ fn get_string_field(frontmatter: &HashMap<String, serde_yaml::Value>, key: &str)
 /// 3. First H2 heading (`## ...`)
 /// 4. First H3 heading (`### ...`)
 /// 5. Empty string
-fn extract_title(frontmatter: &HashMap<String, serde_yaml::Value>, body: &str) -> String {
+fn extract_title(frontmatter: &HashMap<String, serde_yaml_ng::Value>, body: &str) -> String {
     // 1. Frontmatter title
-    if let Some(serde_yaml::Value::String(title)) = frontmatter.get("title")
+    if let Some(serde_yaml_ng::Value::String(title)) = frontmatter.get("title")
         && !title.is_empty()
     {
         return title.clone();
@@ -272,7 +273,7 @@ fn extract_title(frontmatter: &HashMap<String, serde_yaml::Value>, body: &str) -
 /// 2. Frontmatter `updated_at` (date or datetime)
 /// 3. File system last modified time
 fn resolve_last_updated(
-    frontmatter: &HashMap<String, serde_yaml::Value>,
+    frontmatter: &HashMap<String, serde_yaml_ng::Value>,
     path: &Path,
 ) -> DateTime<Utc> {
     // Try frontmatter fields in priority order
@@ -290,9 +291,9 @@ fn resolve_last_updated(
 }
 
 /// Try to parse a YAML value as a DateTime<Utc>.
-fn parse_datetime_value(value: &serde_yaml::Value) -> Option<DateTime<Utc>> {
+fn parse_datetime_value(value: &serde_yaml_ng::Value) -> Option<DateTime<Utc>> {
     let s = match value {
-        serde_yaml::Value::String(s) => s.as_str(),
+        serde_yaml_ng::Value::String(s) => s.as_str(),
         _ => return None,
     };
 
@@ -403,7 +404,7 @@ mod tests {
         #[test]
         fn prefers_frontmatter_title() {
             let mut fm = HashMap::new();
-            fm.insert("title".to_string(), serde_yaml::Value::String("FM Title".to_string()));
+            fm.insert("title".to_string(), serde_yaml_ng::Value::String("FM Title".to_string()));
             assert_eq!(extract_title(&fm, "# Heading Title"), "FM Title");
         }
 
@@ -444,34 +445,34 @@ mod tests {
 
         #[test]
         fn parses_iso_date() {
-            let val = serde_yaml::Value::String("2025-06-15".to_string());
+            let val = serde_yaml_ng::Value::String("2025-06-15".to_string());
             let dt = parse_datetime_value(&val).unwrap();
             assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
         }
 
         #[test]
         fn parses_iso_datetime() {
-            let val = serde_yaml::Value::String("2025-06-15T10:30:00Z".to_string());
+            let val = serde_yaml_ng::Value::String("2025-06-15T10:30:00Z".to_string());
             let dt = parse_datetime_value(&val).unwrap();
             assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
         }
 
         #[test]
         fn parses_datetime_without_timezone() {
-            let val = serde_yaml::Value::String("2025-06-15 10:30:00".to_string());
+            let val = serde_yaml_ng::Value::String("2025-06-15 10:30:00".to_string());
             let dt = parse_datetime_value(&val).unwrap();
             assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
         }
 
         #[test]
         fn returns_none_for_invalid_date() {
-            let val = serde_yaml::Value::String("not-a-date".to_string());
+            let val = serde_yaml_ng::Value::String("not-a-date".to_string());
             assert!(parse_datetime_value(&val).is_none());
         }
 
         #[test]
         fn returns_none_for_non_string() {
-            let val = serde_yaml::Value::Number(serde_yaml::Number::from(42));
+            let val = serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(42));
             assert!(parse_datetime_value(&val).is_none());
         }
     }
