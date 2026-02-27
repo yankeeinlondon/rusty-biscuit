@@ -34,17 +34,19 @@ _notify message title="Rusty Biscuit":
 
 # start Claude Code CLI in yolo mode
 cc *args="":
-  @clear
-  @echo "Starting Claude Code in Yolo mode"
-  @echo
-  @AGENT="Claude Code" claude --dangerously-skip-permissions {{args}}
+    @claudine claude --yolo {{args}}
+
+# Open codex in YOLO mode
+codex *args="":
+    @claudine codex --yolo {{args}}
+
+# Open Claude Code
+gem *args="":
+    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 # start Opencode CLI
 oc *args="":
-  @clear
-  @echo  "Starting Opencode"
-  @echo
-  @AGENT="Opencode" opencode {{args}}
+	@claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
 
 # Uses TTS if available but never error
 _speak *args:
@@ -294,7 +296,7 @@ commit:
     @echo "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
-    @claudine opencode --ni "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, etc.) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message. Note: there are two cases where it's ok to have no 'scope' (aka, package) associated to a commit message:\n1. If the change appears to have no relationship to any particular package in the monorepo.\n2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code then it's possible to group them all into one commit which has no scope specified\nIf no files are staged for commit then communicate this to the user and exit."
+    @claudine opencode --ni "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, perf, test, ci) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message. Note: there are two cases where it's ok to have no 'scope' (aka, package) associated to a commit message:\n1. If the change appears to have no relationship to any particular package in the monorepo.\n2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code then it's possible to group them all into one commit which has no scope specified\nIf no files are staged for commit then communicate this to the user and exit."
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi

@@ -158,19 +158,19 @@ docs_cli:
 
 # Open Opencode
 oc *args="":
-    @claudine opencode -y {{args}}
+    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
+
+# Open Claude Code in YOLO mode
+cc *args="":
+    @claudine claude --yolo {{args}}
+
+# Open codex in YOLO mode
+codex *args="":
+    @claudine codex --yolo {{args}}
 
 # Open Claude Code
-cc *args="":
-    @claudine claude -y {{args}}
-
-# Open Gemini CLI
 gem *args="":
-    @claudine gemini --include GEMINI_API_KEY -y {{args}}
-
-# Open Codex CLI
-codex *args="":
-    @claudine codex -y {{args}}
+    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 # Outdated packages
 outdated:

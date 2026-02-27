@@ -169,7 +169,7 @@ gen *args="":
 
 # Open Opencode
 oc *args="":
-    @claudine opencode {{args}}
+    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
 
 # Open Claude Code in YOLO mode
 cc *args="":
