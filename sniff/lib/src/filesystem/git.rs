@@ -246,7 +246,113 @@ pub enum HostingProvider {
     Unknown,
 }
 
+/// Static metadata for a Git hosting provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostingProviderMetadata {
+    /// Human-readable provider name.
+    pub display_name: &'static str,
+    /// Short ASCII symbol used in compact CLI output.
+    pub symbol: &'static str,
+    /// Whether this provider is typically self-hosted.
+    pub self_hosted: bool,
+    /// Whether hostname matching is generally enough for detection.
+    pub host_based_detection_reliable: bool,
+    /// Canonical browser base URL when one exists.
+    pub browser_base_url: Option<&'static str>,
+}
+
 impl HostingProvider {
+    /// Returns static metadata for the hosting provider.
+    pub const fn metadata(&self) -> HostingProviderMetadata {
+        match self {
+            Self::GitHub => HostingProviderMetadata {
+                display_name: "GitHub",
+                symbol: "[gh]",
+                self_hosted: false,
+                host_based_detection_reliable: true,
+                browser_base_url: Some("https://github.com"),
+            },
+            Self::GitLab => HostingProviderMetadata {
+                display_name: "GitLab",
+                symbol: "[gl]",
+                self_hosted: false,
+                host_based_detection_reliable: false,
+                browser_base_url: Some("https://gitlab.com"),
+            },
+            Self::Bitbucket => HostingProviderMetadata {
+                display_name: "Bitbucket",
+                symbol: "[bb]",
+                self_hosted: false,
+                host_based_detection_reliable: true,
+                browser_base_url: Some("https://bitbucket.org"),
+            },
+            Self::AzureDevOps => HostingProviderMetadata {
+                display_name: "Azure DevOps",
+                symbol: "[az]",
+                self_hosted: false,
+                host_based_detection_reliable: true,
+                browser_base_url: Some("https://dev.azure.com"),
+            },
+            Self::AwsCodeCommit => HostingProviderMetadata {
+                display_name: "AWS CodeCommit",
+                symbol: "[aws]",
+                self_hosted: false,
+                host_based_detection_reliable: false,
+                browser_base_url: None,
+            },
+            Self::Gitea => HostingProviderMetadata {
+                display_name: "Gitea",
+                symbol: "[ga]",
+                self_hosted: true,
+                host_based_detection_reliable: false,
+                browser_base_url: None,
+            },
+            Self::Forgejo => HostingProviderMetadata {
+                display_name: "Forgejo",
+                symbol: "[fj]",
+                self_hosted: true,
+                host_based_detection_reliable: false,
+                browser_base_url: None,
+            },
+            Self::SourceHut => HostingProviderMetadata {
+                display_name: "SourceHut",
+                symbol: "[sh]",
+                self_hosted: false,
+                host_based_detection_reliable: true,
+                browser_base_url: Some("https://sr.ht"),
+            },
+            Self::SelfHosted => HostingProviderMetadata {
+                display_name: "Self-Hosted",
+                symbol: "[git]",
+                self_hosted: true,
+                host_based_detection_reliable: false,
+                browser_base_url: None,
+            },
+            Self::Unknown => HostingProviderMetadata {
+                display_name: "Unknown",
+                symbol: "[?]",
+                self_hosted: false,
+                host_based_detection_reliable: false,
+                browser_base_url: None,
+            },
+        }
+    }
+
+    /// Human-readable provider name.
+    pub const fn display_name(&self) -> &'static str {
+        self.metadata().display_name
+    }
+
+    /// Short ASCII symbol for compact CLI display.
+    pub const fn symbol(&self) -> &'static str {
+        self.metadata().symbol
+    }
+
+    /// Canonical browser base URL when one exists.
+    pub const fn browser_base_url(&self) -> Option<&'static str> {
+        self.metadata().browser_base_url
+    }
+
     /// Detects the hosting provider from a Git remote URL.
     ///
     /// Supports HTTPS, SSH, and git protocol URLs.
@@ -270,30 +376,76 @@ impl HostingProvider {
     /// );
     /// ```
     pub fn from_url(url: &str) -> Self {
-        let normalized = url
-            .trim_start_matches("git@")
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .trim_start_matches("ssh://");
+        let host = match extract_remote_host(url) {
+            Some(host) => host.to_ascii_lowercase(),
+            None => return Self::Unknown,
+        };
 
-        if normalized.starts_with("github.com") {
-            Self::GitHub
-        } else if normalized.starts_with("gitlab.com") {
-            Self::GitLab
-        } else if normalized.starts_with("bitbucket.org") {
-            Self::Bitbucket
-        } else if normalized.contains("dev.azure.com") || normalized.contains("visualstudio.com") {
-            Self::AzureDevOps
-        } else if normalized.contains("codecommit") && normalized.contains("amazonaws.com") {
-            Self::AwsCodeCommit
-        } else if normalized.contains("sr.ht") {
-            Self::SourceHut
-        } else if normalized.contains('.') {
+        if host == "github.com" || host == "www.github.com" {
+            return Self::GitHub;
+        }
+        if host == "gitlab.com" || host == "www.gitlab.com" {
+            return Self::GitLab;
+        }
+        if host == "bitbucket.org" || host == "www.bitbucket.org" {
+            return Self::Bitbucket;
+        }
+        if host == "dev.azure.com" || host.ends_with(".visualstudio.com") {
+            return Self::AzureDevOps;
+        }
+        if (host.starts_with("git-codecommit.") || host.contains("codecommit"))
+            && host.contains("amazonaws.com")
+        {
+            return Self::AwsCodeCommit;
+        }
+        if host == "sr.ht" || host.ends_with(".sr.ht") {
+            return Self::SourceHut;
+        }
+        if host == "codeberg.org"
+            || host.starts_with("forgejo.")
+            || host.contains(".forgejo.")
+        {
+            return Self::Forgejo;
+        }
+        if host.starts_with("gitea.") || host.contains(".gitea.") {
+            return Self::Gitea;
+        }
+        if host.contains('.') {
             Self::SelfHosted
         } else {
             Self::Unknown
         }
     }
+}
+
+/// Extract a hostname from common git remote URL formats.
+fn extract_remote_host(url: &str) -> Option<&str> {
+    let trimmed = url.trim();
+
+    // Scheme-based URLs (https://, http://, ssh://, git://)
+    if let Some(without_scheme) = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .or_else(|| trimmed.strip_prefix("ssh://"))
+        .or_else(|| trimmed.strip_prefix("git://"))
+    {
+        let without_user = without_scheme
+            .rsplit_once('@')
+            .map(|(_, rest)| rest)
+            .unwrap_or(without_scheme);
+        let host_port = without_user.split('/').next()?;
+        let host = host_port.split(':').next().unwrap_or(host_port);
+        return if host.is_empty() { None } else { Some(host) };
+    }
+
+    // SCP-style SSH URL: git@host:owner/repo.git
+    if let Some((_, after_at)) = trimmed.split_once('@')
+        && let Some((host, _)) = after_at.split_once(':')
+    {
+        return if host.is_empty() { None } else { Some(host) };
+    }
+
+    None
 }
 
 /// Complete Git repository information.
@@ -1588,6 +1740,53 @@ mod tests {
             HostingProvider::from_url("https://git.sr.ht/~user/repo"),
             HostingProvider::SourceHut
         );
+    }
+
+    #[test]
+    fn test_hosting_provider_gitea_and_forgejo() {
+        assert_eq!(
+            HostingProvider::from_url("https://gitea.example.com/user/repo"),
+            HostingProvider::Gitea
+        );
+        assert_eq!(
+            HostingProvider::from_url("https://forgejo.example.com/user/repo"),
+            HostingProvider::Forgejo
+        );
+        assert_eq!(
+            HostingProvider::from_url("https://codeberg.org/forgejo/forgejo"),
+            HostingProvider::Forgejo
+        );
+    }
+
+    #[test]
+    fn test_hosting_provider_metadata_helpers() {
+        let github = HostingProvider::GitHub.metadata();
+        assert_eq!(github.display_name, "GitHub");
+        assert_eq!(github.symbol, "[gh]");
+        assert!(github.host_based_detection_reliable);
+        assert_eq!(github.browser_base_url, Some("https://github.com"));
+
+        let self_hosted = HostingProvider::SelfHosted.metadata();
+        assert!(self_hosted.self_hosted);
+        assert!(!self_hosted.host_based_detection_reliable);
+        assert_eq!(HostingProvider::SelfHosted.symbol(), "[git]");
+    }
+
+    #[test]
+    fn test_extract_remote_host() {
+        assert_eq!(
+            extract_remote_host("git@github.com:rust-lang/cargo.git"),
+            Some("github.com")
+        );
+        assert_eq!(
+            extract_remote_host("ssh://git@gitlab.example.com:2222/team/project"),
+            Some("gitlab.example.com")
+        );
+        assert_eq!(
+            extract_remote_host("https://bitbucket.org/workspace/repo"),
+            Some("bitbucket.org")
+        );
+        assert_eq!(extract_remote_host("not-a-url"), None);
     }
 
     #[test]
