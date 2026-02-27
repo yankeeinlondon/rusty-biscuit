@@ -3,14 +3,15 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
+use biscuit_file::serde_yaml_ng;
 
-use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
+use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
 use super::detector::DiscoveredResource;
 use super::model::{IncompleteCause, ResourceDefinition, ResourceReference, ResourceScope};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedMarkdown {
-    pub(crate) frontmatter: serde_yaml::Mapping,
+    pub(crate) frontmatter: serde_yaml_ng::Mapping,
     pub(crate) body: String,
     pub(crate) had_frontmatter: bool,
 }
@@ -79,13 +80,21 @@ pub fn classify_target_reference(
     scope: ResourceScope,
 ) -> ResourceReference {
     let Some(definition) = canonical_definition(canonical_source) else {
-        return ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::NoCanonicalDefinition);
+        return ResourceReference::IncompleteLink(
+            target_provider,
+            scope,
+            IncompleteCause::NoCanonicalDefinition,
+        );
     };
 
     let capabilities = capabilities_for(target_provider);
     let support = capabilities.support_for(resource);
     if !support.level.allows_custom() {
-        return ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::CustomNotSupported);
+        return ResourceReference::IncompleteLink(
+            target_provider,
+            scope,
+            IncompleteCause::CustomNotSupported,
+        );
     }
 
     let missing: Vec<String> = support
@@ -98,7 +107,11 @@ pub fn classify_target_reference(
         .collect();
 
     if !missing.is_empty() {
-        ResourceReference::IncompleteLink(target_provider, scope, IncompleteCause::MissingProperties(missing))
+        ResourceReference::IncompleteLink(
+            target_provider,
+            scope,
+            IncompleteCause::MissingProperties(missing),
+        )
     } else {
         ResourceReference::LinkMissing(target_provider, scope)
     }
@@ -153,7 +166,7 @@ pub(crate) fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
         .or_else(|| content.strip_prefix("---\r\n"))
     else {
         return Ok(ParsedMarkdown {
-            frontmatter: serde_yaml::Mapping::new(),
+            frontmatter: serde_yaml_ng::Mapping::new(),
             body: content.to_string(),
             had_frontmatter: false,
         });
@@ -180,18 +193,18 @@ pub(crate) fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
     ))
 }
 
-fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml::Mapping> {
+fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml_ng::Mapping> {
     if raw.trim().is_empty() {
-        return Ok(serde_yaml::Mapping::new());
+        return Ok(serde_yaml_ng::Mapping::new());
     }
 
-    let value: serde_yaml::Value = match serde_yaml::from_str(raw) {
+    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(raw) {
         Ok(value) => value,
         Err(_) => return Ok(parse_frontmatter_lines(raw)),
     };
     match value {
-        serde_yaml::Value::Mapping(mapping) => Ok(mapping),
-        serde_yaml::Value::Null => Ok(serde_yaml::Mapping::new()),
+        serde_yaml_ng::Value::Mapping(mapping) => Ok(mapping),
+        serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Mapping::new()),
         _ => Err(ClaudineError::LinkingError(
             "frontmatter must be a YAML mapping".to_string(),
         )),
@@ -202,8 +215,8 @@ fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml::Mapping> {
 ///
 /// Handles values like `argument-hint: [--force] [msg]` where square brackets
 /// are literal text, not YAML flow sequences.
-fn parse_frontmatter_lines(raw: &str) -> serde_yaml::Mapping {
-    let mut mapping = serde_yaml::Mapping::new();
+fn parse_frontmatter_lines(raw: &str) -> serde_yaml_ng::Mapping {
+    let mut mapping = serde_yaml_ng::Mapping::new();
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -214,8 +227,8 @@ fn parse_frontmatter_lines(raw: &str) -> serde_yaml::Mapping {
             let value = value.trim();
             if !key.is_empty() && !key.contains(' ') {
                 mapping.insert(
-                    serde_yaml::Value::String(key.to_string()),
-                    serde_yaml::Value::String(value.to_string()),
+                    serde_yaml_ng::Value::String(key.to_string()),
+                    serde_yaml_ng::Value::String(value.to_string()),
                 );
             }
         }
@@ -224,7 +237,7 @@ fn parse_frontmatter_lines(raw: &str) -> serde_yaml::Mapping {
 }
 
 fn write_markdown_document(path: &Path, parsed: &ParsedMarkdown) -> Result<()> {
-    let yaml = serde_yaml::to_string(&parsed.frontmatter)?;
+    let yaml = serde_yaml_ng::to_string(&parsed.frontmatter)?;
     let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
     let yaml = yaml.trim_end_matches('\n');
 
@@ -242,7 +255,7 @@ fn write_markdown_document(path: &Path, parsed: &ParsedMarkdown) -> Result<()> {
 
 fn apply_alias_duplication(
     resource: LinkableResource,
-    frontmatter: &mut serde_yaml::Mapping,
+    frontmatter: &mut serde_yaml_ng::Mapping,
 ) -> bool {
     let mut changed = false;
 
@@ -259,7 +272,7 @@ fn apply_alias_duplication(
 
         for alias in aliases {
             if !frontmatter_has_value(frontmatter, &alias) {
-                frontmatter.insert(serde_yaml::Value::String(alias), source_value.clone());
+                frontmatter.insert(serde_yaml_ng::Value::String(alias), source_value.clone());
                 changed = true;
             }
         }
@@ -272,7 +285,7 @@ fn apply_name_derivation(
     resource: LinkableResource,
     candidate: &DiscoveredResource,
     canonical_file: &Path,
-    frontmatter: &mut serde_yaml::Mapping,
+    frontmatter: &mut serde_yaml_ng::Mapping,
 ) -> bool {
     if frontmatter_has_value(frontmatter, "name") {
         return false;
@@ -284,8 +297,8 @@ fn apply_name_derivation(
     };
 
     frontmatter.insert(
-        serde_yaml::Value::String("name".to_string()),
-        serde_yaml::Value::String(name),
+        serde_yaml_ng::Value::String("name".to_string()),
+        serde_yaml_ng::Value::String(name),
     );
     true
 }
@@ -401,7 +414,7 @@ fn property_is_satisfied(
         .any(|(key, value)| normalize_key(key) == normalized && !value.trim().is_empty())
 }
 
-fn mapping_to_string_map(mapping: &serde_yaml::Mapping) -> BTreeMap<String, String> {
+fn mapping_to_string_map(mapping: &serde_yaml_ng::Mapping) -> BTreeMap<String, String> {
     mapping
         .iter()
         .filter_map(|(key, value)| {
@@ -412,16 +425,16 @@ fn mapping_to_string_map(mapping: &serde_yaml::Mapping) -> BTreeMap<String, Stri
         .collect()
 }
 
-fn yaml_value_to_string(value: &serde_yaml::Value) -> String {
+fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
     match value {
-        serde_yaml::Value::Null => String::new(),
-        serde_yaml::Value::Bool(value) => value.to_string(),
-        serde_yaml::Value::Number(value) => value.to_string(),
-        serde_yaml::Value::String(value) => value.clone(),
-        serde_yaml::Value::Sequence(_)
-        | serde_yaml::Value::Mapping(_)
-        | serde_yaml::Value::Tagged(_) => {
-            let rendered = serde_yaml::to_string(value).unwrap_or_default();
+        serde_yaml_ng::Value::Null => String::new(),
+        serde_yaml_ng::Value::Bool(value) => value.to_string(),
+        serde_yaml_ng::Value::Number(value) => value.to_string(),
+        serde_yaml_ng::Value::String(value) => value.clone(),
+        serde_yaml_ng::Value::Sequence(_)
+        | serde_yaml_ng::Value::Mapping(_)
+        | serde_yaml_ng::Value::Tagged(_) => {
+            let rendered = serde_yaml_ng::to_string(value).unwrap_or_default();
             rendered
                 .strip_prefix("---\n")
                 .unwrap_or(&rendered)
@@ -432,26 +445,26 @@ fn yaml_value_to_string(value: &serde_yaml::Value) -> String {
 }
 
 fn get_frontmatter_value<'a>(
-    frontmatter: &'a serde_yaml::Mapping,
+    frontmatter: &'a serde_yaml_ng::Mapping,
     key: &str,
-) -> Option<&'a serde_yaml::Value> {
-    frontmatter.get(serde_yaml::Value::String(key.to_string()))
+) -> Option<&'a serde_yaml_ng::Value> {
+    frontmatter.get(serde_yaml_ng::Value::String(key.to_string()))
 }
 
-fn frontmatter_has_value(frontmatter: &serde_yaml::Mapping, key: &str) -> bool {
+fn frontmatter_has_value(frontmatter: &serde_yaml_ng::Mapping, key: &str) -> bool {
     get_frontmatter_value(frontmatter, key)
         .map(yaml_value_has_data)
         .unwrap_or(false)
 }
 
-fn yaml_value_has_data(value: &serde_yaml::Value) -> bool {
+fn yaml_value_has_data(value: &serde_yaml_ng::Value) -> bool {
     match value {
-        serde_yaml::Value::Null => false,
-        serde_yaml::Value::String(value) => !value.trim().is_empty(),
-        serde_yaml::Value::Sequence(values) => !values.is_empty(),
-        serde_yaml::Value::Mapping(values) => !values.is_empty(),
-        serde_yaml::Value::Tagged(tagged) => yaml_value_has_data(&tagged.value),
-        serde_yaml::Value::Bool(_) | serde_yaml::Value::Number(_) => true,
+        serde_yaml_ng::Value::Null => false,
+        serde_yaml_ng::Value::String(value) => !value.trim().is_empty(),
+        serde_yaml_ng::Value::Sequence(values) => !values.is_empty(),
+        serde_yaml_ng::Value::Mapping(values) => !values.is_empty(),
+        serde_yaml_ng::Value::Tagged(tagged) => yaml_value_has_data(&tagged.value),
+        serde_yaml_ng::Value::Bool(_) | serde_yaml_ng::Value::Number(_) => true,
     }
 }
 
@@ -656,12 +669,18 @@ mod tests {
         let parsed = parse_markdown_document(content).unwrap();
         assert!(parsed.had_frontmatter);
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
-            Some(&serde_yaml::Value::String("Create commits".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("description".to_string())),
+            Some(&serde_yaml_ng::Value::String("Create commits".to_string()))
         );
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
-            Some(&serde_yaml::Value::String("[--force] [commit-message]".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml_ng::Value::String(
+                "[--force] [commit-message]".to_string()
+            ))
         );
         assert_eq!(parsed.body, "Do the thing.\n");
     }
@@ -676,7 +695,7 @@ mod tests {
         let parsed = parse_markdown_document(content).unwrap();
         let hint = parsed
             .frontmatter
-            .get(serde_yaml::Value::String("argument-hint".to_string()))
+            .get(serde_yaml_ng::Value::String("argument-hint".to_string()))
             .unwrap();
         assert!(
             hint.is_sequence(),
@@ -686,12 +705,13 @@ mod tests {
 
     #[test]
     fn angle_bracket_placeholders_are_plain_strings() {
-        let content =
-            "---\nargument-hint: <skill-name>\ndescription: Do something\n---\nBody.\n";
+        let content = "---\nargument-hint: <skill-name>\ndescription: Do something\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
-            Some(&serde_yaml::Value::String("<skill-name>".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml_ng::Value::String("<skill-name>".to_string()))
         );
     }
 
@@ -699,23 +719,29 @@ mod tests {
     fn mixed_angle_and_square_brackets_are_plain_strings() {
         // `<source-file> [test-glob]` starts with `<`, so YAML treats
         // the whole value as a plain scalar (the `[` is not at value start).
-        let content =
-            "---\nargument-hint: <source-file> [test-glob]\n---\nBody.\n";
+        let content = "---\nargument-hint: <source-file> [test-glob]\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
-            Some(&serde_yaml::Value::String("<source-file> [test-glob]".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml_ng::Value::String(
+                "<source-file> [test-glob]".to_string()
+            ))
         );
     }
 
     #[test]
     fn allowed_tools_with_colons_and_parens_parse_as_strings() {
-        let content =
-            "---\nallowed-tools: Bash(git:*), Read\n---\nBody.\n";
+        let content = "---\nallowed-tools: Bash(git:*), Read\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("allowed-tools".to_string())),
-            Some(&serde_yaml::Value::String("Bash(git:*), Read".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("allowed-tools".to_string())),
+            Some(&serde_yaml_ng::Value::String(
+                "Bash(git:*), Read".to_string()
+            ))
         );
     }
 
@@ -725,8 +751,10 @@ mod tests {
             "---\nallowed-tools: Bash(ping :*), Bash(traceroute :*), Bash(dig :*)\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("allowed-tools".to_string())),
-            Some(&serde_yaml::Value::String(
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("allowed-tools".to_string())),
+            Some(&serde_yaml_ng::Value::String(
                 "Bash(ping :*), Bash(traceroute :*), Bash(dig :*)".to_string()
             ))
         );
@@ -737,19 +765,24 @@ mod tests {
         let content = "---\nname: \"code-review\"\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("name".to_string())),
-            Some(&serde_yaml::Value::String("code-review".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("name".to_string())),
+            Some(&serde_yaml_ng::Value::String("code-review".to_string()))
         );
     }
 
     #[test]
     fn single_quoted_brackets_are_plain_strings() {
-        let content =
-            "---\nargument-hint: '[--force] [commit-message-hint]'\n---\nBody.\n";
+        let content = "---\nargument-hint: '[--force] [commit-message-hint]'\n---\nBody.\n";
         let parsed = parse_markdown_document(content).unwrap();
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("argument-hint".to_string())),
-            Some(&serde_yaml::Value::String("[--force] [commit-message-hint]".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("argument-hint".to_string())),
+            Some(&serde_yaml_ng::Value::String(
+                "[--force] [commit-message-hint]".to_string()
+            ))
         );
     }
 
@@ -759,7 +792,7 @@ mod tests {
         let parsed = parse_markdown_document(content).unwrap();
         let desc = parsed
             .frontmatter
-            .get(serde_yaml::Value::String("description".to_string()))
+            .get(serde_yaml_ng::Value::String("description".to_string()))
             .unwrap();
         assert!(desc.is_string(), "description should parse as string");
     }
@@ -770,12 +803,16 @@ mod tests {
         let parsed = parse_markdown_document(content).unwrap();
         assert!(parsed.had_frontmatter);
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
-            Some(&serde_yaml::Value::String("test".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("description".to_string())),
+            Some(&serde_yaml_ng::Value::String("test".to_string()))
         );
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("name".to_string())),
-            Some(&serde_yaml::Value::String("example".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("name".to_string())),
+            Some(&serde_yaml_ng::Value::String("example".to_string()))
         );
     }
 
@@ -785,8 +822,10 @@ mod tests {
         let parsed = parse_markdown_document(content).unwrap();
         assert!(parsed.had_frontmatter);
         assert_eq!(
-            parsed.frontmatter.get(serde_yaml::Value::String("description".to_string())),
-            Some(&serde_yaml::Value::String("test".to_string()))
+            parsed
+                .frontmatter
+                .get(serde_yaml_ng::Value::String("description".to_string())),
+            Some(&serde_yaml_ng::Value::String("test".to_string()))
         );
     }
 
@@ -813,12 +852,12 @@ mod tests {
         let mapping = parse_frontmatter_lines("# comment\n\nname: test\n\ndescription: hello\n");
         assert_eq!(mapping.len(), 2);
         assert_eq!(
-            mapping.get(serde_yaml::Value::String("name".to_string())),
-            Some(&serde_yaml::Value::String("test".to_string()))
+            mapping.get(serde_yaml_ng::Value::String("name".to_string())),
+            Some(&serde_yaml_ng::Value::String("test".to_string()))
         );
         assert_eq!(
-            mapping.get(serde_yaml::Value::String("description".to_string())),
-            Some(&serde_yaml::Value::String("hello".to_string()))
+            mapping.get(serde_yaml_ng::Value::String("description".to_string())),
+            Some(&serde_yaml_ng::Value::String("hello".to_string()))
         );
     }
 
@@ -826,15 +865,21 @@ mod tests {
     fn fallback_parser_ignores_lines_without_separator() {
         let mapping = parse_frontmatter_lines("name: valid\nno-separator\nother: also-valid\n");
         assert_eq!(mapping.len(), 2);
-        assert!(mapping.get(serde_yaml::Value::String("name".to_string())).is_some());
-        assert!(mapping.get(serde_yaml::Value::String("other".to_string())).is_some());
+        assert!(mapping
+            .get(serde_yaml_ng::Value::String("name".to_string()))
+            .is_some());
+        assert!(mapping
+            .get(serde_yaml_ng::Value::String("other".to_string()))
+            .is_some());
     }
 
     #[test]
     fn fallback_parser_rejects_keys_with_spaces() {
         let mapping = parse_frontmatter_lines("good-key: value\nbad key: value\n");
         assert_eq!(mapping.len(), 1);
-        assert!(mapping.get(serde_yaml::Value::String("good-key".to_string())).is_some());
+        assert!(mapping
+            .get(serde_yaml_ng::Value::String("good-key".to_string()))
+            .is_some());
     }
 
     #[test]

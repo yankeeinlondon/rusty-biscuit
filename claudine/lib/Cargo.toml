@@ -11,6 +11,7 @@ name = "claudine"
 # Internal
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"] }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
@@ -18,7 +19,6 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }

@@ -2,15 +2,16 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::{collections::BTreeSet, fs};
 
+use biscuit_file::serde_yaml_ng;
 use regex::Regex;
 
 use crate::error::Result;
 use crate::events::Provider;
 
-use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
+use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
 use super::compatibility::parse_markdown_document;
 use super::paths::{ProviderSkillPaths, ResourceScope};
-use super::symlink::{LinkResult, create_skill_link};
+use super::symlink::{create_skill_link, LinkResult};
 
 /// Scope classification for a discovered skill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -114,8 +115,16 @@ pub struct SkillFixSummary {
 pub fn fix_missing_skills(paths: &ProviderSkillPaths) -> Result<SkillFixSummary> {
     let mut summary = SkillFixSummary::default();
 
-    let user_dir = paths.target_dir(Provider::Claude, LinkableResource::Skill, ResourceScope::User);
-    let repo_dir = paths.target_dir(Provider::Claude, LinkableResource::Skill, ResourceScope::Repo);
+    let user_dir = paths.target_dir(
+        Provider::Claude,
+        LinkableResource::Skill,
+        ResourceScope::User,
+    );
+    let repo_dir = paths.target_dir(
+        Provider::Claude,
+        LinkableResource::Skill,
+        ResourceScope::Repo,
+    );
 
     let user_skills = scan_skill_dir(user_dir.as_ref());
     let repo_skills = scan_skill_dir(repo_dir.as_ref());
@@ -148,8 +157,7 @@ pub fn fix_missing_skills(paths: &ProviderSkillPaths) -> Result<SkillFixSummary>
                 continue;
             }
 
-            let Some(provider_dir) =
-                paths.target_dir(provider, LinkableResource::Skill, scope)
+            let Some(provider_dir) = paths.target_dir(provider, LinkableResource::Skill, scope)
             else {
                 continue;
             };
@@ -186,12 +194,17 @@ fn fix_scope_skills(
 
 /// Discover all skills from Claude's user and repo skill directories,
 /// classify their scope, parse descriptions, and gather exceptions.
-pub fn list_skills(
-    paths: &ProviderSkillPaths,
-    filters: &[String],
-) -> Result<SkillsReport> {
-    let user_dir = paths.target_dir(Provider::Claude, LinkableResource::Skill, ResourceScope::User);
-    let repo_dir = paths.target_dir(Provider::Claude, LinkableResource::Skill, ResourceScope::Repo);
+pub fn list_skills(paths: &ProviderSkillPaths, filters: &[String]) -> Result<SkillsReport> {
+    let user_dir = paths.target_dir(
+        Provider::Claude,
+        LinkableResource::Skill,
+        ResourceScope::User,
+    );
+    let repo_dir = paths.target_dir(
+        Provider::Claude,
+        LinkableResource::Skill,
+        ResourceScope::Repo,
+    );
 
     let user_skills = scan_skill_dir(user_dir.as_ref());
     let repo_skills = scan_skill_dir(repo_dir.as_ref());
@@ -307,9 +320,9 @@ fn read_description(skill_md: &PathBuf) -> Option<String> {
     let parsed = parse_markdown_document(&content).ok()?;
     let desc = parsed
         .frontmatter
-        .get(serde_yaml::Value::String("description".to_string()))?;
+        .get(serde_yaml_ng::Value::String("description".to_string()))?;
     match desc {
-        serde_yaml::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        serde_yaml_ng::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
         _ => None,
     }
 }
@@ -409,10 +422,7 @@ fn check_scope_missing(
     if !provider_dir.exists() {
         // Directory doesn't exist — emit a directory-level diagnostic instead
         // of listing every individual skill as missing.
-        let message = if provider_dir
-            .parent()
-            .is_some_and(|parent| parent.exists())
-        {
+        let message = if provider_dir.parent().is_some_and(|parent| parent.exists()) {
             format!(
                 "All <b>{scope_label}</b> scoped skills are NOT currently linked because the skills directory for <b>{provider}</b> does not exist! Use the <red>--fix</red> flag to fix this.",
             )
@@ -453,9 +463,9 @@ fn check_invalid(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &Pa
 
     let has_description = parsed
         .frontmatter
-        .get(serde_yaml::Value::String("description".to_string()))
+        .get(serde_yaml_ng::Value::String("description".to_string()))
         .map(|v| match v {
-            serde_yaml::Value::String(s) => !s.trim().is_empty(),
+            serde_yaml_ng::Value::String(s) => !s.trim().is_empty(),
             _ => false,
         })
         .unwrap_or(false);
@@ -671,7 +681,11 @@ mod tests {
         let user_dir = tmp.path().join("user/skills");
         let skill_dir = user_dir.join("no-desc");
         fs::create_dir_all(&skill_dir).unwrap();
-        fs::write(skill_dir.join("SKILL.md"), "---\nname: no-desc\n---\n# Body\n").unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: no-desc\n---\n# Body\n",
+        )
+        .unwrap();
 
         let report = list_skills(&paths, &[]).unwrap();
         let invalid: Vec<_> = report
@@ -951,8 +965,18 @@ mod tests {
         assert!(gemini_dir.join("beta").exists());
 
         // Verify they are symlinks
-        assert!(gemini_dir.join("alpha").symlink_metadata().unwrap().file_type().is_symlink());
-        assert!(gemini_dir.join("beta").symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(gemini_dir
+            .join("alpha")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(gemini_dir
+            .join("beta")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[cfg(unix)]
@@ -1027,7 +1051,8 @@ mod tests {
                 command_also_reads_from: vec![],
             },
         );
-        let paths = ProviderSkillPaths::from_providers_for_test(providers, tmp.path().to_path_buf());
+        let paths =
+            ProviderSkillPaths::from_providers_for_test(providers, tmp.path().to_path_buf());
 
         let user_dir = tmp.path().join("user/skills");
         setup_skill(&user_dir, "my-skill", "Skill", "# Body\n");

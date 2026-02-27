@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use biscuit_file::serde_yaml_ng;
 use crate::error::Result;
 use crate::events::Provider;
 
@@ -508,35 +509,35 @@ fn render_toml_derived(canonical: &ResourceDefinition) -> Result<String> {
 }
 
 fn render_yaml_derived(canonical: &ResourceDefinition) -> Result<String> {
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = serde_yaml_ng::Mapping::new();
     for (key, value) in &canonical.frontmatter {
         if key == DERIVED_FM_HASH_KEY || key == DERIVED_BODY_HASH_KEY {
             continue;
         }
         map.insert(
-            serde_yaml::Value::String(key.clone()),
-            serde_yaml::Value::String(value.clone()),
+            serde_yaml_ng::Value::String(key.clone()),
+            serde_yaml_ng::Value::String(value.clone()),
         );
     }
 
-    let prompt_key = serde_yaml::Value::String("prompt".to_string());
+    let prompt_key = serde_yaml_ng::Value::String("prompt".to_string());
     if !canonical.body.trim().is_empty() && !map.contains_key(&prompt_key) {
         map.insert(
             prompt_key,
-            serde_yaml::Value::String(canonical.body.clone()),
+            serde_yaml_ng::Value::String(canonical.body.clone()),
         );
     }
 
     map.insert(
-        serde_yaml::Value::String(DERIVED_FM_HASH_KEY.to_string()),
-        serde_yaml::Value::String(canonical.fm_hash.to_string()),
+        serde_yaml_ng::Value::String(DERIVED_FM_HASH_KEY.to_string()),
+        serde_yaml_ng::Value::String(canonical.fm_hash.to_string()),
     );
     map.insert(
-        serde_yaml::Value::String(DERIVED_BODY_HASH_KEY.to_string()),
-        serde_yaml::Value::String(canonical.body_hash.to_string()),
+        serde_yaml_ng::Value::String(DERIVED_BODY_HASH_KEY.to_string()),
+        serde_yaml_ng::Value::String(canonical.body_hash.to_string()),
     );
 
-    Ok(serde_yaml::to_string(&map)?)
+    Ok(serde_yaml_ng::to_string(&map)?)
 }
 
 fn render_markdown(definition: &ResourceDefinition) -> String {
@@ -544,14 +545,14 @@ fn render_markdown(definition: &ResourceDefinition) -> String {
         return definition.body.clone();
     }
 
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = serde_yaml_ng::Mapping::new();
     for (key, value) in &definition.frontmatter {
         map.insert(
-            serde_yaml::Value::String(key.clone()),
-            serde_yaml::Value::String(value.clone()),
+            serde_yaml_ng::Value::String(key.clone()),
+            serde_yaml_ng::Value::String(value.clone()),
         );
     }
-    let yaml = serde_yaml::to_string(&map).unwrap_or_default();
+    let yaml = serde_yaml_ng::to_string(&map).unwrap_or_default();
     let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml).trim_end();
     format!("---\n{yaml}\n---\n{}", definition.body)
 }
@@ -596,19 +597,19 @@ fn toml_hash_value(item: &toml_edit::Item) -> Option<u64> {
 
 fn read_yaml_hashes(path: &Path) -> Option<(u64, u64)> {
     let content = std::fs::read_to_string(path).ok()?;
-    let value: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).ok()?;
     let map = value.as_mapping()?;
     let fm_hash =
-        yaml_hash_value(map.get(serde_yaml::Value::String(DERIVED_FM_HASH_KEY.to_string()))?)?;
+        yaml_hash_value(map.get(serde_yaml_ng::Value::String(DERIVED_FM_HASH_KEY.to_string()))?)?;
     let body_hash =
-        yaml_hash_value(map.get(serde_yaml::Value::String(DERIVED_BODY_HASH_KEY.to_string()))?)?;
+        yaml_hash_value(map.get(serde_yaml_ng::Value::String(DERIVED_BODY_HASH_KEY.to_string()))?)?;
     Some((fm_hash, body_hash))
 }
 
-fn yaml_hash_value(value: &serde_yaml::Value) -> Option<u64> {
+fn yaml_hash_value(value: &serde_yaml_ng::Value) -> Option<u64> {
     match value {
-        serde_yaml::Value::Number(number) => number.as_u64(),
-        serde_yaml::Value::String(value) => value.parse::<u64>().ok(),
+        serde_yaml_ng::Value::Number(number) => number.as_u64(),
+        serde_yaml_ng::Value::String(value) => value.parse::<u64>().ok(),
         _ => None,
     }
 }

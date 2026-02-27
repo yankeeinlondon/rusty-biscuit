@@ -1,3 +1,4 @@
+use biscuit_file::YamlParseError;
 use std::path::PathBuf;
 
 /// All errors that can occur within the Claudine library.
@@ -17,7 +18,7 @@ pub enum ClaudineError {
 
     /// Failed to parse YAML content (e.g., SKILL.md frontmatter).
     #[error("YAML parse error: {0}")]
-    YamlParse(#[from] serde_yaml::Error),
+    YamlParse(#[from] YamlParseError),
 
     /// Configuration file not found at expected path.
     #[error("config not found: {0}")]

@@ -122,6 +122,8 @@ Standalone formatters for converting any `serde_json::Value` to JSON5 output, av
 
 For convenience, this crate re-exports types from its underlying dependencies. This allows other packages in this monorepo to migrate from direct dependencies to using `biscuit-file`, while maintaining the same import paths.
 
+> **Note:** When enabling multiple features (e.g., `features = ["toml", "yaml"]`), the corresponding re-exports become available for each.
+
 ### TOML Re-Exports
 
 ```toml
