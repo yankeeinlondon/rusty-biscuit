@@ -1,6 +1,7 @@
 pub mod block_quote;
 pub mod compose;
 pub mod filesystem;
+pub mod inline_content;
 pub mod image_options;
 pub mod list;
 pub mod mermaid;

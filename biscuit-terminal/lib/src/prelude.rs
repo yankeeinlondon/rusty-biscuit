@@ -1,5 +1,6 @@
 pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
+pub use crate::components::inline_content::InlineContent;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::list::{OrderedList, UnorderedList};
