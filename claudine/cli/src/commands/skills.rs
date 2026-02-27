@@ -33,8 +33,27 @@ pub struct SkillsArgs {
 }
 
 /// List available skills and their scopes.
-pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
+pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     let paths = ProviderSkillPaths::new();
+
+    // Git repo detection (needed early for init check)
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let is_git_repo = detect_git(&cwd, false, 1).ok().flatten().is_some();
+
+    // When --fix is used in a git repo, check if repo canonical provider needs initialization
+    if is_git_repo && args.apply && repo_canonical_needs_init(&paths) {
+        log::message("");
+        log::message(
+            "Repo canonical provider is not configured. Running claudine init --repo ...",
+        );
+        log::message("");
+        super::init::run(super::init::InitArgs {
+            quick: false,
+            repo: true,
+        })
+        .await?;
+        log::message("");
+    }
 
     // Apply fixes before listing if requested
     let fix_summary = if args.apply {
@@ -68,10 +87,6 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     }
 
     let term = Terminal::new();
-
-    // Git repo detection
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let is_git_repo = detect_git(&cwd, false, 1).ok().flatten().is_some();
 
     // Header
     let header = Prose::new("<blue><b>Skills</b></blue>").fallback_render(&term);
@@ -118,6 +133,27 @@ pub fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     Ok(())
 }
 
+/// Check whether repo-scoped canonical provider needs initialization.
+///
+/// Returns `true` when a config exists (user or merged) but has no
+/// repo-scoped canonical skill provider configured.  Returns `false`
+/// when no config exists at all (user needs `claudine init` first).
+fn repo_canonical_needs_init(paths: &ProviderSkillPaths) -> bool {
+    let repo_root = Some(paths.repo_root());
+    match load_config(None, repo_root) {
+        Ok(config) => match &config.settings.linking {
+            Some(linking) => canonical_provider(
+                &linking.canonical_provider,
+                ResourceScope::Repo,
+                LinkableResource::Skill,
+            )
+            .is_none(),
+            None => true,
+        },
+        Err(_) => false,
+    }
+}
+
 /// Render the canonical providers line from config (if available).
 fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_git_repo: bool) {
     let repo_root = if is_git_repo {
@@ -137,23 +173,27 @@ fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_gi
 
     let user_canonical =
         canonical_provider(&linking_settings.canonical_provider, ResourceScope::User, LinkableResource::Skill);
-    let repo_canonical = if is_git_repo {
-        canonical_provider(&linking_settings.canonical_provider, ResourceScope::Repo, LinkableResource::Skill)
-    } else {
-        None
+
+    let not_configured = "<i><red>not configured</red></i>";
+
+    let user_part = match user_canonical {
+        Some(user) => format!("user: <b>{user}</b>"),
+        None => format!("user: {not_configured}"),
     };
 
-    let line = match (user_canonical, repo_canonical) {
-        (Some(user), Some(repo)) => format!(
-            "<blue><b>Canonical Providers:</b></blue> user: <b>{user}</b>, repo: <b>{repo}</b>"
-        ),
-        (Some(user), None) => format!(
-            "<blue><b>Canonical Providers:</b></blue> user: <b>{user}</b>"
-        ),
-        (None, Some(repo)) => format!(
-            "<blue><b>Canonical Providers:</b></blue> repo: <b>{repo}</b>"
-        ),
-        (None, None) => return,
+    let line = if is_git_repo {
+        let repo_canonical = canonical_provider(
+            &linking_settings.canonical_provider,
+            ResourceScope::Repo,
+            LinkableResource::Skill,
+        );
+        let repo_part = match repo_canonical {
+            Some(repo) => format!("repo: <b>{repo}</b>"),
+            None => format!("repo: {not_configured}"),
+        };
+        format!("<blue><b>Canonical Providers:</b></blue> {user_part}, {repo_part}")
+    } else {
+        format!("<blue><b>Canonical Providers:</b></blue> {user_part}")
     };
 
     log::data(&Prose::new(line).fallback_render(term));

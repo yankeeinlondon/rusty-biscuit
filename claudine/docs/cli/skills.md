@@ -32,6 +32,9 @@ The reporting is broken down into the following sections:
       - **Detail View**
           - Shown when there is exactly 1 skill being shown (typically due to a filter condition)
           - Whether the `-v` / `--verbose` flag was used has no effect
+          - The first line of reporting on the skill is the topic name (bold) followed by the badge for the scope
+          - The second line is the description of the skill (dim, italics)
+          - Then a blank line
           - The beginning of the reporting in this mode is exactly the same as the verbose mode (below) but immediately following the `topic/scope/description` block we will use the `FileSystem` struct from biscuit-terminal to show the skill's files.
 
       - **Verbose**
