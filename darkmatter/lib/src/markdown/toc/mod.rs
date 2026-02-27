@@ -23,7 +23,8 @@ mod types;
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
 use crate::markdown::Markdown;
-use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
+use biscuit_file::serde_yaml_ng;
+use biscuit_hash::{xx_hash, xx_hash_variant, HashVariant};
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
 /// Generates a URL-safe slug from heading text.
@@ -315,7 +316,7 @@ impl From<&Markdown> for MarkdownToc {
         // Compute frontmatter hashes
         if !frontmatter.is_empty() {
             // Raw hash (preserves formatting)
-            let raw_fm = serde_yaml::to_string(&frontmatter.as_map()).unwrap_or_default();
+            let raw_fm = serde_yaml_ng::to_string(&frontmatter.as_map()).unwrap_or_default();
             toc.frontmatter_hash = xx_hash(&raw_fm);
 
             // Normalized hash (canonical JSON for comparison)

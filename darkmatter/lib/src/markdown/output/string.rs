@@ -1,6 +1,7 @@
 //! String output formatting for Markdown documents.
 
 use crate::markdown::Markdown;
+use biscuit_file::serde_yaml_ng;
 
 /// Converts a Markdown document to a string with frontmatter.
 ///
@@ -27,7 +28,7 @@ pub fn as_string(md: &Markdown) -> String {
     } else {
         // Serialize frontmatter as YAML
         let yaml =
-            serde_yaml::to_string(md.frontmatter().as_map()).unwrap_or_else(|_| String::new());
+            serde_yaml_ng::to_string(md.frontmatter().as_map()).unwrap_or_else(|_| String::new());
 
         // Build the full document with frontmatter delimiters
         let mut output = String::new();

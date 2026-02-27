@@ -1,5 +1,6 @@
 //! Type definitions for the markdown module.
 
+use biscuit_file::YamlParseError;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -11,7 +12,7 @@ pub type FrontmatterMap = HashMap<String, serde_json::Value>;
 pub enum MarkdownError {
     /// Failed to parse frontmatter YAML.
     #[error("Failed to parse frontmatter: {0}")]
-    FrontmatterParse(#[from] serde_yaml::Error),
+    FrontmatterParse(#[from] YamlParseError),
 
     /// Failed to merge frontmatter.
     #[error("Failed to merge frontmatter: {0}")]

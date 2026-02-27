@@ -1568,6 +1568,7 @@ dependencies = [
 name = "darkmatter"
 version = "0.1.0"
 dependencies = [
+ "biscuit-file",
  "biscuit-hash",
  "biscuit-terminal",
  "chrono",
@@ -1581,7 +1582,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "serial_test",
  "similar",
  "supports-hyperlinks",

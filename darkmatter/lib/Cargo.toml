@@ -20,7 +20,7 @@ tracing = "0.1"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"] }
 
 # Error handling
 thiserror = "2.0"

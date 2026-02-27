@@ -1,8 +1,9 @@
 //! Frontmatter parsing and manipulation utilities.
 
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
-use serde::Serialize;
+use biscuit_file::serde_yaml_ng;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
 
 /// Strategy for merging frontmatter fields.
@@ -197,7 +198,7 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         HashMap::new()
     } else {
-        serde_yaml::from_str(&yaml_content)?
+        serde_yaml_ng::from_str(&yaml_content)?
     };
 
     // Extract remaining content
