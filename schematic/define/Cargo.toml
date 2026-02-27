@@ -12,7 +12,7 @@ openapi = ["dep:indexmap", "dep:openapiv3", "dep:serde_yaml", "dep:serde_json"]
 [dependencies]
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
-strum = { version = "0.26", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0"
 
 # OpenAPI feature dependencies

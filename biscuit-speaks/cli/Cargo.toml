@@ -13,6 +13,6 @@ clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 biscuit-speaks = { path = "../lib", features = ["playa"] }
 inquire = "0.9"
-owo-colors = { version = "4.2", features = ["supports-colors"] }
+owo-colors = { version = "4.3", features = ["supports-colors"] }
 darkmatter = { path = "../../darkmatter/lib" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
