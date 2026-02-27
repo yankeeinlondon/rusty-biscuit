@@ -7,7 +7,9 @@ use tracing::{debug, info, warn};
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::{AgenticEvent, GlobalSettings, HookerConfig, Provider};
+use crate::events::{
+    AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings, Provider,
+};
 use crate::services::{ProtectConfig, ProtectPosture};
 
 /// Candidate file names for user-level configuration.
@@ -377,13 +379,18 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
         repo.settings.protect.as_ref(),
     );
 
+    let linking = merge_linking_settings(
+        user.settings.linking.as_ref(),
+        repo.settings.linking.as_ref(),
+    );
+
     let settings = crate::events::GlobalSettings {
         default_log_target: repo
             .settings
             .default_log_target
             .or(user.settings.default_log_target),
         tts: repo.settings.tts.or(user.settings.tts),
-        linking: repo.settings.linking.or(user.settings.linking),
+        linking,
         protect,
     };
 
@@ -421,6 +428,49 @@ fn merge_protect_configs(
 
             Some(merged)
         }
+    }
+}
+
+/// Merge linking settings field-by-field.
+///
+/// `preference` uses repo if non-empty, otherwise user.
+/// `canonical_provider` merges slot-by-slot: repo non-`None` values override user.
+fn merge_linking_settings(
+    user: Option<&LinkingSettings>,
+    repo: Option<&LinkingSettings>,
+) -> Option<LinkingSettings> {
+    match (user, repo) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(r)) => Some(r.clone()),
+        (Some(u), Some(r)) => Some(LinkingSettings {
+            preference: if r.preference.is_empty() {
+                u.preference.clone()
+            } else {
+                r.preference.clone()
+            },
+            canonical_provider: merge_canonical_providers(
+                &u.canonical_provider,
+                &r.canonical_provider,
+            ),
+        }),
+    }
+}
+
+/// Merge canonical provider slots: repo non-`None` values override user.
+fn merge_canonical_providers(
+    user: &CanonicalProviderSettings,
+    repo: &CanonicalProviderSettings,
+) -> CanonicalProviderSettings {
+    CanonicalProviderSettings {
+        user_skill: repo.user_skill.or(user.user_skill),
+        user_command: repo.user_command.or(user.user_command),
+        user_agent: repo.user_agent.or(user.user_agent),
+        user_script: repo.user_script.or(user.user_script),
+        repo_skill: repo.repo_skill.or(user.repo_skill),
+        repo_command: repo.repo_command.or(user.repo_command),
+        repo_agent: repo.repo_agent.or(user.repo_agent),
+        repo_script: repo.repo_script.or(user.repo_script),
     }
 }
 
@@ -693,6 +743,149 @@ mod tests {
         let protect = merged.settings.protect.expect("missing merged protect");
         assert!(!protect.enabled);
         assert_eq!(protect.posture, ProtectPosture::Advisory);
+    }
+
+    #[test]
+    fn merge_linking_preserves_user_canonical_when_repo_sets_repo_slots() {
+        let user = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![Provider::Claude, Provider::Codex],
+                    canonical_provider: CanonicalProviderSettings {
+                        user_skill: Some(Provider::Claude),
+                        user_command: Some(Provider::Claude),
+                        user_agent: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let repo = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![Provider::Claude, Provider::Gemini],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        repo_command: Some(Provider::Claude),
+                        repo_agent: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let merged = merge_configs(user, repo);
+        let linking = merged.settings.linking.expect("missing linking");
+
+        // Repo preference wins
+        assert_eq!(linking.preference, vec![Provider::Claude, Provider::Gemini]);
+
+        // User-scoped canonical providers survive from user config
+        assert_eq!(linking.canonical_provider.user_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.user_command,
+            Some(Provider::Claude)
+        );
+        assert_eq!(
+            linking.canonical_provider.user_agent,
+            Some(Provider::Claude)
+        );
+
+        // Repo-scoped canonical providers come from repo config
+        assert_eq!(linking.canonical_provider.repo_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.repo_command,
+            Some(Provider::Claude)
+        );
+        assert_eq!(
+            linking.canonical_provider.repo_agent,
+            Some(Provider::Claude)
+        );
+    }
+
+    #[test]
+    fn merge_linking_repo_overrides_user_canonical_when_both_set() {
+        let user = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        user_skill: Some(Provider::Claude),
+                        repo_skill: Some(Provider::Codex),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let repo = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let merged = merge_configs(user, repo);
+        let linking = merged.settings.linking.expect("missing linking");
+
+        // user_skill preserved from user config (repo didn't set it)
+        assert_eq!(linking.canonical_provider.user_skill, Some(Provider::Claude));
+        // repo_skill overridden by repo config
+        assert_eq!(linking.canonical_provider.repo_skill, Some(Provider::Claude));
+    }
+
+    #[test]
+    fn merge_linking_user_preference_used_when_repo_empty() {
+        let user = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![Provider::Claude, Provider::Codex],
+                    canonical_provider: CanonicalProviderSettings::default(),
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let repo = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                ..GlobalSettings::default()
+            },
+            providers: HashMap::new(),
+        };
+
+        let merged = merge_configs(user, repo);
+        let linking = merged.settings.linking.expect("missing linking");
+
+        // User preference used since repo's is empty
+        assert_eq!(linking.preference, vec![Provider::Claude, Provider::Codex]);
     }
 
     #[test]
