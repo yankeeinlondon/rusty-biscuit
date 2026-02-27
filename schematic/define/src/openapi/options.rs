@@ -4,6 +4,8 @@
 //! to OpenAPI 3.0.3 specification format.
 
 use super::OpenApiError;
+#[cfg(feature = "openapi")]
+use biscuit_file::serde_yaml_ng;
 
 /// Output format for exported OpenAPI documents.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -80,7 +82,7 @@ pub fn serialize(doc: &openapiv3::OpenAPI, format: ExportFormat) -> Result<Strin
             message: format!("JSON serialization failed: {}", e),
             location: None,
         }),
-        ExportFormat::Yaml => serde_yaml::to_string(doc).map_err(|e| OpenApiError::Parse {
+        ExportFormat::Yaml => serde_yaml_ng::to_string(doc).map_err(|e| OpenApiError::Parse {
             message: format!("YAML serialization failed: {}", e),
             location: None,
         }),
@@ -260,7 +262,7 @@ mod tests {
         let yaml = serialize(&doc, ExportFormat::Yaml).unwrap();
 
         // Should be parseable as YAML
-        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(&yaml);
+        let parsed: Result<serde_yaml_ng::Value, _> = serde_yaml_ng::from_str(&yaml);
         assert!(parsed.is_ok());
     }
 }

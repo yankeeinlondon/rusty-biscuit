@@ -679,7 +679,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "serial_test",
  "tempfile",
  "terminal_size",
@@ -6187,12 +6186,12 @@ name = "schematic-define"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "biscuit-file",
  "indexmap 2.13.0",
  "openapiv3",
  "reqwest",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "serial_test",
  "strum 0.28.0",
  "thiserror 2.0.18",
@@ -6216,6 +6215,7 @@ dependencies = [
 name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
+ "biscuit-file",
  "clap 4.5.60",
  "colored",
  "prettyplease",
@@ -6224,11 +6224,9 @@ dependencies = [
  "schematic-define",
  "schematic-definitions",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "syn 2.0.117",
  "tempfile",
  "thiserror 2.0.18",
- "toml",
 ]
 
 [[package]]

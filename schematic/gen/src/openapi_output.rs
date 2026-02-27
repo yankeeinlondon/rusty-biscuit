@@ -6,10 +6,10 @@
 use std::fs;
 use std::path::Path;
 
-use schematic_define::RestApi;
 use schematic_define::openapi::{
-    ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
+    export, serialize, ExportFormat, ExportOptions, SchemaRegistryLike,
 };
+use schematic_define::RestApi;
 
 use crate::errors::GeneratorError;
 
@@ -91,6 +91,7 @@ pub fn write_openapi<R: SchemaRegistryLike>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_file::serde_yaml_ng;
     use schematic_define::openapi::ExportFormat;
     use schematic_definitions::openai::{define_openai_api, openapi_registry};
     use tempfile::TempDir;
@@ -163,7 +164,7 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
 
         // Should be parseable as YAML
-        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(&content);
+        let parsed: Result<serde_yaml_ng::Value, _> = serde_yaml_ng::from_str(&content);
         assert!(parsed.is_ok(), "Should produce valid YAML");
     }
 

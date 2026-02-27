@@ -136,6 +136,7 @@ pub fn write_cargo_toml(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_file::toml_crate;
     use std::fs;
     use tempfile::TempDir;
 
@@ -146,8 +147,8 @@ mod tests {
         let content = generate_cargo_toml(None);
 
         // Parse as TOML to validate syntax
-        let parsed: toml::Table =
-            toml::from_str(&content).expect("Generated content should be valid TOML");
+        let parsed: toml_crate::Table =
+            toml_crate::from_str(&content).expect("Generated content should be valid TOML");
 
         // Verify package section exists
         assert!(parsed.contains_key("package"));
@@ -157,7 +158,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_has_correct_package_name() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
         assert_eq!(
@@ -169,7 +170,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_uses_edition_2024() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
         assert_eq!(package.get("edition").unwrap().as_str().unwrap(), "2024");
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_has_correct_license() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
         assert_eq!(
@@ -190,7 +191,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_reqwest() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_serde_with_derive() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(deps.contains_key("serde"), "serde dependency is required");
@@ -222,7 +223,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_serde_json() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(
@@ -234,7 +235,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_thiserror() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(
@@ -246,7 +247,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_tokio() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(deps.contains_key("tokio"), "tokio dependency is required");
@@ -261,7 +262,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_bytes() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(
@@ -273,7 +274,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_urlencoding() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(
@@ -285,7 +286,7 @@ mod tests {
     #[test]
     fn generate_cargo_toml_includes_schematic_define() {
         let content = generate_cargo_toml(None);
-        let parsed: toml::Table = toml::from_str(&content).unwrap();
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
         assert!(

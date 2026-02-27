@@ -6,6 +6,7 @@
 
 #![cfg(feature = "openapi")]
 
+use biscuit_file::serde_yaml_ng;
 use schematic_define::openapi::{OpenApiError, OpenApiSource};
 use std::path::PathBuf;
 
@@ -58,7 +59,7 @@ info:
   version: "1.0.0"
 paths: {}
 "#;
-    let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("valid yaml");
+    let doc: openapiv3::OpenAPI = serde_yaml_ng::from_str(yaml).expect("valid yaml");
     let source = OpenApiSource::Document(Box::new(doc));
     assert!(matches!(source, OpenApiSource::Document(_)));
 }

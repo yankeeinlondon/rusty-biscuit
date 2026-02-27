@@ -389,7 +389,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "tempfile",
  "terminal_size",
  "termini",
@@ -3862,11 +3861,11 @@ name = "schematic-define"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "biscuit-file",
  "indexmap 2.13.0",
  "openapiv3",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
  "strum",
  "thiserror 2.0.18",
 ]

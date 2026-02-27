@@ -41,6 +41,8 @@
 
 use std::collections::HashSet;
 
+#[cfg(feature = "openapi")]
+use biscuit_file::serde_yaml_ng;
 use super::error::OpenApiError;
 use super::source::OpenApiSource;
 use crate::auth::AuthStrategy;
@@ -279,7 +281,7 @@ impl OpenApiImport {
                 })?;
 
                 // Try YAML first (it's a superset of JSON)
-                serde_yaml::from_str(&content).map_err(|e| OpenApiError::Parse {
+                serde_yaml_ng::from_str(&content).map_err(|e| OpenApiError::Parse {
                     message: e.to_string(),
                     location: None,
                 })
@@ -291,14 +293,14 @@ impl OpenApiImport {
                 })
             }
             OpenApiSource::Yaml(content) => {
-                serde_yaml::from_str(content).map_err(|e| OpenApiError::Parse {
+                serde_yaml_ng::from_str(content).map_err(|e| OpenApiError::Parse {
                     message: e.to_string(),
                     location: None,
                 })
             }
             OpenApiSource::Bytes(bytes) => {
                 let content = String::from_utf8_lossy(bytes);
-                serde_yaml::from_str(&content).map_err(|e| OpenApiError::Parse {
+                serde_yaml_ng::from_str(&content).map_err(|e| OpenApiError::Parse {
                     message: e.to_string(),
                     location: None,
                 })
