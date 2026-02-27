@@ -17,7 +17,9 @@ futures = "0.3"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "1.0"
+
+# File format utilities (TOML parsing via biscuit-file)
+biscuit-file = { path = "../../biscuit-file/lib", features = ["toml"] }
 
 # HTTP
 reqwest = { version = "0.13", features = ["json", "stream"] }

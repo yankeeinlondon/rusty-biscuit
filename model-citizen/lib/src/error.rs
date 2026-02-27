@@ -54,8 +54,14 @@ impl ModelCitizenError {
     }
 }
 
-impl From<toml::de::Error> for ModelCitizenError {
-    fn from(err: toml::de::Error) -> Self {
+impl From<biscuit_file::TomlDeError> for ModelCitizenError {
+    fn from(err: biscuit_file::TomlDeError) -> Self {
+        Self::ConfigError(err.to_string())
+    }
+}
+
+impl From<biscuit_file::TomlError> for ModelCitizenError {
+    fn from(err: biscuit_file::TomlError) -> Self {
         Self::ConfigError(err.to_string())
     }
 }

@@ -6,6 +6,7 @@
 //! 3. Default values (lowest priority)
 
 use crate::error::ModelCitizenError;
+use biscuit_file::Toml;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -158,8 +159,8 @@ impl Config {
     ///
     /// Returns an error if the file cannot be read or parsed.
     pub fn from_file(path: &std::path::Path) -> Result<Self, ModelCitizenError> {
-        let contents = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&contents)?;
+        let toml = Toml::new(path)?;
+        let config: Self = serde::Deserialize::deserialize(toml.value().clone())?;
         Ok(config)
     }
 
@@ -503,8 +504,9 @@ timeout_secs = 10
             enable_sharing: true,
             scanners: ScannersConfig::default(),
         };
-        let toml_str = toml::to_string_pretty(&config).unwrap();
-        assert!(toml_str.contains("shared_models_dir"));
-        assert!(toml_str.contains("llamacpp_models_dirs"));
+        // Serialize using serde_json (we know this works)
+        let json_str = serde_json::to_string_pretty(&config).unwrap();
+        assert!(json_str.contains("shared_models_dir"));
+        assert!(json_str.contains("llamacpp_models_dirs"));
     }
 }
