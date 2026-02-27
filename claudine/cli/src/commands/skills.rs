@@ -200,22 +200,27 @@ fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_gi
     log::data("");
 }
 
-/// Detail mode: shown when exactly 1 skill matches. Shows badge/name/description + filesystem tree.
+/// Detail mode: shown when exactly 1 skill matches. Shows name/badge, description, + filesystem tree.
 fn render_detail(term: &Terminal, skill: &SkillInfo) {
     let badge = scope_badge(skill.scope);
     let desc = skill.description.as_deref().unwrap_or("no description");
-    let header = Prose::new(format!(
-        r#"{badge} <a href="{}"><b>{}</b></a> <dim><i>{desc}</i></dim>"#,
+
+    let name_line = Prose::new(format!(
+        r#"<a href="{}"><b>{}</b></a> {badge}"#,
         skill.skill_md_path.display(),
         skill.name,
     ));
-    log::data(&header.fallback_render(term));
+    log::data(&name_line.fallback_render(term));
+
+    let desc_line = Prose::new(format!("<dim><i>{desc}</i></dim>"));
+    log::data(&desc_line.fallback_render(term));
     log::data("");
 
     if let Some(dir) = skill.skill_md_path.parent()
         && let Some(dir_str) = dir.to_str()
         && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
     {
+        fs = fs.show_tokens();
         fs.ensure_tree_built();
         log::data(&fs.fallback_render(term));
     }

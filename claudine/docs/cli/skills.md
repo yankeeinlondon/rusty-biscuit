@@ -35,7 +35,8 @@ The reporting is broken down into the following sections:
           - The first line of reporting on the skill is the topic name (bold) followed by the badge for the scope
           - The second line is the description of the skill (dim, italics)
           - Then a blank line
-          - The beginning of the reporting in this mode is exactly the same as the verbose mode (below) but immediately following the `topic/scope/description` block we will use the `FileSystem` struct from biscuit-terminal to show the skill's files.
+          - Now we use the `FileSystem` struct from biscuit-terminal to show the skill's files.
+              - Include the metric (tokens)
 
       - **Verbose**
           - If the number of skills (_after filtering_) is less than 6 (and more than 1) we will report using the verbose style.

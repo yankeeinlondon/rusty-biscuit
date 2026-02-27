@@ -4,6 +4,8 @@
 //! It ensures that required fields are present and non-empty, and provides detailed error
 //! messages for various failure scenarios.
 
+use biscuit_file::serde_yaml_ng;
+use biscuit_file::YamlParseError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -31,9 +33,9 @@ pub enum FrontmatterError {
     EmptyField { field: String },
 }
 
-/// Convert serde_yaml::Error to FrontmatterError
-impl From<serde_yaml::Error> for FrontmatterError {
-    fn from(err: serde_yaml::Error) -> Self {
+/// Convert serde_yaml_ng::Error to FrontmatterError
+impl From<YamlParseError> for FrontmatterError {
+    fn from(err: YamlParseError) -> Self {
         FrontmatterError::InvalidYaml(err.to_string())
     }
 }
@@ -214,7 +216,7 @@ pub fn parse_and_validate_frontmatter(
     }
 
     // Parse YAML
-    let mut frontmatter: SkillFrontmatter = serde_yaml::from_str(&yaml_content)?;
+    let mut frontmatter: SkillFrontmatter = serde_yaml_ng::from_str(&yaml_content)?;
 
     // Validate required fields exist
     if frontmatter.name.is_empty() {
@@ -577,7 +579,7 @@ pub fn parse_and_validate_changelog_frontmatter(
     }
 
     // Parse YAML
-    let mut frontmatter: ChangelogFrontmatter = serde_yaml::from_str(&yaml_content)?;
+    let mut frontmatter: ChangelogFrontmatter = serde_yaml_ng::from_str(&yaml_content)?;
 
     // Validate required fields exist and are non-empty
     if frontmatter.created_at.is_empty() {
@@ -883,7 +885,7 @@ Body
             hash: None,
         };
 
-        let yaml = serde_yaml::to_string(&frontmatter).expect("Failed to serialize");
+        let yaml = serde_yaml_ng::to_string(&frontmatter).expect("Failed to serialize");
         assert!(
             yaml.contains("allowed_tools:"),
             "Serialization should use 'allowed_tools', got: {}",

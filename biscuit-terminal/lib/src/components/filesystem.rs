@@ -83,6 +83,7 @@ use chrono::{DateTime, Utc};
 use paste::paste;
 use thiserror::Error;
 
+use crate::components::prose::Prose;
 use crate::components::renderable::Renderable;
 use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
@@ -526,6 +527,8 @@ pub struct FileSystem {
     metric_configs: HashMap<MetricKind, MetricConfig>,
     /// When true, directories also display applicable metrics (timestamps, permissions).
     show_metrics_on_directories: bool,
+    /// When true, filenames are rendered as clickable OSC8 hyperlinks to the files.
+    file_links: bool,
 }
 
 impl Default for FileSystem {
@@ -550,6 +553,7 @@ impl Default for FileSystem {
             show_root: true,
             metric_configs: HashMap::new(),
             show_metrics_on_directories: false,
+            file_links: false,
         }
     }
 }
@@ -614,6 +618,7 @@ impl FileSystem {
             show_root: true,
             metric_configs: HashMap::new(),
             show_metrics_on_directories: false,
+            file_links: false,
         })
     }
 
@@ -868,6 +873,27 @@ impl FileSystem {
     /// file_size or tokens, which are file-only metrics).
     pub fn show_on_directories(mut self) -> Self {
         self.show_metrics_on_directories = true;
+        self
+    }
+
+    /// Enables OSC8 hyperlinks on filenames and directory names.
+    ///
+    /// When enabled, each filename in the tree output becomes a clickable
+    /// OSC8 hyperlink pointing to the file's absolute path. This only takes
+    /// effect when rendering to a TTY (via [`fallback_render`](Self::fallback_render)).
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+    /// let mut fs = FileSystem::new_with_formatting(".")?
+    ///     .with_file_links();
+    /// fs.ensure_tree_built();
+    /// let output = fs.fallback_render(&Terminal::default());
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn with_file_links(mut self) -> Self {
+        self.file_links = true;
         self
     }
 
@@ -1860,7 +1886,7 @@ impl Renderable for FileSystem {
         }
 
         // Pass is_tty=false since render() has no terminal context
-        self.render_nodes(&mut output, tree, "", width, 0, None, false);
+        self.render_nodes(&mut output, tree, "", width, 0, None, false, &self.root_path);
 
         // Apply layout (margins, alignment) but NOT word wrap
         // Word wrap would break tree connectors
@@ -1916,7 +1942,24 @@ impl Renderable for FileSystem {
             self.render_root_line(&mut output, term.is_nerd_font, term.is_tty);
         }
 
-        self.render_nodes(&mut output, tree, "", width, 0, term.is_nerd_font, term.is_tty);
+        // Canonicalize once for OSC8 file links so paths are absolute
+        let base_path = if self.file_links {
+            self.root_path
+                .canonicalize()
+                .unwrap_or_else(|_| self.root_path.clone())
+        } else {
+            self.root_path.clone()
+        };
+        self.render_nodes(
+            &mut output,
+            tree,
+            "",
+            width,
+            0,
+            term.is_nerd_font,
+            term.is_tty,
+            &base_path,
+        );
 
         self.layout.apply_layout(&output, width)
     }
@@ -1977,8 +2020,21 @@ impl FileSystem {
         };
 
         if is_tty {
-            // Bold blue for icon and directory name
-            output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, name));
+            let display_name = if self.file_links {
+                let abs_path = self
+                    .root_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.root_path.clone());
+                Prose::new(format!(
+                    "<a href=\"{}\">{}</a>",
+                    abs_path.display(),
+                    name
+                ))
+                .render(None)
+            } else {
+                name
+            };
+            output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, display_name));
         } else {
             output.push_str(&format!("{}{}\n", icon_str, name));
         }
@@ -1997,6 +2053,7 @@ impl FileSystem {
     /// * `depth` - Current depth in the tree (0 = root level)
     /// * `is_nerd_font` - Whether to use Nerd Font icons
     /// * `is_tty` - Whether stdout is connected to a TTY (for ANSI styling)
+    /// * `current_path` - The filesystem path of the current directory level
     #[allow(clippy::too_many_arguments)]
     fn render_nodes(
         &self,
@@ -2007,6 +2064,7 @@ impl FileSystem {
         depth: u32,
         is_nerd_font: Option<bool>,
         is_tty: bool,
+        current_path: &Path,
     ) {
         for (idx, node) in nodes.iter().enumerate() {
             let is_last = idx == nodes.len() - 1;
@@ -2040,6 +2098,19 @@ impl FileSystem {
                 truncate_with_ellipsis(name, available)
             } else {
                 name.to_string()
+            };
+
+            // Wrap name in an OSC8 hyperlink when file_links is enabled
+            let display_name = if self.file_links && is_tty {
+                let node_path = current_path.join(name);
+                Prose::new(format!(
+                    "<a href=\"{}\">{}</a>",
+                    node_path.display(),
+                    display_name
+                ))
+                .render(None)
+            } else {
+                display_name
             };
 
             // Format metrics suffix if available
@@ -2092,6 +2163,7 @@ impl FileSystem {
                     depth + 1,
                     is_nerd_font,
                     is_tty,
+                    &current_path.join(name),
                 );
             }
         }
@@ -4696,6 +4768,113 @@ mod tests {
         // Nerd Font adds a space after the icon for PUA compensation
         // so the outputs will be different lengths or content
         // (We can't assert exact icons since they depend on font rendering)
+    }
+
+    #[test]
+    fn test_with_file_links_produces_osc8_links() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("hello.txt"), "").expect("create file");
+        fs::create_dir(temp.path().join("sub")).expect("create dir");
+        fs::write(temp.path().join("sub/nested.rs"), "").expect("create nested file");
+
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .with_file_links();
+        fs_tree.ensure_tree_built();
+
+        // Render with a TTY terminal so OSC8 links are emitted
+        let term = crate::terminal::Terminal::builder()
+            .width(120)
+            .is_tty(true)
+            .build();
+        let result = fs_tree.fallback_render(&term);
+
+        let canonical = temp.path().canonicalize().expect("canonicalize");
+
+        // File should have an OSC8 link with the absolute path
+        let file_link = format!(
+            "\x1b]8;;file://{}/hello.txt\x1b\\",
+            canonical.display()
+        );
+        assert!(
+            result.contains(&file_link),
+            "Expected OSC8 link for hello.txt in output.\nLooking for: {:?}\nOutput: {:?}",
+            file_link,
+            result
+        );
+
+        // Nested file should have full path
+        let nested_link = format!(
+            "\x1b]8;;file://{}/sub/nested.rs\x1b\\",
+            canonical.display()
+        );
+        assert!(
+            result.contains(&nested_link),
+            "Expected OSC8 link for sub/nested.rs in output.\nLooking for: {:?}\nOutput: {:?}",
+            nested_link,
+            result
+        );
+
+        // Directory should also be linked
+        let dir_link = format!(
+            "\x1b]8;;file://{}/sub\x1b\\",
+            canonical.display()
+        );
+        assert!(
+            result.contains(&dir_link),
+            "Expected OSC8 link for sub/ directory in output.\nLooking for: {:?}\nOutput: {:?}",
+            dir_link,
+            result
+        );
+    }
+
+    #[test]
+    fn test_with_file_links_disabled_has_no_osc8() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("test.txt"), "").expect("create file");
+
+        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
+        fs_tree.ensure_tree_built();
+
+        let term = crate::terminal::Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .build();
+        let result = fs_tree.fallback_render(&term);
+
+        // Should NOT contain OSC8 sequences
+        assert!(
+            !result.contains("\x1b]8;;"),
+            "Expected no OSC8 links when file_links is disabled.\nOutput: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_with_file_links_no_osc8_without_tty() {
+        use std::fs;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        fs::write(temp.path().join("test.txt"), "").expect("create file");
+
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .with_file_links();
+        fs_tree.ensure_tree_built();
+
+        // render() has no terminal context (is_tty=false)
+        let result = fs_tree.render(Some(80));
+
+        // Should NOT contain OSC8 sequences without TTY
+        assert!(
+            !result.contains("\x1b]8;;"),
+            "Expected no OSC8 links without TTY.\nOutput: {:?}",
+            result
+        );
     }
 
     #[test]
