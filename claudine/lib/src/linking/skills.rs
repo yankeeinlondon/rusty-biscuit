@@ -72,6 +72,12 @@ pub struct SkillException {
     pub topic: String,
     /// Path to the SKILL.md file (or expected location).
     pub skill_md_path: PathBuf,
+    /// For `Invalid`: names of missing required frontmatter properties.
+    pub missing_properties: Vec<String>,
+    /// For `BrokenLink`: the markdown link text (`[text]`).
+    pub link_text: Option<String>,
+    /// For `BrokenLink`: the link target path (`(target)`).
+    pub link_target: Option<String>,
 }
 
 /// Directory-level diagnostic explaining why all skills for a scope are missing.
@@ -105,6 +111,8 @@ pub struct SkillFixSummary {
     pub already_linked: usize,
     /// Operations skipped (real directory exists, symlink points elsewhere, etc.).
     pub skipped: usize,
+    /// SKILL.md files that had a missing `name` property auto-inserted.
+    pub names_inserted: usize,
 }
 
 /// Fix missing skill links for non-Claude providers.
@@ -128,6 +136,14 @@ pub fn fix_missing_skills(paths: &ProviderSkillPaths) -> Result<SkillFixSummary>
 
     let user_skills = scan_skill_dir(user_dir.as_ref());
     let repo_skills = scan_skill_dir(repo_dir.as_ref());
+
+    // Fix missing `name` property in canonical Claude skills
+    for (name, path) in user_skills.iter().chain(repo_skills.iter()) {
+        let skill_md = path.join("SKILL.md");
+        if fix_missing_name(name, &skill_md)? {
+            summary.names_inserted += 1;
+        }
+    }
 
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -357,6 +373,17 @@ fn gather_exceptions(
         check_no_links(&mut exceptions, name, &skill_md);
     }
 
+    // Scope-specific skill sets for missing-link checks.
+    // Each scope should only expect skills that exist in Claude's corresponding scope.
+    let user_canonical: BTreeMap<&str, &PathBuf> = user_skills
+        .iter()
+        .map(|(name, path)| (name.as_str(), path))
+        .collect();
+    let repo_canonical: BTreeMap<&str, &PathBuf> = repo_skills
+        .iter()
+        .map(|(name, path)| (name.as_str(), path))
+        .collect();
+
     // Check other providers for missing skills
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -377,13 +404,17 @@ fn gather_exceptions(
             continue;
         }
 
-        // Check both user and repo scopes
+        // Check each scope against its own source skill set
         for scope in [ResourceScope::User, ResourceScope::Repo] {
+            let scope_skills = match scope {
+                ResourceScope::User => &user_canonical,
+                ResourceScope::Repo => &repo_canonical,
+            };
             check_scope_missing(
                 paths,
                 provider,
                 scope,
-                &canonical,
+                scope_skills,
                 &mut exceptions,
                 &mut diagnostics,
             );
@@ -445,13 +476,18 @@ fn check_scope_missing(
                 exception_type: ExceptionType::Missing,
                 topic: name.to_string(),
                 skill_md_path: expected.join("SKILL.md"),
+                missing_properties: Vec::new(),
+                link_text: None,
+                link_target: None,
             });
         }
     }
 }
 
-/// Check if a SKILL.md is missing a `description` in frontmatter.
+/// Check if a SKILL.md is missing required frontmatter properties.
 fn check_invalid(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &PathBuf) {
+    const REQUIRED_PROPERTIES: &[&str] = &["name", "description"];
+
     let content = match fs::read_to_string(skill_md) {
         Ok(c) => c,
         Err(_) => return,
@@ -461,23 +497,79 @@ fn check_invalid(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &Pa
         Err(_) => return,
     };
 
-    let has_description = parsed
+    let mut missing = Vec::new();
+    for &prop in REQUIRED_PROPERTIES {
+        let has_prop = parsed
+            .frontmatter
+            .get(serde_yaml_ng::Value::String(prop.to_string()))
+            .map(|v| match v {
+                serde_yaml_ng::Value::String(s) => !s.trim().is_empty(),
+                _ => false,
+            })
+            .unwrap_or(false);
+        if !has_prop {
+            missing.push(prop.to_string());
+        }
+    }
+
+    if !missing.is_empty() {
+        exceptions.push(SkillException {
+            provider: Provider::Claude,
+            exception_type: ExceptionType::Invalid,
+            topic: name.to_string(),
+            skill_md_path: skill_md.clone(),
+            missing_properties: missing,
+            link_text: None,
+            link_target: None,
+        });
+    }
+}
+
+/// Fix a SKILL.md that is missing the `name` frontmatter property.
+///
+/// - If frontmatter exists but has no `name`, inserts it after the opening `---`.
+/// - If no frontmatter exists, prepends a `---\nname: {topic}\n---\n` block.
+///
+/// Returns `true` if a fix was applied.
+fn fix_missing_name(topic: &str, skill_md: &PathBuf) -> Result<bool> {
+    let content = match fs::read_to_string(skill_md) {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    let parsed = match parse_markdown_document(&content) {
+        Ok(p) => p,
+        Err(_) => return Ok(false),
+    };
+
+    let has_name = parsed
         .frontmatter
-        .get(serde_yaml_ng::Value::String("description".to_string()))
+        .get(serde_yaml_ng::Value::String("name".to_string()))
         .map(|v| match v {
             serde_yaml_ng::Value::String(s) => !s.trim().is_empty(),
             _ => false,
         })
         .unwrap_or(false);
 
-    if !has_description {
-        exceptions.push(SkillException {
-            provider: Provider::Claude,
-            exception_type: ExceptionType::Invalid,
-            topic: name.to_string(),
-            skill_md_path: skill_md.clone(),
-        });
+    if has_name {
+        return Ok(false);
     }
+
+    let new_content = if parsed.had_frontmatter {
+        // Insert `name: {topic}` right after the opening `---`
+        if content.starts_with("---\r\n") {
+            format!("---\r\nname: {topic}\r\n{}", &content[5..])
+        } else if content.starts_with("---\n") {
+            format!("---\nname: {topic}\n{}", &content[4..])
+        } else {
+            return Ok(false);
+        }
+    } else {
+        // No frontmatter — prepend a new block
+        format!("---\nname: {topic}\n---\n\n{content}")
+    };
+
+    fs::write(skill_md, new_content)?;
+    Ok(true)
 }
 
 /// Check for broken relative links in SKILL.md body.
@@ -498,6 +590,7 @@ fn check_broken_links(exceptions: &mut Vec<SkillException>, name: &str, skill_md
 
     let link_re = Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").unwrap();
     for cap in link_re.captures_iter(&parsed.body) {
+        let link_text = cap[1].to_string();
         let target = &cap[2];
         if target.starts_with("http://")
             || target.starts_with("https://")
@@ -517,6 +610,9 @@ fn check_broken_links(exceptions: &mut Vec<SkillException>, name: &str, skill_md
                 exception_type: ExceptionType::BrokenLink,
                 topic: name.to_string(),
                 skill_md_path: skill_md.clone(),
+                missing_properties: Vec::new(),
+                link_text: Some(link_text),
+                link_target: Some(target.to_string()),
             });
         }
     }
@@ -544,6 +640,9 @@ fn check_no_links(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &P
             exception_type: ExceptionType::NoLinks,
             topic: name.to_string(),
             skill_md_path: skill_md.clone(),
+            missing_properties: Vec::new(),
+            link_text: None,
+            link_target: None,
         });
     }
 }
@@ -883,7 +982,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_paths_with_gemini(tmp.path());
 
-        // Create Claude skills
+        // Create Claude skills in user scope only
         let user_dir = tmp.path().join("user/skills");
         setup_skill(&user_dir, "my-skill", "A skill", "# Body\n");
 
@@ -907,9 +1006,40 @@ mod tests {
                 e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing
             })
             .collect();
-        // 1 missing in user scope + 1 missing in repo scope
+        // Only user scope: user-only skills are NOT expected in repo scope
+        assert_eq!(gemini_missing.len(), 1);
+        assert_eq!(gemini_missing[0].topic, "my-skill");
+    }
+
+    #[test]
+    fn missing_exceptions_scope_aware_both_scopes() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths_with_gemini(tmp.path());
+
+        // Create Claude skills in BOTH scopes
+        let user_dir = tmp.path().join("user/skills");
+        let repo_dir = tmp.path().join("repo/skills");
+        setup_skill(&user_dir, "user-tool", "User tool", "# Body\n");
+        setup_skill(&repo_dir, "repo-tool", "Repo tool", "# Body\n");
+
+        // Create Gemini skills directories (exist but empty)
+        fs::create_dir_all(tmp.path().join("gemini/skills")).unwrap();
+        fs::create_dir_all(tmp.path().join("repo/.gemini/skills")).unwrap();
+
+        let report = list_skills(&paths, &[]).unwrap();
+
+        let gemini_missing: Vec<_> = report
+            .exceptions
+            .iter()
+            .filter(|e| {
+                e.provider == Provider::Gemini && e.exception_type == ExceptionType::Missing
+            })
+            .collect();
+        // 1 from user scope (user-tool) + 1 from repo scope (repo-tool)
         assert_eq!(gemini_missing.len(), 2);
-        assert!(gemini_missing.iter().all(|e| e.topic == "my-skill"));
+        let topics: BTreeSet<&str> = gemini_missing.iter().map(|e| e.topic.as_str()).collect();
+        assert!(topics.contains("user-tool"));
+        assert!(topics.contains("repo-tool"));
     }
 
     #[test]

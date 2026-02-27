@@ -8,7 +8,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::WordWrap;
+use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
 use claudine::badges;
 use claudine::dispatch::loader::load_config;
 use claudine::linking::{
@@ -117,7 +117,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
 
     let has_exceptions = !report.exceptions.is_empty() || !report.diagnostics.is_empty();
     if has_exceptions {
-        render_exceptions(&term, &report.exceptions, &report.diagnostics);
+        render_exceptions(&term, &report.exceptions, &report.diagnostics, verbose);
     }
 
     render_footer(
@@ -283,6 +283,7 @@ fn render_exceptions(
     term: &Terminal,
     exceptions: &[SkillException],
     diagnostics: &[SkillDirectoryDiagnostic],
+    verbose: bool,
 ) {
     log::data("");
     log::data(&badges::EXCEPTIONS);
@@ -326,40 +327,126 @@ fn render_exceptions(
 
         if let Some(type_map) = by_provider.get(provider_name) {
             for (exc_type, entries) in type_map {
-                let is_missing = *exc_type == ExceptionType::Missing;
                 let count = entries.len();
                 let category_label =
                     Prose::new(format!("<b>{exc_type}</b> ({count})"));
                 inner_list.add(category_label);
 
-                // Show directory-level diagnostics before individual missing skills
                 let mut detail_list = UnorderedList::empty();
-                if is_missing
-                    && let Some(provider_diags) = diag_by_provider.get(provider_name)
-                {
-                    for diag in provider_diags {
-                        detail_list.add(Prose::new(diag.message.clone()));
+
+                match exc_type {
+                    ExceptionType::Missing => {
+                        // Show directory-level diagnostics before individual missing skills
+                        if let Some(provider_diags) = diag_by_provider.get(provider_name) {
+                            for diag in provider_diags {
+                                detail_list.add(Prose::new(diag.message.clone()));
+                            }
+                        }
+                        let topics: Vec<String> =
+                            entries.iter().map(|e| e.topic.clone()).collect();
+                        let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
+                            WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
+                        );
+                        detail_list.add(topic_line);
+                    }
+                    ExceptionType::Invalid => {
+                        // Each topic as its own bullet with missing property details
+                        for e in entries {
+                            let props_markup = e
+                                .missing_properties
+                                .iter()
+                                .map(|p| format!("<red>{p}</red>"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let label = if e.missing_properties.is_empty() {
+                                format!(
+                                    r#"<b><a href="{}">{}</a></b>"#,
+                                    e.skill_md_path.display(),
+                                    e.topic
+                                )
+                            } else {
+                                format!(
+                                    r#"<b><a href="{}">{}</a></b> (<i>missing the properties {}</i>)"#,
+                                    e.skill_md_path.display(),
+                                    e.topic,
+                                    props_markup
+                                )
+                            };
+                            detail_list.add(Prose::new(label));
+                        }
+                    }
+                    ExceptionType::BrokenLink => {
+                        // Group broken links by topic, then list each broken link underneath
+                        let mut by_topic: BTreeMap<&str, Vec<&SkillException>> = BTreeMap::new();
+                        for e in entries {
+                            by_topic.entry(&e.topic).or_default().push(e);
+                        }
+                        for (topic, topic_entries) in &by_topic {
+                            let first = topic_entries[0];
+                            let topic_label = format!(
+                                r#"<b><a href="{}">{}</a></b>"#,
+                                first.skill_md_path.display(),
+                                topic
+                            );
+                            detail_list.add(Prose::new(topic_label));
+
+                            let mut link_list = UnorderedList::empty();
+                            for e in topic_entries {
+                                let link_text = e.link_text.as_deref().unwrap_or("?");
+                                let link_target = e.link_target.as_deref().unwrap_or("?");
+                                let source_file = e
+                                    .skill_md_path
+                                    .file_name()
+                                    .and_then(|f| f.to_str())
+                                    .unwrap_or("SKILL.md");
+                                let msg = format!(
+                                    "<dim><i>in the file <blue>{source_file}</blue> the link \
+                                     <orange>[{link_text}]</orange><red>({link_target})</red> \
+                                     uses an invalid file reference!</i></dim>"
+                                );
+                                link_list.add(Prose::new(msg));
+                            }
+                            detail_list.add(link_list);
+
+                            // In verbose mode, show the skill's file tree with token counts
+                            if verbose {
+                                if let Some(dir) = first.skill_md_path.parent()
+                                    && let Some(dir_str) = dir.to_str()
+                                    && let Ok(mut fs) =
+                                        FileSystem::new_with_formatting(dir_str)
+                                {
+                                    let layout = Layout {
+                                        left_margin: Margin::Chars(4),
+                                        ..Layout::default()
+                                    };
+                                    fs = fs.show_tokens().with_file_links().layout(layout);
+                                    fs.ensure_tree_built();
+                                    detail_list.add(Prose::new(""));
+                                    detail_list.add(fs);
+                                    detail_list.add(Prose::new(""));
+                                }
+                            }
+                        }
+                    }
+                    ExceptionType::NoLinks => {
+                        // Comma-separated linked topic names
+                        let topics: Vec<String> = entries
+                            .iter()
+                            .map(|e| {
+                                format!(
+                                    r#"<a href="{}">{}</a>"#,
+                                    e.skill_md_path.display(),
+                                    e.topic
+                                )
+                            })
+                            .collect();
+                        let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
+                            WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
+                        );
+                        detail_list.add(topic_line);
                     }
                 }
 
-                let topics: Vec<String> = entries
-                    .iter()
-                    .map(|e| {
-                        if is_missing {
-                            e.topic.clone()
-                        } else {
-                            format!(
-                                r#"<a href="{}">{}</a>"#,
-                                e.skill_md_path.display(),
-                                e.topic
-                            )
-                        }
-                    })
-                    .collect();
-
-                let topic_line = Prose::new(topics.join(", "))
-                    .with_word_wrap(WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)));
-                detail_list.add(topic_line);
                 inner_list.add(detail_list);
             }
         } else if let Some(provider_diags) = diag_by_provider.get(provider_name) {
@@ -391,6 +478,7 @@ fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
         format!("links_created={}", summary.links_created),
         format!("already_linked={}", summary.already_linked),
         format!("skipped={}", summary.skipped),
+        format!("names_inserted={}", summary.names_inserted),
     ];
     let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));
     log::data(&format!(" {}", detail.fallback_render(term)));

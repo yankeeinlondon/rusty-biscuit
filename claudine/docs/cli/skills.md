@@ -36,7 +36,8 @@ The reporting is broken down into the following sections:
           - The second line is the description of the skill (dim, italics)
           - Then a blank line
           - Now we use the `FileSystem` struct from biscuit-terminal to show the skill's files.
-              - Include the metric (tokens)
+              - Include the metric **tokens**
+              - make sure files are OSC8 links with the `with_file_links()` builder function
 
       - **Verbose**
           - If the number of skills (_after filtering_) is less than 6 (and more than 1) we will report using the verbose style.
@@ -57,6 +58,9 @@ The reporting is broken down into the following sections:
    - We will report on _user scoped_ and _repo scoped_ issues using color variance to distinguish between the two scopes. The _repo scoped_ topics will be colored in purple.
    - Exceptions show no difference regardless of the `--verbose` / `-v` 
    - However, Exceptions use the same _filtering_ rules as the Defined Skills section so we should ONLY report on those skills which match the fuzzy matching of the filter globs passed in
+   - When the `-v` or `--verbose` flag is used AND there are `broken-link` exceptions we will add a `FileSystem` struct for the skill files to provide additional context.
+       - the FileSystem should use the tokens metric
+       - the FileSystem should have a left margin of 4
 
 4. Footer Messages
 

@@ -101,7 +101,7 @@ Sub-modules:
 - `matcher` — Regex-based event filtering against tool name, notification type, or error
 - `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa, report formatting)
 
-**Config merge strategy**: repo-level provider configs completely replace user-level; global settings merge field-by-field with repo taking precedence.
+**Config merge strategy**: repo-level provider configs completely replace user-level; global settings merge field-by-field with repo taking precedence. `linking.canonical_provider` merges slot-by-slot so user-scoped canonical providers survive when repo only sets repo-scoped slots.
 
 ### Template Variables (`dispatch::template`)
 
@@ -211,7 +211,7 @@ Cross-provider policy engines that operate on normalized event context:
 
 ## Lessons Learned
 
-- **Config merge is intentionally asymmetric**: repo provider configs fully replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences.
+- **Config merge is intentionally asymmetric**: repo provider configs fully replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences. Nested structs like `linking` and `canonical_provider` also merge field-by-field — repo non-`None` values override user, but user-only fields (e.g. `user_skill`) survive when the repo config doesn't set them.
 - **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
 - **Template regex is lazy-compiled**: `LazyLock<Regex>` ensures the Handlebars `\{\{\s*([^{}]+?)\s*\}\}` pattern compiles once across all interpolation calls.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
