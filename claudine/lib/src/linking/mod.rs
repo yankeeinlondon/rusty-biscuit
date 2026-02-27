@@ -31,8 +31,8 @@ pub use execution::{ApplySummary, analyze_resource_links, apply_fixable_resource
 pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
 pub use skills::{
-    ExceptionType, SkillDirectoryDiagnostic, SkillException, SkillFixSummary, SkillInfo,
-    SkillScope, SkillsReport, fix_missing_skills, list_skills,
+    ExceptionType, SkillDirectoryDiagnostic, SkillException, SkillFilter, SkillFixSummary,
+    SkillInfo, SkillScope, SkillsReport, fix_missing_skills, list_skills,
 };
 pub use symlink::{LinkResult, category_link_target, relative_path};
 

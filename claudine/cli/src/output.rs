@@ -189,7 +189,7 @@ pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) 
         Prose::new(
             "- <blue><bold>Info:</bold></blue> potentially dangerous ENV variables were removed; \
              if you need one of these to be included use the <blue>--include \
-             <dim><ENV></dim></blue> CLI switch",
+             <dim>\\<ENV\\></dim></blue> CLI switch",
         )
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
         .fallback_render(term),

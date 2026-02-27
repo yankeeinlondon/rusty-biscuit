@@ -106,9 +106,12 @@
             "qwen",
             "rmcp",
             "rustls",
+            "signingkey",
             "startswith",
             "wezterm",
             "winget",
+            "worktree",
+            "worktrees",
             "ZENMUX"
         ]
     }

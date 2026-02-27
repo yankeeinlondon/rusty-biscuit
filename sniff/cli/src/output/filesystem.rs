@@ -255,6 +255,11 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let sha = commit.sha[0..7].to_string();
         let date_prefix = if use_on { "<i>on</i> " } else { "" };
         let refs_part = format_ref_decorations(&commit.refs);
+        let user_part = if verbose > 0 {
+            format!(" <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>", commit.author)
+        } else {
+            String::new()
+        };
 
         let commit_line = if let Some(ref op) = cc.operation {
             let scope_part = cc
@@ -263,8 +268,8 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 .map(|s| format!("(<dim>{}</dim>)", s))
                 .unwrap_or_default();
             format!(
-                "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}: <dim>{}</dim>",
-                sha, op, scope_part, time_str, date_prefix, date_str, refs_part, cc.description
+                "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
+                sha, op, scope_part, time_str, date_prefix, date_str, refs_part, user_part, cc.description
             )
         } else {
             // Non-conventional commit
@@ -275,8 +280,8 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 first_line.to_string()
             };
             format!(
-                "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}",
-                sha, truncated, date_prefix, date_str, refs_part,
+                "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
+                sha, truncated, date_prefix, date_str, refs_part, user_part,
             )
         };
         status_items.push(commit_line);
@@ -346,6 +351,27 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
         println!("  {}", clean.fallback_render(&terminal));
+    }
+
+    // === Worktrees Section (only if worktrees exist) ===
+    if !git.worktrees.is_empty() {
+        let wt_title = Prose::new("<b><u>Worktrees</u></b>");
+        println!("{}\n", wt_title.fallback_render(&terminal));
+
+        let mut wt_list = UnorderedList::empty();
+        wt_list.add(Prose::new(format!(
+            "The <i>base repo</i> is located at <blue>{}</blue>",
+            git.repo_root.display()
+        )));
+        for (branch, info) in &git.worktrees {
+            wt_list.add(Prose::new(format!(
+                "<b>{}:</b> <i>the {} worktree is located at</i> <blue>{}</blue>",
+                branch,
+                branch,
+                info.filepath.display()
+            )));
+        }
+        println!("{}", wt_list.fallback_render(&terminal));
     }
 
     // === Meta Section ===

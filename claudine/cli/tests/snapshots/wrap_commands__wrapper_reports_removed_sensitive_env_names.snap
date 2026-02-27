@@ -1,6 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
-assertion_line: 152
+assertion_line: 154
 expression: strip_ansi(&stderr)
 ---
 
@@ -16,4 +16,4 @@ Environment Variables:
 • YOLO=false
 
 - Info: potentially dangerous ENV variables were removed; if you need one of
-   these to be included use the --include <ENV></env> CLI switch
+   these to be included use the --include <ENV> CLI switch

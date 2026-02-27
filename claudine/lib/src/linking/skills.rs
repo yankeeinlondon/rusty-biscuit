@@ -13,6 +13,93 @@ use super::compatibility::parse_markdown_document;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{create_skill_link, LinkResult};
 
+/// Parsed skill filter with optional negation and exact-match modes.
+///
+/// ## Syntax
+///
+/// | Input      | Pattern  | Negated | Exact |
+/// |------------|----------|---------|-------|
+/// | `rust`     | `rust`   | false   | false |
+/// | `rust!`    | `rust`   | false   | true  |
+/// | `-rust`    | `rust`   | true    | false |
+/// | `!rust`    | `rust`   | true    | false |
+/// | `-rust!`   | `rust`   | true    | true  |
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillFilter {
+    /// Lowercased pattern (prefix/suffix markers stripped).
+    pub pattern: String,
+    /// Whether this is a negation filter (prefixed with `!` or `-`).
+    pub negated: bool,
+    /// Whether this requires an exact name match (suffixed with `!`).
+    pub exact: bool,
+}
+
+impl SkillFilter {
+    /// Parse a raw filter string into a `SkillFilter`.
+    ///
+    /// Returns `None` if the pattern is empty after stripping markers.
+    pub fn parse(raw: &str) -> Option<Self> {
+        let mut s = raw.trim();
+        let negated = if s.starts_with('!') || s.starts_with('-') {
+            s = &s[1..];
+            true
+        } else {
+            false
+        };
+        let exact = if s.ends_with('!') {
+            s = &s[..s.len() - 1];
+            true
+        } else {
+            false
+        };
+        let pattern = s.to_lowercase();
+        if pattern.is_empty() {
+            return None;
+        }
+        Some(Self {
+            pattern,
+            negated,
+            exact,
+        })
+    }
+
+    /// Parse a slice of raw filter strings, discarding any that are empty.
+    pub fn parse_all(raw: &[String]) -> Vec<Self> {
+        raw.iter().filter_map(|s| Self::parse(s)).collect()
+    }
+
+    /// Test whether this filter matches the given skill name.
+    pub fn matches(&self, name: &str) -> bool {
+        let lower = name.to_lowercase();
+        if self.exact {
+            lower == self.pattern
+        } else {
+            lower.contains(&self.pattern)
+        }
+    }
+
+    /// Decide whether a skill name should be retained given a set of filters.
+    ///
+    /// - Negation always wins: if any negative filter matches, the name is excluded.
+    /// - If positive filters exist, at least one must match.
+    /// - If only negative filters exist, everything not excluded is kept.
+    pub fn retain(filters: &[Self], name: &str) -> bool {
+        // Check negations first — they always win
+        for f in filters {
+            if f.negated && f.matches(name) {
+                return false;
+            }
+        }
+        // Check positive filters
+        let has_positive = filters.iter().any(|f| !f.negated);
+        if has_positive {
+            filters.iter().any(|f| !f.negated && f.matches(name))
+        } else {
+            true
+        }
+    }
+}
+
 /// Scope classification for a discovered skill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkillScope {
@@ -277,13 +364,10 @@ pub fn list_skills(paths: &ProviderSkillPaths, filters: &[String]) -> Result<Ski
         }
     }
 
-    // Apply fuzzy filters
-    if !filters.is_empty() {
-        let lowered: Vec<String> = filters.iter().map(|f| f.to_lowercase()).collect();
-        skills.retain(|skill| {
-            let name_lower = skill.name.to_lowercase();
-            lowered.iter().any(|filter| name_lower.contains(filter))
-        });
+    // Apply filters (fuzzy, exact, negation)
+    let parsed_filters = SkillFilter::parse_all(filters);
+    if !parsed_filters.is_empty() {
+        skills.retain(|skill| SkillFilter::retain(&parsed_filters, &skill.name));
     }
 
     skills.sort_by(|a, b| a.scope.cmp(&b.scope).then(a.name.cmp(&b.name)));
@@ -1244,5 +1328,187 @@ mod tests {
             })
             .collect();
         assert!(gemini_missing.is_empty());
+    }
+
+    // ── SkillFilter parsing tests ────────────────────────────────────
+
+    #[test]
+    fn parse_simple_fuzzy() {
+        let f = SkillFilter::parse("rust").unwrap();
+        assert_eq!(f.pattern, "rust");
+        assert!(!f.negated);
+        assert!(!f.exact);
+    }
+
+    #[test]
+    fn parse_exact_suffix() {
+        let f = SkillFilter::parse("rust!").unwrap();
+        assert_eq!(f.pattern, "rust");
+        assert!(!f.negated);
+        assert!(f.exact);
+    }
+
+    #[test]
+    fn parse_negation_dash_prefix() {
+        let f = SkillFilter::parse("-rust").unwrap();
+        assert_eq!(f.pattern, "rust");
+        assert!(f.negated);
+        assert!(!f.exact);
+    }
+
+    #[test]
+    fn parse_negation_bang_prefix() {
+        let f = SkillFilter::parse("!rust").unwrap();
+        assert_eq!(f.pattern, "rust");
+        assert!(f.negated);
+        assert!(!f.exact);
+    }
+
+    #[test]
+    fn parse_negation_and_exact() {
+        let f = SkillFilter::parse("-rust!").unwrap();
+        assert_eq!(f.pattern, "rust");
+        assert!(f.negated);
+        assert!(f.exact);
+    }
+
+    #[test]
+    fn parse_is_case_insensitive() {
+        let f = SkillFilter::parse("Rust").unwrap();
+        assert_eq!(f.pattern, "rust");
+    }
+
+    #[test]
+    fn parse_empty_returns_none() {
+        assert!(SkillFilter::parse("").is_none());
+        assert!(SkillFilter::parse("-").is_none());
+        assert!(SkillFilter::parse("!").is_none());
+        assert!(SkillFilter::parse("-!").is_none());
+    }
+
+    #[test]
+    fn parse_all_filters_empty() {
+        let raw = vec!["rust".to_string(), "".to_string(), "-!".to_string()];
+        let filters = SkillFilter::parse_all(&raw);
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].pattern, "rust");
+    }
+
+    // ── SkillFilter matching tests ───────────────────────────────────
+
+    #[test]
+    fn fuzzy_matches_substring() {
+        let f = SkillFilter::parse("us").unwrap();
+        assert!(f.matches("rust"));
+        assert!(f.matches("RUST"));
+        assert!(!f.matches("python"));
+    }
+
+    #[test]
+    fn exact_matches_only_full_name() {
+        let f = SkillFilter::parse("rust!").unwrap();
+        assert!(f.matches("rust"));
+        assert!(f.matches("Rust"));
+        assert!(!f.matches("rusty"));
+        assert!(!f.matches("my-rust"));
+    }
+
+    // ── SkillFilter::retain tests ────────────────────────────────────
+
+    #[test]
+    fn retain_positive_fuzzy_only() {
+        let filters = SkillFilter::parse_all(&["us".to_string()]);
+        assert!(SkillFilter::retain(&filters, "rust"));
+        assert!(!SkillFilter::retain(&filters, "python"));
+    }
+
+    #[test]
+    fn retain_negation_only() {
+        let filters = SkillFilter::parse_all(&["-rust".to_string()]);
+        assert!(!SkillFilter::retain(&filters, "rust"));
+        assert!(!SkillFilter::retain(&filters, "rusty"));
+        assert!(SkillFilter::retain(&filters, "python"));
+    }
+
+    #[test]
+    fn retain_negation_wins_over_positive() {
+        let filters = SkillFilter::parse_all(&["us".to_string(), "-rust!".to_string()]);
+        // "rust" matches positive "us" but is excluded by exact negation "-rust!"
+        assert!(!SkillFilter::retain(&filters, "rust"));
+        // "rusty" matches positive "us" and is NOT excluded by exact negation "-rust!"
+        assert!(SkillFilter::retain(&filters, "rusty"));
+    }
+
+    #[test]
+    fn retain_combined_positive_and_negation() {
+        let filters = SkillFilter::parse_all(&["a".to_string(), "-alpha".to_string()]);
+        // "gamma" contains "a" → included, not negated → kept
+        assert!(SkillFilter::retain(&filters, "gamma"));
+        // "alpha" contains "a" → included, but negated by "-alpha" → excluded
+        assert!(!SkillFilter::retain(&filters, "alpha"));
+        // "beta" contains "a" → included, not negated → kept
+        assert!(SkillFilter::retain(&filters, "beta"));
+        // "xyz" does not contain "a" → not included → excluded
+        assert!(!SkillFilter::retain(&filters, "xyz"));
+    }
+
+    #[test]
+    fn retain_only_negations_keeps_non_matches() {
+        let filters = SkillFilter::parse_all(&["-beta".to_string()]);
+        assert!(SkillFilter::retain(&filters, "alpha"));
+        assert!(!SkillFilter::retain(&filters, "beta"));
+        assert!(SkillFilter::retain(&filters, "gamma"));
+    }
+
+    // ── list_skills with new filter modes ────────────────────────────
+
+    #[test]
+    fn list_skills_negation_excludes_match() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(tmp.path());
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "alpha", "Alpha", "# A\n");
+        setup_skill(&user_dir, "beta", "Beta", "# B\n");
+        setup_skill(&user_dir, "gamma", "Gamma", "# G\n");
+
+        let report = list_skills(&paths, &["-beta".to_string()]).unwrap();
+        let names: Vec<&str> = report.skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(!names.contains(&"beta"));
+        assert!(names.contains(&"gamma"));
+    }
+
+    #[test]
+    fn list_skills_exact_matches_only_full_name() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(tmp.path());
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "alpha", "Alpha", "# A\n");
+        setup_skill(&user_dir, "alpha-extended", "Alpha Ext", "# AE\n");
+
+        let report = list_skills(&paths, &["alpha!".to_string()]).unwrap();
+        assert_eq!(report.skills.len(), 1);
+        assert_eq!(report.skills[0].name, "alpha");
+    }
+
+    #[test]
+    fn list_skills_negation_exact_combo() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(tmp.path());
+        let user_dir = tmp.path().join("user/skills");
+        setup_skill(&user_dir, "rust", "Rust", "# R\n");
+        setup_skill(&user_dir, "rusty", "Rusty", "# Ry\n");
+        setup_skill(&user_dir, "python", "Python", "# P\n");
+
+        // Fuzzy "rust" but exclude exact "rust"
+        let report = list_skills(
+            &paths,
+            &["rust".to_string(), "-rust!".to_string()],
+        )
+        .unwrap();
+        let names: Vec<&str> = report.skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(!names.contains(&"rust"));
+        assert!(names.contains(&"rusty"));
+        assert!(!names.contains(&"python"));
     }
 }

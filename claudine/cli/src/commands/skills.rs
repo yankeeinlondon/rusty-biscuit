@@ -14,8 +14,8 @@ use claudine::badges;
 use claudine::dispatch::loader::load_config;
 use claudine::linking::{
     ExceptionType, LinkableResource, ProviderSkillPaths, ResourceScope, SkillDirectoryDiagnostic,
-    SkillException, SkillFixSummary, SkillInfo, SkillScope, canonical_provider, capabilities_for,
-    fix_missing_skills, list_skills,
+    SkillException, SkillFilter, SkillFixSummary, SkillInfo, SkillScope, canonical_provider,
+    capabilities_for, fix_missing_skills, list_skills,
 };
 use sniff::filesystem::git::detect_git;
 
@@ -24,7 +24,7 @@ use crate::log;
 /// Arguments for the skills subcommand.
 #[derive(Args)]
 pub struct SkillsArgs {
-    /// Only show skills matching these terms (fuzzy, case-insensitive).
+    /// Filter skills by name. Supports negation (`-rust` or `!rust`) and exact match (`rust!`).
     #[arg(value_name = "FILTER")]
     pub filter: Vec<String>,
 
@@ -65,13 +65,14 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
 
     let mut report = list_skills(&paths, &args.filter)?;
 
-    // Filter exceptions to match the same fuzzy filters applied to skills
+    // Filter exceptions to match the same filters applied to skills
     if !args.filter.is_empty() {
-        let lowered: Vec<String> = args.filter.iter().map(|f| f.to_lowercase()).collect();
-        report.exceptions.retain(|exc| {
-            let topic_lower = exc.topic.to_lowercase();
-            lowered.iter().any(|filter| topic_lower.contains(filter))
-        });
+        let filters = SkillFilter::parse_all(&args.filter);
+        if !filters.is_empty() {
+            report
+                .exceptions
+                .retain(|exc| SkillFilter::retain(&filters, &exc.topic));
+        }
         report.diagnostics.clear();
     }
 
@@ -256,7 +257,9 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
     }
 
     for (scope, group) in &by_scope {
-        log::data(scope_badge(*scope));
+        let count = group.len();
+        let badge_line = format!("{} <dim>(<i>{count}</i>)</dim>", scope_badge(*scope));
+        log::data(&Prose::new(badge_line).fallback_render(term));
         log::data("");
 
         let names: Vec<String> = group

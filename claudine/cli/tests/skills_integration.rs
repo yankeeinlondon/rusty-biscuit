@@ -450,3 +450,142 @@ fn skills_not_in_git_repo_shows_user_only_hint() {
         "footer should indicate CWD is not a git repo, got:\n{stdout}"
     );
 }
+
+// ── Negation filters ─────────────────────────────────────────────
+
+#[test]
+fn skills_negation_with_dash_prefix_excludes_match() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "alpha", "Alpha skill");
+    setup_skill(&skills_dir, "beta", "Beta skill");
+    setup_skill(&skills_dir, "gamma", "Gamma skill");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--", "-beta"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("alpha"),
+        "should show alpha, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("beta"),
+        "should NOT show beta, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("gamma"),
+        "should show gamma, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn skills_negation_with_bang_prefix_excludes_match() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "alpha", "Alpha skill");
+    setup_skill(&skills_dir, "beta", "Beta skill");
+    setup_skill(&skills_dir, "gamma", "Gamma skill");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "!beta"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("alpha"),
+        "should show alpha, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("beta"),
+        "should NOT show beta, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("gamma"),
+        "should show gamma, got:\n{stdout}"
+    );
+}
+
+// ── Exact filters ────────────────────────────────────────────────
+
+#[test]
+fn skills_exact_filter_matches_only_full_name() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "alpha", "Alpha skill");
+    setup_skill(&skills_dir, "alpha-extended", "Alpha extended skill");
+
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "alpha!"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("alpha"),
+        "should show alpha, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("alpha-extended"),
+        "should NOT show alpha-extended with exact filter, got:\n{stdout}"
+    );
+}
+
+// ── Combined positive + negation ─────────────────────────────────
+
+#[test]
+fn skills_combined_positive_and_negation() {
+    let workspace = TestWorkspace::new();
+    let home_dir = workspace.path().join("home");
+    let cwd = workspace.path().join("project");
+    let skills_dir = home_dir.join(".claude/skills");
+    fs::create_dir_all(&cwd).unwrap();
+    setup_skill(&skills_dir, "alpha", "Alpha skill");
+    setup_skill(&skills_dir, "beta", "Beta skill");
+    setup_skill(&skills_dir, "gamma", "Gamma skill");
+
+    // "a" matches alpha, beta, and gamma; "-alpha" excludes alpha
+    let output = cargo_bin_cmd!("claudine")
+        .current_dir(&cwd)
+        .env("HOME", &home_dir)
+        .env("NO_COLOR", "1")
+        .args(["skills", "--", "a", "-alpha"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("gamma"),
+        "should show gamma (contains 'a'), got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("beta"),
+        "should show beta (contains 'a'), got:\n{stdout}"
+    );
+    // "alpha" is excluded by negation despite matching positive "a"
+    assert!(
+        !stdout.contains("alpha"),
+        "should NOT show alpha (negated), got:\n{stdout}"
+    );
+}

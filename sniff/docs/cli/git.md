@@ -12,14 +12,17 @@ The status section provides a single pane of glass to report on the local repo/b
 
    - Recent commits are listed oldest-first (most recent at the bottom)
    - Count defaults to 10, configurable via `--history` / `-h` switch
+   - The placeholder `{user}` should be translated to:
+       - an empty string when the `--verbose` / `-v` flag is not used
+       - ` <dim><i>by </i></dim><b><indigo-500>{user-who-committed}</indigo-500></b>`
    - Each commit is parsed as a `ConventionalCommit`
    - Conventional commits render as:
-       - Prose::new(`[<b>{short-sha}</b>] <b><yellow>{operation}</yellow></b>(<dim>{scope}</dim>) <i>at</i> <blue><b>{time}</b></blue> {date-prefix}<blue>{date}</blue>{ref-decorations}: <dim>{description}</dim>`)
+       - Prose::new(`[<b>{short-sha}</b>] <b><yellow>{operation}</yellow></b>(<dim>{scope}</dim>) <i>at</i> <blue><b>{time}</b></blue> {date-prefix}<blue>{date}</blue>{ref-decorations}{user}: <dim>{description}</dim>`)
        - the `{date-prefix}` is `<i>on</i> ` when the commit is not from today, empty otherwise
        - the `{scope}` part (including parentheses) is omitted when there is no scope
        - the `{ref-decorations}` are formatted ref names (branches, tags, HEAD) pointing to this commit
    - Non-conventional commits render as:
-       - Prose::new(`[<b>{short-sha}</b>] <dim>{message}</dim> {date-prefix}<blue><b>{date}</b></blue>{ref-decorations}`)
+       - Prose::new(`[<b>{short-sha}</b>] <dim>{message}</dim> {date-prefix}<blue><b>{date}</b></blue>{ref-decorations}{user}`)
        - the `{message}` is truncated to 50 chars (with `...` suffix) if longer
 
 2. Staged files
@@ -42,7 +45,11 @@ The status section provides a single pane of glass to report on the local repo/b
 ## Worktrees Section
 
 - this section is only displayed IF the repo has worktrees defined
-- Prose::new(``)
+- Prose::new(`<b><u>Worktrees</u></b>`)
+- then we will have the following unordered list elements:
+    - Prose::new(`The <i>base repo</i> is located at <blue>{filepath}</blue>`)
+    - Then for every worktree detected:
+        - Prose::new(`<b>{worktree}:</b> <i>the {worktree} worktree is located at <blue>{filepath}</blue>`)
 
 ## Meta Section
 
