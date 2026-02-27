@@ -220,7 +220,7 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         && let Some(dir_str) = dir.to_str()
         && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
     {
-        fs = fs.show_tokens();
+        fs = fs.show_tokens().with_file_links();
         fs.ensure_tree_built();
         log::data(&fs.fallback_render(term));
     }
