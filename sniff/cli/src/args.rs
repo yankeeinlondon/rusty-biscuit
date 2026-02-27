@@ -4,6 +4,9 @@ use std::path::PathBuf;
 
 use crate::output::OutputFilter;
 
+/// Default number of recent commits to display in git output.
+pub const DEFAULT_COMMIT_COUNT: usize = 10;
+
 /// Detect system and repository information
 #[derive(Parser)]
 #[command(
@@ -173,8 +176,8 @@ pub enum Commands {
     /// Show git repository information, or inspect a remote by name/URL
     #[command(disable_help_flag = true)]
     Git {
-        /// Number of recent commits to display (default: 5)
-        #[arg(short = 'h', long, default_value = "5")]
+        /// Number of recent commits to display (default: 10)
+        #[arg(short = 'h', long, default_value_t = DEFAULT_COMMIT_COUNT)]
         history: usize,
 
         /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
@@ -407,7 +410,7 @@ impl Commands {
     pub fn history(&self) -> usize {
         match self {
             Commands::Git { history, .. } => *history,
-            _ => 5,
+            _ => DEFAULT_COMMIT_COUNT,
         }
     }
 

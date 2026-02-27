@@ -6,7 +6,7 @@ use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteRepor
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 
-use crate::args::{COMPLETIONS_HELP, Cli, Commands, DocsFilter, ServiceStateArg};
+use crate::args::{COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, ServiceStateArg};
 use crate::output::{self, OutputFilter};
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -120,8 +120,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         config = config.deep(true);
     }
 
-    // Set commit count from history flag (or default 5)
-    let history_count = cli.command.as_ref().map_or(5, |c| c.history());
+    // Set commit count from history flag
+    let history_count = cli.command.as_ref().map_or(DEFAULT_COMMIT_COUNT, |c| c.history());
     config = config.commit_count(history_count);
 
     // Apply skip logic based on filter mode
