@@ -316,7 +316,7 @@ pub fn print_text(
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref git) = filesystem.git
             {
-                print_git_section(git, history_count);
+                print_git_section(git, history_count, verbose);
             }
         }
         OutputFilter::Repo => {

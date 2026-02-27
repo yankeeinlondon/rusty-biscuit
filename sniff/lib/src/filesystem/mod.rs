@@ -11,7 +11,8 @@ pub mod repo;
 pub use docs::{MarkdownMeta, RepoDocuments, detect_docs};
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, CommitInfo, GitInfo, HostingProvider, RemoteInfo, RepoStatus, detect_git,
+    BehindStatus, CommitInfo, GitInfo, HostingProvider, LocalBranchInfo, RemoteInfo, RepoStatus,
+    detect_git,
 };
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{DependencyEntry, DependencyKind, MonorepoTool, Package, RepoInfo, detect_repo};

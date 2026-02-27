@@ -15,6 +15,36 @@ pub struct GitConfig {
     pub user_name: Option<String>,
     /// User email from git config (user.email).
     pub user_email: Option<String>,
+    /// GPG agent usage (gpg.useAgent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpg_use_agent: Option<bool>,
+    /// GPG program path (gpg.program).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpg_program: Option<String>,
+    /// Credential helper (credential.helper).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_helper: Option<String>,
+    /// GPG signing key (user.signingkey).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<String>,
+    /// Whether commits are signed by default (commit.gpgsign).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_sign: Option<bool>,
+    /// Whether tags are signed by default (tag.gpgsign).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_sign: Option<bool>,
+    /// Configured pager (core.pager).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pager: Option<String>,
+    /// Delta syntax theme (delta.syntax-theme).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_syntax_theme: Option<String>,
+    /// Delta light mode (delta.light).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_light: Option<bool>,
+    /// Delta side-by-side mode (delta.side-by-side).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_side_by_side: Option<bool>,
 }
 
 /// Parsed conventional commit.
@@ -159,6 +189,22 @@ pub struct RemoteTrackingStatus {
     pub behind: usize,
 }
 
+/// Information about a local branch.
+///
+/// Contains the branch name, abbreviated commit hash, and ahead/behind
+/// counts relative to the current branch's HEAD.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalBranchInfo {
+    /// Branch name (e.g., "main", "feature/xyz").
+    pub name: String,
+    /// Abbreviated commit hash for the branch tip (first 8 chars).
+    pub short_hash: String,
+    /// Number of commits this branch is ahead of the current branch.
+    pub ahead: usize,
+    /// Number of commits this branch is behind the current branch.
+    pub behind: usize,
+}
+
 /// Git hosting provider types.
 ///
 /// Identifies the hosting platform for a Git repository based on its remote URL.
@@ -280,8 +326,8 @@ pub struct GitInfo {
     pub repo: Option<String>,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
-    /// All local branch names.
-    pub branches: Vec<String>,
+    /// All local branches with commit hashes and ahead/behind counts.
+    pub branches: Vec<LocalBranchInfo>,
     /// Whether the current path is inside a worktree (vs main repository).
     pub in_worktree: bool,
     /// Recent commits from HEAD (last 10 commits).
@@ -428,6 +474,9 @@ pub struct RemoteInfo {
     /// Branches available on this remote (only populated with --deep flag).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branches: Option<Vec<String>>,
+    /// Default branch for this remote (resolved from refs/remotes/{name}/HEAD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
 }
 
 /// Ref decoration for a commit (branch, tag, or remote tracking ref).
@@ -668,7 +717,7 @@ pub fn detect_git(path: &Path, _deep: bool, commit_count: usize) -> Result<Optio
     let remotes = get_remotes(&repo);
     let worktrees = get_worktrees(&repo);
     let config = get_git_config(&repo);
-    let branches = get_local_branches(&repo);
+    let branches = get_local_branches(&repo, current_branch.as_deref());
     let tracking = get_tracking_status(&repo, current_branch.as_deref());
 
     let (org, repo) = preferred_remote(&remotes)
@@ -1056,29 +1105,96 @@ fn build_untracked_files(paths: &[PathBuf], repo_root: &Option<PathBuf>) -> Vec<
         .collect()
 }
 
-/// Gets git user configuration (user.name, user.email).
+/// Gets git configuration (user info, GPG, signing).
 fn get_git_config(repo: &Repository) -> GitConfig {
-    let config = match repo.config() {
+    let mut config = match repo.config() {
         Ok(c) => c,
         Err(_) => return GitConfig::default(),
     };
 
+    // On macOS, the Developer Tools system gitconfig lives outside libgit2's
+    // default search paths. Include it so we pick up credential.helper, etc.
+    #[cfg(target_os = "macos")]
+    {
+        let macos_system =
+            std::path::Path::new("/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig");
+        if macos_system.exists() {
+            let _ = config.add_file(macos_system, git2::ConfigLevel::ProgramData, false);
+        }
+    }
+
     GitConfig {
         user_name: config.get_string("user.name").ok(),
         user_email: config.get_string("user.email").ok(),
+        gpg_use_agent: config.get_bool("gpg.use-agent").ok(),
+        gpg_program: config.get_string("gpg.program").ok(),
+        credential_helper: config.get_string("credential.helper").ok(),
+        signing_key: config.get_string("user.signingkey").ok(),
+        commit_sign: config.get_bool("commit.gpgsign").ok(),
+        tag_sign: config.get_bool("tag.gpgsign").ok(),
+        pager: config.get_string("core.pager").ok(),
+        delta_syntax_theme: config.get_string("delta.syntax-theme").ok(),
+        delta_light: config.get_bool("delta.light").ok(),
+        delta_side_by_side: config.get_bool("delta.side-by-side").ok(),
     }
 }
 
-/// Gets all local branch names.
-fn get_local_branches(repo: &Repository) -> Vec<String> {
+/// Gets all local branches with commit hashes and ahead/behind counts.
+///
+/// For each branch, resolves the tip commit's short hash and computes
+/// ahead/behind relative to the current branch's HEAD. The current branch
+/// itself gets ahead=0, behind=0.
+fn get_local_branches(
+    repo: &Repository,
+    current_branch: Option<&str>,
+) -> Vec<LocalBranchInfo> {
     let mut branches = Vec::new();
+
+    // Resolve HEAD commit OID for ahead/behind calculations
+    let head_oid = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_commit().ok())
+        .map(|c| c.id());
 
     if let Ok(branch_iter) = repo.branches(Some(git2::BranchType::Local)) {
         for branch_result in branch_iter {
             if let Ok((branch, _)) = branch_result
                 && let Ok(Some(name)) = branch.name()
             {
-                branches.push(name.to_string());
+                let is_current = current_branch.is_some_and(|cb| cb == name);
+
+                // Get short hash from branch tip commit
+                let short_hash = branch
+                    .get()
+                    .peel_to_commit()
+                    .ok()
+                    .map(|c| {
+                        let id = c.id().to_string();
+                        id[..8.min(id.len())].to_string()
+                    })
+                    .unwrap_or_default();
+
+                // Compute ahead/behind relative to HEAD
+                let (ahead, behind) = if is_current {
+                    (0, 0)
+                } else if let Some(head_id) = head_oid {
+                    branch
+                        .get()
+                        .peel_to_commit()
+                        .ok()
+                        .and_then(|c| repo.graph_ahead_behind(c.id(), head_id).ok())
+                        .unwrap_or((0, 0))
+                } else {
+                    (0, 0)
+                };
+
+                branches.push(LocalBranchInfo {
+                    name: name.to_string(),
+                    short_hash,
+                    ahead,
+                    behind,
+                });
             }
         }
     }
@@ -1147,18 +1263,31 @@ fn get_remotes(repo: &Repository) -> Vec<RemoteInfo> {
                             .unwrap_or(HostingProvider::Unknown);
 
                         let branches = get_remote_branches(repo, name);
+                        let default_branch = get_remote_default_branch(repo, name);
 
                         RemoteInfo {
                             name: name.to_string(),
                             url,
                             provider,
                             branches,
+                            default_branch,
                         }
                     })
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Resolves the default branch for a remote from `refs/remotes/{name}/HEAD`.
+///
+/// Returns the branch name (e.g., "main") if the symbolic ref exists and can be resolved.
+fn get_remote_default_branch(repo: &Repository, remote_name: &str) -> Option<String> {
+    let ref_name = format!("refs/remotes/{}/HEAD", remote_name);
+    let reference = repo.find_reference(&ref_name).ok()?;
+    let target = reference.symbolic_target()?;
+    let prefix = format!("refs/remotes/{}/", remote_name);
+    target.strip_prefix(&prefix).map(String::from)
 }
 
 /// Gets branch names for a remote from local tracking refs (`refs/remotes/<name>/*`).
@@ -2088,6 +2217,7 @@ mod tests {
                 "main".to_string(),
                 "develop".to_string(),
             ]),
+            default_branch: Some("main".to_string()),
         };
 
         let json_with = serde_json::to_string(&remote_with_branches).unwrap();
@@ -2101,6 +2231,7 @@ mod tests {
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[0], "main");
         assert_eq!(branches[1], "develop");
+        assert_eq!(parsed_with["default_branch"], "main");
 
         // Test with branches as None (should be excluded due to skip_serializing_if)
         let remote_without_branches = RemoteInfo {
@@ -2108,6 +2239,7 @@ mod tests {
             url: Some("https://github.com/other/repo".to_string()),
             provider: HostingProvider::GitHub,
             branches: None,
+            default_branch: None,
         };
 
         let json_without = serde_json::to_string(&remote_without_branches).unwrap();
@@ -2116,6 +2248,26 @@ mod tests {
         assert_eq!(parsed_without["name"], "upstream");
         // branches field should be absent (not null)
         assert!(parsed_without.get("branches").is_none());
+        // default_branch field should also be absent
+        assert!(parsed_without.get("default_branch").is_none());
+    }
+
+    #[test]
+    fn test_local_branch_info_serialization() {
+        let branch = LocalBranchInfo {
+            name: "feature/xyz".to_string(),
+            short_hash: "a1b2c3d4".to_string(),
+            ahead: 3,
+            behind: 1,
+        };
+
+        let json = serde_json::to_string(&branch).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["name"], "feature/xyz");
+        assert_eq!(parsed["short_hash"], "a1b2c3d4");
+        assert_eq!(parsed["ahead"], 3);
+        assert_eq!(parsed["behind"], 1);
     }
 
     #[test]
@@ -2612,6 +2764,7 @@ mod tests {
             url: Some(format!("https://github.com/{name}/repo.git")),
             provider: HostingProvider::GitHub,
             branches: None,
+            default_branch: None,
         }
     }
 

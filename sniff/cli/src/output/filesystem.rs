@@ -238,7 +238,7 @@ fn split_path(path: &str) -> (String, String) {
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
-pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize) {
+pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize, verbose: u8) {
     let terminal = Terminal::default();
 
     // === Status Section ===
@@ -352,138 +352,290 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     let meta_title = Prose::new("<b><u>Meta</u></b>");
     println!("{}\n", meta_title.fallback_render(&terminal));
 
-    let mut meta_items: Vec<String> = Vec::new();
+    let mut meta_list = UnorderedList::empty();
 
-    // Remote tracking status with heading - render as list under "Remotes:" header
-    if !git.tracking.is_empty() || !git.remotes.is_empty() {
-        // Build remote items - match tracking with remote info
-        let remote_items: Vec<String> = git
-            .remotes
-            .iter()
-            .map(|remote| {
-                // Find tracking info for this remote
-                let tracking_part = git
-                    .tracking
-                    .iter()
-                    .find(|t| t.remote == remote.name)
-                    .map(|t| {
-                        format!(
-                            "<green>{} ahead</green>, <red>{} behind</red>",
-                            t.ahead, t.behind
-                        )
-                    })
-                    .unwrap_or_default();
+    // --- Local ---
+    if let Some(ref current) = git.current_branch {
+        let local_header: RenderableContent = Prose::new("<b>Local:</b>").into();
+        if verbose > 0 {
+            // Verbose: nested list with current branch + other branches
+            let mut local_list = UnorderedList::empty();
 
-                // Parse owner/repo from URL and build display string with link
-                let repo_link = remote
-                    .url
-                    .as_ref()
-                    .map(|url| {
-                        let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
-                        let provider_name = format_provider(&remote.provider);
-                        if let Some(ref repo_path) = owner_repo {
-                            let link_url = browse_url.unwrap_or_else(|| url.clone());
-                            format!(
-                                " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> {}",
-                                link_url, repo_path, provider_name
-                            )
-                        } else {
-                            format!(" <i>on</i> {}", provider_name)
-                        }
-                    })
-                    .unwrap_or_default();
+            let dirty = if git.status.is_dirty {
+                "<red>+</red>"
+            } else {
+                ""
+            };
 
-                let line = if tracking_part.is_empty() {
-                    format!("<b>{}</b>{}", remote.name, repo_link)
-                } else {
-                    format!("<b>{}</b>: {}{}", remote.name, tracking_part, repo_link)
-                };
+            // Find current branch's short hash
+            let current_hash = git
+                .branches
+                .iter()
+                .find(|b| b.name == *current)
+                .map(|b| b.short_hash.as_str())
+                .unwrap_or("");
 
-                Prose::new(&line).fallback_render(&terminal)
-            })
-            .collect();
+            local_list.add(Prose::new(format!(
+                "<b><blue>{}{}</blue></b> [<dim>{}</dim>] (<dim><i>current</i></dim>)",
+                current, dirty, current_hash
+            )));
 
-        // Print "Remotes:" header followed by the list
-        if !remote_items.is_empty() {
-            let header = Prose::new("<b>Remotes:</b>");
-            println!("{}", header.fallback_render(&terminal));
-            let remote_list = UnorderedList::new(remote_items);
-            println!("{}", remote_list.fallback_render(&terminal));
-
-            // List remote branches under each remote
-            for remote in &git.remotes {
-                if let Some(ref branches) = remote.branches {
-                    let branch_header = Prose::new(format!(
-                        "<b>{}</b> <dim>branches ({}):</dim>",
-                        remote.name,
-                        branches.len()
-                    ));
-                    println!("{}", branch_header.fallback_render(&terminal));
-                    let branch_items: Vec<String> = branches
-                        .iter()
-                        .map(|b| {
-                            Prose::new(format!("<dim>{}</dim>", b))
-                                .fallback_render(&terminal)
-                        })
-                        .collect();
-                    let branch_list = UnorderedList::new(branch_items);
-                    println!("{}", branch_list.fallback_render(&terminal));
-                }
+            for branch in git.branches.iter().filter(|b| b.name != *current) {
+                let ab = format_ahead_behind(branch.ahead, branch.behind, terminal.is_nerd_font);
+                local_list.add(Prose::new(format!(
+                    "{} [<dim>{}</dim>] - {}",
+                    branch.name, branch.short_hash, ab
+                )));
             }
+
+            let branches_header: RenderableContent = Prose::new("<b>Branches:</b>").into();
+            let mut local_wrapper = UnorderedList::empty();
+            local_wrapper.add(branches_header);
+            local_wrapper.add(local_list);
+
+            meta_list.add(local_header);
+            meta_list.add(local_wrapper);
+        } else {
+            // Normal: single line with current branch and others in parens
+            let other_branches: Vec<_> = git
+                .branches
+                .iter()
+                .filter(|b| b.name != *current)
+                .take(3)
+                .map(|b| b.name.clone())
+                .collect();
+
+            let branch_line = if other_branches.is_empty() {
+                format!("<b>Branches:</b> <blue>{}</blue>", current)
+            } else {
+                let others = other_branches.join(", ");
+                let more = if git.branches.len() > 4 {
+                    format!(", +{} more", git.branches.len() - 4)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "<b>Branches:</b> <blue>{}</blue> (<dim>{}{}</dim>)",
+                    current, others, more
+                )
+            };
+
+            let mut local_list = UnorderedList::empty();
+            local_list.add(Prose::new(branch_line));
+
+            meta_list.add(local_header);
+            meta_list.add(local_list);
         }
     }
 
-    // Branch info with heading
-    if let Some(ref current) = git.current_branch {
-        let other_branches: Vec<_> = git
-            .branches
-            .iter()
-            .filter(|b| *b != current)
-            .take(3)
-            .cloned()
-            .collect();
+    // --- Remotes ---
+    if !git.tracking.is_empty() || !git.remotes.is_empty() {
+        let remotes_header: RenderableContent = Prose::new("<b>Remotes:</b>").into();
+        let mut remotes_list = UnorderedList::empty();
 
-        let branch_line = if other_branches.is_empty() {
-            format!("<b>Branches:</b> <b>{}</b>", current)
-        } else {
-            let others = other_branches.join(", ");
-            let more = if git.branches.len() > 4 {
-                format!(", +{} more", git.branches.len() - 4)
+        for remote in &git.remotes {
+            // Build ahead/behind with arrows
+            let tracking_part = git
+                .tracking
+                .iter()
+                .find(|t| t.remote == remote.name)
+                .map(|t| format_ahead_behind(t.ahead, t.behind, terminal.is_nerd_font))
+                .unwrap_or_default();
+
+            // Parse owner/repo from URL and build display string with link
+            let repo_link = remote
+                .url
+                .as_ref()
+                .map(|url| {
+                    let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
+                    let provider_name = format_provider(&remote.provider);
+                    if let Some(ref repo_path) = owner_repo {
+                        let link_url = browse_url.unwrap_or_else(|| url.clone());
+                        format!(
+                            " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> <b>{}</b>",
+                            link_url, repo_path, provider_name
+                        )
+                    } else {
+                        format!(" <i>on</i> <b>{}</b>", provider_name)
+                    }
+                })
+                .unwrap_or_default();
+
+            // Use remote's default branch, falling back to current branch
+            let branch_part = remote
+                .default_branch
+                .as_ref()
+                .or(git.current_branch.as_ref())
+                .map(|b| format!(" <i>of</i> {}", b))
+                .unwrap_or_default();
+
+            let line = if tracking_part.is_empty() {
+                format!("<b>{}:</b>{}{}", remote.name, branch_part, repo_link)
             } else {
-                String::new()
+                format!(
+                    "<b>{}:</b> {}{}{}",
+                    remote.name, tracking_part, branch_part, repo_link
+                )
             };
-            format!(
-                "<b>Branches:</b> <b>{}</b> <dim>({}{})</dim>",
-                current, others, more
-            )
-        };
-        meta_items.push(branch_line);
+
+            remotes_list.add(Prose::new(line));
+
+            // Verbose: show remote branches as nested list, excluding the default branch
+            if verbose > 0 {
+                if let Some(ref branches) = remote.branches {
+                    let default = remote.default_branch.as_deref();
+                    let non_default: Vec<_> = branches
+                        .iter()
+                        .filter(|b| default.is_none_or(|d| b.as_str() != d))
+                        .collect();
+                    if !non_default.is_empty() {
+                        let mut branch_list = UnorderedList::empty();
+                        for branch in non_default {
+                            branch_list.add(Prose::new(format!("<dim>{}</dim>", branch)));
+                        }
+                        remotes_list.add(branch_list);
+                    }
+                }
+            }
+        }
+
+        meta_list.add(remotes_header);
+        meta_list.add(remotes_list);
     }
 
-    // Git config with heading - format email with angle brackets
-    // Use mathematical angle brackets (⟨ and ⟩) to avoid HTML parsing issues
-    if let Some(ref name) = git.config.user_name {
-        let email_part = git
-            .config
-            .user_email
-            .as_ref()
-            .map(|e| format!(" <dim>⟨{}⟩</dim>", e))
-            .unwrap_or_default();
-        meta_items.push(format!(
-            "<b>Git Config:</b> <cyan>{}</cyan>{}",
-            name, email_part
-        ));
+    // --- Config ---
+    if git.config.user_name.is_some() {
+        let config_header: RenderableContent = Prose::new("<b>Config:</b>").into();
+        let mut config_list = UnorderedList::empty();
+
+        if let Some(ref name) = git.config.user_name {
+            let email_part = git
+                .config
+                .user_email
+                .as_ref()
+                .map(|e| format!(" ⟨<dim>{}</dim>⟩", e))
+                .unwrap_or_default();
+            config_list.add(Prose::new(format!(
+                "<b>User Info:</b> <blue>{}</blue>{}",
+                name, email_part
+            )));
+        }
+
+        // Crypto subsection (verbose only)
+        if verbose > 0 {
+            let crypto_header: RenderableContent = Prose::new("<b>Crypto</b>").into();
+            let mut crypto_list = UnorderedList::empty();
+
+            let agent = git
+                .config
+                .gpg_use_agent
+                .map(|v| if v { "true" } else { "false" })
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            let program = git
+                .config
+                .gpg_program
+                .as_deref()
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            let helper = git
+                .config
+                .credential_helper
+                .as_deref()
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            crypto_list.add(Prose::new(format!(
+                "<b>GPG:</b> use-agent: <blue>{}</blue>, program: <blue>{}</blue>, helper: <blue>{}</blue>",
+                agent, program, helper
+            )));
+
+            let key = git
+                .config
+                .signing_key
+                .as_deref()
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            crypto_list.add(Prose::new(format!(
+                "<b>GPG Key:</b> <blue>{}</blue>",
+                key
+            )));
+
+            let commit_sign = git
+                .config
+                .commit_sign
+                .map(|v| if v { "true" } else { "false" })
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            let tag_sign = git
+                .config
+                .tag_sign
+                .map(|v| if v { "true" } else { "false" })
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            crypto_list.add(Prose::new(format!(
+                "<b>Signing:</b> commit: <blue>{}</blue>, tags: <blue>{}</blue>",
+                commit_sign, tag_sign
+            )));
+
+            config_list.add(crypto_header);
+            config_list.add(crypto_list);
+        }
+
+        // Pager subsection (verbose only)
+        if verbose > 0 {
+            let pager_value = git
+                .config
+                .pager
+                .as_deref()
+                .unwrap_or("<dim><i>undefined</i></dim>");
+            let pager_line = Prose::new(format!("<b>Pager:</b> <blue>{}</blue>", pager_value));
+
+            if git.config.pager.as_deref() == Some("delta") {
+                let theme = git
+                    .config
+                    .delta_syntax_theme
+                    .as_deref()
+                    .unwrap_or("<dim><i>undefined</i></dim>");
+                let light = git
+                    .config
+                    .delta_light
+                    .map(|v| if v { "true" } else { "false" })
+                    .unwrap_or("false");
+                let side_by_side = git
+                    .config
+                    .delta_side_by_side
+                    .map(|v| if v { "true" } else { "false" })
+                    .unwrap_or("<dim><i>undefined</i></dim>");
+
+                let mut pager_details = UnorderedList::empty();
+                pager_details.add(Prose::new(format!("theme: <dim>{}</dim>", theme)));
+                pager_details.add(Prose::new(format!("light-mode: <dim>{}</dim>", light)));
+                pager_details.add(Prose::new(format!(
+                    "side-by-side: <dim>{}</dim>",
+                    side_by_side
+                )));
+
+                config_list.add(pager_line);
+                config_list.add(pager_details);
+            } else {
+                config_list.add(pager_line);
+            }
+        }
+
+        meta_list.add(config_header);
+        meta_list.add(config_list);
     }
 
-    // Render meta items as list
-    if !meta_items.is_empty() {
-        let rendered_items: Vec<String> = meta_items
-            .iter()
-            .map(|item| Prose::new(item.as_str()).fallback_render(&terminal))
-            .collect();
-        let list = UnorderedList::new(rendered_items);
-        println!("{}", list.fallback_render(&terminal));
-    }
+    println!("{}", meta_list.fallback_render(&terminal));
+}
+
+/// Format ahead/behind counts with directional arrows.
+///
+/// When the terminal uses a Nerd Font, uses  (U+F0737) for ahead and
+///  (U+F072E) for behind. Otherwise arrows are omitted.
+/// Arrows are always omitted when the corresponding count is 0.
+fn format_ahead_behind(ahead: usize, behind: usize, nerd_font: Option<bool>) -> String {
+    let is_nerd = nerd_font == Some(true);
+    let ahead_arrow = if ahead > 0 && is_nerd { "\u{F0737} " } else { "" };
+    let behind_arrow = if behind > 0 && is_nerd { "\u{F072E} " } else { "" };
+    format!(
+        "<green>{}{} ahead</green>, <red>{}{} behind</red>",
+        ahead_arrow, ahead, behind_arrow, behind
+    )
 }
 
 /// Format a MonorepoTool for display.
