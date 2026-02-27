@@ -154,23 +154,6 @@ fn format_ref_decorations(refs: &[sniff::filesystem::git::RefDecoration]) -> Str
     format!(" <dim>(</dim>{}<dim>)</dim>", parts.join("<dim>, </dim>"))
 }
 
-/// Format a hosting provider as a display string.
-fn format_provider(provider: &sniff::filesystem::git::HostingProvider) -> &'static str {
-    use sniff::filesystem::git::HostingProvider;
-    match provider {
-        HostingProvider::GitHub => "GitHub",
-        HostingProvider::GitLab => "GitLab",
-        HostingProvider::Bitbucket => "Bitbucket",
-        HostingProvider::AzureDevOps => "Azure DevOps",
-        HostingProvider::AwsCodeCommit => "AWS CodeCommit",
-        HostingProvider::Gitea => "Gitea",
-        HostingProvider::Forgejo => "Forgejo",
-        HostingProvider::SourceHut => "SourceHut",
-        HostingProvider::SelfHosted => "Self-Hosted",
-        HostingProvider::Unknown | _ => "Unknown",
-    }
-}
-
 /// Parse a git remote URL to extract owner/repo and browsable URL.
 ///
 /// Handles both SSH (`git@github.com:owner/repo.git`) and HTTPS
@@ -181,8 +164,6 @@ fn parse_git_url(
     url: &str,
     provider: &sniff::filesystem::git::HostingProvider,
 ) -> (Option<String>, Option<String>) {
-    use sniff::filesystem::git::HostingProvider;
-
     // Try to extract owner/repo from URL
     let owner_repo = if url.contains('@') && url.contains(':') {
         // SSH format: git@github.com:owner/repo.git
@@ -203,16 +184,9 @@ fn parse_git_url(
     };
 
     // Build browsable URL based on provider
-    let browse_url = owner_repo.as_ref().and_then(|repo| {
-        let base = match provider {
-            HostingProvider::GitHub => Some("https://github.com"),
-            HostingProvider::GitLab => Some("https://gitlab.com"),
-            HostingProvider::Bitbucket => Some("https://bitbucket.org"),
-            HostingProvider::SourceHut => Some("https://sr.ht"),
-            _ => None,
-        };
-        base.map(|b| format!("{}/{}", b, repo))
-    });
+    let browse_url = owner_repo
+        .as_ref()
+        .and_then(|repo| provider.browser_base_url().map(|base| format!("{}/{}", base, repo)));
 
     (owner_repo, browse_url)
 }
@@ -474,15 +448,19 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 .as_ref()
                 .map(|url| {
                     let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
-                    let provider_name = format_provider(&remote.provider);
+                    let provider_label = format!(
+                        "<dim>{}</dim> {}",
+                        remote.provider.symbol(),
+                        remote.provider.display_name()
+                    );
                     if let Some(ref repo_path) = owner_repo {
                         let link_url = browse_url.unwrap_or_else(|| url.clone());
                         format!(
                             " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> <b>{}</b>",
-                            link_url, repo_path, provider_name
+                            link_url, repo_path, provider_label
                         )
                     } else {
-                        format!(" <i>on</i> <b>{}</b>", provider_name)
+                        format!(" <i>on</i> <b>{}</b>", provider_label)
                     }
                 })
                 .unwrap_or_default();
