@@ -4,12 +4,13 @@ The darkmatter transform pipeline provides document preparation through two stag
 
 ## Pipeline Overview
 
-**Stage 1** (in-memory transforms — 4 sub-stages):
+**Stage 1** (in-memory transforms — 5 sub-stages):
 
 1. **Text Replacement** - `replace:` frontmatter replaces literal strings
 2. **Interpolation** - `{{ variable }}` expressions expand to values
-3. **Cleanup** - Normalizes markdown formatting
-4. **Normalization** - Adjusts heading levels
+3. **TOC Linking** - `::toc-linking` directives expand to heading link lists
+4. **Cleanup** - Normalizes markdown formatting
+5. **Normalization** - Adjusts heading levels
 
 **Stage 2** (file-based transclusion):
 
@@ -155,6 +156,7 @@ Inline: `{{ not_evaluated }}`
 pub struct TransformReport {
     pub replacements_applied: usize,
     pub interpolations_applied: usize,
+    pub toc_links_generated: usize,
     pub cleanup_changed: bool,
     pub normalization_report: Option<NormalizationReport>,
     pub warnings: Vec<TransformWarning>,
