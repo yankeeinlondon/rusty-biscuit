@@ -1,4 +1,6 @@
+pub mod analysis;
 pub mod builtins;
+pub mod cache;
 pub mod dead_code;
 pub mod error;
 pub mod file;

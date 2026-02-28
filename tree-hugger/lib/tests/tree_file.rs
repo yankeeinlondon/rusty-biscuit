@@ -304,6 +304,51 @@ fn extracts_python_function_signature() -> Result<(), TreeHuggerError> {
 }
 
 #[test]
+fn emits_symbol_records_v2() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
+    let records = tree_file.symbol_records()?;
+
+    assert!(!records.is_empty(), "expected v2 symbol records");
+    assert!(
+        records
+            .iter()
+            .all(|record| record.schema_version.major == 2)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn emits_symbol_index_v2_with_completed_passes() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
+    let index = tree_file.symbol_index_v2()?;
+
+    assert_eq!(index.schema_version.major, 2);
+    assert!(
+        index
+            .completed_passes
+            .contains(&tree_hugger::AnalysisPass::Parse)
+    );
+    assert!(
+        index
+            .completed_passes
+            .contains(&tree_hugger::AnalysisPass::Bind)
+    );
+    assert!(
+        index
+            .completed_passes
+            .contains(&tree_hugger::AnalysisPass::Semantic)
+    );
+    assert!(
+        index
+            .completed_passes
+            .contains(&tree_hugger::AnalysisPass::Docs)
+    );
+
+    Ok(())
+}
+
+#[test]
 fn extracts_go_function_signature() -> Result<(), TreeHuggerError> {
     // Regression test: Go return types and method parameters should be correct
     let tree_file = TreeFile::new(fixture_path("sample.go"))?;

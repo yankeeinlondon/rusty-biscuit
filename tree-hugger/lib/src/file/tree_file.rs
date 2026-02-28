@@ -6,9 +6,10 @@ use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
 use crate::error::TreeHuggerError;
 use crate::queries::{QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::shared::{
-    CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FieldInfo, FunctionSignature,
-    ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage, ReferencedSymbol,
-    SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
+    AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FieldInfo, FileSymbolIndex,
+    FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage,
+    ReferencedSymbol, SourceContext, SymbolInfo, SymbolKind, SymbolRecord, SyntaxDiagnostic,
+    TypeMetadata, VariantInfo, Visibility,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -1454,6 +1455,64 @@ impl TreeFile {
             .into_iter()
             .map(|(symbol, _)| symbol)
             .collect())
+    }
+
+    /// Provides v2 schema symbol records for this file from the parse pass.
+    ///
+    /// ## Returns
+    /// Returns symbol records in Symbol Schema v2 format.
+    ///
+    /// ## Errors
+    /// Returns an error if symbol extraction or query compilation fails.
+    pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
+        let exported_names: std::collections::HashSet<String> = self
+            .exported_symbols()?
+            .into_iter()
+            .map(|symbol| symbol.name)
+            .collect();
+
+        let mut records = Vec::new();
+        for symbol in self.symbols()? {
+            let mut record: SymbolRecord = symbol.into();
+            if exported_names.contains(&record.identity.name) {
+                record.visibility.is_exported = true;
+            }
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
+    /// Runs the full v2 analysis pipeline and returns a per-file symbol index.
+    ///
+    /// This executes parse, bind, semantic, and docs passes in order.
+    ///
+    /// ## Returns
+    /// Returns the staged `FileSymbolIndex` output for the file.
+    ///
+    /// ## Errors
+    /// Returns an error if any extraction pass fails.
+    pub fn symbol_index_v2(&self) -> Result<FileSymbolIndex, TreeHuggerError> {
+        self.symbol_index_with_passes(&[
+            AnalysisPass::Parse,
+            AnalysisPass::Bind,
+            AnalysisPass::Semantic,
+            AnalysisPass::Docs,
+        ])
+    }
+
+    /// Runs selected analysis passes and returns a v2 symbol index.
+    ///
+    /// ## Returns
+    /// Returns `FileSymbolIndex` populated through the requested pass level.
+    ///
+    /// ## Errors
+    /// Returns an error if any selected pass fails.
+    pub fn symbol_index_with_passes(
+        &self,
+        passes: &[AnalysisPass],
+    ) -> Result<FileSymbolIndex, TreeHuggerError> {
+        crate::analysis::analyze_file(self, passes)
     }
 
     fn symbol_nodes(&self) -> Result<Vec<(SymbolInfo, Node<'_>)>, TreeHuggerError> {
