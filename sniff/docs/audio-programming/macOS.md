@@ -23,7 +23,6 @@ prompt: |-
 		- **Tahoe versus Monterey**
 
     Your output should be in well-formed idiomatic Markdown.  Use of Mermaid code blocks is welcome if that is helpful in illustrating an idea.
-
 last_updated: 2026-02-27
 update_policy:
 	- Duration(6mo)

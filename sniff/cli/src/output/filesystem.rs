@@ -1128,6 +1128,7 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
 
 /// Print markdown documents section.
 pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
+    let terminal = Terminal::default();
     let prompt_count = docs.iter().filter(|d| d.prompt.is_some()).count();
 
     let header = if prompt_count > 0 {
@@ -1139,7 +1140,7 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
     } else {
         format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
     };
-    eprintln!("\n{}\n", Prose::new(&header).render(None));
+    eprintln!("\n{}\n", Prose::new(&header).fallback_render(&terminal));
 
     let items: Vec<String> = docs
         .iter()
@@ -1158,16 +1159,19 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
                 file_link
             }
         })
-        .map(|item| Prose::new(&item).render(None))
+        .map(|item| Prose::new(&item).fallback_render(&terminal))
         .collect();
 
     let list = UnorderedList::new(items);
-    println!("{}", list.render(None));
+    println!("{}", list.fallback_render(&terminal));
 
     if verbose == 0 {
         eprintln!(
             "{}",
-            Prose::new("<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>").render(None)
+            Prose::new(
+                "<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>"
+            )
+            .fallback_render(&terminal)
         );
     }
 }

@@ -199,3 +199,10 @@ drift *args="":
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- sniff {{DOCS}} {{args}}
     @_speak "the drift recipe for the sniff package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+
+skill-audio-programming:
+    @echo "Publishing the {{BOLD}}audio-programming{{RESET}} skill to this repo"
+    @mkdir -p ../.claude/skills/audio-programming
+    @cp ./docs/audio-programming/*.md ../.claude/skills/audio-programming
+    @md compose ./docs/audio-programming/SKILL.md > ../.claude/skills/audio-programming/SKILL.md
+    @echo "Published {{BOLD}}{{GREEN}}audio-programming{{RESET}}"
