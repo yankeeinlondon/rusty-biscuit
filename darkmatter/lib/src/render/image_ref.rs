@@ -894,7 +894,7 @@ impl From<(&String, &String)> for ImageRef {
 
 impl From<(&str, &Prose)> for ImageRef {
     fn from((url, alt_text): (&str, &Prose)) -> Self {
-        let rendered_alt = alt_text.render(None);
+        let rendered_alt = alt_text.render_optimistic(None);
         ImageRef::new(url, rendered_alt)
             .expect("ImageRef tuple conversion requires a non-empty source URL")
     }
@@ -902,7 +902,7 @@ impl From<(&str, &Prose)> for ImageRef {
 
 impl From<(&String, &Prose)> for ImageRef {
     fn from((url, alt_text): (&String, &Prose)) -> Self {
-        let rendered_alt = alt_text.render(None);
+        let rendered_alt = alt_text.render_optimistic(None);
         ImageRef::new(url.as_str(), rendered_alt)
             .expect("ImageRef tuple conversion requires a non-empty source URL")
     }

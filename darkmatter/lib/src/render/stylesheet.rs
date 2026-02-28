@@ -1304,7 +1304,7 @@ impl Stylesheet {
 
                 let styled_name =
                     prose_style_text(terminal, "<bold><rgb 97,175,239>{text}</rgb></bold>", &name);
-                let styled_colon = Prose::new("<rgb 160,160,160>:</rgb>").fallback_render(terminal);
+                let styled_colon = Prose::new("<rgb 160,160,160>:</rgb>").render(terminal);
                 let styled_value = match decl.value.kind() {
                     CssValueKind::Sizing | CssValueKind::SizingMulti => {
                         prose_style_text(terminal, "<rgb 86,182,194>{text}</rgb>", &value_text)
@@ -1320,7 +1320,7 @@ impl Stylesheet {
                     }
                 };
                 let styled_semicolon =
-                    Prose::new("<rgb 160,160,160>;</rgb>").fallback_render(terminal);
+                    Prose::new("<rgb 160,160,160>;</rgb>").render(terminal);
 
                 format!("{styled_name}{styled_colon} {styled_value}{styled_semicolon}")
             })
@@ -1767,7 +1767,7 @@ fn format_css_number(value: f32) -> String {
 fn prose_style_text(term: &Terminal, template: &str, text: &str) -> String {
     let placeholder = unique_placeholder(text);
     let source = template.replace("{text}", &placeholder);
-    let rendered = Prose::new(source).fallback_render(term);
+    let rendered = Prose::new(source).render(term);
     rendered.replace(&placeholder, text)
 }
 

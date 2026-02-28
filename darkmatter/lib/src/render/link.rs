@@ -671,14 +671,14 @@ impl From<(&String, &String)> for Link {
 
 impl From<(&str, &Prose)> for Link {
     fn from((href, display): (&str, &Prose)) -> Self {
-        let rendered_display = display.render(None);
+        let rendered_display = display.render_optimistic(None);
         Link::new(rendered_display, href).expect("Link tuple conversion requires a non-empty href")
     }
 }
 
 impl From<(&String, &Prose)> for Link {
     fn from((href, display): (&String, &Prose)) -> Self {
-        let rendered_display = display.render(None);
+        let rendered_display = display.render_optimistic(None);
         Link::new(rendered_display, href.as_str())
             .expect("Link tuple conversion requires a non-empty href")
     }

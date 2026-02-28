@@ -586,7 +586,7 @@ impl ImageRenderer {
 
         // Render via Renderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
-        let output = term_image.fallback_render(&render_terminal);
+        let output = term_image.render(&render_terminal);
         if output.is_empty() {
             format!("▉ IMAGE[{}]\n", alt_text)
         } else {
@@ -1714,7 +1714,7 @@ fn render_table_cell_text(
 
         // Avoid tag parsing edge cases for literal '<'/'{' content.
         if !text.contains('<') && !text.contains('{') {
-            let prose = Prose::new(serialized).fallback_render(terminal);
+            let prose = Prose::new(serialized).render(terminal);
             let fg = style.foreground;
             return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, prose);
         }
@@ -1782,7 +1782,7 @@ fn render_table(rows: &[Vec<String>], alignments: &[Alignment], terminal_width: 
     TerminalTable::new()
         .with_columns(columns)
         .with_data(data)
-        .fallback_render(&Terminal::builder().width(terminal_width as u32).build())
+        .render(&Terminal::builder().width(terminal_width as u32).build())
 }
 
 /// Emits code text with both foreground and background colors.

@@ -10,7 +10,7 @@ Key recommendations:
 - Keep table parsing in Darkmatter, but hand off final layout/rendering to `Table`.
 - Use `Prose` selectively for cell-level style serialization, not as a Markdown parser.
 - Keep `TerminalImage` as a block-level renderable; do not inject image protocol escape sequences directly into table cells.
-- Standardize renderable usage around `fallback_render(&terminal)` (or `display(&terminal)` for direct print flows).
+- Standardize renderable usage around `render(&terminal)` (or `display(&terminal)` for direct print flows).
 
 ## Current State (Darkmatter)
 
@@ -38,7 +38,7 @@ This is a strong signal that Darkmatter is duplicating behavior `biscuit-termina
 - Multiline cell content and vertical alignment.
 - Conditional column visibility for narrower terminals.
 - Optional alternating row styling and cursor-alignment mode.
-- `Renderable` integration with `fallback_render(&Terminal)`.
+- `Renderable` integration with `render(&Terminal)`.
 
 Migrating to this component reduces bespoke table logic in Darkmatter and aligns with the architecture split where terminal behavior lives in `biscuit-terminal`.
 
@@ -52,7 +52,7 @@ Migrating to this component reduces bespoke table logic in Darkmatter and aligns
 Recommendation:
 
 - Use `Prose` as an optional serializer for cell content after Darkmatter parses inline Markdown events.
-- Add a small adapter: Markdown-inline events -> `Prose` token/tag string -> `Prose::new(...).fallback_render(&terminal)`.
+- Add a small adapter: Markdown-inline events -> `Prose` token/tag string -> `Prose::new(...).render(&terminal)`.
 - Do not rely on `Prose` for code-span theming from syntect. Keep code-span styling from Darkmatter's existing style/highlighter path, then pass ANSI text into `TableCellContent`.
 
 Practical split:
@@ -62,7 +62,7 @@ Practical split:
 
 ## `TerminalImage` Evaluation and Recommendation
 
-Darkmatter already uses `TerminalImage` in a good direction (`fallback_render(&self.terminal)`).
+Darkmatter already uses `TerminalImage` in a good direction (`render(&self.terminal)`).
 
 For table rendering specifically:
 
@@ -80,9 +80,9 @@ Use `TerminalImage` directly only for block-level image events outside table cel
 
 Within Darkmatter, default policy should be:
 
-- Use `fallback_render(&terminal)` for renderable composition.
+- Use `render(&terminal)` for renderable composition.
 - Use `display(&terminal)` when directly printing a renderable to terminal output and you want newline-safe output.
-- Avoid `.render(Some(width))` unless you intentionally need optimistic/capability-agnostic output (tests or controlled snapshots).
+- Avoid `.render_optimistic(Some(width))` unless you intentionally need optimistic/capability-agnostic output (tests or controlled snapshots).
 
 This matches `biscuit-terminal` guidance and avoids capability mismatches.
 
@@ -91,7 +91,7 @@ This matches `biscuit-terminal` guidance and avoids capability mismatches.
 1. Add a new table renderer adapter in Darkmatter that builds `biscuit-terminal::Table` from buffered Markdown table data.
 2. Map Markdown alignments to `TableColumn` alignment and default to `ColumnType::String`.
 3. Feed cell text as ANSI-safe `TableCellContent::Text` (including link/style output).
-4. Route rendering through `table.fallback_render(&terminal)`.
+4. Route rendering through `table.render(&terminal)`.
 5. Keep current `comfy-table` path behind a short-lived fallback flag; remove after parity tests pass.
 6. Remove `comfy-table` dependency from `darkmatter/lib/Cargo.toml` once migration is complete.
 
@@ -105,4 +105,3 @@ Add/keep regression tests for:
 - Very narrow terminal width wrapping behavior.
 - Images inside table cells use deterministic textual fallback.
 - `HyperlinkMode::{Auto,Never,Always}` behavior in table cells remains correct.
-
