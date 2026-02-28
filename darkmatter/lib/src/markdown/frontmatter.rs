@@ -194,11 +194,24 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let yaml_lines = &lines[1..closing_idx];
     let yaml_content = yaml_lines.join("\n");
 
-    // Parse YAML
+    // Parse YAML (retry once after normalizing leading tab indentation)
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         HashMap::new()
     } else {
-        serde_yaml_ng::from_str(&yaml_content)?
+        match serde_yaml_ng::from_str(&yaml_content) {
+            Ok(map) => map,
+            Err(original_err) => {
+                let normalized_yaml = normalize_frontmatter_indentation(&yaml_content);
+                if normalized_yaml == yaml_content {
+                    return Err(original_err.into());
+                }
+
+                match serde_yaml_ng::from_str(&normalized_yaml) {
+                    Ok(map) => map,
+                    Err(_) => return Err(original_err.into()),
+                }
+            }
+        }
     };
 
     // Extract remaining content
@@ -206,6 +219,49 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let remaining_content = content_lines.join("\n");
 
     Ok((Frontmatter::from_map(frontmatter_map), remaining_content))
+}
+
+/// Normalizes frontmatter indentation by replacing leading tabs with spaces.
+///
+/// Only tabs in the leading indentation prefix are rewritten (1 tab = 2 spaces).
+/// Tabs after the first non-whitespace character in a line are preserved.
+fn normalize_frontmatter_indentation(yaml: &str) -> String {
+    let mut normalized = String::with_capacity(yaml.len());
+
+    for (idx, line) in yaml.split('\n').enumerate() {
+        if idx > 0 {
+            normalized.push('\n');
+        }
+
+        let mut saw_tab_in_indent = false;
+        let mut indent_end = 0usize;
+        let mut indent = String::new();
+
+        for (byte_idx, ch) in line.char_indices() {
+            match ch {
+                ' ' => {
+                    indent.push(' ');
+                    indent_end = byte_idx + ch.len_utf8();
+                }
+                '\t' => {
+                    indent.push_str("  ");
+                    saw_tab_in_indent = true;
+                    indent_end = byte_idx + ch.len_utf8();
+                }
+                _ => break,
+            }
+        }
+
+        if !saw_tab_in_indent {
+            normalized.push_str(line);
+            continue;
+        }
+
+        normalized.push_str(&indent);
+        normalized.push_str(&line[indent_end..]);
+    }
+
+    normalized
 }
 
 #[cfg(test)]
@@ -340,5 +396,26 @@ This is content."#;
 
         assert!(fm.is_empty());
         assert_eq!(remaining, content);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_tab_indentation_block_scalar() {
+        let content = "---\nprompt: |-\n\tLine one\n\tLine two\nlast_updated: 2026-02-27\n---\n# macOS Audio\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let prompt: Option<String> = fm.get("prompt").unwrap();
+        let last_updated: Option<String> = fm.get("last_updated").unwrap();
+
+        assert_eq!(prompt, Some("Line one\nLine two".to_string()));
+        assert_eq!(last_updated, Some("2026-02-27".to_string()));
+        assert!(remaining.starts_with("# macOS Audio"));
+    }
+
+    #[test]
+    fn test_normalize_frontmatter_indentation_only_changes_leading_tabs() {
+        let input = "key: \"a\tb\"\n \tchild: true\n\t\tgrandchild: 1";
+        let normalized = normalize_frontmatter_indentation(input);
+
+        assert_eq!(normalized, "key: \"a\tb\"\n   child: true\n    grandchild: 1");
     }
 }

@@ -630,4 +630,22 @@ See [nonexistent](#nonexistent).
         // The entire content becomes preamble
         assert!(toc.preamble.contains("Just some text"));
     }
+
+    #[test]
+    fn test_toc_ignores_tab_indented_frontmatter_content() {
+        let content = "---\nprompt: |-\n\tLine one\n\tLine two\nlast_updated: 2026-02-27\n---\n# macOS Audio\n\n## Getting Started\n";
+        let md: Markdown = content.into();
+        let toc = md.toc();
+
+        assert_eq!(toc.heading_count(), 2);
+        assert_eq!(toc.structure.len(), 1);
+        assert_eq!(toc.structure[0].title, "macOS Audio");
+        assert_eq!(toc.structure[0].children[0].title, "Getting Started");
+
+        let all_titles: Vec<&str> = toc.all_headings().iter().map(|node| node.title.as_str()).collect();
+        assert_eq!(all_titles, vec!["macOS Audio", "Getting Started"]);
+        assert!(!all_titles
+            .iter()
+            .any(|title| title.contains("last_updated") || title.contains("update_policy")));
+    }
 }

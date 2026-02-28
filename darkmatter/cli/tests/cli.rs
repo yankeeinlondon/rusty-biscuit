@@ -169,6 +169,20 @@ fn test_toc_subcommand_json_output() {
 }
 
 #[test]
+fn test_toc_subcommand_ignores_tab_indented_frontmatter() {
+    let input = "---\nprompt: |-\n\tLine one\n\tLine two\nlast_updated: 2026-02-27\n---\n# macOS Audio\n\n## Details\n";
+
+    md_cmd()
+        .args(["toc", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("macOS Audio"))
+        .stdout(predicate::str::contains("Details"))
+        .stdout(predicate::str::contains("last_updated").not());
+}
+
+#[test]
 fn test_delta_subcommand_output() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.md");
@@ -653,6 +667,7 @@ fn test_hash_directory_ignores_non_markdown() {
 // =============================================================================
 
 const FM_DOC: &str = "---\ntitle: Hello World\nauthor: Alice\ncount: 42\ntags:\n  - rust\n  - cli\n---\n# Content\n\nBody text.";
+const FM_DOC_TAB_INDENT: &str = "---\nprompt: |-\n\tLine one\n\tLine two\nlast_updated: 2026-02-27\nmodel: Gemini 3 Pro\n---\n# Content\n";
 
 #[test]
 fn test_get_single_property_string() {
@@ -778,6 +793,16 @@ fn test_get_no_frontmatter_returns_empty_string() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"\""));
+}
+
+#[test]
+fn test_get_tab_indented_frontmatter_property_is_populated() {
+    md_cmd()
+        .args(["get", "-", "last_updated"])
+        .write_stdin(FM_DOC_TAB_INDENT)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"2026-02-27\""));
 }
 
 #[test]

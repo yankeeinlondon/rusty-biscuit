@@ -93,6 +93,57 @@ md.fm_merge_with(json!({"tags": ["rust"]}), MergeStrategy::ErrorOnConflict)?;
 md.fm_set_defaults(json!({"draft": false}))?;
 ```
 
+## Frontmatter Parsing and TOC Reliability
+
+Some Markdown producers emit YAML frontmatter with tab-indented block scalar content. That can be valid in source systems, but strict YAML parsers may reject it.
+
+### What failed before
+
+- Tab-indented YAML frontmatter could fail parsing in strict YAML parser behavior.
+- On parse failure, the full document remained in markdown body content.
+- TOC extraction then interpreted frontmatter delimiters/content as markdown structure, which could produce a mangled first TOC entry.
+
+### What is fixed now
+
+- Frontmatter parsing now retries with indentation normalization for **leading tabs only**.
+- Successful fallback parsing strips frontmatter from body content before TOC extraction.
+- TOC output now reflects real headings from the document body.
+
+### What is intentionally unchanged
+
+- The fix only adds frontmatter indentation recovery (leading-tab normalization during fallback parse).
+- Invalid YAML that remains invalid after normalization still fails parsing and follows existing call-site fallback behavior.
+
+### Safety and compatibility notes
+
+- Non-frontmatter content is untouched.
+- Non-leading tabs are not rewritten.
+- Existing typed frontmatter access APIs (`fm_get`, `fm_insert`, `fm_merge_with`, `fm_set_defaults`) are unchanged.
+
+### Example: Tab-Indented Frontmatter Still Produces Correct TOC
+
+```rust
+use darkmatter::markdown::Markdown;
+
+let content = "---\n\
+prompt: |-\n\
+\tLine one\n\
+\tLine two\n\
+last_updated: 2026-02-27\n\
+---\n\
+# macOS Audio\n\
+\n\
+## Getting Started\n";
+
+let md: Markdown = content.into();
+let toc = md.toc();
+
+let prompt: Option<String> = md.fm_get("prompt").unwrap();
+assert_eq!(prompt, Some("Line one\nLine two".to_string()));
+assert_eq!(toc.structure[0].title, "macOS Audio");
+assert_eq!(toc.structure[0].children[0].title, "Getting Started");
+```
+
 ### Output Formats
 
 #### Terminal Output
