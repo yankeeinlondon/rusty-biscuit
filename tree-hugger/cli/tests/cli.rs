@@ -92,16 +92,14 @@ fn test_symbols_json_output() {
 
 #[test]
 fn test_symbols_pretty_output_default() {
-    // Regression test: symbols command without --json should produce pretty output
-    // Note: Pretty output now includes type composition like `{ field: Type }`
-    // so we check for the language marker and that it's NOT JSON format
+    // Default symbol output is now flattened (not file-grouped) and non-JSON.
     hug_cmd()
         .args(["symbols", "tree-hugger/cli/src/main.rs"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("(Rust)"))
+        .stdout(predicate::str::contains("tree-hugger/cli/src/main.rs:"))
         // Check it's not JSON - JSON would have "root_dir" field
-        .stdout(predicate::str::contains("\"root_dir\"").not());
+        .stdout(predicate::str::contains("\"files\"").not());
 }
 
 // ============================================================================
@@ -214,11 +212,12 @@ fn test_types_json_output() {
 
 #[test]
 fn test_exports_json_output() {
+    // `exports` subcommand was removed in the CLI refactor.
     hug_cmd()
         .args(["exports", "tree-hugger/cli/src/main.rs", "--json"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"files\""));
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand"));
 }
 
 #[test]
@@ -255,6 +254,45 @@ fn test_glob_pattern_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"files\""));
+}
+
+#[test]
+fn test_symbols_without_filters_scans_all_sources() {
+    hug_cmd()
+        .args(["symbols", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tree-hugger/cli/src/main.rs:"));
+}
+
+#[test]
+fn test_symbol_name_filters_auto_wrap_and_use_or_semantics() {
+    hug_cmd()
+        .args([
+            "functions",
+            "greet",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet"))
+        .stdout(predicate::str::contains("greet_many"));
+}
+
+#[test]
+fn test_symbol_name_filters_preserve_explicit_wildcard() {
+    hug_cmd()
+        .args([
+            "functions",
+            "*many",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet_many"))
+        .stdout(predicate::str::contains("greet(").not());
 }
 
 // ============================================================================
@@ -643,12 +681,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 
     let mut cmd = Command::cargo_bin("hug").unwrap();
     cmd.current_dir(&bt_lib)
-        .args([
-            "symbols",
-            "src/terminal.rs",
-            "--prelude",
-            "--plain",
-        ])
+        .args(["symbols", "src/terminal.rs", "--prelude", "--plain"])
         .assert()
         .success()
         // Terminal is re-exported in prelude.rs

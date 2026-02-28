@@ -11,9 +11,9 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use tree_hugger::{
     Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
-    ImportSymbol, LintDiagnostic, PackageSummary, ParameterInfo, ProgrammingLanguage,
-    SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError,
-    TypeMetadata, VariantInfo, find_git_root, find_package_root,
+    ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage, SchemaVersion, SourceContext,
+    SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
+    find_git_root, find_package_root,
 };
 
 #[derive(Parser, Debug)]
@@ -39,6 +39,22 @@ struct Cli {
     #[arg(long, global = true)]
     plain: bool,
 
+    /// Group symbol output by file path
+    #[arg(long, global = true)]
+    group_by_file: bool,
+
+    /// Group symbol output by module path (directory/module scope)
+    #[arg(long, global = true)]
+    group_by_module: bool,
+
+    /// Sort symbols by kind before name
+    #[arg(long, global = true)]
+    sort_by_kind: bool,
+
+    /// Sort symbols by module before other sort keys
+    #[arg(long, global = true)]
+    sort_by_module: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -59,13 +75,12 @@ impl Cli {
 /// Common arguments for all subcommands
 #[derive(clap::Args, Debug, Clone)]
 struct CommonArgs {
-    /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
-    inputs: Vec<String>,
-
-    /// Process all source files from the nearest package/repo root
-    #[arg(long)]
-    all: bool,
+    /// File or symbol filters
+    ///
+    /// File-like filters (path-like or extension-like) restrict scanned files.
+    /// Remaining filters are treated as symbol glob filters.
+    #[arg(value_name = "FILTER", num_args = 0..)]
+    filters: Vec<String>,
 
     /// Show only exported (public) symbols
     #[arg(long, conflicts_with = "prelude")]
@@ -79,13 +94,9 @@ struct CommonArgs {
 /// Arguments for the classes command
 #[derive(clap::Args, Debug, Clone)]
 struct ClassArgs {
-    /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
-    inputs: Vec<String>,
-
-    /// Process all source files from the nearest package/repo root
-    #[arg(long)]
-    all: bool,
+    /// File or symbol filters
+    #[arg(value_name = "FILTER", num_args = 0..)]
+    filters: Vec<String>,
 
     /// Filter by class name
     #[arg(long, short = 'n')]
@@ -111,13 +122,9 @@ struct ClassArgs {
 /// Arguments for the lint command
 #[derive(clap::Args, Debug, Clone)]
 struct LintArgs {
-    /// Glob patterns for files to include
-    #[arg(value_name = "GLOB", num_args = 1.., conflicts_with = "all")]
-    inputs: Vec<String>,
-
-    /// Process all source files from the nearest package/repo root
-    #[arg(long)]
-    all: bool,
+    /// File filters (glob patterns or paths)
+    #[arg(value_name = "FILTER", num_args = 0..)]
+    filters: Vec<String>,
 
     /// Show only lint diagnostics (pattern-based and semantic rules)
     #[arg(long, conflicts_with = "syntax_only")]
@@ -144,8 +151,6 @@ enum Command {
     Types(CommonArgs),
     /// List all symbols in the file(s)
     Symbols(CommonArgs),
-    /// List exported symbols in the file(s)
-    Exports(CommonArgs),
     /// List imported symbols in the file(s)
     Imports(CommonArgs),
     /// List classes and their members
@@ -171,31 +176,16 @@ Examples:
 }
 
 impl Command {
-    /// Returns the input glob patterns from the subcommand.
-    fn inputs(&self) -> &[String] {
+    /// Returns positional filter tokens from the subcommand.
+    fn filters(&self) -> &[String] {
         match self {
             Self::Functions(args)
             | Self::Types(args)
             | Self::Symbols(args)
-            | Self::Exports(args)
-            | Self::Imports(args) => &args.inputs,
-            Self::Lint(args) => &args.inputs,
-            Self::Classes(args) => &args.inputs,
+            | Self::Imports(args) => &args.filters,
+            Self::Lint(args) => &args.filters,
+            Self::Classes(args) => &args.filters,
             Self::Completions(_) => &[],
-        }
-    }
-
-    /// Returns whether the `--all` flag was set.
-    fn all(&self) -> bool {
-        match self {
-            Self::Functions(args)
-            | Self::Types(args)
-            | Self::Symbols(args)
-            | Self::Exports(args)
-            | Self::Imports(args) => args.all,
-            Self::Lint(args) => args.all,
-            Self::Classes(args) => args.all,
-            Self::Completions(_) => false,
         }
     }
 
@@ -204,7 +194,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.exported,
             Self::Classes(args) => args.exported,
-            Self::Exports(_) | Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
         }
     }
 
@@ -213,7 +203,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.prelude,
             Self::Classes(args) => args.prelude,
-            Self::Exports(_) | Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
         }
     }
 
@@ -223,7 +213,6 @@ impl Command {
             Self::Functions(_) => Some(CommandKind::Functions),
             Self::Types(_) => Some(CommandKind::Types),
             Self::Symbols(_) => Some(CommandKind::Symbols),
-            Self::Exports(_) => Some(CommandKind::Exports),
             Self::Imports(_) => Some(CommandKind::Imports),
             Self::Lint(args) => Some(CommandKind::Lint {
                 lint_only: args.lint_only,
@@ -245,7 +234,6 @@ enum CommandKind {
     Functions,
     Types,
     Symbols,
-    Exports,
     Imports,
     Lint {
         lint_only: bool,
@@ -269,6 +257,22 @@ enum SymbolFilter {
     Prelude(HashSet<String>),
 }
 
+/// Classification of positional filter tokens.
+#[derive(Debug, Clone, Default)]
+struct ScanFilters {
+    file_filters: Vec<String>,
+    symbol_globs: Vec<String>,
+}
+
+/// Ordering/grouping switches for symbol rendering.
+#[derive(Debug, Clone, Copy)]
+struct SymbolRenderOptions {
+    group_by_file: bool,
+    group_by_module: bool,
+    sort_by_kind: bool,
+    sort_by_module: bool,
+}
+
 /// Summary of a class with its members partitioned by static/instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClassSummary {
@@ -282,6 +286,15 @@ struct ClassSummary {
     pub static_fields: Vec<FieldInfo>,
     /// Instance fields
     pub instance_fields: Vec<FieldInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsonOutput {
+    schema_version: SchemaVersion,
+    root_dir: PathBuf,
+    language: ProgrammingLanguage,
+    files: Vec<FileSummary>,
+    symbol_indexes: Vec<tree_hugger::FileSymbolIndex>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -355,15 +368,6 @@ fn hyperlink(path: &Path, line: usize, text: &str) -> String {
     )
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    for ancestor in start.ancestors() {
-        if ancestor.join(".git").is_dir() {
-            return Some(ancestor.to_path_buf());
-        }
-    }
-    None
-}
-
 fn display_path(path: &Path, root: Option<&Path>) -> String {
     if let Some(root) = root
         && let Ok(relative) = path.strip_prefix(root)
@@ -426,35 +430,29 @@ fn main() -> Result<(), TreeHuggerError> {
     }
 
     let language = cli.language.map(ProgrammingLanguage::from);
-    let inputs = cli.command.inputs();
-    let use_all = cli.command.all();
+    let filters = cli.command.filters();
     let output_format = cli.output_format();
     let output_config = OutputConfig::new(output_format);
-
-    let root_dir = current_dir()?;
-
-    let (files, display_root, pkg_root) = if use_all {
-        let git_root = find_git_root(&root_dir)?;
-        let pkg_root = find_package_root(&root_dir, &git_root);
-        let files = collect_files(&pkg_root, &[], &cli.ignore, language)?;
-        (files, Some(git_root), pkg_root)
-    } else {
-        if inputs.is_empty() {
-            Cli::command()
-                .error(
-                    clap::error::ErrorKind::MissingRequiredArgument,
-                    "provide file glob patterns or use --all to process all source files",
-                )
-                .exit();
-        }
-        let display_root = find_repo_root(&root_dir);
-        let git_root = find_git_root(&root_dir).unwrap_or_else(|_| root_dir.clone());
-        let pkg_root = find_package_root(&root_dir, &git_root);
-        let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
-        (files, display_root, pkg_root)
+    let render_options = SymbolRenderOptions {
+        group_by_file: cli.group_by_file,
+        group_by_module: cli.group_by_module,
+        sort_by_kind: cli.sort_by_kind,
+        sort_by_module: cli.sort_by_module,
     };
 
+    let root_dir = current_dir()?;
+    let git_root = find_git_root(&root_dir).unwrap_or_else(|_| root_dir.clone());
+    let pkg_root = find_package_root(&root_dir, &git_root);
+    let display_root = Some(git_root.clone());
+
     let command_kind = cli.command.kind().expect("completions already handled");
+    let scan_filters = classify_filters(filters, &command_kind);
+
+    let files = if scan_filters.file_filters.is_empty() {
+        collect_files(&pkg_root, &[], &cli.ignore, language)?
+    } else {
+        collect_files(&pkg_root, &scan_filters.file_filters, &cli.ignore, language)?
+    };
 
     // Build symbol filter
     let symbol_filter = if cli.command.exported() {
@@ -501,6 +499,12 @@ fn main() -> Result<(), TreeHuggerError> {
                 SymbolFilter::None => {}
             }
 
+            if !scan_filters.symbol_globs.is_empty() {
+                class_summaries.retain(|summary| {
+                    matches_symbol_filters(&summary.class.name, &scan_filters.symbol_globs)
+                });
+            }
+
             if !class_summaries.is_empty() {
                 all_class_summaries.push((
                     tree_file.file.clone(),
@@ -537,9 +541,18 @@ fn main() -> Result<(), TreeHuggerError> {
     }
 
     let mut summaries = Vec::new();
+    let mut symbol_indexes = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
-        let summary = summarize_file(&tree_file, &command_kind, &symbol_filter)?;
+        if matches!(output_format, OutputFormat::Json) {
+            symbol_indexes.push(tree_file.symbol_index_v2()?);
+        }
+        let summary = summarize_file(
+            &tree_file,
+            &command_kind,
+            &symbol_filter,
+            &scan_filters.symbol_globs,
+        )?;
         summaries.push(summary);
     }
 
@@ -549,10 +562,12 @@ fn main() -> Result<(), TreeHuggerError> {
                 .or_else(|| summaries.first().map(|summary| summary.language))
                 .unwrap_or(ProgrammingLanguage::Rust);
 
-            let output = PackageSummary {
+            let output = JsonOutput {
+                schema_version: SchemaVersion::V2_0,
                 root_dir,
                 language: package_language,
                 files: summaries,
+                symbol_indexes,
             };
 
             let json =
@@ -563,13 +578,26 @@ fn main() -> Result<(), TreeHuggerError> {
             println!("{json}");
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
-            for summary in summaries {
-                render_summary(
-                    &summary,
+            if matches!(
+                command_kind,
+                CommandKind::Functions | CommandKind::Types | CommandKind::Symbols
+            ) {
+                render_symbol_summaries(
+                    &summaries,
                     &command_kind,
                     &output_config,
                     display_root.as_deref(),
+                    render_options,
                 );
+            } else {
+                for summary in summaries {
+                    render_summary(
+                        &summary,
+                        &command_kind,
+                        &output_config,
+                        display_root.as_deref(),
+                    );
+                }
             }
         }
     }
@@ -626,6 +654,113 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<HashSet<String>, TreeHugge
     }
 
     Ok(names)
+}
+
+fn classify_filters(filters: &[String], command: &CommandKind) -> ScanFilters {
+    match command {
+        CommandKind::Functions
+        | CommandKind::Types
+        | CommandKind::Symbols
+        | CommandKind::Classes { .. } => {
+            let mut file_filters = Vec::new();
+            let mut symbol_globs = Vec::new();
+            for filter in filters {
+                if is_file_filter_token(filter) {
+                    file_filters.push(filter.clone());
+                } else {
+                    symbol_globs.push(normalize_symbol_glob(filter));
+                }
+            }
+            ScanFilters {
+                file_filters,
+                symbol_globs,
+            }
+        }
+        CommandKind::Imports | CommandKind::Lint { .. } => ScanFilters {
+            file_filters: filters.to_vec(),
+            symbol_globs: Vec::new(),
+        },
+    }
+}
+
+fn is_file_filter_token(token: &str) -> bool {
+    if token.contains('/') || token.contains('\\') {
+        return true;
+    }
+
+    let extension = Path::new(token).extension().and_then(|ext| ext.to_str());
+    extension
+        .and_then(ProgrammingLanguage::from_extension)
+        .is_some()
+}
+
+fn normalize_symbol_glob(token: &str) -> String {
+    if token.contains('*') {
+        token.to_string()
+    } else {
+        format!("*{token}*")
+    }
+}
+
+fn matches_symbol_filters(name: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+
+    patterns
+        .iter()
+        .any(|pattern| wildcard_match(pattern.as_str(), name))
+}
+
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let segments: Vec<&str> = pattern
+        .split('*')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return true;
+    }
+
+    let mut index = 0usize;
+    for (position, segment) in segments.iter().enumerate() {
+        if position == 0 && !starts_with_wildcard {
+            if !value[index..].starts_with(segment) {
+                return false;
+            }
+            index += segment.len();
+            continue;
+        }
+
+        match value[index..].find(segment) {
+            Some(found) => {
+                index += found + segment.len();
+            }
+            None => return false,
+        }
+    }
+
+    if ends_with_wildcard {
+        true
+    } else {
+        value.ends_with(segments.last().unwrap_or(&""))
+    }
+}
+
+fn apply_symbol_glob_filter(symbols: Vec<SymbolInfo>, symbol_globs: &[String]) -> Vec<SymbolInfo> {
+    if symbol_globs.is_empty() {
+        return symbols;
+    }
+
+    symbols
+        .into_iter()
+        .filter(|symbol| matches_symbol_filters(&symbol.name, symbol_globs))
+        .collect()
 }
 
 fn collect_files(
@@ -687,6 +822,7 @@ fn summarize_file(
     tree_file: &TreeFile,
     command: &CommandKind,
     filter: &SymbolFilter,
+    symbol_globs: &[String],
 ) -> Result<FileSummary, TreeHuggerError> {
     let mut summary = FileSummary {
         file: tree_file.file.clone(),
@@ -702,7 +838,7 @@ fn summarize_file(
 
     match command {
         CommandKind::Functions => {
-            summary.symbols = match filter {
+            let symbols = match filter {
                 SymbolFilter::Exported => tree_file
                     .exported_symbols()?
                     .into_iter()
@@ -719,9 +855,10 @@ fn summarize_file(
                     .filter(|s| s.kind.is_function())
                     .collect(),
             };
+            summary.symbols = apply_symbol_glob_filter(symbols, symbol_globs);
         }
         CommandKind::Types => {
-            summary.symbols = match filter {
+            let symbols = match filter {
                 SymbolFilter::Exported => tree_file
                     .exported_symbols()?
                     .into_iter()
@@ -738,6 +875,7 @@ fn summarize_file(
                     .filter(|s| s.kind.is_type())
                     .collect(),
             };
+            summary.symbols = apply_symbol_glob_filter(symbols, symbol_globs);
         }
         CommandKind::Symbols => {
             match filter {
@@ -769,9 +907,9 @@ fn summarize_file(
                     summary.locals = tree_file.local_symbols()?;
                 }
             }
-        }
-        CommandKind::Exports => {
-            summary.exports = tree_file.exported_symbols()?;
+            summary.symbols = apply_symbol_glob_filter(summary.symbols, symbol_globs);
+            summary.exports = apply_symbol_glob_filter(summary.exports, symbol_globs);
+            summary.locals = apply_symbol_glob_filter(summary.locals, symbol_globs);
         }
         CommandKind::Imports => {
             summary.imports = tree_file.imported_symbols()?;
@@ -813,7 +951,6 @@ fn render_summary(
 
     match command {
         CommandKind::Imports => render_imports(&summary.imports, config),
-        CommandKind::Exports => render_symbols(&summary.exports, config),
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
         }
@@ -834,6 +971,251 @@ fn render_summary(
     }
 
     println!();
+}
+
+fn render_symbol_summaries(
+    summaries: &[FileSummary],
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+    options: SymbolRenderOptions,
+) {
+    let mut symbols: Vec<SymbolInfo> = summaries
+        .iter()
+        .flat_map(|summary| summary.symbols.iter().cloned())
+        .collect();
+
+    if symbols.is_empty() {
+        if config.use_colors {
+            println!("{}", "(no symbols)".dimmed());
+        } else {
+            println!("(no symbols)");
+        }
+        return;
+    }
+
+    sort_symbols(&mut symbols, options, display_root);
+
+    if options.group_by_module && options.group_by_file {
+        render_symbols_grouped_by_module_and_file(&symbols, config, display_root);
+    } else if options.group_by_module {
+        render_symbols_grouped_by_module(&symbols, config, display_root);
+    } else if options.group_by_file {
+        render_symbols_grouped_by_file(&symbols, config, display_root);
+    } else {
+        render_flat_symbol_list(&symbols, command, config, display_root);
+    }
+}
+
+fn sort_symbols(
+    symbols: &mut [SymbolInfo],
+    options: SymbolRenderOptions,
+    display_root: Option<&Path>,
+) {
+    symbols.sort_by(|left, right| {
+        let left_name = left.name.to_ascii_lowercase();
+        let right_name = right.name.to_ascii_lowercase();
+
+        if options.sort_by_module {
+            let left_module = module_key_for_symbol(left, display_root);
+            let right_module = module_key_for_symbol(right, display_root);
+            let module_cmp = left_module.cmp(&right_module);
+            if !module_cmp.is_eq() {
+                return module_cmp;
+            }
+        }
+
+        if options.sort_by_kind {
+            let kind_cmp = left.kind.to_string().cmp(&right.kind.to_string());
+            if !kind_cmp.is_eq() {
+                return kind_cmp;
+            }
+        }
+
+        let name_cmp = left_name.cmp(&right_name);
+        if !name_cmp.is_eq() {
+            return name_cmp;
+        }
+
+        left.range
+            .start_line
+            .cmp(&right.range.start_line)
+            .then_with(|| left.range.start_column.cmp(&right.range.start_column))
+    });
+}
+
+fn module_key_for_symbol(symbol: &SymbolInfo, display_root: Option<&Path>) -> String {
+    let display = display_path(&symbol.file, display_root);
+    Path::new(&display)
+        .parent()
+        .map(|parent| parent.display().to_string())
+        .unwrap_or_default()
+}
+
+fn render_flat_symbol_list(
+    symbols: &[SymbolInfo],
+    _command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) {
+    for symbol in symbols {
+        render_symbol_line(symbol, config, display_root, true);
+    }
+}
+
+fn render_symbols_grouped_by_file(
+    symbols: &[SymbolInfo],
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) {
+    let mut grouped: BTreeMap<String, Vec<SymbolInfo>> = BTreeMap::new();
+    for symbol in symbols {
+        grouped
+            .entry(display_path(&symbol.file, display_root))
+            .or_default()
+            .push(symbol.clone());
+    }
+
+    for (file, items) in grouped {
+        if config.use_colors {
+            println!("{}", file.bold());
+        } else {
+            println!("{file}");
+        }
+        for symbol in items {
+            render_symbol_line(&symbol, config, display_root, false);
+        }
+        println!();
+    }
+}
+
+fn render_symbols_grouped_by_module(
+    symbols: &[SymbolInfo],
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) {
+    let mut grouped: BTreeMap<String, Vec<SymbolInfo>> = BTreeMap::new();
+    for symbol in symbols {
+        grouped
+            .entry(module_key_for_symbol(symbol, display_root))
+            .or_default()
+            .push(symbol.clone());
+    }
+
+    for (module, items) in grouped {
+        let title = if module.is_empty() {
+            "(root)"
+        } else {
+            module.as_str()
+        };
+        if config.use_colors {
+            println!("{}", title.bold());
+        } else {
+            println!("{title}");
+        }
+        for symbol in items {
+            render_symbol_line(&symbol, config, display_root, true);
+        }
+        println!();
+    }
+}
+
+fn render_symbols_grouped_by_module_and_file(
+    symbols: &[SymbolInfo],
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) {
+    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<SymbolInfo>>> = BTreeMap::new();
+    for symbol in symbols {
+        grouped
+            .entry(module_key_for_symbol(symbol, display_root))
+            .or_default()
+            .entry(display_path(&symbol.file, display_root))
+            .or_default()
+            .push(symbol.clone());
+    }
+
+    for (module, by_file) in grouped {
+        let title = if module.is_empty() {
+            "(root)"
+        } else {
+            module.as_str()
+        };
+        if config.use_colors {
+            println!("{}", title.bold());
+        } else {
+            println!("{title}");
+        }
+
+        for (file, items) in by_file {
+            if config.use_colors {
+                println!("  {}", file.underline());
+            } else {
+                println!("  {file}");
+            }
+            for symbol in items {
+                render_symbol_line(&symbol, config, display_root, false);
+            }
+        }
+
+        println!();
+    }
+}
+
+fn render_symbol_line(
+    symbol: &SymbolInfo,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+    include_file: bool,
+) {
+    let location = if include_file {
+        let path = display_path(&symbol.file, display_root);
+        format!(
+            "{}:{}:{}",
+            path, symbol.range.start_line, symbol.range.start_column
+        )
+    } else {
+        format!(
+            "[{}:{}]",
+            symbol.range.start_line, symbol.range.start_column
+        )
+    };
+
+    let location_display = if config.use_hyperlinks {
+        hyperlink(&symbol.file, symbol.range.start_line, &location)
+    } else {
+        location
+    };
+
+    let name_with_sig = format_symbol_name(symbol, symbol.language);
+    let visibility = symbol
+        .signature
+        .as_ref()
+        .and_then(|signature| signature.visibility.as_ref());
+
+    if config.use_colors {
+        let kind_style = style_for_kind(symbol.kind);
+        let kind_part = match visibility {
+            Some(visibility) => format!(
+                "{} {}",
+                visibility.to_string().italic(),
+                symbol.kind.to_string().style(kind_style)
+            ),
+            None => symbol.kind.to_string().style(kind_style).to_string(),
+        };
+        println!(
+            "  - {} {} {}",
+            kind_part,
+            name_with_sig.bold(),
+            location_display.dimmed()
+        );
+    } else {
+        let kind_part = match visibility {
+            Some(visibility) => format!("{} {}", visibility, symbol.kind),
+            None => symbol.kind.to_string(),
+        };
+        println!("  - {} {} {}", kind_part, name_with_sig, location_display);
+    }
 }
 
 fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
