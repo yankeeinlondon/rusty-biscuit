@@ -117,42 +117,77 @@ pub fn find_git_root(start: &Path) -> Result<PathBuf, TreeHuggerError> {
 
 /// Finds the nearest package root between `start` and `git_root`.
 ///
-/// Walks up from `start` looking for manifest files (Cargo.toml, package.json, etc.).
-/// Falls back to `git_root` if no manifest is found.
+/// Walks up from `start` looking for package manifest files (Cargo.toml with
+/// `[package]`, package.json without `"workspaces"`, etc.). Workspace-only
+/// manifests are skipped so that monorepo roots don't become the scan scope.
+///
+/// Falls back to `start` if no package manifest is found.
 pub fn find_package_root(start: &Path, git_root: &Path) -> PathBuf {
     for ancestor in start.ancestors() {
         if ancestor == git_root {
             break;
         }
 
-        if has_manifest(ancestor) {
+        if has_package_manifest(ancestor) {
             return ancestor.to_path_buf();
         }
     }
 
-    if has_manifest(git_root) {
+    if has_package_manifest(git_root) {
         return git_root.to_path_buf();
     }
 
-    git_root.to_path_buf()
+    start.to_path_buf()
 }
 
-fn has_manifest(path: &Path) -> bool {
-    const MANIFESTS: &[&str] = &[
-        "Cargo.toml",
-        "package.json",
-        "go.mod",
-        "pyproject.toml",
-        "setup.py",
-        "pom.xml",
-        "build.gradle",
-        "build.gradle.kts",
-        "composer.json",
-    ];
+/// Package manifest file names to check for.
+const MANIFESTS: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "go.mod",
+    "pyproject.toml",
+    "setup.py",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+];
 
-    MANIFESTS
-        .iter()
-        .any(|manifest| path.join(manifest).is_file())
+/// Returns `true` if `path` contains a manifest that represents a real package
+/// (not a workspace-only root).
+fn has_package_manifest(path: &Path) -> bool {
+    for manifest in MANIFESTS {
+        let file = path.join(manifest);
+        if !file.is_file() {
+            continue;
+        }
+
+        // For manifests that can be workspace-only, inspect contents.
+        match *manifest {
+            "Cargo.toml" => return is_cargo_package(&file),
+            "package.json" => return is_node_package(&file),
+            _ => return true,
+        }
+    }
+    false
+}
+
+/// A `Cargo.toml` is a package if it contains a `[package]` table.
+///
+/// A workspace-only `Cargo.toml` (only `[workspace]`, no `[package]`) is not
+/// a package root.
+fn is_cargo_package(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|contents| contents.contains("[package]"))
+        .unwrap_or(false)
+}
+
+/// A `package.json` is a package if it does NOT contain a top-level
+/// `"workspaces"` field (which signals a monorepo root).
+fn is_node_package(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|contents| !contents.contains("\"workspaces\""))
+        .unwrap_or(false)
 }
 
 fn detect_primary_language(root: &Path) -> Result<ProgrammingLanguage, TreeHuggerError> {
