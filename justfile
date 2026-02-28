@@ -205,7 +205,7 @@ install:
             echo "- no justfile for the area **$area**" >&2
         fi
     done
-    just _speak "all apps in the monorepo have been rebuilt and installed"
+    just _speak "all apps in the Rusty Biscuit monorepo have been rebuilt and installed"
 
 
 # executes the latest Darkmatter CLI code in debug mode
