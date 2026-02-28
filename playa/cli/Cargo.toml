@@ -13,6 +13,8 @@ default = []
 audio-ducking = ["playa/audio-ducking", "tokio"]
 audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
 audio-ducking-linux = ["audio-ducking", "playa/audio-ducking-linux"]
+sfx-native = ["playa/sfx-native"]
+sfx-native-macos = ["sfx-native", "playa/sfx-native-macos"]
 
 [dependencies]
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
