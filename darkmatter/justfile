@@ -18,6 +18,7 @@ LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
 CLI_PATH := "./cli"
 DOCS := ""
+TODAY := `date +%F`
 
 
 default:
@@ -38,6 +39,9 @@ default:
 # Uses TTS if available but never error
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+_sound_effect effect="drop4":
+    @playa effect "{{effect}}" --background 2>/dev/null || return 0
 
 _notify message title=PACKAGE:
     #!/usr/bin/env bash
@@ -239,7 +243,7 @@ install *args="":
     @echo
     @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
-    @playa effect drop-4 2>/dev/null || return 0
+    @just _sound_effect drop4
 
 # Validate the source code without doing a full build
 check:
@@ -281,96 +285,28 @@ review *args="":
     @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
     @echo
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
+    @just _sound_effect confirmation
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 
-TODAY := `date +%F`
-# the temp file for the documents prompt
-DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + LIBRARY + "_docs_prompt.md"
-# the temp file for the skills prompt
-SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + LIBRARY + "_skill_prompt.md"
-# the captured summary from the docs refresh step
-DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + LIBRARY + "_docs_summary.md"
-
-# Render the documentation refresh prompt template.
-#
-# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
-_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    CLI_VALUE={{quote(CLI)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DEPS_VALUE={{quote(DEPS)}}
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
-    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
-
-# Render the skill refresh prompt template.
-#
-# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
-_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
-
-_refresh_docs *args="":
-    @echo >&2
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
-    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{DOCS_PROMPT}}"
-
-
-_refresh_skill SUMMARY_FILE *args:
-    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
-    @echo >&2
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
-    @echo >&2
-    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{SKILL_PROMPT}}"
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
+# update the CLI documents
+docs_cli:
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}{{LIBRARY}}{{RESET}} via Rust drift script"
+    @echo -e "Updating the CLI documents for {{BOLD}}Darkmatter{{RESET}}"
     @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
+    @just _claude_file ./prompts/update-cli-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
+    @just _sound_effect confirmation
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
-    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+    @echo -e "{{BOLD}}Darkmatter {{GREEN}}CLI Docs{{RESET}} were updated!"
 
-
+docs_library:
+    @echo
+    @echo -e "Updating the documentation for the {{BOLD}}Darkmatter Library{{RESET}}"
+    @echo
+    @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
+    @just _sound_effect confirmation
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} {{TODAY}} {{DOCS}} >/dev/null || true
