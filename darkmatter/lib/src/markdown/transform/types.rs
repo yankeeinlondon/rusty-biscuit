@@ -186,6 +186,9 @@ pub struct Stage1Stages {
     /// Frontmatter interpolation stage (`{{variable}}` expansion).
     pub interpolation: bool,
 
+    /// TOC linking stage (`::toc-linking` directive expansion).
+    pub toc_linking: bool,
+
     /// Markdown cleanup stage (formatting normalization).
     pub cleanup: bool,
 
@@ -198,6 +201,7 @@ impl Default for Stage1Stages {
         Self {
             replacement: true,
             interpolation: true,
+            toc_linking: true,
             cleanup: true,
             normalization: true,
         }
@@ -210,6 +214,7 @@ impl Stage1Stages {
         Self {
             replacement: false,
             interpolation: false,
+            toc_linking: false,
             cleanup: false,
             normalization: false,
         }
@@ -227,6 +232,14 @@ impl Stage1Stages {
     pub fn only_interpolation() -> Self {
         Self {
             interpolation: true,
+            ..Self::none()
+        }
+    }
+
+    /// Creates stages with only toc_linking enabled.
+    pub fn only_toc_linking() -> Self {
+        Self {
+            toc_linking: true,
             ..Self::none()
         }
     }
@@ -465,6 +478,9 @@ pub struct TransformReport {
     /// Number of interpolations resolved.
     pub interpolations_applied: usize,
 
+    /// Number of toc-linking directives expanded.
+    pub toc_links_generated: usize,
+
     /// Whether the cleanup stage modified the content.
     pub cleanup_changed: bool,
 
@@ -494,6 +510,7 @@ impl TransformReport {
     pub fn has_changes(&self) -> bool {
         self.replacements_applied > 0
             || self.interpolations_applied > 0
+            || self.toc_links_generated > 0
             || self.cleanup_changed
             || self.transclusions_applied > 0
             || self
@@ -516,6 +533,10 @@ impl TransformReport {
 
         if self.interpolations_applied > 0 {
             parts.push(format!("{} interpolation(s)", self.interpolations_applied));
+        }
+
+        if self.toc_links_generated > 0 {
+            parts.push(format!("{} toc-link(s)", self.toc_links_generated));
         }
 
         if self.cleanup_changed {

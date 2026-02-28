@@ -49,6 +49,10 @@ pub enum MarkdownError {
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
     Transclusion(#[from] crate::markdown::transform::TransclusionError),
+
+    /// TOC linking pipeline error.
+    #[error("TOC linking error: {0}")]
+    TocLinking(#[from] crate::markdown::transform::TocLinkingError),
 }
 
 /// Result type for markdown operations.

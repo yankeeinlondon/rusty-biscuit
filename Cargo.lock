@@ -1571,6 +1571,7 @@ dependencies = [
  "biscuit-hash",
  "biscuit-terminal",
  "chrono",
+ "globset",
  "html-escape",
  "insta",
  "lazy_static",

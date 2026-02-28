@@ -5,8 +5,9 @@
 //!
 //! 1. **Text Replacement** - Replace literal strings from frontmatter `replace` map
 //! 2. **Interpolation** - Expand `{{variable}}` expressions
-//! 3. **Cleanup** - Normalize markdown formatting
-//! 4. **Normalization** - Adjust heading levels
+//! 3. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 4. **Cleanup** - Normalize markdown formatting
+//! 5. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -28,12 +29,15 @@
 
 mod state;
 mod types;
+pub(crate) mod parse_utils;
 
 pub mod interpolation;
 pub mod replacement;
+pub mod toc_linking;
 pub mod transclusion;
 
 pub use state::{EffectiveState, EffectiveStateBuilder};
+pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     Stage1Stages, Stage2Stages, TransclusionOptions, TransformContext, TransformOptions,
@@ -177,6 +181,30 @@ impl Markdown {
             if options.stages.interpolation {
                 let interpolations = self.run_interpolation_stage(&effective_state, &options)?;
                 report.interpolations_applied = interpolations;
+            }
+
+            // Stage 1: TOC Linking
+            if options.stages.toc_linking {
+                match toc_linking::process_toc_linking(
+                    &self.content,
+                    &options.transclusion.source,
+                    &options.transclusion,
+                    options.fail_fast,
+                ) {
+                    Ok((new_content, count)) => {
+                        if count > 0 {
+                            self.content = new_content;
+                        }
+                        report.toc_links_generated = count;
+                    }
+                    Err(e) if !options.fail_fast => {
+                        report.add_warning(TransformWarning::new(
+                            "toc_linking",
+                            e.to_string(),
+                        ));
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
 
             // Stage 1: Cleanup
@@ -1133,6 +1161,7 @@ mod tests {
         let options = TransformOptions::new().with_stages(Stage1Stages {
             replacement: true,
             interpolation: false,
+            toc_linking: false,
             cleanup: true,
             normalization: false,
         });
@@ -1486,6 +1515,7 @@ Hello :wave: {{ greeting }} :smile:"#;
         let options = TransformOptions::new().with_stages(Stage1Stages {
             replacement: true,
             interpolation: true,
+            toc_linking: false,
             cleanup: false,
             normalization: false,
         });
