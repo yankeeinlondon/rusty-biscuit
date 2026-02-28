@@ -14,6 +14,8 @@ let file = TreeFile::new("src/lib.rs")?;
 
 // Symbol extraction
 let symbols = file.symbols()?;           // All symbols combined
+let v2_symbols = file.symbol_records()?; // Symbol Schema v2 parse records
+let v2_index = file.symbol_index_v2()?;  // Parse -> bind -> semantic -> docs pipeline output
 let imports = file.imported_symbols()?;  // Import statements
 let exports = file.exported_symbols()?;  // Exported symbols
 let locals = file.local_symbols()?;      // Local definitions
@@ -123,6 +125,9 @@ pub struct TypeMetadata {
 
 The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
 used by the CLI but are also available to library consumers.
+
+Schema v2 output is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
+and `completed_passes` metadata for staged analysis.
 
 ## Testing
 
