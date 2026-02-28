@@ -141,13 +141,13 @@ impl Default for Prose {
 }
 
 impl Renderable for Prose {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let parsed = self.parse_tokens(None);
         self.layout.apply_layout(&parsed, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let parsed = self.parse_tokens(Some(term));
         self.layout.apply_layout(&parsed, width)
@@ -1527,35 +1527,35 @@ mod tests {
     #[test]
     fn test_atomic_bold_token() {
         let prose = Prose::new("Hello {{bold}}world{{reset}}!");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "Hello \x1b[1mworld\x1b[0m!\x1b[0m");
     }
 
     #[test]
     fn test_atomic_color_token() {
         let prose = Prose::new("{{red}}Error{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[31mError\x1b[0m\x1b[0m");
     }
 
     #[test]
     fn test_block_bold_tag() {
         let prose = Prose::new("<b>bold text</b>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[1mbold text\x1b[22m\x1b[0m");
     }
 
     #[test]
     fn test_block_italic_tag() {
         let prose = Prose::new("<i>italic text</i>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[3mitalic text\x1b[23m\x1b[0m");
     }
 
     #[test]
     fn test_block_underline_tag() {
         let prose = Prose::new("<u>underlined</u>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4munderlined\x1b[24m\x1b[0m");
     }
 
@@ -1563,22 +1563,22 @@ mod tests {
     fn test_underline_variants_atomic() {
         // Double underline
         let prose = Prose::new("{{double-underline}}text{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[4:2m"));
 
         // Curly underline
         let prose = Prose::new("{{curly-underline}}text{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[4:3m"));
 
         // Dotted underline
         let prose = Prose::new("{{dotted-underline}}text{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[4:4m"));
 
         // Dashed underline
         let prose = Prose::new("{{dashed-underline}}text{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[4:5m"));
     }
 
@@ -1586,27 +1586,27 @@ mod tests {
     fn test_underline_variants_block() {
         // Double underline (full name)
         let prose = Prose::new("<double-underline>double</double-underline>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4:2mdouble\x1b[24m\x1b[0m");
 
         // Double underline (alias)
         let prose = Prose::new("<uu>double</uu>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4:2mdouble\x1b[24m\x1b[0m");
 
         // Curly underline
         let prose = Prose::new("<curly-underline>curly</curly-underline>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4:3mcurly\x1b[24m\x1b[0m");
 
         // Dotted underline
         let prose = Prose::new("<dotted-underline>dotted</dotted-underline>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4:4mdotted\x1b[24m\x1b[0m");
 
         // Dashed underline
         let prose = Prose::new("<dashed-underline>dashed</dashed-underline>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[4:5mdashed\x1b[24m\x1b[0m");
     }
 
@@ -1614,27 +1614,27 @@ mod tests {
     fn test_block_aliases() {
         // Test that aliases produce the same output as full names
         assert_eq!(
-            Prose::new("<bold>x</bold>").render(None),
-            Prose::new("<b>x</b>").render(None)
+            Prose::new("<bold>x</bold>").render_optimistic(None),
+            Prose::new("<b>x</b>").render_optimistic(None)
         );
         assert_eq!(
-            Prose::new("<italic>x</italic>").render(None),
-            Prose::new("<i>x</i>").render(None)
+            Prose::new("<italic>x</italic>").render_optimistic(None),
+            Prose::new("<i>x</i>").render_optimistic(None)
         );
         assert_eq!(
-            Prose::new("<underline>x</underline>").render(None),
-            Prose::new("<u>x</u>").render(None)
+            Prose::new("<underline>x</underline>").render_optimistic(None),
+            Prose::new("<u>x</u>").render_optimistic(None)
         );
         assert_eq!(
-            Prose::new("<strikethrough>x</strikethrough>").render(None),
-            Prose::new("<~>x</~>").render(None)
+            Prose::new("<strikethrough>x</strikethrough>").render_optimistic(None),
+            Prose::new("<~>x</~>").render_optimistic(None)
         );
     }
 
     #[test]
     fn test_nested_block_tags() {
         let prose = Prose::new("<b><i>bold italic</i></b>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         // One final \x1b[0m, not two — inner recursion no longer adds its own reset
         assert_eq!(result, "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[22m\x1b[0m");
     }
@@ -1642,7 +1642,7 @@ mod tests {
     #[test]
     fn test_nested_tags_with_unicode_before_rgb_attr_tag() {
         let prose = Prose::new("<b>Stage 0 — <rgb 64,128,255>planning</rgb></b>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("Stage 0 —"));
         assert!(result.contains("planning"));
         assert!(result.contains("\x1b[38;2;64;128;255m"));
@@ -1651,7 +1651,7 @@ mod tests {
     #[test]
     fn test_osc8_link() {
         let prose = Prose::new("<a href=\"https://example.com\">link</a>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(
             result,
             "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m"
@@ -1661,39 +1661,39 @@ mod tests {
     #[test]
     fn test_plain_text_no_reset() {
         let prose = Prose::new("Plain text with no styles");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "Plain text with no styles");
     }
 
     #[test]
     fn test_background_color() {
         let prose = Prose::new("{{bg-red}}highlight{{reset}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[41mhighlight\x1b[0m\x1b[0m");
     }
 
     #[test]
     fn test_strikethrough_block() {
         let prose = Prose::new("<~>deleted</~>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[9mdeleted\x1b[29m\x1b[0m");
     }
 
     #[test]
     fn test_named_color_block() {
         let prose = Prose::new("<red>error message</red>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[31merror message\x1b[39m\x1b[0m");
     }
 
     #[test]
     fn test_bright_color_block() {
         let prose = Prose::new("<bright-red>bright error</bright-red>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[91mbright error\x1b[39m\x1b[0m");
 
         let prose = Prose::new("<bright-cyan>info</bright-cyan>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[96minfo\x1b[39m\x1b[0m");
     }
 
@@ -1701,14 +1701,14 @@ mod tests {
     fn test_web_color_block() {
         // coral is RGB(255, 127, 80)
         let prose = Prose::new("<coral>coral text</coral>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;127;80m"));
         assert!(result.contains("coral text"));
         assert!(result.contains("\x1b[39m"));
 
         // alice-blue (with hyphen) - RGB(240, 248, 255)
         let prose = Prose::new("<alice-blue>light blue</alice-blue>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;240;248;255m"));
         assert!(result.contains("light blue"));
     }
@@ -1717,7 +1717,7 @@ mod tests {
     fn test_tailwind_color_block() {
         // purple-500 should resolve to a purple color
         let prose = Prose::new("<purple-500>tailwind purple</purple-500>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         // Should have 24-bit color escape
         assert!(result.contains("\x1b[38;2;"));
         assert!(result.contains("tailwind purple"));
@@ -1725,7 +1725,7 @@ mod tests {
 
         // slate-500 should resolve to a gray-ish color
         let prose = Prose::new("<slate-500>muted</slate-500>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;"));
         assert!(result.contains("muted"));
     }
@@ -1733,7 +1733,7 @@ mod tests {
     #[test]
     fn test_unknown_tag_preserved() {
         let prose = Prose::new("<unknown-tag>content</unknown-tag>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("<unknown-tag>content</unknown-tag>"));
     }
 
@@ -1741,7 +1741,7 @@ mod tests {
     fn test_rgb_tag() {
         // Test RGB color tag parsing
         let prose = Prose::new("<rgb 255,0,0>red text</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(
             result.contains("\x1b[38;2;255;0;0m"),
             "Expected RGB escape code, got: {:?}",
@@ -1752,7 +1752,7 @@ mod tests {
 
         // Test with different RGB values
         let prose = Prose::new("<rgb 125,67,45>brown text</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;125;67;45m"));
         assert!(result.contains("brown text"));
     }
@@ -1798,7 +1798,7 @@ mod tests {
     #[test]
     fn test_bg_rgb_tag() {
         let prose = Prose::new("<bg-rgb 255,0,0>red bg</bg-rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(
             result.contains("\x1b[48;2;255;0;0m"),
             "Expected bg RGB escape code, got: {:?}",
@@ -1808,7 +1808,7 @@ mod tests {
         assert!(result.contains("\x1b[49m"));
 
         let prose = Prose::new("<bg-rgb 125,67,45>brown bg</bg-rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;125;67;45m"));
         assert!(result.contains("brown bg"));
     }
@@ -1817,17 +1817,17 @@ mod tests {
     fn test_rgb_hex_format() {
         // Hex with # prefix
         let prose = Prose::new("<rgb #FF0000>red</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;0;0m"));
 
         // Hex without # prefix
         let prose = Prose::new("<rgb FF0000>red</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;0;0m"));
 
         // Dark red #8B0000
         let prose = Prose::new("<rgb #8B0000>dark red</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;139;0;0m"));
     }
 
@@ -1835,12 +1835,12 @@ mod tests {
     fn test_rgb_space_separated() {
         // Space-separated values
         let prose = Prose::new("<rgb 255 0 0>red</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;0;0m"));
 
         // With extra spaces
         let prose = Prose::new("<rgb  125  67  45 >brown</rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;125;67;45m"));
     }
 
@@ -1848,12 +1848,12 @@ mod tests {
     fn test_bg_rgb_hex_format() {
         // Hex with # prefix
         let prose = Prose::new("<bg-rgb #00FF00>green bg</bg-rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;0;255;0m"));
 
         // Hex without # prefix
         let prose = Prose::new("<bg-rgb 0000FF>blue bg</bg-rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;0;0;255m"));
     }
 
@@ -1861,7 +1861,7 @@ mod tests {
     fn test_bg_rgb_space_separated() {
         // Space-separated values
         let prose = Prose::new("<bg-rgb 255 128 0>orange bg</bg-rgb>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;255;128;0m"));
     }
 
@@ -1869,14 +1869,14 @@ mod tests {
     fn test_bg_web_color_block() {
         // coral is RGB(255, 127, 80)
         let prose = Prose::new("<bg-coral>coral bg</bg-coral>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;255;127;80m"));
         assert!(result.contains("coral bg"));
         assert!(result.contains("\x1b[49m"));
 
         // alice-blue (with hyphen) - RGB(240, 248, 255)
         let prose = Prose::new("<bg-alice-blue>light blue bg</bg-alice-blue>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;240;248;255m"));
         assert!(result.contains("light blue bg"));
     }
@@ -1884,13 +1884,13 @@ mod tests {
     #[test]
     fn test_bg_tailwind_color_block() {
         let prose = Prose::new("<bg-red-800>danger bg</bg-red-800>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;"));
         assert!(result.contains("danger bg"));
         assert!(result.contains("\x1b[49m"));
 
         let prose = Prose::new("<bg-slate-500>muted bg</bg-slate-500>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;"));
         assert!(result.contains("muted bg"));
     }
@@ -1898,7 +1898,7 @@ mod tests {
     #[test]
     fn test_osc8_link_with_absolute_path() {
         let prose = Prose::new("<a href=\"/usr/local/bin/test\">link</a>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("file:///usr/local/bin/test"));
     }
 
@@ -1908,7 +1908,7 @@ mod tests {
     fn test_same_layer_fg_nesting_restores_parent() {
         // </red> should restore blue, not reset to default
         let prose = Prose::new("<blue>before <red>red</red> after</blue>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(
             result,
             "\x1b[34mbefore \x1b[31mred\x1b[34m after\x1b[39m\x1b[0m"
@@ -1920,7 +1920,7 @@ mod tests {
         // {{blue}} sets foreground, then <red> opens a new scope.
         // </red> should restore to \x1b[34m (the atomic blue).
         let prose = Prose::new("{{blue}}<red>red</red>blue");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[34m\x1b[31mred\x1b[34mblue\x1b[0m");
     }
 
@@ -1928,7 +1928,7 @@ mod tests {
     fn test_no_mid_content_resets() {
         // Only one \x1b[0m should appear, at the very end
         let prose = Prose::new("<b><i>text</i> more</b>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         let reset_count = result.matches("\x1b[0m").count();
         assert_eq!(
             reset_count, 1,
@@ -1941,7 +1941,7 @@ mod tests {
     #[test]
     fn test_deep_nesting_three_layers() {
         let prose = Prose::new("<b><red><i>deep</i></red></b>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         // bold → red → italic → close italic (→ \x1b[23m]) → close red (→ \x1b[39m]) → close bold (→ \x1b[22m]) → final reset
         assert_eq!(
             result,
@@ -1953,7 +1953,7 @@ mod tests {
     fn test_reset_style_preserves_background() {
         // {{reset-style}} should clear everything except background
         let prose = Prose::new("{{bg-red}}{{bold}}text{{reset-style}}still bg");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         // After reset-style: background layer should still be Some
         // The escape sequence \x1b[22;23;24;25;27;28;29;39m is emitted,
         // but background \x1b[41m stays active in the state.
@@ -1967,7 +1967,7 @@ mod tests {
     fn test_single_block_no_extra_reset() {
         // Single block tag should produce exactly one \x1b[0m
         let prose = Prose::new("<red>hello</red>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "\x1b[31mhello\x1b[39m\x1b[0m");
     }
 
@@ -1994,14 +1994,14 @@ mod tests {
     #[test]
     fn test_escaped_angle_brackets() {
         let prose = Prose::new("use \\<ENV\\> here");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "use <ENV> here");
     }
 
     #[test]
     fn test_escaped_angle_brackets_inside_block_tag() {
         let prose = Prose::new("<dim>\\<ENV\\></dim>");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("<ENV>"));
         assert!(result.contains("\x1b[2m")); // dim open
     }
@@ -2009,21 +2009,21 @@ mod tests {
     #[test]
     fn test_escaped_backslash() {
         let prose = Prose::new("path\\\\name");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "path\\name");
     }
 
     #[test]
     fn test_escaped_open_brace() {
         let prose = Prose::new("\\{not a token}}");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("{not a token}}"));
     }
 
     #[test]
     fn test_backslash_before_normal_char_preserved() {
         let prose = Prose::new("hello\\nworld");
-        let result = prose.render(None);
+        let result = prose.render_optimistic(None);
         assert_eq!(result, "hello\\nworld");
     }
 }

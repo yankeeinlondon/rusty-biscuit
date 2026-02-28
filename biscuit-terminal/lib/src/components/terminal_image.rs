@@ -140,7 +140,7 @@ impl Renderable for TerminalImage {
     /// Fallback render using terminal capabilities.
     ///
     /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         self.render_to_terminal(term).unwrap_or_default()
     }
 
@@ -148,7 +148,7 @@ impl Renderable for TerminalImage {
     ///
     /// Uses `q=2` (quiet mode) to suppress the terminal's protocol response,
     /// which would otherwise appear as garbage text when printed from a string.
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         match self.render_as_kitty(width) {
             Ok(escape_seq) => escape_seq,

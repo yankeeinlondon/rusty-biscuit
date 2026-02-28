@@ -52,7 +52,7 @@ use crate::utils::layout::Layout;
 ///     .with("one")
 ///     .with("two")
 ///     .with("three");
-/// assert_eq!(inline.render(Some(80)), "one | two | three");
+/// assert_eq!(inline.render_optimistic(Some(80)), "one | two | three");
 /// ```
 #[derive(Debug)]
 pub struct InlineContent {
@@ -191,7 +191,7 @@ impl InlineContent {
     ///     .with("a")
     ///     .with("b")
     ///     .with("c");
-    /// assert_eq!(inline.render(Some(80)), "a, b, c");
+    /// assert_eq!(inline.render_optimistic(Some(80)), "a, b, c");
     /// ```
     pub fn with_separator<T: Into<String>>(mut self, sep: T) -> Self {
         self.separator = Some(sep.into());
@@ -250,13 +250,13 @@ impl InlineContent {
 // =========================================================================
 
 impl Renderable for InlineContent {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
-        self.fallback_render(&term)
+        self.render(&term)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let mut output = String::new();
         for (i, part) in self.parts.iter().enumerate() {
             if i > 0
@@ -266,7 +266,7 @@ impl Renderable for InlineContent {
             }
             match part {
                 RenderableContent::String(s) => output.push_str(s),
-                RenderableContent::Component(c) => output.push_str(&c.fallback_render(term)),
+                RenderableContent::Component(c) => output.push_str(&c.render(term)),
             }
         }
         output
@@ -304,7 +304,7 @@ mod tests {
         let inline = InlineContent::default();
         assert!(inline.is_empty());
         assert_eq!(inline.len(), 0);
-        assert_eq!(inline.render(Some(80)), "");
+        assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
     #[test]
@@ -314,14 +314,14 @@ mod tests {
             RenderableContent::from("b"),
         ]);
         assert_eq!(inline.len(), 2);
-        assert_eq!(inline.render(Some(80)), "ab");
+        assert_eq!(inline.render_optimistic(Some(80)), "ab");
     }
 
     #[test]
     fn test_new_with_empty_vec() {
         let inline = InlineContent::new(Vec::new());
         assert!(inline.is_empty());
-        assert_eq!(inline.render(Some(80)), "");
+        assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
     #[test]
@@ -329,8 +329,8 @@ mod tests {
         let from_new = InlineContent::new(Vec::new());
         let from_default = InlineContent::default();
         assert_eq!(
-            from_new.render(Some(80)),
-            from_default.render(Some(80)),
+            from_new.render_optimistic(Some(80)),
+            from_default.render_optimistic(Some(80)),
         );
     }
 
@@ -342,14 +342,14 @@ mod tests {
     fn test_from_str() {
         let inline = InlineContent::from("hello");
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "hello");
+        assert_eq!(inline.render_optimistic(Some(80)), "hello");
     }
 
     #[test]
     fn test_from_string() {
         let inline = InlineContent::from(String::from("hello"));
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "hello");
+        assert_eq!(inline.render_optimistic(Some(80)), "hello");
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
         let s = String::from("hello");
         let inline = InlineContent::from(&s);
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "hello");
+        assert_eq!(inline.render_optimistic(Some(80)), "hello");
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         ];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 2);
-        assert_eq!(inline.render(Some(80)), "xy");
+        assert_eq!(inline.render_optimistic(Some(80)), "xy");
     }
 
     #[test]
@@ -384,7 +384,7 @@ mod tests {
         let items = vec![RenderableContent::from("solo")];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "solo");
+        assert_eq!(inline.render_optimistic(Some(80)), "solo");
     }
 
     #[test]
@@ -392,7 +392,7 @@ mod tests {
         let content = RenderableContent::String("direct".into());
         let inline = InlineContent::from(content);
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "direct");
+        assert_eq!(inline.render_optimistic(Some(80)), "direct");
     }
 
     #[test]
@@ -400,35 +400,35 @@ mod tests {
         let content = RenderableContent::from(Prose::new("component"));
         let inline = InlineContent::from(content);
         assert_eq!(inline.len(), 1);
-        assert!(inline.render(Some(80)).contains("component"));
+        assert!(inline.render_optimistic(Some(80)).contains("component"));
     }
 
     #[test]
     fn test_from_prose() {
         let inline = InlineContent::from(Prose::new("styled"));
         assert_eq!(inline.len(), 1);
-        assert!(inline.render(Some(80)).contains("styled"));
+        assert!(inline.render_optimistic(Some(80)).contains("styled"));
     }
 
     #[test]
     fn test_from_text_block() {
         let inline = InlineContent::from(TextBlock::new("block"));
         assert_eq!(inline.len(), 1);
-        assert!(inline.render(Some(80)).contains("block"));
+        assert!(inline.render_optimistic(Some(80)).contains("block"));
     }
 
     #[test]
     fn test_from_empty_str() {
         let inline = InlineContent::from("");
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "");
+        assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
     #[test]
     fn test_from_empty_string() {
         let inline = InlineContent::from(String::new());
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "");
+        assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
     // =====================================================================
@@ -442,7 +442,7 @@ mod tests {
             .with("b")
             .with("c");
         assert_eq!(inline.len(), 3);
-        assert_eq!(inline.render(Some(80)), "abc");
+        assert_eq!(inline.render_optimistic(Some(80)), "abc");
     }
 
     #[test]
@@ -450,7 +450,7 @@ mod tests {
         let inline = InlineContent::default()
             .with("text ")
             .with(Prose::new("styled"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
         assert!(output.contains("styled"));
     }
@@ -460,21 +460,21 @@ mod tests {
         let inline = InlineContent::from("start")
             .with(" middle")
             .with(" end");
-        assert_eq!(inline.render(Some(80)), "start middle end");
+        assert_eq!(inline.render_optimistic(Some(80)), "start middle end");
     }
 
     #[test]
     fn test_with_string_owned() {
         let inline = InlineContent::default()
             .with(String::from("owned"));
-        assert_eq!(inline.render(Some(80)), "owned");
+        assert_eq!(inline.render_optimistic(Some(80)), "owned");
     }
 
     #[test]
     fn test_with_renderable_content_directly() {
         let content = RenderableContent::from("via rc");
         let inline = InlineContent::default().with(content);
-        assert_eq!(inline.render(Some(80)), "via rc");
+        assert_eq!(inline.render_optimistic(Some(80)), "via rc");
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
         let inline = InlineContent::default()
             .with("prefix ")
             .with(TextBlock::new("block"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("prefix "));
         assert!(output.contains("block"));
     }
@@ -491,7 +491,7 @@ mod tests {
     fn test_with_single_item() {
         let inline = InlineContent::default().with("only");
         assert_eq!(inline.len(), 1);
-        assert_eq!(inline.render(Some(80)), "only");
+        assert_eq!(inline.render_optimistic(Some(80)), "only");
     }
 
     // =====================================================================
@@ -504,7 +504,7 @@ mod tests {
             .with("a")
             .with("b")
             .with("c");
-        assert_eq!(inline.render(Some(80)), "abc");
+        assert_eq!(inline.render_optimistic(Some(80)), "abc");
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
             .with("one")
             .with("two")
             .with("three");
-        assert_eq!(inline.render(Some(80)), "one, two, three");
+        assert_eq!(inline.render_optimistic(Some(80)), "one, two, three");
     }
 
     #[test]
@@ -522,7 +522,7 @@ mod tests {
         let inline = InlineContent::default()
             .with_separator(" | ")
             .with("only");
-        assert_eq!(inline.render(Some(80)), "only");
+        assert_eq!(inline.render_optimistic(Some(80)), "only");
     }
 
     #[test]
@@ -531,7 +531,7 @@ mod tests {
             .with_separator(" | ")
             .with("a")
             .with("b");
-        assert_eq!(inline.render(Some(80)), "a | b");
+        assert_eq!(inline.render_optimistic(Some(80)), "a | b");
     }
 
     #[test]
@@ -540,14 +540,14 @@ mod tests {
             .with_separator("")
             .with("a")
             .with("b");
-        assert_eq!(inline.render(Some(80)), "ab");
+        assert_eq!(inline.render_optimistic(Some(80)), "ab");
     }
 
     #[test]
     fn test_separator_no_items() {
         let inline = InlineContent::default()
             .with_separator(", ");
-        assert_eq!(inline.render(Some(80)), "");
+        assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
     #[test]
@@ -556,7 +556,7 @@ mod tests {
             .with_separator(" + ")
             .with(Prose::new("alpha"))
             .with(Prose::new("beta"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.contains("alpha"));
         assert!(output.contains(" + "));
         assert!(output.contains("beta"));
@@ -568,7 +568,7 @@ mod tests {
             .with_separator(": ")
             .with("label")
             .with(Prose::new("value"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("label: "));
         assert!(output.contains("value"));
     }
@@ -580,7 +580,7 @@ mod tests {
             .with_separator(", ")
             .with("a")
             .with("b");
-        assert_eq!(inline.render(Some(80)), "a, b");
+        assert_eq!(inline.render_optimistic(Some(80)), "a, b");
     }
 
     #[test]
@@ -589,7 +589,7 @@ mod tests {
             .with_separator(String::from(" -> "))
             .with("a")
             .with("b");
-        assert_eq!(inline.render(Some(80)), "a -> b");
+        assert_eq!(inline.render_optimistic(Some(80)), "a -> b");
     }
 
     #[test]
@@ -599,7 +599,7 @@ mod tests {
             .with("usr")
             .with("local")
             .with("bin");
-        assert_eq!(inline.render(Some(80)), "usr/local/bin");
+        assert_eq!(inline.render_optimistic(Some(80)), "usr/local/bin");
     }
 
     // =====================================================================
@@ -610,7 +610,7 @@ mod tests {
     fn test_push_chaining() {
         let mut inline = InlineContent::default();
         inline.push("a").push("b").push("c");
-        assert_eq!(inline.render(Some(80)), "abc");
+        assert_eq!(inline.render_optimistic(Some(80)), "abc");
     }
 
     #[test]
@@ -619,7 +619,7 @@ mod tests {
         inline
             .push("text ")
             .push(Prose::new("styled"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
         assert!(output.contains("styled"));
     }
@@ -628,28 +628,28 @@ mod tests {
     fn test_push_owned_string() {
         let mut inline = InlineContent::default();
         inline.push(String::from("owned"));
-        assert_eq!(inline.render(Some(80)), "owned");
+        assert_eq!(inline.render_optimistic(Some(80)), "owned");
     }
 
     #[test]
     fn test_push_renderable_content() {
         let mut inline = InlineContent::default();
         inline.push(RenderableContent::from("content"));
-        assert_eq!(inline.render(Some(80)), "content");
+        assert_eq!(inline.render_optimistic(Some(80)), "content");
     }
 
     #[test]
     fn test_add_text_str() {
         let mut inline = InlineContent::default();
         inline.add_text("hello").add_text(" world");
-        assert_eq!(inline.render(Some(80)), "hello world");
+        assert_eq!(inline.render_optimistic(Some(80)), "hello world");
     }
 
     #[test]
     fn test_add_text_owned_string() {
         let mut inline = InlineContent::default();
         inline.add_text(String::from("owned"));
-        assert_eq!(inline.render(Some(80)), "owned");
+        assert_eq!(inline.render_optimistic(Some(80)), "owned");
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
         inline
             .add_text("prefix: ")
             .add_prose(Prose::new("content"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("prefix: "));
         assert!(output.contains("content"));
     }
@@ -669,7 +669,7 @@ mod tests {
         inline
             .add_text("before ")
             .add_text_block(TextBlock::new("styled"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("before "));
         assert!(output.contains("styled"));
     }
@@ -681,7 +681,7 @@ mod tests {
             .add_text("plain ")
             .add_prose(Prose::new("prose "))
             .add_text_block(TextBlock::new("block"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("plain "));
         assert!(output.contains("prose"));
         assert!(output.contains("block"));
@@ -696,21 +696,21 @@ mod tests {
     fn test_with_then_push() {
         let mut inline = InlineContent::default().with("a");
         inline.push("b");
-        assert_eq!(inline.render(Some(80)), "ab");
+        assert_eq!(inline.render_optimistic(Some(80)), "ab");
     }
 
     #[test]
     fn test_from_then_push() {
         let mut inline = InlineContent::from("start");
         inline.push(" end");
-        assert_eq!(inline.render(Some(80)), "start end");
+        assert_eq!(inline.render_optimistic(Some(80)), "start end");
     }
 
     #[test]
     fn test_from_then_add_text() {
         let mut inline = InlineContent::from("label");
         inline.add_text(": value");
-        assert_eq!(inline.render(Some(80)), "label: value");
+        assert_eq!(inline.render_optimistic(Some(80)), "label: value");
     }
 
     // =====================================================================
@@ -724,7 +724,7 @@ mod tests {
             RenderableContent::from("line2"),
             RenderableContent::from("line3"),
         ]);
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(!output.contains('\n'));
         assert_eq!(output, "line1line2line3");
     }
@@ -735,7 +735,7 @@ mod tests {
             .with("text")
             .with(Prose::new("prose"))
             .with(TextBlock::new("block"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(!output.contains('\n'));
     }
 
@@ -787,51 +787,51 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — render / fallback_render
+    // Renderable trait — render / render_optimistic
     // =====================================================================
 
     #[test]
-    fn test_fallback_render() {
+    fn test_render() {
         let inline = InlineContent::default()
             .with("hello ")
             .with("world");
         let term = Terminal::new_optimistic(80);
-        assert_eq!(inline.fallback_render(&term), "hello world");
+        assert_eq!(inline.render(&term), "hello world");
     }
 
     #[test]
     fn test_render_default_width() {
         let inline = InlineContent::from("test");
-        assert_eq!(inline.render(None), "test");
+        assert_eq!(inline.render_optimistic(None), "test");
     }
 
     #[test]
     fn test_render_with_explicit_width() {
         let inline = InlineContent::from("test");
-        assert_eq!(inline.render(Some(120)), "test");
+        assert_eq!(inline.render_optimistic(Some(120)), "test");
     }
 
     #[test]
-    fn test_render_and_fallback_render_consistent_for_plain_text() {
+    fn test_render_and_render_optimistic_consistent_for_plain_text() {
         let inline = InlineContent::default()
             .with("hello ")
             .with("world");
         let term = Terminal::new_optimistic(80);
         assert_eq!(
-            inline.render(Some(80)),
-            inline.fallback_render(&term),
+            inline.render_optimistic(Some(80)),
+            inline.render(&term),
         );
     }
 
     #[test]
     fn test_render_empty() {
-        assert_eq!(InlineContent::default().render(Some(80)), "");
+        assert_eq!(InlineContent::default().render_optimistic(Some(80)), "");
     }
 
     #[test]
-    fn test_fallback_render_empty() {
+    fn test_render_empty_with_terminal() {
         let term = Terminal::new_optimistic(80);
-        assert_eq!(InlineContent::default().fallback_render(&term), "");
+        assert_eq!(InlineContent::default().render(&term), "");
     }
 
     // =====================================================================
@@ -1007,7 +1007,7 @@ mod tests {
         let inline = InlineContent::default()
             .with("Hello ")
             .with("世界");
-        assert_eq!(inline.render(Some(80)), "Hello 世界");
+        assert_eq!(inline.render_optimistic(Some(80)), "Hello 世界");
     }
 
     #[test]
@@ -1015,7 +1015,7 @@ mod tests {
         let inline = InlineContent::default()
             .with("Status: ")
             .with("✅");
-        assert_eq!(inline.render(Some(80)), "Status: ✅");
+        assert_eq!(inline.render_optimistic(Some(80)), "Status: ✅");
     }
 
     #[test]
@@ -1025,7 +1025,7 @@ mod tests {
             .with("English")
             .with("日本語")
             .with("العربية");
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.contains("English"));
         assert!(output.contains("日本語"));
         assert!(output.contains("العربية"));
@@ -1038,7 +1038,7 @@ mod tests {
             .with_separator(" 🔸 ")
             .with("a")
             .with("b");
-        assert_eq!(inline.render(Some(80)), "a 🔸 b");
+        assert_eq!(inline.render_optimistic(Some(80)), "a 🔸 b");
     }
 
     // =====================================================================
@@ -1051,7 +1051,7 @@ mod tests {
             .with("")
             .with("content")
             .with("");
-        assert_eq!(inline.render(Some(80)), "content");
+        assert_eq!(inline.render_optimistic(Some(80)), "content");
         assert_eq!(inline.len(), 3);
     }
 
@@ -1061,13 +1061,13 @@ mod tests {
             .with("   ")
             .with("text")
             .with("   ");
-        assert_eq!(inline.render(Some(80)), "   text   ");
+        assert_eq!(inline.render_optimistic(Some(80)), "   text   ");
     }
 
     #[test]
     fn test_single_character() {
         let inline = InlineContent::from("X");
-        assert_eq!(inline.render(Some(80)), "X");
+        assert_eq!(inline.render_optimistic(Some(80)), "X");
     }
 
     #[test]
@@ -1076,7 +1076,7 @@ mod tests {
             .with("col1")
             .with("\t")
             .with("col2");
-        assert_eq!(inline.render(Some(80)), "col1\tcol2");
+        assert_eq!(inline.render_optimistic(Some(80)), "col1\tcol2");
     }
 
     // =====================================================================
@@ -1090,7 +1090,7 @@ mod tests {
             inline.push(i.to_string());
         }
         assert_eq!(inline.len(), 100);
-        let output = inline.render(Some(1000));
+        let output = inline.render_optimistic(Some(1000));
         assert!(output.starts_with("0123"));
         assert!(output.ends_with("99"));
     }
@@ -1101,7 +1101,7 @@ mod tests {
         for i in 0..5 {
             inline.push(i.to_string());
         }
-        assert_eq!(inline.render(Some(80)), "0,1,2,3,4");
+        assert_eq!(inline.render_optimistic(Some(80)), "0,1,2,3,4");
     }
 
     // =====================================================================
@@ -1114,7 +1114,7 @@ mod tests {
             .with("normal ")
             .with(Prose::new("{{bold}}bold{{reset}}"))
             .with(" normal");
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         // Bold wraps with escape codes: \x1b[1m ... \x1b[22m
         assert!(output.contains("\x1b[1m"));
         assert!(output.contains("bold"));
@@ -1127,7 +1127,7 @@ mod tests {
         let inline = InlineContent::default()
             .with(Prose::new("<red>error</red>"))
             .with(": something broke");
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.contains("error"));
         assert!(output.contains(": something broke"));
     }
@@ -1138,7 +1138,7 @@ mod tests {
             .with(Prose::new("{{bold}}key{{reset}}"))
             .with(": ")
             .with(Prose::new("{{dim}}value{{reset}}"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.contains("key"));
         assert!(output.contains(": "));
         assert!(output.contains("value"));
@@ -1157,7 +1157,7 @@ mod tests {
             .with("outer ")
             .with(inner)
             .with(" end");
-        assert_eq!(outer.render(Some(80)), "outer inner1inner2 end");
+        assert_eq!(outer.render_optimistic(Some(80)), "outer inner1inner2 end");
     }
 
     #[test]
@@ -1171,7 +1171,7 @@ mod tests {
             .with("start")
             .with(inner)
             .with("end");
-        assert_eq!(outer.render(Some(80)), "start | a+b | end");
+        assert_eq!(outer.render_optimistic(Some(80)), "start | a+b | end");
     }
 
     // =====================================================================
@@ -1186,7 +1186,7 @@ mod tests {
             .with("before ")
             .with(compose)
             .with(" after");
-        assert_eq!(inline.render(Some(80)), "before composed after");
+        assert_eq!(inline.render_optimistic(Some(80)), "before composed after");
     }
 
     // =====================================================================
@@ -1197,14 +1197,14 @@ mod tests {
     fn test_separator_with_push() {
         let mut inline = InlineContent::default().with_separator(" - ");
         inline.push("x").push("y").push("z");
-        assert_eq!(inline.render(Some(80)), "x - y - z");
+        assert_eq!(inline.render_optimistic(Some(80)), "x - y - z");
     }
 
     #[test]
     fn test_separator_with_add_text() {
         let mut inline = InlineContent::default().with_separator(".");
         inline.add_text("com").add_text("example").add_text("www");
-        assert_eq!(inline.render(Some(80)), "com.example.www");
+        assert_eq!(inline.render_optimistic(Some(80)), "com.example.www");
     }
 
     #[test]
@@ -1213,7 +1213,7 @@ mod tests {
         inline
             .add_prose(Prose::new("hello"))
             .add_prose(Prose::new("world"));
-        let output = inline.render(Some(80));
+        let output = inline.render_optimistic(Some(80));
         assert!(output.contains("hello"));
         assert!(output.contains("world"));
     }

@@ -14,23 +14,31 @@ use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
 /// the provided builder methods let callers configure it
 /// fluently.
 pub trait Renderable: std::fmt::Debug + Any {
-    /// **Opportunistic Render**
+    /// **Terminal-Aware Render**
     ///
-    /// Renders without knowledge of the underlying terminal's
-    /// capabilities with an "opportunistic" view that the
-    /// terminal supports all capabilities.
+    /// Renders the component using capabilities from the provided
+    /// [`Terminal`] (width, color depth, image support, etc.).
+    fn render(&self, term: &Terminal) -> String;
+
+    /// **Optimistic Render**
+    ///
+    /// Renders without environment detection by assuming a modern
+    /// terminal capability set.
     ///
     /// `term_width` provides the terminal width in columns.
-    /// When `None`, the component should assume a reasonable
-    /// default (typically 80).
-    fn render(&self, term_width: Option<u32>) -> String;
+    /// When `None`, the component uses 80 columns.
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        let term = Terminal::new_optimistic(width);
+        self.render(&term)
+    }
 
-    /// **Fallback Render**
-    ///
-    /// Renders the component based on the capabilities of the
-    /// passed in `Terminal`. Will provide graceful fallbacks
-    /// when possible.
-    fn fallback_render(&self, term: &Terminal) -> String;
+    /// Render with all capabilities copied from `term` but a fixed width override.
+    fn render_in_width(&self, term: &Terminal, width: u32) -> String {
+        let mut term_with_width = Terminal::from(term);
+        term_with_width.fixed_width = Some(width);
+        self.render(&term_with_width)
+    }
 
     /// Returns a shared reference to the component's layout.
     fn layout(&self) -> &Layout;
@@ -129,28 +137,25 @@ pub trait Renderable: std::fmt::Debug + Any {
     ///
     /// This is the method CLI programs should use when printing a
     /// component directly to the terminal. It is a thin wrapper around
-    /// [`fallback_render()`](Renderable::fallback_render) that
-    /// guarantees the returned string ends with a newline.
+    /// [`render()`](Renderable::render) that guarantees the returned
+    /// string ends with a newline.
     ///
-    /// ## Why not `render()` or `fallback_render()`?
+    /// ## Why not `render()` directly?
     ///
-    /// Neither `render()` nor `fallback_render()` append a trailing
-    /// newline — their output is designed for **composition**, where
-    /// one component's output is embedded inside another. When that
-    /// output is sent directly to the terminal via `print!`, the
-    /// missing newline causes zsh to display an inverted `%` glyph
-    /// at the end of the line.
+    /// `render()` does not append a trailing newline because its output
+    /// is designed for **composition**, where one component's output is
+    /// embedded inside another. When that output is sent directly to the
+    /// terminal via `print!`, the missing newline causes zsh to display
+    /// an inverted `%` glyph at the end of the line.
     ///
-    /// `display()` solves this by delegating to `fallback_render()`
-    /// (so you get capability-aware rendering with graceful
-    /// degradation) and then ensuring the output is
-    /// newline-terminated.
+    /// `display()` solves this by delegating to `render()` and then
+    /// ensuring the output is newline-terminated.
     ///
-    /// | Method             | Trailing `\n` | Terminal-aware | Use for                      |
-    /// |--------------------|---------------|---------------|------------------------------|
-    /// | `render()`         | No            | No            | Composition, embedding       |
-    /// | `fallback_render()`| No            | Yes           | Composition, embedding       |
-    /// | **`display()`**    | **Yes**       | **Yes**       | **Direct terminal output**   |
+    /// | Method                  | Trailing `\n` | Terminal-aware | Use for                      |
+    /// |-------------------------|---------------|---------------|------------------------------|
+    /// | `render_optimistic()`   | No            | No            | Composition, embedding       |
+    /// | `render()`              | No            | Yes           | Composition, embedding       |
+    /// | **`display()`**         | **Yes**       | **Yes**       | **Direct terminal output**   |
     ///
     /// ## Examples
     ///
@@ -161,12 +166,11 @@ pub trait Renderable: std::fmt::Debug + Any {
     ///     .with_columns(vec![TableColumn::new("Name")])
     ///     .with_data(vec![vec!["Alice".into()]]);
     ///
-    /// // Detect the real terminal (width, color depth, image support, …)
     /// let term = Terminal::default();
     /// print!("{}", table.display(&term));
     /// ```
     fn display(&self, term: &Terminal) -> String {
-        let rendered = self.fallback_render(term);
+        let rendered = self.render(term);
         if rendered.ends_with('\n') {
             rendered
         } else {
@@ -200,13 +204,13 @@ impl RenderableContent {
     /// Returns the text content as a string.
     ///
     /// For String variants, returns the string directly.
-    /// For Component variants, renders using fallback with default terminal.
+    /// For Component variants, renders with default terminal detection.
     pub fn as_text(&self) -> String {
         match self {
             RenderableContent::String(s) => s.clone(),
             RenderableContent::Component(c) => {
                 let term = Terminal::default();
-                c.fallback_render(&term)
+                c.render(&term)
             }
         }
     }

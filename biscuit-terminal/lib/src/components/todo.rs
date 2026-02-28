@@ -231,14 +231,14 @@ impl Todo {
 }
 
 impl Renderable for Todo {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
         let content = self.to_terminal(&term);
         self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let content = self.to_terminal(term);
         self.layout.apply_layout(&content, width)

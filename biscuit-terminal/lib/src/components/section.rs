@@ -108,9 +108,9 @@ impl Section {
                 RenderableContent::String(s) => s.clone(),
                 RenderableContent::Component(component) => {
                     if let Some(t) = term {
-                        component.fallback_render(t)
+                        component.render_in_width(t, term_width)
                     } else {
-                        component.render(Some(term_width))
+                        component.render_optimistic(Some(term_width))
                     }
                 }
             };
@@ -128,14 +128,14 @@ impl Section {
 }
 
 impl Renderable for Section {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
         let content = self.render_content(None, available);
         self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn test_h1_section() {
         let section = Section::new(HeadingLevel::h1, "Title");
-        let result = section.render(None);
+        let result = section.render_optimistic(None);
         assert_eq!(result, "\x1b[1m# Title\x1b[22m");
     }
 
@@ -174,7 +174,7 @@ mod tests {
     fn test_section_with_content() {
         let mut section = Section::new(HeadingLevel::h2, "Header");
         section.add_string("Some content here.");
-        let result = section.render(None);
+        let result = section.render_optimistic(None);
         assert_eq!(result, "\x1b[1m## Header\x1b[22m\nSome content here.");
     }
 

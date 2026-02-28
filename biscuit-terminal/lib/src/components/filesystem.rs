@@ -19,7 +19,7 @@
 //!
 //! let mut fs = FileSystem::new(".").unwrap();
 //! fs.ensure_tree_built();
-//! println!("{}", fs.render(Some(80)));
+//! println!("{}", fs.render_optimistic(Some(80)));
 //! ```
 //!
 //! With formatting options:
@@ -70,9 +70,9 @@
 //! ## Rendering Methods
 //!
 //! - [`FileSystem::render()`] - Basic rendering without terminal context (uses Unicode icons)
-//! - [`FileSystem::fallback_render()`] - Terminal-aware rendering with Nerd Font support
+//! - [`FileSystem::render()`] - Terminal-aware rendering with Nerd Font support
 //!
-//! For CLI output, always use `fallback_render()` with a [`Terminal`] instance to get
+//! For CLI output, always use `render()` with a [`Terminal`] instance to get
 //! proper icon selection and ANSI styling based on terminal capabilities.
 
 use std::any::Any;
@@ -477,11 +477,11 @@ pub struct FileMetrics {
 /// fs.ensure_tree_built();
 ///
 /// // Option 1: Basic rendering (no terminal context, Unicode icons only)
-/// let output = fs.render(Some(80));
+/// let output = fs.render_optimistic(Some(80));
 ///
 /// // Option 2: Terminal-aware rendering (Nerd Font icons, ANSI styling)
 /// let term = Terminal::default();
-/// let output = fs.fallback_render(&term);
+/// let output = fs.render(&term);
 /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
 /// ```
 ///
@@ -889,7 +889,7 @@ impl FileSystem {
     /// let mut fs = FileSystem::new_with_formatting(".")?
     ///     .with_file_links();
     /// fs.ensure_tree_built();
-    /// let output = fs.fallback_render(&Terminal::default());
+    /// let output = fs.render(&Terminal::default());
     /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
     pub fn with_file_links(mut self) -> Self {
@@ -1833,7 +1833,7 @@ impl Renderable for FileSystem {
     /// Renders the filesystem tree as a string without terminal context.
     ///
     /// This method provides basic rendering with Unicode fallback icons and no
-    /// ANSI styling. For CLI output, prefer [`fallback_render()`](Self::fallback_render)
+    /// ANSI styling. For CLI output, prefer [`render()`](Self::render)
     /// which uses terminal capabilities for Nerd Font icons and proper styling.
     ///
     /// ## Arguments
@@ -1854,10 +1854,10 @@ impl Renderable for FileSystem {
     /// fs.ensure_tree_built();
     ///
     /// // Render at 80 columns (default)
-    /// let output = fs.render(None);
+    /// let output = fs.render_optimistic(None);
     ///
     /// // Render at specific width
-    /// let narrow = fs.render(Some(40));
+    /// let narrow = fs.render_optimistic(Some(40));
     /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
     ///
@@ -1867,7 +1867,7 @@ impl Renderable for FileSystem {
     /// - File/directory names are truncated with ellipsis (`...`) when too long
     /// - Uses Unicode fallback icons (📄, 📂) regardless of terminal capabilities
     /// - No ANSI styling is applied since there is no terminal context
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
 
         let tree = match &self.tree {
@@ -1885,7 +1885,7 @@ impl Renderable for FileSystem {
             self.render_root_line(&mut output, None, false);
         }
 
-        // Pass is_tty=false since render() has no terminal context
+        // Pass is_tty=false since render_optimistic() has no terminal context
         self.render_nodes(&mut output, tree, "", width, 0, None, false, &self.root_path);
 
         // Apply layout (margins, alignment) but NOT word wrap
@@ -1912,7 +1912,7 @@ impl Renderable for FileSystem {
     ///
     /// // Use Terminal::default() for current terminal capabilities
     /// let term = Terminal::default();
-    /// let output = fs.fallback_render(&term);
+    /// let output = fs.render(&term);
     /// println!("{}", output);
     /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
@@ -1924,7 +1924,7 @@ impl Renderable for FileSystem {
     /// - Symlinks are styled cyan
     /// - Error directories (permission denied) are styled red
     /// - Dotfiles are italicized when configured
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
 
         let tree = match &self.tree {
@@ -2030,7 +2030,7 @@ impl FileSystem {
                     abs_path.display(),
                     name
                 ))
-                .render(None)
+                .render_optimistic(None)
             } else {
                 name
             };
@@ -2108,7 +2108,7 @@ impl FileSystem {
                     node_path.display(),
                     display_name
                 ))
-                .render(None)
+                .render_optimistic(None)
             } else {
                 display_name
             };
@@ -4397,7 +4397,7 @@ mod tests {
     fn test_render_empty_tree_returns_empty_string() {
         let fs = FileSystem::default();
         // Tree not built, should return empty
-        let result = fs.render(Some(80));
+        let result = fs.render_optimistic(Some(80));
         assert_eq!(result, "");
     }
 
@@ -4411,7 +4411,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
 
         // Should contain the tree connector and filename
         assert!(result.contains("test.rs"), "Output should contain filename");
@@ -4433,7 +4433,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
 
         // Should contain both src directory and main.rs file
         assert!(result.contains("src"), "Output should contain src directory");
@@ -4451,7 +4451,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
 
         assert_eq!(lines.len(), 2, "Should have 2 lines for 2 files");
@@ -4477,7 +4477,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
 
         // First line is root header, second is the file
@@ -4504,7 +4504,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
 
         assert_eq!(lines.len(), 1, "Should have only 1 file line (no root header)");
@@ -4527,7 +4527,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
 
         // Should have: src, then lib.rs and main.rs inside
@@ -4556,7 +4556,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(40));
+        let result = fs_tree.render_optimistic(Some(40));
 
         // Each line should fit within 40 columns
         for line in result.lines() {
@@ -4582,7 +4582,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
 
         // Each line should fit within 80 columns
         for line in result.lines() {
@@ -4607,7 +4607,7 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let result = fs_tree.render(Some(120));
+        let result = fs_tree.render_optimistic(Some(120));
 
         for line in result.lines() {
             let line_width = visible_width(line);
@@ -4641,7 +4641,7 @@ mod tests {
 
         // Test at different widths
         for width in [40, 80, 120] {
-            let result = fs_tree.render(Some(width));
+            let result = fs_tree.render_optimistic(Some(width));
 
             // Verify file appears
             assert!(
@@ -4675,7 +4675,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // Even at very narrow width, connectors should be intact
-        let result = fs_tree.render(Some(20));
+        let result = fs_tree.render_optimistic(Some(20));
 
         for line in result.lines() {
             // Each line should have an intact connector at the appropriate position
@@ -4702,7 +4702,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // Render at narrow width to force truncation
-        let result = fs_tree.render(Some(30));
+        let result = fs_tree.render_optimistic(Some(30));
 
         // Should contain ellipsis for truncated name
         assert!(
@@ -4712,7 +4712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fallback_render_uses_terminal_width() {
+    fn test_render_uses_terminal_width() {
         use std::fs;
 
         let temp = tempfile::tempdir().expect("create temp dir");
@@ -4723,7 +4723,7 @@ mod tests {
 
         let term = crate::terminal::TerminalBuilder::default().width(50).build();
 
-        let result = fs_tree.fallback_render(&term);
+        let result = fs_tree.render(&term);
 
         // Should contain the file
         assert!(result.contains("test.txt"));
@@ -4741,7 +4741,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fallback_render_uses_nerd_font_setting() {
+    fn test_render_uses_nerd_font_setting() {
         use std::fs;
 
         let temp = tempfile::tempdir().expect("create temp dir");
@@ -4753,12 +4753,12 @@ mod tests {
         // With Nerd Font enabled
         let mut term_nerd = crate::terminal::TerminalBuilder::default().width(80).build();
         term_nerd.is_nerd_font = Some(true);
-        let result_nerd = fs_tree.fallback_render(&term_nerd);
+        let result_nerd = fs_tree.render(&term_nerd);
 
         // With Nerd Font disabled
         let mut term_unicode = crate::terminal::TerminalBuilder::default().width(80).build();
         term_unicode.is_nerd_font = Some(false);
-        let result_unicode = fs_tree.fallback_render(&term_unicode);
+        let result_unicode = fs_tree.render(&term_unicode);
 
         // Both should contain the file name
         assert!(result_nerd.contains("main.rs"));
@@ -4789,7 +4789,7 @@ mod tests {
             .width(120)
             .is_tty(true)
             .build();
-        let result = fs_tree.fallback_render(&term);
+        let result = fs_tree.render(&term);
 
         let canonical = temp.path().canonicalize().expect("canonicalize");
 
@@ -4844,7 +4844,7 @@ mod tests {
             .width(80)
             .is_tty(true)
             .build();
-        let result = fs_tree.fallback_render(&term);
+        let result = fs_tree.render(&term);
 
         // Should NOT contain OSC8 sequences
         assert!(
@@ -4867,7 +4867,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // render() has no terminal context (is_tty=false)
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
 
         // Should NOT contain OSC8 sequences without TTY
         assert!(
@@ -5284,7 +5284,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // Render at narrow width to test truncation of wide chars
-        let result = fs_tree.render(Some(30));
+        let result = fs_tree.render_optimistic(Some(30));
 
         for line in result.lines() {
             let line_width = visible_width(line);
@@ -5321,7 +5321,7 @@ mod tests {
         assert!(!tree.is_empty(), "Should have some entries");
 
         // The tree should stop at depth 20, so deepest.txt should not appear
-        let result = fs_tree.render(Some(200));
+        let result = fs_tree.render_optimistic(Some(200));
         assert!(
             !result.contains("deepest.txt"),
             "deepest.txt should not appear due to max_depth=20"
@@ -5399,7 +5399,7 @@ mod tests {
         assert!(tree.is_empty(), "Tree should be empty");
 
         // Render should return empty string for empty tree
-        let result = fs_tree.render(Some(80));
+        let result = fs_tree.render_optimistic(Some(80));
         assert_eq!(result, "", "Empty tree should render as empty string");
     }
 
@@ -5497,7 +5497,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // Very narrow width (10 columns) - connector takes 4, icon takes ~2
-        let result = fs_tree.render(Some(10));
+        let result = fs_tree.render_optimistic(Some(10));
 
         for line in result.lines() {
             let line_width = visible_width(line);
@@ -5521,7 +5521,7 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // render(None) should use default width of 80
-        let result = fs_tree.render(None);
+        let result = fs_tree.render_optimistic(None);
 
         for line in result.lines() {
             let line_width = visible_width(line);
@@ -5535,7 +5535,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fallback_render_no_styling_when_not_tty() {
+    fn test_render_no_styling_when_not_tty() {
         use std::fs;
 
         let temp = tempfile::tempdir().expect("create temp dir");
@@ -5551,7 +5551,7 @@ mod tests {
         let mut term = crate::terminal::TerminalBuilder::default().width(80).build();
         term.is_tty = false;
 
-        let result = fs_tree.fallback_render(&term);
+        let result = fs_tree.render(&term);
 
         // Should not contain any ANSI escape sequences
         assert!(
@@ -6066,7 +6066,7 @@ mod tests {
             .show_root(false);
         fs.ensure_tree_built();
 
-        let output = fs.render(Some(120));
+        let output = fs.render_optimistic(Some(120));
         assert!(
             output.contains("file size:"),
             "output should contain 'file size:' label, got: {}",
@@ -6086,7 +6086,7 @@ mod tests {
             .show_root(false);
         fs.ensure_tree_built();
 
-        let output = fs.render(Some(120));
+        let output = fs.render_optimistic(Some(120));
         assert!(output.contains("file size:"), "should have file size");
         assert!(output.contains("tokens:"), "should have tokens");
     }

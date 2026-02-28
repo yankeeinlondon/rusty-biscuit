@@ -324,9 +324,9 @@ impl TwoColumn {
                 let rendered = if let Some(t) = term {
                     let mut column_term = Terminal::from(t);
                     column_term.fixed_width = Some(width);
-                    component.fallback_render(&column_term)
+                    component.render(&column_term)
                 } else {
-                    component.render(Some(width))
+                    component.render_optimistic(Some(width))
                 };
                 RenderedColumn {
                     lines: split_lines(rendered),
@@ -373,7 +373,7 @@ impl Renderable for TwoColumn {
         self
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         self.render_with_width(width, Some(term))
     }
@@ -402,7 +402,7 @@ impl Renderable for TwoColumn {
         self
     }
 
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         self.render_with_width(width, None)
     }
@@ -447,14 +447,14 @@ mod tests {
     #[test]
     fn renders_side_by_side_balanced() {
         let two = TwoColumn::new("Left", "Right");
-        let result = two.render(Some(20));
+        let result = two.render_optimistic(Some(20));
         assert_eq!(result, "Left       Right    ");
     }
 
     #[test]
     fn respects_custom_ratio_and_height_padding() {
         let two = TwoColumn::new("Left line\nLeft two", "Right").with_left_percent(0.7);
-        let rendered = two.render(Some(30));
+        let rendered = two.render_optimistic(Some(30));
         let lines: Vec<&str> = rendered.lines().collect();
 
         assert_eq!(lines.len(), 2);
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn stacks_when_not_enough_space() {
         let two = TwoColumn::new("L", "R");
-        let rendered = two.render(Some(1));
+        let rendered = two.render_optimistic(Some(1));
         assert_eq!(rendered, "L\nR");
     }
 

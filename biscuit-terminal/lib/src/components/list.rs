@@ -147,7 +147,7 @@ impl OrderedList {
     ///   continuation alignment.
     /// - **Block-level components** are rendered without a prefix and
     ///   their output is indented by `indent_children` spaces.
-    fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
+    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
         let indent = self.indent_children;
 
@@ -171,7 +171,7 @@ impl OrderedList {
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no prefix, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = component.render(Some(child_width));
+                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -185,7 +185,7 @@ impl OrderedList {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&prefix);
                     let child_width = term_width.saturating_sub(prefix_width);
-                    let content = component.render(Some(child_width));
+                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
                     result.push_str(&content);
                 }
             }
@@ -198,14 +198,14 @@ impl OrderedList {
 }
 
 impl Renderable for OrderedList {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
         let content = self.render_content(None, available);
         self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -392,7 +392,7 @@ impl UnorderedList {
     ///   continuation alignment.
     /// - **Block-level components** are rendered without a bullet and
     ///   their output is indented by `indent` spaces.
-    fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
+    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
         let bullet_width = visible_width(&self.bullet);
         let indent = self.indent_children.unwrap_or(bullet_width);
@@ -417,7 +417,7 @@ impl UnorderedList {
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no bullet, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = component.render(Some(child_width));
+                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -431,7 +431,7 @@ impl UnorderedList {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&self.bullet);
                     let child_width = term_width.saturating_sub(bullet_width);
-                    let content = component.render(Some(child_width));
+                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
                     result.push_str(&content);
                 }
             }
@@ -444,14 +444,14 @@ impl UnorderedList {
 }
 
 impl Renderable for UnorderedList {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
         let content = self.render_content(None, available);
         self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -482,35 +482,35 @@ mod tests {
     #[test]
     fn test_ordered_list_simple() {
         let list = OrderedList::new(vec!["First", "Second", "Third"]);
-        let result = list.render(None);
+        let result = list.render_optimistic(None);
         assert_eq!(result, "1. First\n2. Second\n3. Third\n");
     }
 
     #[test]
     fn test_unordered_list_simple() {
         let list = UnorderedList::new(vec!["Apple", "Banana", "Cherry"]);
-        let result = list.render(None);
+        let result = list.render_optimistic(None);
         assert_eq!(result, "• Apple\n• Banana\n• Cherry\n");
     }
 
     #[test]
     fn test_unordered_list_custom_bullet() {
         let list = UnorderedList::new(vec!["Item 1", "Item 2"]).with_bullet("- ");
-        let result = list.render(None);
+        let result = list.render_optimistic(None);
         assert_eq!(result, "- Item 1\n- Item 2\n");
     }
 
     #[test]
     fn test_empty_ordered_list() {
         let list: OrderedList = OrderedList::new(Vec::<String>::new());
-        let result = list.render(None);
+        let result = list.render_optimistic(None);
         assert_eq!(result, "");
     }
 
     #[test]
     fn test_empty_unordered_list() {
         let list: UnorderedList = UnorderedList::new(Vec::<String>::new());
-        let result = list.render(None);
+        let result = list.render_optimistic(None);
         assert_eq!(result, "");
     }
 
@@ -526,7 +526,7 @@ mod tests {
             RenderableContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         assert_eq!(result, "1. First\n    1. Nested A\n    2. Nested B\n");
     }
 
@@ -535,7 +535,7 @@ mod tests {
         let inner = OrderedList::new(vec!["Deep"]);
         let middle = OrderedList::from(vec![RenderableContent::Component(Rc::new(inner))]);
         let outer = OrderedList::from(vec![RenderableContent::Component(Rc::new(middle))]);
-        let result = outer.render(Some(80));
+        let result = outer.render_optimistic(Some(80));
         assert_eq!(result, "        1. Deep\n");
     }
 
@@ -551,7 +551,7 @@ mod tests {
             RenderableContent::Component(Rc::new(inner_list)),
         ];
         let list = OrderedList::from(items);
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines[0], "1. Plain string");
         assert_eq!(lines[1], "2. Inline text");
@@ -566,7 +566,7 @@ mod tests {
             RenderableContent::Component(Rc::new(inner)),
         ];
         let list = UnorderedList::from(items);
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         assert_eq!(result, "• Top\n  • Sub A\n  • Sub B\n");
     }
 
@@ -578,7 +578,7 @@ mod tests {
             RenderableContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         assert_eq!(result, "1. Fruits:\n    • Apple\n    • Banana\n");
     }
 
@@ -591,7 +591,7 @@ mod tests {
             RenderableContent::String("After".to_string()),
         ];
         let list = OrderedList::from(items);
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         assert_eq!(result, "1. Before\n\n3. After\n");
     }
 
@@ -601,7 +601,7 @@ mod tests {
         let items = vec![RenderableContent::Component(Rc::new(inner))];
         let list = OrderedList::from(items);
         let width = 40u32;
-        let result = list.render(Some(width));
+        let result = list.render_optimistic(Some(width));
         for line in result.lines() {
             let vis = visible_width(line) as u32;
             assert!(vis <= width, "Line exceeds width {}: {:?} ({})", width, line, vis);
@@ -616,7 +616,7 @@ mod tests {
     fn test_unordered_string_wraps_with_hanging_indent() {
         // "• " is 2 chars wide, so with width=20 content gets 18 chars.
         let list = UnorderedList::new(vec!["This is a long item that wraps"]);
-        let result = list.render(Some(20));
+        let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
@@ -633,7 +633,7 @@ mod tests {
 
         let mut list = UnorderedList::empty();
         list.add(Prose::new("This is a long prose item that should wrap automatically"));
-        let result = list.render(Some(25));
+        let result = list.render_optimistic(Some(25));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
@@ -654,7 +654,7 @@ mod tests {
         let mut list = UnorderedList::empty();
         list.add(prose);
 
-        let result = list.render(Some(20));
+        let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
@@ -667,7 +667,7 @@ mod tests {
     #[test]
     fn test_unordered_no_hanging_indent() {
         let list = UnorderedList::new(vec!["Short"]).without_hanging_indent();
-        let result = list.render(Some(80));
+        let result = list.render_optimistic(Some(80));
         assert_eq!(result, "• Short\n");
     }
 
@@ -682,7 +682,7 @@ mod tests {
         let mut list = UnorderedList::empty();
         list.add(prose);
 
-        let result = list.render(Some(20));
+        let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         // Explicit Some(4) should be preserved, not overwritten to 2

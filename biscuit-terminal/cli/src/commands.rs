@@ -106,7 +106,7 @@ pub fn render_image(
     let pre_cursor = if debug { cursor_position() } else { None };
 
     // Render the image
-    let output = term_image.fallback_render(&terminal);
+    let output = term_image.render(&terminal);
 
     // Output the result with vertical margins
     for _ in 0..layout.margin_top.unwrap_or(0) {
@@ -285,7 +285,7 @@ pub fn display_mermaid_diagram(
         println!();
     }
 
-    let output = term_image.fallback_render(&terminal);
+    let output = term_image.render(&terminal);
     emit_image_output(&output)?;
 
     // Output metadata if requested
@@ -1668,7 +1668,7 @@ pub fn render_prose(
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let output = prose.fallback_render(&term);
+    let output = prose.render(&term);
 
     emit_vertical_margins(layout, || {
         println!("{}", output);
@@ -1724,7 +1724,7 @@ pub fn render_quote(
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let output = quote.fallback_render(&term);
+    let output = quote.render(&term);
 
     emit_vertical_margins(layout, || {
         println!("{}", output);
@@ -1789,7 +1789,7 @@ pub fn render_list(
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let output = list.fallback_render(&term);
+    let output = list.render(&term);
 
     emit_vertical_margins(layout, || {
         println!("{}", output);
@@ -1834,7 +1834,7 @@ pub fn render_columns(
     }
 
     let term = Terminal::new();
-    let output = columns.fallback_render(&term);
+    let output = columns.render(&term);
 
     emit_vertical_margins(layout, || {
         println!("{}", output);
@@ -1882,7 +1882,7 @@ pub fn render_dir(
     fs.ensure_tree_built();
 
     let term = Terminal::new();
-    let output = fs.fallback_render(&term);
+    let output = fs.render(&term);
 
     // Vertical margins on stderr so they don't pollute piped output
     let top = layout.margin_top.unwrap_or(1);

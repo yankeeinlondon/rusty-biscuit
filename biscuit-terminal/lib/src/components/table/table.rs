@@ -1280,7 +1280,7 @@ impl Table {
 }
 
 impl Renderable for Table {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         // Opportunistic render assumes full capability; stripe if requested
         let stripe = if self.alternate_background_color {
@@ -1302,7 +1302,7 @@ impl Renderable for Table {
         }
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let has_true_color = term.color_depth == ColorDepth::TrueColor;
         // Only stripe when the terminal actually supports true color
@@ -1634,7 +1634,7 @@ mod tests {
                 vec!["Bob".into(), "25".into()],
             ]);
 
-        let result = table.render(None);
+        let result = table.render_optimistic(None);
         assert!(result.contains("Name"));
         assert!(result.contains("Alice"));
         assert!(result.contains("Bob"));
@@ -1646,14 +1646,14 @@ mod tests {
             .with_title("Users")
             .with_columns(vec![TableColumn::new("Name")]);
 
-        let result = table.render(None);
+        let result = table.render_optimistic(None);
         assert!(result.starts_with("Users\n"));
     }
 
     #[test]
     fn test_empty_table() {
         let table = Table::new();
-        let result = table.render(None);
+        let result = table.render_optimistic(None);
         assert_eq!(result, "");
     }
 
@@ -2005,7 +2005,7 @@ mod tests {
             .with_data(vec![vec!["A".into()]]);
         table.layout_mut().left_margin = Margin::Chars(1);
 
-        let rendered = table.render(Some(60));
+        let rendered = table.render_optimistic(Some(60));
         for line in rendered.lines() {
             assert!(
                 line.starts_with(' '),
@@ -2038,7 +2038,7 @@ mod tests {
             .with_data(vec![vec!["Alice".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // Should contain cursor positioning escape codes
         assert!(
             result.contains("\x1b["),
@@ -2061,7 +2061,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().left_margin = Margin::Chars(5);
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // Table should start at column 6 (5 margin + 1 for 1-indexed)
         assert!(
             result.contains("\x1b[6G"),
@@ -2078,7 +2078,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Center;
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // With 80 width and small table, table_start should be > 1
         // The table width is about 5 chars (│ X │), so center offset should be ~37
         // Look for a column position > 30 (roughly centered)
@@ -2113,7 +2113,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Right;
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // With 80 width and small table (~5 chars), table should start near column 75
         let has_right_position = result
             .lines()
@@ -2148,7 +2148,7 @@ mod tests {
             .with_data(vec![vec![TableCellContent::Integer(42)]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // The content "42" should be positioned toward the right of the 10-char cell
         // Look for the data row and verify cursor position accounts for alignment
         let lines: Vec<&str> = result.lines().collect();
@@ -2169,7 +2169,7 @@ mod tests {
             ])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         assert!(result.contains("Name"), "Should contain header 'Name'");
         assert!(result.contains("Age"), "Should contain header 'Age'");
         assert!(result.contains("Alice"), "Should contain data 'Alice'");
@@ -2186,14 +2186,14 @@ mod tests {
             .with_data(vec![vec!["Alice".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         assert!(result.contains("Users"), "Should contain title");
     }
 
     #[test]
     fn test_cursor_alignment_empty_table_returns_empty() {
         let table = Table::new().prefer_cursor_alignment();
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         assert!(result.is_empty(), "Empty table should render empty string");
     }
 
@@ -2209,7 +2209,7 @@ mod tests {
         table.layout_mut().right_margin = Margin::Chars(2);
         table.layout_mut().row_fill_strategy = RowFill::Fill;
 
-        let result = table.render(Some(20));
+        let result = table.render_optimistic(Some(20));
         // With row fill enabled, lines should extend to fill available width
         // Available width = 20 - 2 - 2 = 16
         for line in result.lines() {
@@ -2232,7 +2232,7 @@ mod tests {
             ])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // All border lines should contain the same box-drawing characters
         let border_lines: Vec<&str> = result
             .lines()
@@ -2856,7 +2856,7 @@ mod tests {
             )]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
         // Should contain both lines of content
         assert!(result.contains("Line 1"), "Should contain 'Line 1'");
         assert!(result.contains("Line 2"), "Should contain 'Line 2'");
@@ -2884,7 +2884,7 @@ mod tests {
             ]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
 
         // Verify all content is present
         assert!(result.contains("A"), "Should contain 'A'");
@@ -2906,7 +2906,7 @@ mod tests {
             ]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
 
         // Find data lines (skip header and borders)
         let content_lines: Vec<&str> = result
@@ -2945,7 +2945,7 @@ mod tests {
             .with_data(vec![vec![TableCellContent::Text("A\nB".to_string())]])
             .prefer_cursor_alignment();
 
-        let result = table.render(Some(80));
+        let result = table.render_optimistic(Some(80));
 
         // Every line should use cursor positioning
         for line in result.lines() {
@@ -3073,7 +3073,7 @@ mod tests {
         table.layout_mut().left_margin = Margin::Chars(5);
         table.layout_mut().right_margin = Margin::Chars(5);
 
-        let result = table.render(Some(60));
+        let result = table.render_optimistic(Some(60));
 
         // Table should respect available width (60 - 5 - 5 = 50)
         // Check that cursor positioning starts correctly
@@ -3097,7 +3097,7 @@ mod tests {
             ]]);
 
         // Render with narrow width - table should wrap content
-        let result = table.render(Some(50));
+        let result = table.render_optimistic(Some(50));
         let lines: Vec<&str> = result.lines().collect();
 
         // All content lines should fit within available width
@@ -3120,7 +3120,7 @@ mod tests {
             .prefer_cursor_alignment();
 
         // With only 15 chars available, table should still render
-        let result = table.render(Some(15));
+        let result = table.render_optimistic(Some(15));
         assert!(
             !result.is_empty(),
             "Should render even with narrow terminal"
@@ -3895,14 +3895,14 @@ mod tests {
             .prefer_cursor_alignment();
 
         // Narrow: Extra column should be hidden
-        let narrow = table.render(Some(50));
+        let narrow = table.render_optimistic(Some(50));
         assert!(narrow.contains("Name"));
         assert!(!narrow.contains("Extra"));
         assert!(!narrow.contains("detail"));
         assert!(narrow.contains("Alice"));
 
         // Wide: both visible
-        let wide = table.render(Some(100));
+        let wide = table.render_optimistic(Some(100));
         assert!(wide.contains("Extra"));
         assert!(wide.contains("detail"));
     }

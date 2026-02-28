@@ -13,7 +13,7 @@ use std::any::Any;
 /// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// let bar = Progress::new(0.75); // 75% complete
-/// let output = bar.render(Some(40));
+/// let output = bar.render_optimistic(Some(40));
 /// assert!(output.contains("75%"));
 /// ```
 #[derive(Debug, Clone)]
@@ -113,13 +113,13 @@ impl Progress {
 }
 
 impl Renderable for Progress {
-    fn render(&self, term_width: Option<u32>) -> String {
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let bar_content = self.render_bar();
         self.layout.apply_layout(&bar_content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal) -> String {
+    fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let bar_content = self.render_bar();
         self.layout.apply_layout(&bar_content, width)
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn test_progress_zero() {
         let bar = Progress::new(0.0);
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(output.contains("  0%"), "Should show 0%, got: {}", output);
         assert!(output.contains('['), "Should contain left bracket");
         assert!(output.contains(']'), "Should contain right bracket");
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_progress_half() {
         let bar = Progress::new(0.5);
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(output.contains("50%"), "Should show 50%, got: {}", output);
         assert!(output.contains('█'), "Should contain fill character");
         assert!(output.contains('·'), "Should contain empty character");
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_progress_full() {
         let bar = Progress::new(1.0);
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(output.contains("100%"), "Should show 100%, got: {}", output);
         // All characters should be filled (20 blocks for default bar_width)
         let expected_filled = "█".repeat(20);
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_progress_with_label() {
         let bar = Progress::new(0.75).with_label("Loading");
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(
             output.contains("Loading"),
             "Should show label, got: {}",
@@ -203,7 +203,7 @@ mod tests {
     fn test_progress_clamps_value() {
         // Test value > 1.0 clamps to 1.0
         let bar_high = Progress::new(1.5);
-        let output_high = bar_high.render(Some(80));
+        let output_high = bar_high.render_optimistic(Some(80));
         assert!(
             output_high.contains("100%"),
             "Should clamp to 100%, got: {}",
@@ -212,7 +212,7 @@ mod tests {
 
         // Test value < 0.0 clamps to 0.0
         let bar_low = Progress::new(-0.5);
-        let output_low = bar_low.render(Some(80));
+        let output_low = bar_low.render_optimistic(Some(80));
         assert!(
             output_low.contains("0%"),
             "Should clamp to 0%, got: {}",
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn test_progress_custom_bar_width() {
         let bar = Progress::new(0.5).with_bar_width(10);
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         // Should have 5 filled and 5 empty (total 10)
         assert!(output.contains("50%"), "Should show 50%, got: {}", output);
     }
@@ -234,7 +234,7 @@ mod tests {
             .with_fill_char('#')
             .with_empty_char('-')
             .with_brackets('(', ')');
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(output.contains('#'), "Should contain custom fill char");
         assert!(output.contains('-'), "Should contain custom empty char");
         assert!(output.contains('('), "Should contain custom left bracket");
@@ -245,21 +245,21 @@ mod tests {
     fn test_progress_percentage_alignment() {
         // Check that percentages are right-aligned in the format
         let bar_0 = Progress::new(0.0);
-        let output_0 = bar_0.render(Some(80));
+        let output_0 = bar_0.render_optimistic(Some(80));
         assert!(
             output_0.contains("  0%"),
             "0% should be right-aligned with 2 spaces"
         );
 
         let bar_75 = Progress::new(0.75);
-        let output_75 = bar_75.render(Some(80));
+        let output_75 = bar_75.render_optimistic(Some(80));
         assert!(
             output_75.contains(" 75%"),
             "75% should be right-aligned with 1 space"
         );
 
         let bar_100 = Progress::new(1.0);
-        let output_100 = bar_100.render(Some(80));
+        let output_100 = bar_100.render_optimistic(Some(80));
         assert!(
             output_100.contains("100%"),
             "100% should have no leading space"
@@ -271,7 +271,7 @@ mod tests {
         use crate::utils::layout::Margin;
 
         let bar = Progress::new(0.5).left_margin(Margin::Chars(4));
-        let output = bar.render(Some(80));
+        let output = bar.render_optimistic(Some(80));
         assert!(
             output.starts_with("    "),
             "Should have left margin of 4 spaces"

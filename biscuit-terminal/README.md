@@ -110,7 +110,7 @@ let term = Terminal::builder()
 
 ## Image Rendering Architecture
 
-All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. `render_to_terminal()` uses save/restore cursor positioning and explicit row advancement by computed image height, then normalizes to column 0 with a trailing carriage return (`\r`). It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
+All `TerminalImage` rendering is string-based — `render()`, `render_optimistic()`, and `render_to_terminal()` return escape sequences as composable strings. `render_to_terminal()` uses save/restore cursor positioning and explicit row advancement by computed image height, then normalizes to column 0 with a trailing carriage return (`\r`). It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
 
 ## Rendering to the Terminal
 

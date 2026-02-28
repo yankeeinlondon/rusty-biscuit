@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compose the two columns and render for the detected terminal width.
     let two_col = TwoColumn::new(left_column, description).with_left_percent(0.35);
-    let output = two_col.fallback_render(&term);
+    let output = two_col.render(&term);
 
     println!("{}", output);
     Ok(())

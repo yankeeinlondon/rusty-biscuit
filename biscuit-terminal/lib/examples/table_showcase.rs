@@ -49,7 +49,7 @@ fn main() {
                 TableCellContent::Currency(Currency::USD, 3.50),
             ],
         ]);
-    println!("{}\n", table.render(Some(80)));
+    println!("{}\n", table.render_optimistic(Some(80)));
 
     // ── 2. Colored Cell Content ───────────────────────────────────
     println!("--- 2. ANSI Colored Cell Content ---\n");
@@ -82,7 +82,7 @@ fn main() {
                 "94.20%".into(),
             ],
         ]);
-    println!("{}\n", table.render(Some(80)));
+    println!("{}\n", table.render_optimistic(Some(80)));
 
     // ── 3. OSC8 Hyperlinks ────────────────────────────────────────
     println!("--- 3. OSC8 Hyperlinks (clickable in supported terminals) ---\n");
@@ -122,7 +122,7 @@ fn main() {
             ],
         ])
         .alternate_background_color();
-    println!("{}\n", table.render(Some(80)));
+    println!("{}\n", table.render_optimistic(Some(80)));
 
     // ── 4. Multi-Currency ─────────────────────────────────────────
     println!("--- 4. Multi-Currency ---\n");
@@ -154,7 +154,7 @@ fn main() {
                 TableCellContent::Float(1.0),
             ],
         ]);
-    println!("{}\n", table.render(Some(80)));
+    println!("{}\n", table.render_optimistic(Some(80)));
 
     // ── 5. Center-Aligned Override ─────────────────────────────────
     println!("--- 5. Center-Aligned Override ---\n");
@@ -180,5 +180,5 @@ fn main() {
             vec!["D".into(), TableCellContent::Integer(4), "8%".into()],
         ])
         .alternate_text_color();
-    println!("{}\n", table.render(Some(80)));
+    println!("{}\n", table.render_optimistic(Some(80)));
 }

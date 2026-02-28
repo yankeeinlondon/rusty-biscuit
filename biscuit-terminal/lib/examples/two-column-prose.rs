@@ -30,7 +30,7 @@ fn main() {
     .with_word_wrap(WordWrap::WrapProse(None, None));
 
     let two_col = TwoColumn::new(left_column, right_column).with_left_percent(0.45);
-    let output = two_col.fallback_render(&term);
+    let output = two_col.render(&term);
 
     println!("{}", output);
 }

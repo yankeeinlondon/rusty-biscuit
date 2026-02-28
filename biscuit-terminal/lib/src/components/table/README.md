@@ -29,7 +29,7 @@ let table = Table::new()
         vec!["Bob".into(), "25".into()],
     ]);
 
-println!("{}", table.render(Some(120)));
+println!("{}", table.render_optimistic(Some(120)));
 ```
 
 **Fields:**
@@ -150,7 +150,7 @@ Cell alignment follows each column's effective alignment (for example: text defa
 | Method | When to Use |
 |--------|-------------|
 | `render(term_width)` | Optimistic path -- assumes full terminal capabilities. Falls back to 80 columns when `term_width` is `None`. |
-| `fallback_render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.width()` for sizing. |
+| `render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.width()` for sizing. |
 
 Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_layout()` which applies:
 
