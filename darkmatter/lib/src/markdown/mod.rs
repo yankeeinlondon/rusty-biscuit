@@ -30,7 +30,9 @@
 pub mod cleanup;
 pub mod delta;
 pub mod dsl;
+pub mod fs;
 mod frontmatter;
+pub mod hash;
 pub mod highlighting;
 pub mod inline;
 pub mod normalize;

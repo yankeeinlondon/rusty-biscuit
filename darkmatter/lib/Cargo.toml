@@ -62,6 +62,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash/lib" }
+serde_yaml = "0.9.34"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
