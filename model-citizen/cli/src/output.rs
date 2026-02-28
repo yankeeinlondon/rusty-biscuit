@@ -27,16 +27,16 @@ pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, r
         let term = Terminal::default();
 
         let mut columns = vec![
-            TableColumn::new(Prose::new("Name").fallback_render(&term)),
-            TableColumn::new(Prose::new("Quant").fallback_render(&term))
+            TableColumn::new(Prose::new("Name").render(&term)),
+            TableColumn::new(Prose::new("Quant").render(&term))
                 .with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("Size").fallback_render(&term))
+            TableColumn::new(Prose::new("Size").render(&term))
                 .with_type(ColumnType::String)
                 .with_alignment(Alignment::Right),
-            TableColumn::new(Prose::new("Arch").fallback_render(&term))
+            TableColumn::new(Prose::new("Arch").render(&term))
                 .with_alignment(Alignment::Center)
                 .with_when(Conditional::WidthGreaterThan(89)),
-            TableColumn::new(Prose::new("Source").fallback_render(&term))
+            TableColumn::new(Prose::new("Source").render(&term))
                 .with_alignment(Alignment::Center)
                 .with_when(Conditional::WidthGreaterThan(69)),
         ];
@@ -44,12 +44,12 @@ pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, r
         if verbose {
             columns.insert(
                 1,
-                TableColumn::new(Prose::new("Params").fallback_render(&term))
+                TableColumn::new(Prose::new("Params").render(&term))
                     .with_alignment(Alignment::Center),
             );
             columns.insert(
                 5,
-                TableColumn::new(Prose::new("Format").fallback_render(&term))
+                TableColumn::new(Prose::new("Format").render(&term))
                     .with_alignment(Alignment::Center),
             );
         }
@@ -59,7 +59,7 @@ pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, r
         for m in models {
             let name_cell = if let Some(repo) = m.metadata.huggingface_repo.as_deref() {
                 let name_link = format!("<a href=\"https://huggingface.co/{repo}\">{}</a>", m.name);
-                TableCellContent::Text(Prose::new(name_link).fallback_render(&term))
+                TableCellContent::Text(Prose::new(name_link).render(&term))
             } else {
                 TableCellContent::Text(m.name.clone())
             };
@@ -275,27 +275,27 @@ pub fn print_search_results(
         let show_modified = verbose || sort == SortOrder::Modified;
 
         let mut columns = vec![
-            TableColumn::new(Prose::new("Repository").fallback_render(&term)),
+            TableColumn::new(Prose::new("Repository").render(&term)),
             TableColumn::new(
                 Prose::new(sort_header("Downloads", sort == SortOrder::Downloads))
-                    .fallback_render(&term),
+                    .render(&term),
             )
             .with_type(ColumnType::Integer),
             TableColumn::new(
-                Prose::new(sort_header("Likes", sort == SortOrder::Likes)).fallback_render(&term),
+                Prose::new(sort_header("Likes", sort == SortOrder::Likes)).render(&term),
             )
             .with_type(ColumnType::Integer),
-            TableColumn::new(Prose::new("G").fallback_render(&term))
+            TableColumn::new(Prose::new("G").render(&term))
                 .with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("ST").fallback_render(&term))
+            TableColumn::new(Prose::new("ST").render(&term))
                 .with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("Tags").fallback_render(&term)),
+            TableColumn::new(Prose::new("Tags").render(&term)),
         ];
         if show_created {
             columns.push(
                 TableColumn::new(
                     Prose::new(sort_header("Created", sort == SortOrder::Created))
-                        .fallback_render(&term),
+                        .render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -304,7 +304,7 @@ pub fn print_search_results(
             columns.push(
                 TableColumn::new(
                     Prose::new(sort_header("Modified", sort == SortOrder::Modified))
-                        .fallback_render(&term),
+                        .render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -318,10 +318,10 @@ pub fn print_search_results(
             let blank = TableCellContent::Text(String::new());
             let tags_markup = format_tags(r);
             let neither = !r.has_gguf() && !r.has_safetensors();
-            let dot = Prose::new("<red-500>\u{23fa}</red-500>").fallback_render(&term);
+            let dot = Prose::new("<red-500>\u{23fa}</red-500>").render(&term);
 
             let mut row = vec![
-                Prose::new(&repo_link).fallback_render(&term).into(),
+                Prose::new(&repo_link).render(&term).into(),
                 TableCellContent::Integer(r.downloads as i64),
                 TableCellContent::Integer(r.likes as i64),
                 if r.has_gguf() {
@@ -338,7 +338,7 @@ pub fn print_search_results(
                 } else {
                     blank
                 },
-                Prose::new(&tags_markup).fallback_render(&term).into(),
+                Prose::new(&tags_markup).render(&term).into(),
             ];
             if show_created {
                 row.push(format_date(&r.created_at));
