@@ -43,7 +43,7 @@ fn device_suffix(host: &str, port: u16, source: &DeviceSource) -> String {
 
 /// Renders a styled single-line result using Prose.
 fn styled(text: impl Into<String>) -> String {
-    Prose::new(text).fallback_render(&Terminal::default())
+    Prose::new(text).render(&Terminal::default())
 }
 
 /// Formats a boolean as "on" or "off" for table display.
@@ -2180,7 +2180,7 @@ async fn handle_sony_debug(
                         "<red>[ERR]</red>".to_string()
                     };
                     table.add_row(vec![
-                        TableCellContent::Text(Prose::new(marker).render(None)),
+                        TableCellContent::Text(Prose::new(marker).render_optimistic(None)),
                         result.path.as_str().into(),
                         result.detail.as_str().into(),
                     ]);
