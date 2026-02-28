@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Claude Code Skill Frontmatter",
+  "description": "Schema for SKILL.md YAML frontmatter in Claude Code skills",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Display name for the skill"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this skill does and when to activate it"
+    },
+    "argument-hint": {
+      "type": "string",
+      "description": "Hint showing argument placeholders for user-invocable skills"
+    },
+    "arguments": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Named arguments the skill accepts"
+    },
+    "allowed-tools": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Tools this skill is allowed to use"
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Alias for allowed-tools"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model to use when running this skill (e.g., opus, sonnet, haiku, inherit)"
+    },
+    "version": {
+      "type": "string",
+      "description": "Skill version identifier"
+    },
+    "when_to_use": {
+      "type": "string",
+      "description": "Additional guidance on when this skill should be activated"
+    },
+    "user-invocable": {
+      "type": ["boolean", "string"],
+      "description": "Whether this skill can be invoked directly by the user as a slash command"
+    },
+    "disable-model-invocation": {
+      "type": ["boolean", "string"],
+      "description": "Prevent the model from autonomously invoking this skill"
+    },
+    "context": {
+      "type": "string",
+      "enum": ["fork"],
+      "description": "Execution context for the skill"
+    },
+    "agent": {
+      "type": "string",
+      "description": "Sub-agent type to delegate execution to"
+    },
+    "paths": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Glob patterns that conditionally activate this skill when matching files are touched"
+    },
+    "compatibility": {
+      "type": "string",
+      "description": "Compatibility constraints for the skill"
+    },
+    "hash": {
+      "type": "string",
+      "description": "Content hash for change detection"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Prompt instructions for skill orchestration"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the skill was last updated"
+    },
+    "update_policy": {
+      "type": "string",
+      "description": "Policy governing how and when this skill should be updated"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary metadata attached to the skill"
+    },
+    "env": {
+      "type": "object",
+      "description": "Environment variables for the skill"
+    }
+  },
+  "required": ["description"],
+  "additionalProperties": true
+}

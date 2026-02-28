@@ -1,0 +1,17 @@
+{
+  "name": "skill-schema-validator",
+  "displayName": "SKILL.md Schema Validator",
+  "description": "Custom frontmatter validation for Claude Code SKILL.md files",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Linters"],
+  "activationEvents": [
+    "onLanguage:skill",
+    "onLanguage:markdown"
+  ],
+  "main": "./extension.js",
+  "contributes": {}
+}
