@@ -48,20 +48,19 @@ Tree Hugger distinguishes between different kinds of type definitions where the 
 
 ## Using the CLI
 
-**Syntax:** `hug <COMMAND> <...file-glob>`
+**Syntax:** `hug <COMMAND> <...filter>`
 
-You can provide one or more file-glob patterns to match files:
+`hug` now scans all supported source files by default. Positional filters are optional and
+classified as:
 
-- Files matching **any** glob pattern are included
-- Use `--ignore <glob>` to exclude matches
-- Files ignored by `.gitignore` are never included
+- file filters (path-like / extension-like tokens) that narrow scanned files
+- symbol filters (name globs) for `functions`, `types`, `symbols`, and `classes`
 
 ### Commands
 
 - `functions` - list functions and methods
 - `types` - list type definitions (includes structs, enums, classes, interfaces, traits)
 - `symbols` - list all discovered symbols
-- `exports` - list exported symbols
 - `imports` - list imported symbols
 - `classes` - list classes with members (static/instance partitioning)
 - `lint` - run lint and syntax diagnostics
@@ -72,15 +71,19 @@ You can provide one or more file-glob patterns to match files:
 - `--ignore <GLOB>` - exclude paths
 - `--json` - output JSON format
 - `--plain` - disable colors and hyperlinks
+- `--group-by-file` - group symbol output by file
+- `--group-by-module` - group symbol output by module (directory scope)
+- `--sort-by-kind` - sort symbols by kind then name
+- `--sort-by-module` - sort symbols by module then other keys
 
 ### Examples
 
 ```bash
-# List all symbols in Rust files
-hug symbols "tree-hugger/lib/src/**/*.rs"
+# Scan all source files and list symbols whose names contain `cache`
+hug symbols cache
 
-# List functions with language override
-hug functions --language rust "tree-hugger/lib/src/**/*.rs"
+# Restrict to one file and one symbol pattern
+hug functions tree-hugger/lib/tests/fixtures/sample.rs greet
 
 # List imports as JSON
 hug imports --json "tree-hugger/lib/tests/fixtures/**/*.js"
@@ -101,18 +104,20 @@ hug lint "src/**/*.rs" --lint-only
 
 ## JSON Output
 
-When `--json` is selected, output is a serialized `PackageSummary`:
+When `--json` is selected, output includes v2 schema metadata and pass-aware symbol indexes:
 
+- `schema_version` - active symbol schema version (`2.0`)
 - `root_dir` - the directory scanned
 - `language` - primary language for the run
-- `files` - list of `FileSummary` objects
+- `files` - command-specific v1-compatible `FileSummary` list
+- `symbol_indexes` - per-file `FileSymbolIndex` with staged pass metadata
 
 Each `FileSummary` includes:
 
 - `file`, `language`, `hash`
 - `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field
 - `imports` (for `imports` and `symbols`)
-- `exports` (for `exports` and `symbols`)
+- `exports` (for `symbols`)
 - `locals` (for `symbols`)
 - `lint`, `syntax`
 

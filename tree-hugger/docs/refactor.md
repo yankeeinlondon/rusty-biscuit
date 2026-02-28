@@ -1,5 +1,14 @@
 The tree-hugger Library and CLI are working to some degree but they still pretty broken and this feature request is a major refactor of both.
 
+## Status (2026-02-28)
+
+- Implemented: `--all` removal for symbol commands; default scan is all source files.
+- Implemented: `exports` subcommand removal.
+- Implemented: positional filter classifier (`file` vs `symbol`) with automatic `*...*` wrapping.
+- Implemented: symbol filter combination semantics use logical OR.
+- Implemented: sorting/grouping switches (`--group-by-file`, `--group-by-module`, `--sort-by-kind`, `--sort-by-module`).
+- Implemented: Symbol Schema v2 foundations (`SymbolRecord`, `FileSymbolIndex`, staged passes, v1 adapters).
+
 ## CLI
 
 In many/most we have a `--all` flag which will select all the source files from the current repo/package. This switch should be removed and iterating over all source files should be the default!
