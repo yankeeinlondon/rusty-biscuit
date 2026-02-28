@@ -37,11 +37,15 @@ pub enum Command {
         show: bool,
     },
 
-    /// Clean up markdown formatting (output to stdout).
+    /// Clean up markdown formatting.
     Clean {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: Option<PathBuf>,
+
+        /// Save cleaned markdown in place and report delta-style changes
+        #[arg(long)]
+        save: bool,
     },
 
     /// Compose a document through the transform pipeline.
@@ -162,6 +166,10 @@ pub struct Cli {
     /// Open selected output in the default app using a temp file
     #[arg(long)]
     pub show: bool,
+
+    /// Shorthand for `clean --save` with top-level [INPUT]
+    #[arg(long)]
+    pub save: bool,
 
     /// Include line numbers in code blocks
     #[arg(long)]

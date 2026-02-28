@@ -24,12 +24,15 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     if cli.show {
         conflicts.push("--show");
     }
+    if cli.save {
+        conflicts.push("--save");
+    }
 
     if conflicts.is_empty() {
         Ok(())
     } else {
         Err(eyre!(
-            "subcommands cannot be combined with top-level render options: {}",
+            "subcommands cannot be combined with top-level options: {}",
             conflicts.join(", ")
         ))
     }
@@ -44,11 +47,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_read(input.as_ref(), output, show, cli)?;
         }
-        CliCommand::Clean { input } => {
-            let mut md = load_markdown(input.as_ref())?;
-            md.cleanup();
-            println!("{}", md.as_string());
-        }
+        CliCommand::Clean { input, save } => run_clean(input.as_ref(), save, cli.verbose > 0)?,
         CliCommand::Compose {
             input,
             state,
@@ -103,6 +102,37 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Clean markdown formatting, optionally saving in place and printing a delta report.
+pub fn run_clean(input: Option<&PathBuf>, save: bool, verbose: bool) -> Result<()> {
+    if !save {
+        let mut md = load_markdown(input)?;
+        md.cleanup();
+        println!("{}", md.as_string());
+        return Ok(());
+    }
+
+    let input_path = input
+        .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
+    if input_path.to_str() == Some("-") {
+        return Err(eyre!(
+            "--save requires an input file path (stdin is not supported)"
+        ));
+    }
+
+    let original = load_markdown(Some(input_path))?;
+    let mut cleaned = original.clone();
+    cleaned.cleanup();
+
+    let delta = original.delta(&cleaned);
+    if !delta.is_unchanged() {
+        std::fs::write(input_path, cleaned.as_string())
+            .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", input_path))?;
+    }
+
+    print_delta(&delta, verbose, &original, &cleaned);
     Ok(())
 }
 

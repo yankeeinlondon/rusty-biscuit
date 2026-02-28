@@ -82,6 +82,10 @@
 //! # Clean up markdown formatting (stdout)
 //! md clean README.md
 //! echo "# Hello" | md clean -
+//!
+//! # Save cleaned content in place and print a delta-style change report
+//! md clean README.md --save
+//! md README.md --save
 //! ```
 //!
 //! ### Transform pipeline
@@ -130,7 +134,7 @@
 //! - **Image rendering**: Inline images in supported terminals (iTerm2, Kitty, etc.)
 //! - **Mermaid diagrams**: Render mermaid diagrams to terminal or HTML
 //! - **Theme support**: Multiple prose and code themes with light/dark mode detection
-//! - **Markdown cleanup**: Normalize markdown formatting
+//! - **Markdown cleanup**: Normalize markdown formatting, optionally save in place with change reports
 //! - **Transform pipeline**: Compose documents with interpolation, replacement, and transclusion
 //! - **Document comparison**: Structural diff between markdown documents
 //! - **Table of contents**: Extract document structure as tree or JSON
