@@ -1,4 +1,4 @@
-use expectrl::Session;
+use expectrl::{Expect, Session};
 use std::process::Command;
 use assert_cmd::cargo::cargo_bin;
 use tempfile::tempdir;

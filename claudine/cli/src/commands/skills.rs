@@ -91,11 +91,11 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     let term = Terminal::new();
 
     // Header
-    let header = Prose::new("<blue><b>Skills</b></blue>").fallback_render(&term);
+    let header = Prose::new("<blue><b>Skills</b></blue>").render(&term);
     log::data("");
     log::data(&header);
     log::data(
-        &Prose::new("<blue>==================</blue>").fallback_render(&term),
+        &Prose::new("<blue>==================</blue>").render(&term),
     );
     log::data("");
 
@@ -198,7 +198,7 @@ fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_gi
         format!("<blue><b>Canonical Providers:</b></blue> {user_part}")
     };
 
-    log::data(&Prose::new(line).fallback_render(term));
+    log::data(&Prose::new(line).render(term));
     log::data("");
 }
 
@@ -212,11 +212,11 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         skill.skill_md_path.display(),
         skill.name,
     ));
-    log::data(&name_line.fallback_render(term));
+    log::data(&name_line.render(term));
 
     let desc_line = Prose::new(format!("<dim><i>{desc}</i></dim>"))
         .with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None));
-    log::data(&desc_line.fallback_render(term));
+    log::data(&desc_line.render(term));
     log::data("");
 
     if let Some(dir) = skill.skill_md_path.parent()
@@ -229,7 +229,7 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         };
         fs = fs.show_tokens().with_file_links().layout(layout);
         fs.ensure_tree_built();
-        log::data(&fs.fallback_render(term));
+        log::data(&fs.render(term));
     }
 }
 
@@ -251,7 +251,7 @@ fn render_verbose(term: &Terminal, skills: &[SkillInfo]) {
         list.add(item);
     }
 
-    log::data(&list.fallback_render(term));
+    log::data(&list.render(term));
 }
 
 /// Normal mode: group skills by scope, show badge header + tab-delimited names.
@@ -264,7 +264,7 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
     for (scope, group) in &by_scope {
         let count = group.len();
         let badge_line = format!("{} <dim>(<i>{count}</i>)</dim>", scope_badge(*scope));
-        log::data(&Prose::new(badge_line).fallback_render(term));
+        log::data(&Prose::new(badge_line).render(term));
         log::data("");
 
         let names: Vec<String> = group
@@ -281,7 +281,7 @@ fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
         let joined = names.join("  ");
         let rendered = Prose::new(joined)
             .with_word_wrap(WordWrap::BespokeProse(Some(50), vec![' '], None))
-            .fallback_render(term);
+            .render(term);
         log::data(&rendered);
         log::data("");
     }
@@ -476,13 +476,13 @@ fn render_exceptions(
         outer_list.add(inner_list);
     }
 
-    log::data(&outer_list.fallback_render(term));
+    log::data(&outer_list.render(term));
 }
 
 /// Render the summary of fix operations.
 fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
     log::data("");
-    let header = Prose::new("<b>Fix Summary</b>").fallback_render(term);
+    let header = Prose::new("<b>Fix Summary</b>").render(term);
     log::data(&header);
 
     let parts = [
@@ -493,7 +493,7 @@ fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
         format!("names_inserted={}", summary.names_inserted),
     ];
     let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));
-    log::data(&format!(" {}", detail.fallback_render(term)));
+    log::data(&format!(" {}", detail.render(term)));
 }
 
 /// Build the provider header line with user/repo skill paths.
@@ -570,14 +570,14 @@ fn render_footer(
     log::data("");
 
     if messages.len() == 1 {
-        let rendered = Prose::new(messages.into_iter().next().unwrap()).fallback_render(term);
+        let rendered = Prose::new(messages.into_iter().next().unwrap()).render(term);
         log::data(&format!(" {rendered}"));
     } else {
         let mut list = UnorderedList::empty();
         for msg in messages {
             list.add(Prose::new(msg));
         }
-        log::data(&list.fallback_render(term));
+        log::data(&list.render(term));
     }
 }
 

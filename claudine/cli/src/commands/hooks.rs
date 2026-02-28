@@ -233,7 +233,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 
     log::data("");
     let header = Prose::new("{{yellow}}{{bold}}⚠ Invalid sound effects:{{reset}}");
-    log::data(&format!(" {}", header.render(Some(100))));
+    log::data(&format!(" {}", header.render_optimistic(Some(100))));
 
     let mut has_fixable = false;
     for effect in &invalid_effects {
@@ -250,7 +250,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
                 effect.invalid_name
             ),
         };
-        log::data(&format!(" {}", Prose::new(msg).render(Some(100))));
+        log::data(&format!(" {}", Prose::new(msg).render_optimistic(Some(100))));
     }
 
     log::data("");
@@ -258,12 +258,12 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
         let hint = Prose::new(
             "{{dim}}Edit {{blue}}~/.claudine/config.json{{reset}}{{dim}} to apply suggested fixes{{reset}}",
         );
-        log::data(&format!(" {}", hint.render(Some(100))));
+        log::data(&format!(" {}", hint.render_optimistic(Some(100))));
     }
     let hint = Prose::new(
         "{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}",
     );
-    log::data(&format!(" {}", hint.render(Some(100))));
+    log::data(&format!(" {}", hint.render_optimistic(Some(100))));
 
     invalid_effects
 }
@@ -495,11 +495,11 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         status_icon,
         if installed { "" } else { "not " }
     ));
-    log::data(&format!("\n {}", header.fallback_render(&term)));
+    log::data(&format!("\n {}", header.render(&term)));
 
     // Show docs URL
     let docs = Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", provider.docs_url()));
-    log::data(&format!(" {}", docs.fallback_render(&term)));
+    log::data(&format!(" {}", docs.render(&term)));
     log::data("");
 
     // Get provider config if available
@@ -529,10 +529,10 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         let support_cell: TableCellContent = match support_level {
             EventSupportLevel::Hook => "hook".into(),
             EventSupportLevel::NonHook => Prose::new("{{dim}}non-hook{{reset}}")
-                .fallback_render(&term)
+                .render(&term)
                 .into(),
             EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
-                .fallback_render(&term)
+                .render(&term)
                 .into(),
         };
 
@@ -542,7 +542,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
             Some(b) => {
                 if b.actions.is_empty() {
                     Prose::new("{{dim}}(no actions){{reset}}")
-                        .fallback_render(&term)
+                        .render(&term)
                         .into()
                 } else {
                     let text = b
@@ -551,7 +551,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
                         .map(format_action)
                         .collect::<Vec<_>>()
                         .join("\n");
-                    Prose::new(text).fallback_render(&term).into()
+                    Prose::new(text).render(&term).into()
                 }
             }
         };
@@ -563,7 +563,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         ]);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&rendered);
 
     // Summary stats
@@ -578,7 +578,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         "{{{{bold}}}}{}{{{{reset}}}} supports {{{{yellow}}}}{}{{{{reset}}}} of the {{{{bold}}}}{{{{yellow}}}}{}{{{{reset}}}} unified events",
         provider, configured_count, total_unified_events
     ));
-    log::data(&format!(" {}", summary.fallback_render(&term)));
+    log::data(&format!(" {}", summary.render(&term)));
 
     // Show enabled events table with descriptions
     let enabled_events: Vec<&AgenticEvent> = event_rows
@@ -603,7 +603,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         } else {
             Prose::new("{{bold}}Event Descriptions{{reset}}")
         };
-        log::data(&format!(" {}", enabled_header.fallback_render(&term)));
+        log::data(&format!(" {}", enabled_header.render(&term)));
 
         let desc_columns = vec![
             TableColumn::new(bold("Event")),
@@ -622,14 +622,14 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
                     "{{{{red}}}}{{{{strikethrough}}}}{}{{{{reset}}}}",
                     event.as_pascal_case()
                 ))
-                .fallback_render(&term)
+                .render(&term)
                 .into()
             } else {
                 event.as_pascal_case().into()
             };
             let desc_cell: TableCellContent = if is_unsupported {
                 Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", event.description()))
-                    .fallback_render(&term)
+                    .render(&term)
                     .into()
             } else {
                 event.description().into()
@@ -637,7 +637,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
             desc_table.add_row(vec![event_cell, desc_cell]);
         }
 
-        let desc_rendered = desc_table.fallback_render(&term);
+        let desc_rendered = desc_table.render(&term);
         log::data(&desc_rendered);
     }
 
@@ -843,13 +843,13 @@ fn run_simple(
 
                 // Use Prose to render the colored output
                 let text = formatted.join(", ");
-                Prose::new(text).render(None).into()
+                Prose::new(text).render_optimistic(None).into()
             }
         };
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render(None).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
 
         table.add_row(vec![provider_cell, bool_indicator(installed), hooks_cell]);
     }
@@ -857,7 +857,7 @@ fn run_simple(
     let term = Terminal::new();
     let table = table.prefer_cursor_alignment();
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show color legend if there are issues
@@ -877,7 +877,7 @@ fn run_simple(
             "{{{{dim}}}}- Legend: {}{{{{reset}}}}",
             legend_parts.join(", ")
         ));
-        log::data(&format!(" {}", legend.render(Some(120))));
+        log::data(&format!(" {}", legend.render_optimistic(Some(120))));
     }
 
     // Show hints about available flags
@@ -890,7 +890,7 @@ fn run_simple(
         "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
     ];
     for hint in hints {
-        log::data(&format!(" {}", Prose::new(hint).render(Some(100))));
+        log::data(&format!(" {}", Prose::new(hint).render_optimistic(Some(100))));
     }
 
     Ok(())
@@ -929,7 +929,7 @@ fn run_verbose(
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render(None).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -956,7 +956,7 @@ fn run_verbose(
     }
 
     let term = Terminal::new();
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
@@ -964,7 +964,7 @@ fn run_verbose(
     let legend = Prose::new(
         "{{dim}}Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}",
     ).with_left_margin(Margin::Chars(8));
-    log::data(&format!(" {}\n", legend.fallback_render(&term)));
+    log::data(&format!(" {}\n", legend.render(&term)));
 
     // Show hints about available flags
     let hints = [
@@ -974,7 +974,7 @@ fn run_verbose(
         "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
     ];
     for hint in hints {
-        log::data(&format!(" {}", Prose::new(hint).fallback_render(&term)));
+        log::data(&format!(" {}", Prose::new(hint).render(&term)));
     }
 
     Ok(())
@@ -1033,7 +1033,7 @@ fn run_support() -> Result<()> {
         table.add_row(row);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
@@ -1041,7 +1041,7 @@ fn run_support() -> Result<()> {
     let legend = Prose::new(
         "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{{NO_SUPPORT}}{{dim}} = not supported{{reset}}",
     );
-    log::data(&format!(" {}\n", legend.fallback_render(&term)));
+    log::data(&format!(" {}\n", legend.render(&term)));
 
     Ok(())
 }
@@ -1054,7 +1054,7 @@ fn run_mapping() -> Result<()> {
 
     for provider_group in ALL_PROVIDERS.chunks(4) {
         let table = build_mapping_table(provider_group).prefer_cursor_alignment();
-        let rendered = table.fallback_render(&term);
+        let rendered = table.render(&term);
         log::data(&format!("\n{}", rendered));
     }
 
@@ -1062,7 +1062,7 @@ fn run_mapping() -> Result<()> {
     log::data("");
     let legend =
         Prose::new("{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}");
-    log::data(&format!(" {}", legend.render(Some(100))));
+    log::data(&format!(" {}", legend.render_optimistic(Some(100))));
 
     Ok(())
 }
@@ -1122,18 +1122,18 @@ fn run_describe() -> Result<()> {
         table.add_row(row);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
     log::data("");
     let legend =
         Prose::new("{{dim}}- Response Schema: fields available in the event payload{{reset}}");
-    log::data(&format!(" {}", legend.fallback_render(&term)));
+    log::data(&format!(" {}", legend.render(&term)));
     let legend2 = Prose::new(
         "{{dim}}- Return Schema: what hooks can return to influence agent behavior (blocking hooks only){{reset}}",
     );
-    log::data(&format!(" {}", legend2.fallback_render(&term)));
+    log::data(&format!(" {}", legend2.render(&term)));
 
     Ok(())
 }
@@ -1146,12 +1146,12 @@ fn run_variables() -> Result<()> {
     let term = Terminal::new();
 
     let header = Prose::new("{{bold}}Template Variables{{reset}}");
-    log::data(&format!("\n {}", header.fallback_render(&term)));
+    log::data(&format!("\n {}", header.render(&term)));
     log::data("");
     let intro = Prose::new(
         "{{dim}}Use these in speak messages and report templates: {{reset}}{{cyan}}\"Tool {{tool_name}} failed: {{error}}\"{{reset}}",
     );
-    log::data(&format!(" {}", intro.fallback_render(&term)));
+    log::data(&format!(" {}", intro.render(&term)));
     log::data("");
 
     // Event fields table
@@ -1166,23 +1166,23 @@ fn run_variables() -> Result<()> {
     for var in TemplateVariable::event_variables() {
         table.add_row(vec![
             Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
-                .fallback_render(&term)
+                .render(&term)
                 .into(),
             var.description().into(),
             Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", var.availability()))
-                .fallback_render(&term)
+                .render(&term)
                 .into(),
         ]);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&rendered);
 
     // Context variables - grouped by category with current values
     log::data("");
     let ctx_header =
         Prose::new("{{bold}}Context Variables{{reset}} {{dim}}(auto-detected at runtime){{reset}}");
-    log::data(&format!(" {}", ctx_header.fallback_render(&term)));
+    log::data(&format!(" {}", ctx_header.render(&term)));
 
     // Detect current environment to show live values
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -1208,7 +1208,7 @@ fn run_variables() -> Result<()> {
             current_category = Some(cat);
             ctx_table.add_row(vec![
                 Prose::new(format!("{{{{dim}}}}# {}{{{{reset}}}}", cat.label()))
-                    .fallback_render(&term)
+                    .render(&term)
                     .into(),
                 "".into(),
                 "".into(),
@@ -1218,7 +1218,7 @@ fn run_variables() -> Result<()> {
         // Resolve current value
         let current_value = var.resolve(&dummy_meta);
         let value_display = if current_value.is_empty() {
-            Prose::new("{{dim}}-{{reset}}").fallback_render(&term)
+            Prose::new("{{dim}}-{{reset}}").render(&term)
         } else {
             // Truncate long values
             let truncated = if current_value.len() > 40 {
@@ -1226,25 +1226,25 @@ fn run_variables() -> Result<()> {
             } else {
                 current_value.to_string()
             };
-            Prose::new(format!("{{{{green}}}}{}{{{{reset}}}}", truncated)).fallback_render(&term)
+            Prose::new(format!("{{{{green}}}}{}{{{{reset}}}}", truncated)).render(&term)
         };
 
         ctx_table.add_row(vec![
             Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
-                .fallback_render(&term)
+                .render(&term)
                 .into(),
             var.description().into(),
             value_display.into(),
         ]);
     }
 
-    let ctx_rendered = ctx_table.fallback_render(&term);
+    let ctx_rendered = ctx_table.render(&term);
     log::data(&ctx_rendered);
 
     // Example
     log::data("");
     let example_header = Prose::new("{{bold}}Example{{reset}}");
-    log::data(&format!(" {}", example_header.fallback_render(&term)));
+    log::data(&format!(" {}", example_header.render(&term)));
     log::data("");
     let example = Prose::new(
         r#"{{dim}}  {
@@ -1252,7 +1252,7 @@ fn run_variables() -> Result<()> {
     "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
   }{{reset}}"#,
     );
-    log::data(&example.fallback_render(&term));
+    log::data(&example.render(&term));
     log::data("");
 
     Ok(())

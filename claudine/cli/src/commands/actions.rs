@@ -92,7 +92,7 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
         table.add_row(vec![action_name.clone().into(), events_str.into()]);
     }
 
-    let rendered = table.fallback_render(term);
+    let rendered = table.render(term);
     log::data(&format!("\n{}", rendered));
 
     Ok(())
@@ -255,7 +255,7 @@ fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Resu
         table.add_row(vec![action_key.clone().into(), events_str.into()]);
     }
 
-    let rendered = table.fallback_render(term);
+    let rendered = table.render(term);
     log::data(&format!("\n{}", rendered));
 
     Ok(())

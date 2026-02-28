@@ -143,6 +143,16 @@ pub(crate) trait WrapperProfile: Send + Sync {
             self.provider()
         ))
     }
+
+    // -- Provider-required env vars ------------------------------------------
+
+    /// Env var names that this provider requires and should bypass the
+    /// sensitive-key sanitizer automatically.
+    ///
+    /// Default: empty (no automatic includes).
+    fn allowed_env_keys(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +361,10 @@ impl WrapperProfile for CodexWrapper {
         }
         None
     }
+
+    fn allowed_env_keys(&self) -> &'static [&'static str] {
+        &["OPENAI_API_KEY", "CODEX_API_KEY"]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +425,10 @@ impl WrapperProfile for GeminiWrapper {
             );
         }
         Ok(())
+    }
+
+    fn allowed_env_keys(&self) -> &'static [&'static str] {
+        &["GEMINI_API_KEY", "GOOGLE_API_KEY"]
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
@@ -490,6 +508,10 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
+    fn allowed_env_keys(&self) -> &'static [&'static str] {
+        &["KIMI_API_KEY"]
+    }
+
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
         if !has_flag(args, "--print") {
             args.push("--print".to_string());
@@ -563,6 +585,10 @@ impl WrapperProfile for QwenWrapper {
             return Ok(());
         }
         bail!("--non-interactive for qwen requires a prompt (positional or --prompt/-p)");
+    }
+
+    fn allowed_env_keys(&self) -> &'static [&'static str] {
+        &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {

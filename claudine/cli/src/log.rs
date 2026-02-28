@@ -31,7 +31,7 @@ pub fn output(msg: &str) {
 pub fn warn(msg: &str) {
     let term = Terminal::new();
     let rendered =
-        Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}")).fallback_render(&term);
+        Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}")).render(&term);
     let _ = writeln!(std::io::stderr(), "{rendered}");
 }
 
@@ -42,6 +42,6 @@ pub fn warn(msg: &str) {
 pub fn error(msg: &str) {
     let term = Terminal::new();
     let rendered =
-        Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).fallback_render(&term);
+        Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
     let _ = writeln!(std::io::stderr(), "\n{rendered}");
 }

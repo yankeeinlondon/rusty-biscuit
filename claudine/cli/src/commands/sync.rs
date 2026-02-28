@@ -318,12 +318,12 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     if args.dry_run {
         log::data("");
         let header = Prose::new("<b><yellow>Dry run</yellow></b> - no changes will be made");
-        log::data(&header.fallback_render(&term));
+        log::data(&header.render(&term));
     }
 
     for (provider, actions) in provider_actions {
         let section = build_provider_section(provider, actions);
-        log::data(&section.fallback_render(&term));
+        log::data(&section.render(&term));
     }
 
     log::data("");
@@ -360,7 +360,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                         let header = Prose::new(
                             "<green><b>Fixed:</b></green> Removed unsupported events from config:",
                         );
-                        log::data(&format!("✓ {}", header.fallback_render(&term)));
+                        log::data(&format!("✓ {}", header.render(&term)));
                         log::data("");
 
                         for (provider, events) in &removed {
@@ -373,13 +373,13 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                                 "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
                                 provider, events_str
                             ));
-                            log::data(&line.fallback_render(&term));
+                            log::data(&line.render(&term));
                         }
 
                         log::data("");
                         let saved_msg =
                             Prose::new(format!("<dim>Config saved to {}</dim>", path.display()));
-                        log::data(&saved_msg.fallback_render(&term));
+                        log::data(&saved_msg.render(&term));
                         log::data("");
                     }
                     Err(e) => {
@@ -387,7 +387,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                             "<red><b>Error:</b></red> Failed to save config: {}",
                             e
                         ));
-                        log::data(&error_msg.fallback_render(&term));
+                        log::data(&error_msg.render(&term));
                         log::data("");
                     }
                 }
@@ -396,7 +396,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                 let header = Prose::new(
                     "<yellow><b>Would fix:</b></yellow> These unsupported events would be removed:",
                 );
-                log::data(&format!("⚠ {}", header.fallback_render(&term)));
+                log::data(&format!("⚠ {}", header.render(&term)));
                 log::data("");
 
                 for (provider, events) in &unsupported_warnings {
@@ -409,7 +409,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                         "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
                         provider, events_str
                     ));
-                    log::data(&line.fallback_render(&term));
+                    log::data(&line.render(&term));
                 }
 
                 log::data("");
@@ -418,7 +418,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                 let warning_header = Prose::new(
                     "<yellow><b>Warning:</b></yellow> Some configured events are not supported by their providers:",
                 );
-                log::data(&format!("⚠ {}", warning_header.fallback_render(&term)));
+                log::data(&format!("⚠ {}", warning_header.render(&term)));
                 log::data("");
 
                 for (provider, events) in &unsupported_warnings {
@@ -431,14 +431,14 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                         "  <b>{}</b>: <red><strikethrough>{}</strikethrough></red>",
                         provider, events_str
                     ));
-                    log::data(&line.fallback_render(&term));
+                    log::data(&line.render(&term));
                 }
 
                 log::data("");
                 let hint = Prose::new(
                     "<dim>These events won't fire. Use --fix to remove them, or edit ~/.claudine/config.json manually.</dim>",
                 );
-                log::data(&hint.fallback_render(&term));
+                log::data(&hint.render(&term));
                 log::data("");
             }
         }

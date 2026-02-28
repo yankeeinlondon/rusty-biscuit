@@ -36,7 +36,13 @@ pub(crate) fn build_child_env(
     env_overrides: &[(String, String)],
 ) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
-    let (mut env, removed, included, mut warnings) = sanitize_process_env(&include_set);
+    let auto_include: HashSet<String> = profile
+        .allowed_env_keys()
+        .iter()
+        .map(|k| (*k).to_string())
+        .collect();
+    let (mut env, removed, included, mut warnings) =
+        sanitize_process_env(&include_set, &auto_include);
     let mut added = BTreeMap::new();
 
     let redacted_params = redact_sensitive_args(agent_params);
@@ -146,6 +152,7 @@ fn is_valid_env_name(name: &str) -> bool {
 
 fn sanitize_process_env(
     include_set: &HashSet<String>,
+    auto_include: &HashSet<String>,
 ) -> (HashMap<OsString, OsString>, Vec<String>, Vec<String>, Vec<String>) {
     let mut kept = HashMap::new();
     let mut removed = BTreeSet::new();
@@ -157,7 +164,7 @@ fn sanitize_process_env(
         present_keys.insert(key_display.clone());
 
         if is_sensitive_key(&key_display) {
-            if include_set.contains(&key_display) {
+            if include_set.contains(&key_display) || auto_include.contains(&key_display) {
                 included.insert(key_display);
             } else {
                 removed.insert(key_display);
@@ -168,6 +175,7 @@ fn sanitize_process_env(
         kept.insert(key, value);
     }
 
+    // Only warn about missing keys for explicit --include, not auto-included.
     let mut warnings = Vec::new();
     for include in include_set {
         if !present_keys.contains(include) {
@@ -605,11 +613,23 @@ mod tests {
         env: &[(String, String)],
         include_set: &HashSet<String>,
     ) -> (Vec<(String, String)>, Vec<String>) {
+        let auto_include = HashSet::new();
+        sanitize_env_for_test_with_auto(env, include_set, &auto_include)
+    }
+
+    fn sanitize_env_for_test_with_auto(
+        env: &[(String, String)],
+        include_set: &HashSet<String>,
+        auto_include: &HashSet<String>,
+    ) -> (Vec<(String, String)>, Vec<String>) {
         let mut kept = Vec::new();
         let mut removed = BTreeSet::new();
 
         for (key, value) in env {
-            if is_sensitive_key(key) && !include_set.contains(key) {
+            if is_sensitive_key(key)
+                && !include_set.contains(key)
+                && !auto_include.contains(key)
+            {
                 removed.insert(key.clone());
             } else {
                 kept.push((key.clone(), value.clone()));

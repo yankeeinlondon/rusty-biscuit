@@ -25,7 +25,7 @@ pub(crate) fn log_wrapper_summary(
             "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
             profile.provider()
         ))
-        .fallback_render(term),
+        .render(term),
     ];
 
     if yolo_requested {
@@ -41,13 +41,13 @@ pub(crate) fn log_wrapper_summary(
             Prose::new(format!(
                 "<green><bold>PACKAGE_NAME:</bold> {package_name}</green>"
             ))
-            .fallback_render(term),
+            .render(term),
         );
     }
 
     let remaining = format_passthrough_args(child_args);
     if !remaining.is_empty() {
-        header_parts.push(Prose::new(format!("<dim>{remaining}</dim>")).fallback_render(term));
+        header_parts.push(Prose::new(format!("<dim>{remaining}</dim>")).render(term));
     }
 
     log::message(&format!("\n{}", header_parts.join(" ")));
@@ -56,7 +56,7 @@ pub(crate) fn log_wrapper_summary(
     // Verbose level 1+: header + environment changes
     if verbose > 0 || !env_plan.added.is_empty() || !env_plan.removed.is_empty() || !env_plan.included.is_empty() {
         log::message(
-            &Prose::new("<bold>Environment Variables:</bold>").fallback_render(term),
+            &Prose::new("<bold>Environment Variables:</bold>").render(term),
         );
 
         let mut items: Vec<RenderableContent> = Vec::new();
@@ -87,7 +87,7 @@ pub(crate) fn log_wrapper_summary(
 
         let rendered = UnorderedList::from(items)
             .with_bullet("• ")
-            .fallback_render(term);
+            .render(term);
         log::message(&rendered);
     }
 }
@@ -105,7 +105,7 @@ pub(crate) fn log_dry_run(
             "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
             profile.provider()
         ))
-        .fallback_render(term),
+        .render(term),
     );
 
     // Working directory
@@ -114,7 +114,7 @@ pub(crate) fn log_dry_run(
             "<bold>Working directory:</bold> <dim>{}</dim>",
             child_cwd.display()
         ))
-        .fallback_render(term),
+        .render(term),
     );
 
     // Full command line
@@ -123,12 +123,12 @@ pub(crate) fn log_dry_run(
         .collect();
     log::message(
         &Prose::new(format!("<bold>Command:</bold> <dim>{}</dim>", cmd_parts.join(" ")))
-            .fallback_render(term),
+            .render(term),
     );
 
     // Environment changes
     log::message(
-        &Prose::new("<bold>Environment Changes:</bold>").fallback_render(term),
+        &Prose::new("<bold>Environment Changes:</bold>").render(term),
     );
     let mut items: Vec<RenderableContent> = Vec::new();
     for removed in &env_plan.removed {
@@ -153,7 +153,7 @@ pub(crate) fn log_dry_run(
     }
     let rendered = UnorderedList::from(items)
         .with_bullet("• ")
-        .fallback_render(term);
+        .render(term);
     log::message(&rendered);
 }
 
@@ -192,7 +192,7 @@ pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) 
              <dim>\\<ENV\\></dim></blue> CLI switch",
         )
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-        .fallback_render(term),
+        .render(term),
     )
 }
 
@@ -200,7 +200,7 @@ pub(crate) fn post_env_message(message: &str, term: &Terminal) -> String {
     let styled = style_cli_switches(message);
     Prose::new(format!("- {styled}"))
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-        .fallback_render(term)
+        .render(term)
 }
 
 pub(crate) fn post_env_warning_message(message: &str, term: &Terminal) -> String {
@@ -209,7 +209,7 @@ pub(crate) fn post_env_warning_message(message: &str, term: &Terminal) -> String
         "- <orange><bold>Warning:</bold></orange> {styled}"
     ))
     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-    .fallback_render(term)
+    .render(term)
 }
 
 pub(crate) fn style_cli_switches(message: &str) -> String {

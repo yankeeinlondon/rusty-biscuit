@@ -78,15 +78,18 @@ fn wait_with_signal_handling(child: &mut Child) -> Result<i32> {
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             match count {
                 1 => {
-                    // First Ctrl-C: let the default behavior propagate to child
-                    // (process group signal). Do nothing extra.
+                    // First Ctrl-C: forward SIGINT to the child process.
+                    // Registering this handler replaced the default behavior
+                    // (which would propagate to the process group), so we
+                    // must explicitly forward the signal.
+                    libc::kill(child_pid as i32, libc::SIGINT);
                 }
                 2 => {
-                    // Second Ctrl-C: send SIGTERM to child
+                    // Second Ctrl-C: escalate to SIGTERM
                     libc::kill(child_pid as i32, libc::SIGTERM);
                 }
                 _ => {
-                    // Third+ Ctrl-C: send SIGKILL to child
+                    // Third+ Ctrl-C: force kill
                     libc::kill(child_pid as i32, libc::SIGKILL);
                 }
             }

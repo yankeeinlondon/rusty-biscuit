@@ -277,7 +277,7 @@ fn render_link_strategy(
         args.scope.label(),
         mode
     ));
-    log::data(&format!("\n {}", header.fallback_render(&term)));
+    log::data(&format!("\n {}", header.render(&term)));
 
     for section in sections {
         log::data("");
@@ -290,7 +290,7 @@ fn render_link_strategy(
             section.resource.name(),
             canonical
         ));
-        log::data(&format!(" {}", section_header.fallback_render(&term)));
+        log::data(&format!(" {}", section_header.render(&term)));
 
         if section.rows.is_empty() {
             let empty = if args.filter.is_some() {
@@ -298,7 +298,7 @@ fn render_link_strategy(
             } else {
                 "{{dim}}No resources discovered.{{reset}}"
             };
-            log::data(&format!(" {}", Prose::new(empty).fallback_render(&term)));
+            log::data(&format!(" {}", Prose::new(empty).render(&term)));
             continue;
         }
 
@@ -334,12 +334,12 @@ fn render_link_strategy(
             ]);
         }
 
-        log::data(&table.fallback_render(&term));
+        log::data(&table.render(&term));
         let summary = Prose::new(format!(
             "{{{{dim}}}}summary: ok={}, fixable={}, needs-attention={}{{{{reset}}}}",
             ok_count, fixable_count, attention_count
         ));
-        log::data(&format!(" {}", summary.fallback_render(&term)));
+        log::data(&format!(" {}", summary.render(&term)));
 
         if args.apply {
             let apply = Prose::new(format!(
@@ -348,7 +348,7 @@ fn render_link_strategy(
                 section.apply_summary.derived_written,
                 section.apply_summary.skipped
             ));
-            log::data(&format!(" {}", apply.fallback_render(&term)));
+            log::data(&format!(" {}", apply.render(&term)));
         }
     }
 
@@ -358,22 +358,22 @@ fn render_link_strategy(
             "{{{{bold}}}}Apply Totals{{{{reset}}}} {{{{dim}}}}links_created={}, derived_written={}, skipped={}{{{{reset}}}}",
             total_apply.links_created, total_apply.derived_written, total_apply.skipped
         ));
-        log::data(&format!(" {}", apply_total.fallback_render(&term)));
+        log::data(&format!(" {}", apply_total.render(&term)));
     } else {
         log::data("");
         let hint = Prose::new(
             "{{dim}}Run {{blue}}{{bold}}claudine link --apply{{reset}}{{dim}} to fix LinkMissing/DerivedMissing/DerivedStale states.{{reset}}",
         );
-        log::data(&format!(" {}", hint.fallback_render(&term)));
+        log::data(&format!(" {}", hint.render(&term)));
     }
 
     if !attention.is_empty() {
         log::data("");
         let attention_header = Prose::new("{{bold}}Needs Attention{{reset}}");
-        log::data(&format!(" {}", attention_header.fallback_render(&term)));
+        log::data(&format!(" {}", attention_header.render(&term)));
         for item in attention {
             let line = Prose::new(format!("{{{{yellow}}}}- {{{{reset}}}}{item}"));
-            log::data(&format!(" {}", line.fallback_render(&term)));
+            log::data(&format!(" {}", line.render(&term)));
         }
 
         if !args.apply {
@@ -381,7 +381,7 @@ fn render_link_strategy(
             let fix_hint = Prose::new(
                 "{{dim}}{{i}}use {{red}}--fix{{reset}}{{dim}}{{i}} to attempt to fix the reported issues{{reset}}",
             );
-            log::data(&format!(" {}", fix_hint.fallback_render(&term)));
+            log::data(&format!(" {}", fix_hint.render(&term)));
         }
     }
 }
@@ -569,7 +569,7 @@ fn run_support() -> Result<()> {
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render(None).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -583,7 +583,7 @@ fn run_support() -> Result<()> {
         table.add_row(row);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
@@ -591,7 +591,7 @@ fn run_support() -> Result<()> {
     let legend = Prose::new(
         "{{dim}}Legend: {{reset}}\u{2705}{{dim}} = full support, {{reset}}\u{2699}\u{fe0f}{{dim}} = custom format, {{reset}}\u{25cb}{{dim}} = limited/built-in only, {{reset}}\u{274c}{{dim}} = not supported{{reset}}",
     );
-    log::data(&format!(" {}\n", legend.fallback_render(&term)));
+    log::data(&format!(" {}\n", legend.render(&term)));
 
     // Show hints
     let hints = [
@@ -599,7 +599,7 @@ fn run_support() -> Result<()> {
         "{{dim}}- Providers with {{green}}custom format{{reset}}{{dim}} may need format conversion for linking{{reset}}",
     ];
     for hint in hints {
-        log::data(&format!(" {}", Prose::new(hint).fallback_render(&term)));
+        log::data(&format!(" {}", Prose::new(hint).render(&term)));
     }
 
     Ok(())
@@ -635,11 +635,11 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
         status_icon,
         if installed { "" } else { "not " }
     ));
-    log::data(&format!("\n {}", header.fallback_render(&term)));
+    log::data(&format!("\n {}", header.render(&term)));
 
     // Show docs URL
     let docs = Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", provider.docs_url()));
-    log::data(&format!(" {}", docs.fallback_render(&term)));
+    log::data(&format!(" {}", docs.render(&term)));
     log::data("");
 
     // Resource support table
@@ -673,7 +673,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
 
         let notes_cell: TableCellContent = support
             .notes
-            .map(|n| Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", n)).fallback_render(&term))
+            .map(|n| Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", n)).render(&term))
             .unwrap_or_else(|| "-".to_string())
             .into();
 
@@ -686,7 +686,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
         ]);
     }
 
-    let rendered = table.fallback_render(&term);
+    let rendered = table.render(&term);
     log::data(&rendered);
 
     // Show "also reads from" info if applicable
@@ -697,7 +697,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
     if has_also_reads {
         log::data("");
         let also_header = Prose::new("{{bold}}Cross-Provider Discovery{{reset}}");
-        log::data(&format!(" {}", also_header.fallback_render(&term)));
+        log::data(&format!(" {}", also_header.render(&term)));
 
         for resource in LinkableResource::ALL {
             let support = caps.support_for(resource);
@@ -712,7 +712,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
                     resource.name(),
                     paths.join(", ")
                 ));
-                log::data(&format!("  {}", also_reads.fallback_render(&term)));
+                log::data(&format!("  {}", also_reads.render(&term)));
             }
         }
     }
@@ -720,7 +720,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
     // Show skill frontmatter support
     log::data("");
     let fm_header = Prose::new("{{bold}}Skill Frontmatter Fields{{reset}}");
-    log::data(&format!(" {}", fm_header.fallback_render(&term)));
+    log::data(&format!(" {}", fm_header.render(&term)));
 
     let fm = &caps.skill_frontmatter;
     let fm_columns = vec![
@@ -780,7 +780,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
     for (field, supported, usage) in fm_fields {
         let usage_cell: TableCellContent = if supported {
             Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", usage))
-                .fallback_render(&term)
+                .render(&term)
                 .into()
         } else {
             "".into()
@@ -788,7 +788,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
         fm_table.add_row(vec![field.into(), bool_indicator(supported), usage_cell]);
     }
 
-    let fm_rendered = fm_table.fallback_render(&term);
+    let fm_rendered = fm_table.render(&term);
     log::data(&fm_rendered);
 
     Ok(())
@@ -802,7 +802,7 @@ fn format_support_level_cell(term: &Terminal, level: SupportLevel) -> TableCellC
         SupportLevel::Limited => "{{dim}}Limited{{reset}}",
         SupportLevel::None => "{{dim}}-{{reset}}",
     };
-    Prose::new(text).fallback_render(term).into()
+    Prose::new(text).render(term).into()
 }
 
 #[cfg(test)]
