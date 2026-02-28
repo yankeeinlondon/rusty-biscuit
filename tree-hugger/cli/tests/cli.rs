@@ -526,3 +526,152 @@ fn test_imports_rust_grouped_output() {
             "- use std::process::{Child, Command, Stdio}",
         ));
 }
+
+// ============================================================================
+// --exported and --prelude filter tests
+// ============================================================================
+
+#[test]
+fn test_exported_flag_filters_functions() {
+    // sample.rs has pub fn greet and pub fn greet_many — both should appear
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exported",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet"))
+        .stdout(predicate::str::contains("greet_many"));
+}
+
+#[test]
+fn test_exported_flag_filters_symbols() {
+    // sample.rs has pub struct Greeter — should appear under --exported
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exported",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Greeter"))
+        .stdout(predicate::str::contains("greet"));
+}
+
+#[test]
+fn test_exported_flag_json_output() {
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exported",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"files\""))
+        .stdout(predicate::str::contains("greet"));
+}
+
+#[test]
+fn test_exported_and_prelude_conflict() {
+    // --exported and --prelude are mutually exclusive
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exported",
+            "--prelude",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_prelude_env_var_filters_symbols() {
+    // PRELUDE env var should limit results to named symbols
+    hug_cmd()
+        .env("PRELUDE", "greet")
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--prelude",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet"))
+        // greet_many should NOT appear (name is "greet_many", not "greet")
+        .stdout(predicate::str::contains("greet_many").not());
+}
+
+#[test]
+fn test_prelude_env_var_multiple_names() {
+    // Multiple comma-separated names in PRELUDE
+    hug_cmd()
+        .env("PRELUDE", "greet, Greeter")
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--prelude",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet"))
+        .stdout(predicate::str::contains("Greeter"))
+        .stdout(predicate::str::contains("greet_many").not());
+}
+
+#[test]
+fn test_prelude_flag_with_real_prelude_file() {
+    // biscuit-terminal/lib has a real prelude.rs
+    // Run from biscuit-terminal/lib to pick up its prelude
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let bt_lib = repo_root.join("biscuit-terminal/lib");
+
+    let mut cmd = Command::cargo_bin("hug").unwrap();
+    cmd.current_dir(&bt_lib)
+        .args([
+            "symbols",
+            "src/terminal.rs",
+            "--prelude",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        // Terminal is re-exported in prelude.rs
+        .stdout(predicate::str::contains("Terminal"));
+}
+
+#[test]
+fn test_exported_flag_in_help() {
+    hug_cmd()
+        .args(["functions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--exported"))
+        .stdout(predicate::str::contains("--prelude"));
+}
+
+#[test]
+fn test_exported_flag_classes() {
+    // Classes command should also support --exported
+    hug_cmd()
+        .args(["classes", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--exported"))
+        .stdout(predicate::str::contains("--prelude"));
+}
