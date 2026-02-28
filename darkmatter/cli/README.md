@@ -97,6 +97,12 @@ md clean README.md
 
 # Clean from stdin
 cat README.md | md clean
+
+# Save cleaned file in place and report delta-style changes
+md clean README.md --save
+
+# Shorthand: top-level clean-and-save
+md README.md --save
 ```
 
 Frontmatter mutation flags were removed from the CLI; composition uses frontmatter as pipeline input and outputs the composed document content.
