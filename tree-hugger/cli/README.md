@@ -1,6 +1,6 @@
 # Tree Hugger CLI
 
-Tree Hugger provides the `hug` CLI for exploring symbols, imports, and exports across multiple
+Tree Hugger provides the `hug` CLI for exploring symbols, imports, and diagnostics across multiple
 languages.
 
 ## Installation
@@ -12,8 +12,8 @@ cargo install --path tree-hugger/cli
 ## Usage
 
 ```bash
-hug symbols "src/**/*.rs"
-hug functions --language rust "src/**/*.rs"
+hug symbols
+hug functions --language rust src/main.rs greet
 hug imports --json "tests/fixtures/**/*.js"
 ```
 
@@ -22,7 +22,6 @@ hug imports --json "tests/fixtures/**/*.js"
 - `functions` - List function and method definitions
 - `types` - List type definitions (structs, enums, classes, interfaces, traits)
 - `symbols` - List all discovered symbols
-- `exports` - List exported symbols
 - `imports` - List imported symbols
 - `classes` - List classes with members partitioned by static/instance
 - `lint` - Run lint and syntax diagnostics
@@ -33,6 +32,10 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--ignore <GLOB>` - Exclude files matching pattern
 - `--json` - Output as JSON
 - `--plain` - Disable colors and hyperlinks
+- `--group-by-file` - Group symbol output by file
+- `--group-by-module` - Group symbol output by module
+- `--sort-by-kind` - Sort symbols by kind then name
+- `--sort-by-module` - Sort symbols by module then other sort keys
 
 ## Output Format
 
@@ -112,8 +115,8 @@ The CLI displays different symbol kinds with distinct labels:
 ## Examples
 
 ```bash
-# List all types in a Rust project
-hug types "src/**/*.rs"
+# List all types in the nearest package (default all-file scan)
+hug types
 
 # List functions in TypeScript files, excluding tests
 hug functions "src/**/*.ts" --ignore "**/test/**"
