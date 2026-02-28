@@ -15,6 +15,8 @@ audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
 # Native sound effects playback via rodio (enables OS audio channel routing)
 sfx-native = ["rodio"]
 sfx-native-macos = ["sfx-native", "coreaudio-sys"]
+sfx-native-windows = ["sfx-native", "windows"]
+sfx-native-linux = ["sfx-native", "libpulse-binding"]
 
 # Umbrella feature for all effects (~30MB)
 sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
@@ -44,8 +46,16 @@ symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "o
 coreaudio-sys = { version = "0.2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = { version = "2.28", optional = true }
 pulsectl-rs = { version = "0.3", optional = true }
 alsa = { version = "0.11", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Media_Audio",
+    "Win32_Media_Multimedia",
+    "Win32_System_Com",
+] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

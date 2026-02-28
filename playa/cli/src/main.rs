@@ -170,22 +170,31 @@ struct PlaybackOptions {
 }
 
 impl PlaybackOptions {
-    fn apply_to_playa(&self, mut playa: Playa) -> Playa {
+    /// Convert CLI playback options to the library's `PlaybackOptions` type.
+    fn to_lib_options(&self) -> playa::PlaybackOptions {
+        let mut opts = playa::PlaybackOptions::new();
+
         if let Some(speed) = self.speed {
-            playa = playa.speed(speed);
+            opts = opts.with_speed(speed);
         } else if self.fast {
-            playa = playa.speed(1.25);
+            opts = opts.with_speed(1.25);
         } else if self.slow {
-            playa = playa.speed(0.75);
+            opts = opts.with_speed(0.75);
         }
 
         if let Some(volume) = self.volume {
-            playa = playa.volume(volume);
+            opts = opts.with_volume(volume);
         } else if self.quiet {
-            playa = playa.volume(0.5);
+            opts = opts.with_volume(0.5);
         } else if self.loud {
-            playa = playa.volume(1.5);
+            opts = opts.with_volume(1.5);
         }
+
+        opts
+    }
+
+    fn apply_to_playa(&self, mut playa: Playa) -> Playa {
+        playa = playa.with_options(self.to_lib_options());
 
         if self.meta {
             playa = playa.show_meta();
@@ -384,6 +393,17 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
         std::process::exit(2);
     };
 
+    // Use native SFX playback when available and ducking is not requested.
+    // Native playback bypasses host player subprocess spawning for lower latency
+    // and enables OS audio channel routing (e.g., macOS system sound device).
+    #[cfg(feature = "sfx-native")]
+    if !opts.has_ducking() {
+        if playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok() {
+            return;
+        }
+        // Fall through to host player on error.
+    }
+
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
@@ -427,6 +447,15 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
         );
         std::process::exit(2);
     };
+
+    // Use native SFX playback when available.
+    #[cfg(feature = "sfx-native")]
+    {
+        if playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok() {
+            return;
+        }
+        // Fall through to host player on error.
+    }
 
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
         Ok(p) => opts.apply_to_playa(p),
@@ -509,7 +538,7 @@ fn list_sound_effects(filter: Option<&str>) {
     }
 
     // Render and print
-    let output = top_list.render(None);
+    let output = top_list.render_optimistic(None);
     println!("{}", output);
 }
 
