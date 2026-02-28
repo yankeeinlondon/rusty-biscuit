@@ -1351,33 +1351,33 @@ impl SoundEffect {
     /// # Ok::<(), playa::PlaybackError>(())
     /// ```
     pub fn play(self) -> Result<(), crate::PlaybackError> {
-        self.play_with_volume(None)
+        self.play_with_options(&crate::PlaybackOptions::default())
     }
 
-    /// Play this sound effect at a specific volume level.
+    /// Play this sound effect with specific playback options.
     ///
-    /// Volume is a multiplier: 0.0 = silent, 1.0 = normal, >1.0 = amplified.
+    /// Supports volume (0.0 = silent, 1.0 = normal, >1.0 = amplified) and
+    /// speed (1.0 = normal, <1.0 = slower, >1.0 = faster) control.
     ///
-    /// When the `sfx-native` feature is enabled, volume is applied directly
-    /// via rodio's Sink. Otherwise, volume control depends on the host player's
+    /// When the `sfx-native` feature is enabled, options are applied directly
+    /// via rodio's Player. Otherwise, control depends on the host player's
     /// capabilities.
-    pub fn play_with_volume(self, volume: Option<f32>) -> Result<(), crate::PlaybackError> {
+    pub fn play_with_options(
+        self,
+        options: &crate::PlaybackOptions,
+    ) -> Result<(), crate::PlaybackError> {
         // Try native playback first when available.
         #[cfg(feature = "sfx-native")]
         {
-            match crate::sfx_player::play_sfx(self.bytes(), volume) {
-                Ok(()) => return Ok(()),
-                Err(_) => {
-                    // Fall through to host player.
-                }
+            if crate::sfx_player::play_sfx(self.bytes(), options).is_ok() {
+                return Ok(());
             }
+            // Fall through to host player on error.
         }
 
-        let mut playa = crate::Playa::from_bytes(self.as_bytes().to_vec())
-            .map_err(|crate::InvalidAudio::Detection(e)| crate::PlaybackError::Detection(e))?;
-        if let Some(vol) = volume {
-            playa = playa.volume(vol);
-        }
+        let playa = crate::Playa::from_bytes(self.as_bytes().to_vec())
+            .map_err(|crate::InvalidAudio::Detection(e)| crate::PlaybackError::Detection(e))?
+            .with_options(*options);
         playa.play()
     }
 

@@ -11,11 +11,30 @@
 //! System Settings → Sound → "Play sound effects through". It may differ from
 //! the default music output device (e.g., built-in speakers for alerts while
 //! headphones handle music).
+//!
+//! ## Windows Sound Effects Category
+//!
+//! With the `sfx-native-windows` feature, sound effects are played through
+//! WASAPI with `AudioCategory_SoundEffects`. This tags the audio stream so
+//! Windows routes it through the Sound Effects mixer category, which has its
+//! own volume slider in the Volume Mixer. Falls back to the default rodio
+//! output if WASAPI setup fails.
+//!
+//! ## Linux
+//!
+//! With the `sfx-native-linux` feature, sound effects are played through
+//! PulseAudio (or PipeWire's PulseAudio compatibility layer) with
+//! `media.role=event` set on the stream. PipeWire's `module-role-ducking`
+//! and PulseAudio's equivalent use this property to optionally duck other
+//! audio during event sounds. Falls back to the default rodio output if
+//! PulseAudio is not available (e.g., ALSA-only systems).
 
 use std::io::Cursor;
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
+
+use crate::types::PlaybackOptions;
 
 /// Errors from native SFX playback.
 #[derive(Debug, Error)]
@@ -35,22 +54,45 @@ pub enum SfxPlaybackError {
 
 /// Play sound effect bytes using native audio (rodio).
 ///
-/// On macOS with `sfx-native-macos`, routes audio to the system sound device
-/// (which the user can configure separately from the default output in System
-/// Settings → Sound). Falls back to the default output device if the system
-/// sound device can't be found or is the same as the default.
+/// Supports volume and speed control via `PlaybackOptions`. On macOS with
+/// `sfx-native-macos`, routes audio to the system sound device (which the
+/// user can configure separately from the default output in System Settings
+/// → Sound). Falls back to the default output device if the system sound
+/// device can't be found or is the same as the default.
 ///
 /// ## Errors
 ///
 /// Returns `SfxPlaybackError` if the audio stream can't be opened or the
 /// audio data can't be decoded. Callers should fall back to host player
 /// delegation on error.
-pub fn play_sfx(bytes: &[u8], volume: Option<f32>) -> Result<(), SfxPlaybackError> {
-    let stream = open_sfx_stream()?;
+pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlaybackError> {
+    // Windows: play through WASAPI with AudioCategory_SoundEffects.
+    #[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
+    {
+        if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
+            return Ok(());
+        }
+        // Fall through to default rodio path on error.
+    }
+
+    // Linux: play through PulseAudio with media.role=event.
+    #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
+    {
+        if linux::play_sfx_as_event(bytes, options).is_ok() {
+            return Ok(());
+        }
+        // Fall through to default rodio path on error.
+    }
+
+    let mut stream = open_sfx_stream()?;
+    stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
-    if let Some(vol) = volume {
+    if let Some(vol) = options.volume {
         player.set_volume(vol);
+    }
+    if let Some(speed) = options.speed {
+        player.set_speed(speed);
     }
 
     let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
@@ -284,6 +326,514 @@ mod macos {
             // Should succeed regardless of whether devices differ.
             let result = find_system_sound_device();
             assert!(result.is_ok());
+        }
+    }
+}
+
+// ============================================================================
+// Windows: WASAPI sound effects category
+// ============================================================================
+
+#[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
+mod windows_sfx {
+    use std::io::Cursor;
+
+    use rodio::Source;
+    use windows::Win32::{
+        Media::{
+            Audio::{
+                AudioCategory_SoundEffects, AudioClientProperties, IAudioClient2,
+                IAudioRenderClient, IMMDeviceEnumerator, MMDeviceEnumerator,
+                AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, WAVEFORMATEX, eMultimedia, eRender,
+            },
+            Multimedia::WAVE_FORMAT_IEEE_FLOAT,
+        },
+        System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
+    };
+
+    use crate::types::PlaybackOptions;
+
+    /// Play sound effect bytes through WASAPI with `AudioCategory_SoundEffects`.
+    ///
+    /// Decodes the audio, then plays it through a WASAPI shared-mode stream
+    /// tagged with the Sound Effects audio category. Windows shows this stream
+    /// separately in the Volume Mixer, letting users control SFX volume
+    /// independently of other audio.
+    ///
+    /// Uses `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM` so WASAPI handles sample rate
+    /// and channel conversion from the decoded format to the device format.
+    /// Speed is implemented by adjusting the declared sample rate (higher rate =
+    /// faster playback with proportional pitch shift).
+    pub fn play_sfx_with_category(
+        bytes: &[u8],
+        options: &PlaybackOptions,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Decode audio using rodio's decoder.
+        let decoder = rodio::Decoder::new(Cursor::new(bytes.to_vec()))?;
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+
+        // Collect all samples as f32 (fine for short SFX clips).
+        let mut samples: Vec<f32> = decoder.convert_samples().collect();
+
+        // Apply volume.
+        if let Some(vol) = options.volume {
+            for s in &mut samples {
+                *s *= vol;
+            }
+        }
+
+        // Speed: adjust the declared sample rate. WASAPI's auto-conversion
+        // resamples from our declared rate to the device rate. Declaring a
+        // higher rate makes WASAPI treat the samples as "faster", producing
+        // the standard speed-with-pitch-shift effect.
+        let effective_rate = if let Some(speed) = options.speed {
+            (sample_rate as f32 * speed) as u32
+        } else {
+            sample_rate
+        };
+
+        unsafe {
+            // Initialize COM (ignore error if already initialized on this thread).
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+            // Get default audio render endpoint.
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)?;
+
+            // Activate IAudioClient2 (supports SetClientProperties).
+            let client: IAudioClient2 = device.Activate(CLSCTX_ALL, None)?;
+
+            // Tag this stream as Sound Effects.
+            let props = AudioClientProperties {
+                cbSize: std::mem::size_of::<AudioClientProperties>() as u32,
+                bIsOffload: false.into(),
+                eCategory: AudioCategory_SoundEffects,
+                Options: Default::default(),
+            };
+            client.SetClientProperties(&props)?;
+
+            // Describe our decoded audio format (float32 PCM).
+            let bytes_per_sample = 4u16; // f32
+            let block_align = channels * bytes_per_sample;
+            let format = WAVEFORMATEX {
+                wFormatTag: WAVE_FORMAT_IEEE_FLOAT as u16,
+                nChannels: channels,
+                nSamplesPerSec: effective_rate,
+                nAvgBytesPerSec: effective_rate * block_align as u32,
+                nBlockAlign: block_align,
+                wBitsPerSample: 32,
+                cbSize: 0,
+            };
+
+            // Initialize shared-mode stream with automatic format conversion.
+            // WASAPI converts from our declared format to the device's native format.
+            let buffer_duration = 10_000_000i64; // 1 second in 100ns REFERENCE_TIME units
+            client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                buffer_duration,
+                0, // periodicity (must be 0 for shared mode)
+                &format,
+                None,
+            )?;
+
+            let buffer_frames = client.GetBufferSize()?;
+            let render: IAudioRenderClient = client.GetService()?;
+
+            client.Start()?;
+
+            // Render loop: write decoded samples to the WASAPI buffer.
+            let total_frames = samples.len() / channels as usize;
+            let mut frame_offset = 0usize;
+
+            while frame_offset < total_frames {
+                let padding = client.GetCurrentPadding()?;
+                let available = buffer_frames - padding;
+
+                if available == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                }
+
+                let frames_to_write = available.min((total_frames - frame_offset) as u32);
+                let buf_ptr = render.GetBuffer(frames_to_write)?;
+
+                let dst = std::slice::from_raw_parts_mut(
+                    buf_ptr as *mut f32,
+                    frames_to_write as usize * channels as usize,
+                );
+                let src_start = frame_offset * channels as usize;
+                let src_end = (src_start + dst.len()).min(samples.len());
+                let copy_len = src_end - src_start;
+                dst[..copy_len].copy_from_slice(&samples[src_start..src_end]);
+                // Zero any trailing samples (end of audio).
+                if copy_len < dst.len() {
+                    dst[copy_len..].fill(0.0);
+                }
+
+                render.ReleaseBuffer(frames_to_write, 0)?;
+                frame_offset += frames_to_write as usize;
+            }
+
+            // Drain: wait for the remaining buffered audio to play.
+            let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let padding = client.GetCurrentPadding()?;
+                if padding == 0 || std::time::Instant::now() > drain_deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
+            client.Stop()?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        #[ignore = "requires Windows audio device"]
+        fn can_get_default_audio_endpoint() {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let enumerator: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                        .expect("should create device enumerator");
+                let device = enumerator
+                    .GetDefaultAudioEndpoint(eRender, eMultimedia)
+                    .expect("should find default audio endpoint");
+                let _client: IAudioClient2 = device
+                    .Activate(CLSCTX_ALL, None)
+                    .expect("should activate audio client");
+            }
+        }
+
+        #[test]
+        #[ignore = "requires Windows audio device"]
+        fn can_set_sound_effects_category() {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let enumerator: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
+                let device = enumerator
+                    .GetDefaultAudioEndpoint(eRender, eMultimedia)
+                    .unwrap();
+                let client: IAudioClient2 = device.Activate(CLSCTX_ALL, None).unwrap();
+
+                let props = AudioClientProperties {
+                    cbSize: std::mem::size_of::<AudioClientProperties>() as u32,
+                    bIsOffload: false.into(),
+                    eCategory: AudioCategory_SoundEffects,
+                    Options: Default::default(),
+                };
+                client
+                    .SetClientProperties(&props)
+                    .expect("should set SoundEffects category");
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Linux: PulseAudio media.role=event tagging
+// ============================================================================
+
+#[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
+mod linux {
+    use std::io::Cursor;
+
+    use libpulse_binding as pulse;
+    use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
+    use pulse::context::Context;
+    use pulse::proplist::Proplist;
+    use pulse::sample::{Format, Spec};
+    use pulse::stream::{SeekMode, Stream};
+    use rodio::Source;
+
+    use crate::types::PlaybackOptions;
+
+    /// Play sound effect bytes through PulseAudio with `media.role=event`.
+    ///
+    /// Decodes the audio with rodio, then plays through a PulseAudio stream
+    /// tagged with `media.role=event`. PipeWire's `module-role-ducking` and
+    /// PulseAudio's `module-role-ducking` use this property to optionally duck
+    /// other audio during event sounds.
+    ///
+    /// Speed is implemented by adjusting the declared sample rate (higher rate =
+    /// faster playback with proportional pitch shift).
+    pub fn play_sfx_as_event(
+        bytes: &[u8],
+        options: &PlaybackOptions,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Decode audio using rodio's decoder.
+        let decoder = rodio::Decoder::new(Cursor::new(bytes.to_vec()))?;
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+
+        // Collect all samples as f32 (fine for short SFX clips).
+        let mut samples: Vec<f32> = decoder.convert_samples().collect();
+
+        // Apply volume.
+        if let Some(vol) = options.volume {
+            for s in &mut samples {
+                *s *= vol;
+            }
+        }
+
+        // Speed: adjust the declared sample rate. PulseAudio resamples from our
+        // declared rate to the device rate, producing the speed-with-pitch effect.
+        let effective_rate = if let Some(speed) = options.speed {
+            (sample_rate as f32 * speed) as u32
+        } else {
+            sample_rate
+        };
+
+        let spec = Spec {
+            format: Format::Float32le,
+            channels: channels as u8,
+            rate: effective_rate,
+        };
+
+        if !spec.is_valid() {
+            return Err("invalid PulseAudio sample spec".into());
+        }
+
+        // Create PulseAudio mainloop (single-threaded, we iterate manually).
+        let mut mainloop =
+            Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
+
+        // Create and connect context.
+        let mut context =
+            Context::new(&mainloop, "playa").ok_or("failed to create PulseAudio context")?;
+
+        context.connect(None, pulse::context::FlagSet::NOFLAGS, None)?;
+
+        // Wait for context to become ready.
+        loop {
+            iterate_or_fail(&mut mainloop)?;
+            match context.get_state() {
+                pulse::context::State::Ready => break,
+                pulse::context::State::Failed | pulse::context::State::Terminated => {
+                    return Err("PulseAudio context connection failed".into());
+                }
+                _ => {}
+            }
+        }
+
+        // Create stream proplist with media.role=event.
+        let mut proplist =
+            Proplist::new().ok_or("failed to create PulseAudio proplist")?;
+        proplist
+            .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
+            .map_err(|()| "failed to set media.role property")?;
+
+        let mut stream = Stream::new_with_proplist(
+            &mut context,
+            "Sound Effect",
+            &spec,
+            None,
+            &mut proplist,
+        )
+        .ok_or("failed to create PulseAudio stream")?;
+
+        // Connect stream for playback.
+        stream.connect_playback(
+            None, // default device
+            None, // default buffer attributes
+            pulse::stream::FlagSet::NOFLAGS,
+            None, // no volume override
+            None, // no sync stream
+        )?;
+
+        // Wait for stream to become ready.
+        loop {
+            iterate_or_fail(&mut mainloop)?;
+            match stream.get_state() {
+                pulse::stream::State::Ready => break,
+                pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                    return Err("PulseAudio stream connection failed".into());
+                }
+                _ => {}
+            }
+        }
+
+        // Convert f32 samples to little-endian byte representation.
+        let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+
+        // Write all audio data. PulseAudio buffers internally.
+        stream.write(&byte_data, None, 0, SeekMode::Relative)?;
+
+        // Drain: wait for all buffered audio to finish playing.
+        let op = stream.drain(None);
+        loop {
+            iterate_or_fail(&mut mainloop)?;
+            match op.get_state() {
+                pulse::operation::State::Done | pulse::operation::State::Cancelled => break,
+                pulse::operation::State::Running => {}
+            }
+        }
+
+        // Clean up (Drop impls handle the rest).
+        stream.disconnect().ok();
+        context.disconnect();
+
+        Ok(())
+    }
+
+    /// Iterate the PulseAudio mainloop once, blocking until an event arrives.
+    fn iterate_or_fail(
+        mainloop: &mut Mainloop,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match mainloop.iterate(true) {
+            IterateResult::Success(_) => Ok(()),
+            IterateResult::Err(e) => Err(format!("PulseAudio mainloop error: {e}").into()),
+            IterateResult::Quit(_) => Err("PulseAudio mainloop quit unexpectedly".into()),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn valid_sample_spec() {
+            let spec = Spec {
+                format: Format::Float32le,
+                channels: 2,
+                rate: 44100,
+            };
+            assert!(spec.is_valid());
+        }
+
+        #[test]
+        fn invalid_sample_spec_zero_rate() {
+            let spec = Spec {
+                format: Format::Float32le,
+                channels: 2,
+                rate: 0,
+            };
+            assert!(!spec.is_valid());
+        }
+
+        #[test]
+        fn invalid_sample_spec_zero_channels() {
+            let spec = Spec {
+                format: Format::Float32le,
+                channels: 0,
+                rate: 44100,
+            };
+            assert!(!spec.is_valid());
+        }
+
+        #[test]
+        fn proplist_can_set_media_role() {
+            let mut proplist = Proplist::new().expect("should create proplist");
+            let result = proplist.set_str(pulse::proplist::properties::MEDIA_ROLE, "event");
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        #[ignore = "requires PulseAudio daemon"]
+        fn can_connect_pulseaudio_context() {
+            let mut mainloop = Mainloop::new().expect("should create mainloop");
+            let mut context =
+                Context::new(&mainloop, "playa-test").expect("should create context");
+            context
+                .connect(None, pulse::context::FlagSet::NOFLAGS, None)
+                .expect("should start connection");
+
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(5);
+            loop {
+                if start.elapsed() > timeout {
+                    panic!("timed out waiting for PulseAudio context");
+                }
+                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+                match context.get_state() {
+                    pulse::context::State::Ready => break,
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        panic!("PulseAudio context failed");
+                    }
+                    _ => {}
+                }
+            }
+
+            context.disconnect();
+        }
+
+        #[test]
+        #[ignore = "requires PulseAudio daemon"]
+        fn can_create_event_stream() {
+            let mut mainloop = Mainloop::new().expect("should create mainloop");
+            let mut context =
+                Context::new(&mainloop, "playa-test").expect("should create context");
+            context
+                .connect(None, pulse::context::FlagSet::NOFLAGS, None)
+                .expect("should start connection");
+
+            // Wait for context ready.
+            loop {
+                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+                match context.get_state() {
+                    pulse::context::State::Ready => break,
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        panic!("PulseAudio context failed");
+                    }
+                    _ => {}
+                }
+            }
+
+            // Create stream with media.role=event.
+            let spec = Spec {
+                format: Format::Float32le,
+                channels: 1,
+                rate: 44100,
+            };
+            let mut proplist = Proplist::new().expect("should create proplist");
+            proplist
+                .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
+                .expect("should set media.role");
+
+            let mut stream = Stream::new_with_proplist(
+                &mut context,
+                "test-sfx",
+                &spec,
+                None,
+                &mut proplist,
+            )
+            .expect("should create stream");
+
+            stream
+                .connect_playback(
+                    None,
+                    None,
+                    pulse::stream::FlagSet::NOFLAGS,
+                    None,
+                    None,
+                )
+                .expect("should connect for playback");
+
+            // Wait for stream ready.
+            loop {
+                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+                match stream.get_state() {
+                    pulse::stream::State::Ready => break,
+                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                        panic!("PulseAudio stream failed");
+                    }
+                    _ => {}
+                }
+            }
+
+            stream.disconnect().ok();
+            context.disconnect();
         }
     }
 }
