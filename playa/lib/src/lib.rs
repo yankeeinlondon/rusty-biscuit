@@ -9,6 +9,9 @@ mod types;
 #[cfg(feature = "audio-ducking")]
 pub mod ducking;
 
+#[cfg(feature = "sfx-native")]
+pub mod sfx_player;
+
 #[cfg(any(
     feature = "sound-effects",
     feature = "sfx-ui",

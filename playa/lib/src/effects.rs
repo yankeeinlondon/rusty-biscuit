@@ -1330,6 +1330,11 @@ impl SoundEffect {
     /// This method blocks until playback completes. For non-blocking playback,
     /// use `play_async` (requires the `async` feature).
     ///
+    /// When the `sfx-native` feature is enabled, plays directly through the OS
+    /// audio subsystem via rodio. On macOS with `sfx-native-macos`, routes to
+    /// the system sound device (configurable in System Settings → Sound).
+    /// Falls back to host player delegation if native playback fails.
+    ///
     /// ## Errors
     ///
     /// Returns `PlaybackError` if:
@@ -1346,8 +1351,33 @@ impl SoundEffect {
     /// # Ok::<(), playa::PlaybackError>(())
     /// ```
     pub fn play(self) -> Result<(), crate::PlaybackError> {
-        let playa = crate::Playa::from_bytes(self.as_bytes().to_vec())
+        self.play_with_volume(None)
+    }
+
+    /// Play this sound effect at a specific volume level.
+    ///
+    /// Volume is a multiplier: 0.0 = silent, 1.0 = normal, >1.0 = amplified.
+    ///
+    /// When the `sfx-native` feature is enabled, volume is applied directly
+    /// via rodio's Sink. Otherwise, volume control depends on the host player's
+    /// capabilities.
+    pub fn play_with_volume(self, volume: Option<f32>) -> Result<(), crate::PlaybackError> {
+        // Try native playback first when available.
+        #[cfg(feature = "sfx-native")]
+        {
+            match crate::sfx_player::play_sfx(self.bytes(), volume) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    // Fall through to host player.
+                }
+            }
+        }
+
+        let mut playa = crate::Playa::from_bytes(self.as_bytes().to_vec())
             .map_err(|crate::InvalidAudio::Detection(e)| crate::PlaybackError::Detection(e))?;
+        if let Some(vol) = volume {
+            playa = playa.volume(vol);
+        }
         playa.play()
     }
 
