@@ -214,7 +214,8 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
     ));
     log::data(&name_line.fallback_render(term));
 
-    let desc_line = Prose::new(format!("<dim><i>{desc}</i></dim>"));
+    let desc_line = Prose::new(format!("<dim><i>{desc}</i></dim>"))
+        .with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None));
     log::data(&desc_line.fallback_render(term));
     log::data("");
 

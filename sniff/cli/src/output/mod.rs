@@ -33,8 +33,8 @@ pub(crate) use filesystem::{
     print_repo_deps_visual, print_repo_packages, print_repo_section,
 };
 pub(crate) use hardware::{
-    print_cpu_section, print_gpu_section, print_hardware_section, print_memory_section,
-    print_storage_section,
+    print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
+    print_memory_section, print_storage_section,
 };
 pub(crate) use network::print_network_section;
 pub(crate) use os::print_os_section;
@@ -65,6 +65,8 @@ pub enum OutputFilter {
     Memory,
     /// Show only storage info (hardware subsection, flattened in JSON)
     Storage,
+    /// Show only audio devices (hardware subsection, flattened in JSON)
+    AudioDevices,
     /// Show only git info (filesystem subsection, flattened in JSON)
     Git,
     /// Show only repo/monorepo info (filesystem subsection, flattened in JSON)
@@ -312,6 +314,11 @@ pub fn print_text(
                 print_storage_section(&hardware.storage, verbose, repo_root);
             }
         }
+        OutputFilter::AudioDevices => {
+            if let Some(ref hardware) = result.hardware {
+                print_audio_devices_section(&hardware.audio_devices, verbose);
+            }
+        }
         OutputFilter::Git => {
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref git) = filesystem.git
@@ -445,6 +452,14 @@ fn apply_filter_to_json(
             // Flatten: return storage array at top level
             if let Some(ref hw) = result.hardware {
                 serde_json::to_value(&hw.storage).unwrap_or(Value::Null)
+            } else {
+                json!([])
+            }
+        }
+        OutputFilter::AudioDevices => {
+            // Flatten: return audio devices array at top level
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(&hw.audio_devices).unwrap_or(Value::Null)
             } else {
                 json!([])
             }

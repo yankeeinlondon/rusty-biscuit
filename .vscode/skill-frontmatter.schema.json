@@ -99,6 +99,10 @@
     "env": {
       "type": "object",
       "description": "Environment variables for the skill"
+    },
+    "keep": {
+        "type": "array",
+        "description": "Tell the Darkmatter pipelining operations which frontmatter properties should be preserved on the completion of the pipeline operations."
     }
   },
   "required": ["description"],

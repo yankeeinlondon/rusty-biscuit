@@ -1,6 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
-expression: "run_stdout(&[\"topics\"])"
+expression: "normalize_topics_table(&run_stdout(&[\"topics\"]))"
 ---
 | hardware | filesystem | programs |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ expression: "run_stdout(&[\"topics\"])"
 | gpu | repo | utilities |
 | memory | language | language-package-managers |
 | storage |  | os-package-managers |
-|  |  | tts-clients |
+| audio-devices |  | tts-clients |
 |  |  | terminal-apps |
 |  |  | audio |
 |  |  | agents |

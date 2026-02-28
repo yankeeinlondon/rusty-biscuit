@@ -173,6 +173,9 @@ pub enum Commands {
     /// Show only storage/disk information
     Storage,
 
+    /// Show only audio devices (inputs, outputs, sample rates)
+    AudioDevices,
+
     /// Show git repository information, or inspect a remote by name/URL
     #[command(disable_help_flag = true)]
     Git {
@@ -305,6 +308,7 @@ impl Commands {
             Commands::Gpu => OutputFilter::Gpu,
             Commands::Memory => OutputFilter::Memory,
             Commands::Storage => OutputFilter::Storage,
+            Commands::AudioDevices => OutputFilter::AudioDevices,
             Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
@@ -510,10 +514,11 @@ Commands:
     sniff structure   Show a structural overview of sniff output
 
   Hardware details:
-    sniff cpu         Show only CPU information
-    sniff gpu         Show only GPU information
-    sniff memory      Show only memory information
-    sniff storage     Show only storage/disk information
+    sniff cpu             Show only CPU information
+    sniff gpu             Show only GPU information
+    sniff memory          Show only memory information
+    sniff storage         Show only storage/disk information
+    sniff audio-devices   Show only audio devices
 
   Filesystem details:
     sniff git                        Show only git repository information
@@ -644,6 +649,10 @@ mod tests {
                 Some(Commands::Storage)
             ));
             assert!(matches!(
+                parse_args(&["audio-devices"]).unwrap().command,
+                Some(Commands::AudioDevices)
+            ));
+            assert!(matches!(
                 parse_args(&["language"]).unwrap().command,
                 Some(Commands::Language)
             ));
@@ -769,6 +778,10 @@ mod tests {
         fn output_filter_mapping_covers_modes() {
             assert_eq!(Commands::Os.to_output_filter(), OutputFilter::Os);
             assert_eq!(Commands::Cpu.to_output_filter(), OutputFilter::Cpu);
+            assert_eq!(
+                Commands::AudioDevices.to_output_filter(),
+                OutputFilter::AudioDevices
+            );
             assert_eq!(
                 Commands::Repo {
                     deps: false,

@@ -6679,6 +6679,8 @@ dependencies = [
  "biscuit-file",
  "biscuit-hash",
  "chrono",
+ "core-foundation 0.10.1",
+ "coreaudio-sys",
  "ec4rs",
  "futures",
  "getifaddrs",

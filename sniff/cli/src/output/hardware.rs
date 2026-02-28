@@ -132,6 +132,13 @@ pub fn print_hardware_section(
         println!();
     }
 
+    // Print audio devices if available
+    if !hardware.audio_devices.is_empty() {
+        println!("Audio Devices:");
+        print_audio_device_list(&hardware.audio_devices, verbose);
+        println!();
+    }
+
     println!("Storage:");
     for disk in &hardware.storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
@@ -261,6 +268,84 @@ pub fn print_storage_section(
                 println!("  Removable: yes");
             }
         }
+    }
+    println!();
+}
+
+// ============================================================================
+// Audio devices
+// ============================================================================
+
+/// Format a sample rate for display.
+///
+/// Integer rates (e.g., 48000.0) display without decimals.
+/// Fractional rates display with 1 decimal place.
+fn format_sample_rate(rate: f64) -> String {
+    if (rate - rate.round()).abs() < 0.01 {
+        format!("{}", rate as u64)
+    } else {
+        format!("{:.1}", rate)
+    }
+}
+
+/// Print a list of audio devices with verbosity levels.
+///
+/// - Default: name, kind, direction, default markers
+/// - `-v`: adds sample rate + channel counts
+/// - `-vv`: adds available sample rates + UID
+fn print_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) {
+    for dev in devices {
+        let mut markers = Vec::new();
+        if dev.is_default_output {
+            markers.push("default output");
+        }
+        if dev.is_default_input {
+            markers.push("default input");
+        }
+
+        let marker_str = if markers.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", markers.join(", "))
+        };
+
+        println!("  {} ({}, {}){}", dev.name, dev.kind, dev.direction, marker_str);
+
+        if verbose > 0 {
+            if dev.sample_rate > 0.0 {
+                println!("    Sample rate: {} Hz", format_sample_rate(dev.sample_rate));
+            }
+            if dev.output_channels > 0 {
+                println!("    Output channels: {}", dev.output_channels);
+            }
+            if dev.input_channels > 0 {
+                println!("    Input channels: {}", dev.input_channels);
+            }
+        }
+
+        if verbose > 1 {
+            if !dev.available_sample_rates.is_empty() {
+                let rates: Vec<String> = dev
+                    .available_sample_rates
+                    .iter()
+                    .map(|r| format_sample_rate(*r))
+                    .collect();
+                println!("    Available rates: {} Hz", rates.join(", "));
+            }
+            if !dev.uid.is_empty() {
+                println!("    UID: {}", dev.uid);
+            }
+        }
+    }
+}
+
+/// Print standalone audio devices section (for `sniff audio-devices`).
+pub fn print_audio_devices_section(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) {
+    println!("=== Audio Devices ===");
+    if devices.is_empty() {
+        println!("No audio devices detected");
+    } else {
+        print_audio_device_list(devices, verbose);
     }
     println!();
 }

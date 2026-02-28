@@ -4,7 +4,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
 const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
-    ("hardware", &["cpu", "gpu", "memory", "storage"]),
+    ("hardware", &["cpu", "gpu", "memory", "storage", "audio-devices"]),
     ("filesystem", &["git", "repo", "language"]),
     (
         "programs",

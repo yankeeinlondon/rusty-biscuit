@@ -3,11 +3,13 @@ use sysinfo::{CpuRefreshKind, DiskKind, Disks, MemoryRefreshKind, RefreshKind, S
 
 use crate::Result;
 
+mod audio;
 mod cpu;
 mod gpu;
 mod memory;
 mod storage;
 
+pub use audio::{AudioDeviceInfo, AudioDeviceKind, AudioDirection, detect_audio_devices};
 pub use cpu::{CpuInfo, SimdCapabilities, detect_simd};
 pub use gpu::{GpuCapabilities, GpuDeviceType, GpuInfo, detect_gpus};
 pub use memory::MemoryInfo;
@@ -28,8 +30,8 @@ pub use crate::os::{
 
 /// Complete hardware information.
 ///
-/// Aggregates CPU, memory, storage, and GPU information detected
-/// from the current system. OS information is available separately
+/// Aggregates CPU, memory, storage, GPU, and audio device information
+/// detected from the current system. OS information is available separately
 /// via the top-level `os` field in `SniffResult`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HardwareInfo {
@@ -41,6 +43,8 @@ pub struct HardwareInfo {
     pub storage: Vec<StorageInfo>,
     /// GPU devices
     pub gpu: Vec<GpuInfo>,
+    /// Audio devices (inputs and outputs)
+    pub audio_devices: Vec<AudioDeviceInfo>,
 }
 
 /// Detects hardware information from the current system.
@@ -123,12 +127,14 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
         .collect();
 
     let gpu = detect_gpus();
+    let audio_devices = detect_audio_devices();
 
     Ok(HardwareInfo {
         cpu,
         memory,
         storage,
         gpu,
+        audio_devices,
     })
 }
 

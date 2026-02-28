@@ -34,6 +34,7 @@ System + repository detection results.
   • memory stats
   • storage volumes
   • gpu devices + capabilities
+  • audio devices + sample rates
 • network
   • interfaces (flags + addresses)
   • primary interface selection

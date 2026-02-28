@@ -1,5 +1,6 @@
 ---
 name: audio-programming
+description: Explore how to interact with audio pragmatically on various operating systems including macOS, Linux, Windows, IOS, and Android. Provide code examples using Rust and Typescript.
 ---
 
 # Audio Programming by Operating System

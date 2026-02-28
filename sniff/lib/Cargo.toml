@@ -36,6 +36,8 @@ network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
 remote = ["network"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = "0.2"
+core-foundation = "0.10"
 metal = "0.33"
 
 [dev-dependencies]

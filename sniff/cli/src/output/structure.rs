@@ -78,6 +78,7 @@ fn build_sniff_result_section() -> Section {
         "memory stats",
         "storage volumes",
         "gpu devices + capabilities",
+        "audio devices + sample rates",
     ]);
     add_node(&mut root_list, "<b>hardware</b>", hardware_list);
 

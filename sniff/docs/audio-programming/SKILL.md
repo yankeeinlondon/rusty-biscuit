@@ -6,6 +6,9 @@ prompt: |-
 
     1. Copy the other Markdown files (all except SKILL.md) in this directory to `{repo root}/.claude/skills/audio-programming`
     2. Save the `{repo root}/.claude/skills/audio-programming/SKILL.md` from the output of running `md compose @sniff/docs/audio-programming/SKILL.md`
+keep: 
+    - name
+    - description
 ---
 
 # Audio Programming by Operating System

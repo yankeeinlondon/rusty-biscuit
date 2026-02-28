@@ -138,7 +138,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         OutputFilter::Filesystem => {
             config = config.skip_os().skip_hardware().skip_network();
         }
-        OutputFilter::Cpu | OutputFilter::Gpu | OutputFilter::Memory | OutputFilter::Storage => {
+        OutputFilter::Cpu
+        | OutputFilter::Gpu
+        | OutputFilter::Memory
+        | OutputFilter::Storage
+        | OutputFilter::AudioDevices => {
             config = config.skip_os().skip_network().skip_filesystem();
         }
         OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language | OutputFilter::Docs => {
