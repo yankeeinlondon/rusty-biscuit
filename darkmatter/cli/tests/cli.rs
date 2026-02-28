@@ -248,6 +248,57 @@ fn test_clean_subcommand_file() {
         .stdout(predicate::str::contains("World"));
 }
 
+#[test]
+fn test_clean_subcommand_save_in_place_reports_delta() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+
+    md_cmd()
+        .arg("clean")
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Whitespace changes only"));
+
+    let updated = std::fs::read_to_string(tmp.path()).unwrap();
+    assert!(updated.contains("# Hello"));
+    assert!(updated.contains("World"));
+    assert!(!updated.contains("# Hello "));
+    assert!(!updated.contains("World  "));
+}
+
+#[test]
+fn test_save_shorthand_cleans_in_place_and_reports_delta() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+
+    md_cmd()
+        .arg(tmp.path())
+        .arg("--save")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Whitespace changes only"));
+
+    let updated = std::fs::read_to_string(tmp.path()).unwrap();
+    assert!(updated.contains("# Hello"));
+    assert!(updated.contains("World"));
+    assert!(!updated.contains("# Hello "));
+    assert!(!updated.contains("World  "));
+}
+
+#[test]
+fn test_clean_save_rejects_stdin() {
+    md_cmd()
+        .args(["clean", "-", "--save"])
+        .write_stdin("# Hello\n\nWorld\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--save requires an input file path (stdin is not supported)",
+        ));
+}
+
 // =============================================================================
 //                          READ SUBCOMMAND TESTS
 // =============================================================================
