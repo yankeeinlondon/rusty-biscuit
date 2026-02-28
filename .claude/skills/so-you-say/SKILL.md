@@ -1,6 +1,6 @@
 ---
 name: so-you-say
-description: CLI for text-to-speech using system TTS providers. Use when working on the `speak` binary, adding CLI features, debugging TTS from command line, or testing voice/provider configurations. For library-level TTS work, use the biscuit-speaks skill instead.
+description: CLI for text-to-speech using system TTS providers. Use when working on the `so-you-say` binary, adding CLI features, debugging TTS from command line, or testing voice/provider configurations. For library-level TTS work, use the biscuit-speaks skill instead.
 ---
 
 ## Purpose
@@ -19,28 +19,28 @@ description: CLI for text-to-speech using system TTS providers. Use when working
 
 ```bash
 # Basic usage
-speak "Hello, world!"
-echo "Hello" | speak
+so-you-say "Hello, world!"
+echo "Hello" | so-you-say
 
 # Voice selection
-speak --voice Samantha "Hello"
-speak --gender female "Hello"
-speak --lang fr "Bonjour"
+so-you-say --voice Samantha "Hello"
+so-you-say --gender female "Hello"
+so-you-say --lang fr "Bonjour"
 
 # Provider control
-speak --list-providers
-speak --list-voices --provider say
-speak --provider elevenlabs "Premium voice"
+so-you-say --list-providers
+so-you-say --list-voices --provider say
+so-you-say --provider elevenlabs "Premium voice"
 
 # Audio controls
-speak --loud "Announcement!"
-speak --soft "Whisper"
-speak --fast "Quick message"
-speak --slow "Deliberate speech"
+so-you-say --loud "Announcement!"
+so-you-say --soft "Whisper"
+so-you-say --fast "Quick message"
+so-you-say --slow "Deliberate speech"
 
 # Metadata and cache
-speak --meta "Show what was used"
-speak --refresh-cache
+so-you-say --meta "Show what was used"
+so-you-say --refresh-cache
 ```
 
 ## CLI Arguments
