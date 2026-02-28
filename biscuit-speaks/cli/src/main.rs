@@ -16,6 +16,21 @@ use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 use inquire::Select;
 use owo_colors::OwoColorize;
 
+const CLI_BINARY_NAME: &str = "so-you-say";
+
+const AFTER_HELP: &str = "\
+\x1b[1m\x1b[4mShell Completions\x1b[0m
+  Enable tab completions by adding one of the following to your shell config:
+
+  # Bash (~/.bashrc)
+  source <(COMPLETE=bash so-you-say)
+
+  # Zsh (~/.zshrc)
+  source <(COMPLETE=zsh so-you-say)
+
+  # Fish (~/.config/fish/config.fish)
+  COMPLETE=fish so-you-say | source";
+
 /// Gender preference for voice selection
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum GenderArg {
@@ -34,59 +49,8 @@ impl From<GenderArg> for Gender {
     }
 }
 
-/// Simple text-to-speech CLI
-///
-/// # Examples
-///
-/// ```no_run
-/// // Speak text from command-line arguments
-/// // so-you-say Hello world
-///
-/// // Speak text with a specific voice
-/// // so-you-say --voice Samantha Hello world
-///
-/// // Speak text with a female voice
-/// // so-you-say --gender female Hello world
-///
-/// // Speak text in a specific language
-/// // so-you-say --lang fr "Bonjour le monde"
-///
-/// // List available TTS providers
-/// // so-you-say --list-providers
-///
-/// // List available voices for a provider
-/// // so-you-say --list-voices --provider say
-///
-/// // List only French voices for a provider
-/// // so-you-say --list-voices --provider gtts --lang fr
-///
-/// // Select a provider interactively to list voices
-/// // so-you-say --list-voices
-///
-/// // Refresh the voice cache (useful after installing new voices)
-/// // so-you-say --refresh-cache
-///
-/// // Use a specific TTS provider
-/// // so-you-say --provider say Hello world
-///
-/// // Speak text from stdin
-/// // echo "Hello world" | so-you-say
-/// ```
-const AFTER_HELP: &str = "\
-\x1b[1m\x1b[4mShell Completions\x1b[0m
-  Enable tab completions by adding one of the following to your shell config:
-
-  # Bash (~/.bashrc)
-  source <(COMPLETE=bash speak)
-
-  # Zsh (~/.zshrc)
-  source <(COMPLETE=zsh speak)
-
-  # Fish (~/.config/fish/config.fish)
-  COMPLETE=fish speak | source";
-
 #[derive(Parser)]
-#[command(name = "so-you-say")]
+#[command(name = CLI_BINARY_NAME)]
 #[command(about = "Convert text to speech using system TTS", long_about = None)]
 #[command(version)]
 #[command(after_help = AFTER_HELP)]
@@ -168,7 +132,7 @@ fn read_from_stdin() -> io::Result<String> {
 
     if text.is_empty() {
         eprintln!("Error: No input provided");
-        eprintln!("Usage: so-you-say <text> or echo \"text\" | so-you-say");
+        eprintln!("Usage: {} <text> or echo \"text\" | {}", CLI_BINARY_NAME, CLI_BINARY_NAME);
         std::process::exit(1);
     }
 
