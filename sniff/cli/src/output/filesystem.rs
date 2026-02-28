@@ -217,7 +217,7 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
 
     // === Status Section ===
     let status_title = Prose::new("<b><u>Status</u></b>");
-    println!("\n{}\n", status_title.fallback_render(&terminal));
+    println!("\n{}\n", status_title.render(&terminal));
 
     let mut status_items: Vec<String> = Vec::new();
 
@@ -318,19 +318,19 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     if !status_items.is_empty() {
         let rendered_items: Vec<String> = status_items
             .iter()
-            .map(|item| Prose::new(item.as_str()).fallback_render(&terminal))
+            .map(|item| Prose::new(item.as_str()).render(&terminal))
             .collect();
         let list = UnorderedList::new(rendered_items);
-        println!("{}", list.fallback_render(&terminal));
+        println!("{}", list.render(&terminal));
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
-        println!("  {}", clean.fallback_render(&terminal));
+        println!("  {}", clean.render(&terminal));
     }
 
     // === Worktrees Section (only if worktrees exist) ===
     if !git.worktrees.is_empty() {
         let wt_title = Prose::new("<b><u>Worktrees</u></b>");
-        println!("{}\n", wt_title.fallback_render(&terminal));
+        println!("{}\n", wt_title.render(&terminal));
 
         let mut wt_list = UnorderedList::empty();
         wt_list.add(Prose::new(format!(
@@ -345,12 +345,12 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 info.filepath.display()
             )));
         }
-        println!("{}", wt_list.fallback_render(&terminal));
+        println!("{}", wt_list.render(&terminal));
     }
 
     // === Meta Section ===
     let meta_title = Prose::new("<b><u>Meta</u></b>");
-    println!("{}\n", meta_title.fallback_render(&terminal));
+    println!("{}\n", meta_title.render(&terminal));
 
     let mut meta_list = UnorderedList::empty();
 
@@ -624,7 +624,7 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         meta_list.add(config_list);
     }
 
-    println!("{}", meta_list.fallback_render(&terminal));
+    println!("{}", meta_list.render(&terminal));
 }
 
 /// Format ahead/behind counts with directional arrows.
@@ -747,13 +747,13 @@ pub fn print_repo_section(
 ) {
     if !repo.is_monorepo {
         let title = Prose::new("<b><u>Repository</u></b>");
-        println!("\n{}\n", title.render(None));
+        println!("\n{}\n", title.render_optimistic(None));
         let items = vec![
-            Prose::new("<b>Type:</b> Single-package").render(None),
-            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(None),
+            Prose::new("<b>Type:</b> Single-package").render_optimistic(None),
+            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render_optimistic(None),
         ];
         let list = UnorderedList::new(items);
-        println!("{}", list.render(None));
+        println!("{}", list.render_optimistic(None));
         return;
     }
 
@@ -780,7 +780,7 @@ pub fn print_repo_section(
         };
 
         let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
-        println!("\n{}\n", title.render(None));
+        println!("\n{}\n", title.render_optimistic(None));
 
         // Track whether any package has updatable deps or excluded packages for the key
         let has_updatable = filtered.iter().any(|pkg| pkg.is_updatable == Some(true));
@@ -801,7 +801,7 @@ pub fn print_repo_section(
         let mut outer_items: Vec<RenderableContent> = Vec::new();
         for area in &areas {
             // Area heading in blue
-            let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render(None);
+            let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render_optimistic(None);
             outer_items.push(RenderableContent::String(label));
 
             // Nested package list with left margin
@@ -809,13 +809,13 @@ pub fn print_repo_section(
             for pkg in &area_packages[area.as_str()] {
                 let items = format_package_items(pkg, verbose);
                 // First item is the main package line
-                let main = Prose::new(&items[0]).render(None);
+                let main = Prose::new(&items[0]).render_optimistic(None);
                 inner_items.push(RenderableContent::String(main));
                 // Additional items are verbose details shown as a nested child list
                 if items.len() > 1 {
                     let detail_items: Vec<String> = items[1..]
                         .iter()
-                        .map(|s| Prose::new(s).render(None))
+                        .map(|s| Prose::new(s).render_optimistic(None))
                         .collect();
                     let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
                     inner_items.push(RenderableContent::Component(Rc::new(detail_list)));
@@ -826,7 +826,7 @@ pub fn print_repo_section(
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-        println!("{}", list.render(None));
+        println!("{}", list.render_optimistic(None));
 
         // Legend for indicators
         if has_updatable || has_excluded {
@@ -849,14 +849,14 @@ pub fn print_repo_section(
                 );
             }
             legend.push_str("</dim>");
-            println!("{}", Prose::new(&legend).render(None));
+            println!("{}", Prose::new(&legend).render_optimistic(None));
         }
     } else {
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
             tool_name, total_count,
         ));
-        println!("\n{}\n", title.render(None));
+        println!("\n{}\n", title.render_optimistic(None));
     }
 }
 
@@ -1109,19 +1109,19 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
             "<b>Packages:</b> <dim>({} / {} packages)</dim>",
             tool_name, pkg_count,
         ));
-        println!("{}", header.render(None));
+        println!("{}", header.render_optimistic(None));
 
         if let Some(ref packages) = repo.packages {
             let items: Vec<String> = packages
                 .iter()
                 .map(|pkg| {
                     let markup = &format_package_items(pkg, verbose)[0];
-                    Prose::new(markup).render(None)
+                    Prose::new(markup).render_optimistic(None)
                 })
                 .collect();
 
             let list = UnorderedList::new(items);
-            println!("{}", list.render(None));
+            println!("{}", list.render_optimistic(None));
         }
     }
 }
@@ -1140,7 +1140,7 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
     } else {
         format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
     };
-    eprintln!("\n{}\n", Prose::new(&header).fallback_render(&terminal));
+    eprintln!("\n{}\n", Prose::new(&header).render(&terminal));
 
     let items: Vec<String> = docs
         .iter()
@@ -1159,11 +1159,11 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
                 file_link
             }
         })
-        .map(|item| Prose::new(&item).fallback_render(&terminal))
+        .map(|item| Prose::new(&item).render(&terminal))
         .collect();
 
     let list = UnorderedList::new(items);
-    println!("{}", list.fallback_render(&terminal));
+    println!("{}", list.render(&terminal));
 
     if verbose == 0 {
         eprintln!(
@@ -1171,7 +1171,7 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
             Prose::new(
                 "<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>"
             )
-            .fallback_render(&terminal)
+            .render(&terminal)
         );
     }
 }
@@ -1349,11 +1349,11 @@ pub fn print_repo_deps_text(
         )
     };
     let term = Terminal::default();
-    eprintln!("\n{}\n", Prose::new(&title).fallback_render(&term));
+    eprintln!("\n{}\n", Prose::new(&title).render(&term));
 
     let mut outer_items: Vec<RenderableContent> = Vec::new();
     for pkg in &relevant {
-        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).fallback_render(&term);
+        let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(&term);
         outer_items.push(RenderableContent::String(label));
 
         let mut detail_items: Vec<String> = Vec::new();
@@ -1363,13 +1363,13 @@ pub fn print_repo_deps_text(
                     "<b>depends-on:</b> {}",
                     pkg.depends_on.join(", ")
                 ))
-                .fallback_render(&term),
+                .render(&term),
             );
         }
         if !pkg.used_by.is_empty() {
             detail_items.push(
                 Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", ")))
-                    .fallback_render(&term),
+                    .render(&term),
             );
         }
 
@@ -1380,12 +1380,12 @@ pub fn print_repo_deps_text(
     }
 
     let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-    print!("{}", list.fallback_render(&term));
+    print!("{}", list.render(&term));
 
     eprintln!(
         "\n{}",
         Prose::new("<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>")
-            .fallback_render(&term)
+            .render(&term)
     );
 }
 

@@ -28,7 +28,7 @@ fn linked_name_cell(name: &str, website: &str, term: &Terminal) -> String {
     }
 
     // Use Prose OSC8 support so links are clickable without burning table width.
-    Prose::new(format!(r#"<a href="{website}">{name}</a>"#)).fallback_render(term)
+    Prose::new(format!(r#"<a href="{website}">{name}</a>"#)).render(term)
 }
 
 fn version_allowed(include_versions: bool, source: Option<ExecutableSource>) -> bool {

@@ -7,13 +7,13 @@ use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 
 pub fn print_structure() {
-    let title = Prose::new("<b><u>Sniff Data Structure</u></b>").render(None);
+    let title = Prose::new("<b><u>Sniff Data Structure</u></b>").render_optimistic(None);
     println!("\n{}\n", title);
 
     let intro = Prose::new(
         "Structural map of the data sniff can produce. Leaf fields and values are omitted.",
     )
-    .render(None);
+    .render_optimistic(None);
     println!("{}\n", intro);
 
     let mut root_table = Table::new()
@@ -25,12 +25,12 @@ pub fn print_structure() {
         .prefer_cursor_alignment();
 
     root_table.add_row(vec![
-        TableCellContent::Text(Prose::new("<b>SniffResult</b>").render(None)),
+        TableCellContent::Text(Prose::new("<b>SniffResult</b>").render_optimistic(None)),
         TableCellContent::Text("detect(), detect_with_config()".to_string()),
         TableCellContent::Text("os, hardware, network, filesystem".to_string()),
     ]);
     root_table.add_row(vec![
-        TableCellContent::Text(Prose::new("<b>ProgramsInfo</b>").render(None)),
+        TableCellContent::Text(Prose::new("<b>ProgramsInfo</b>").render_optimistic(None)),
         TableCellContent::Text("ProgramsInfo::detect()".to_string()),
         TableCellContent::Text(
             "editors, utilities, language package managers, os package managers, tts clients, terminal apps, headless audio, ai clients"
@@ -38,21 +38,21 @@ pub fn print_structure() {
         ),
     ]);
     root_table.add_row(vec![
-        TableCellContent::Text(Prose::new("<b>ServicesInfo</b>").render(None)),
+        TableCellContent::Text(Prose::new("<b>ServicesInfo</b>").render_optimistic(None)),
         TableCellContent::Text("detect_services()".to_string()),
         TableCellContent::Text("init system, host os, evidence, services".to_string()),
     ]);
 
-    println!("{}\n", root_table.render(None));
+    println!("{}\n", root_table.render_optimistic(None));
 
     let sniff_section = build_sniff_result_section();
-    println!("{}\n", sniff_section.render(None));
+    println!("{}\n", sniff_section.render_optimistic(None));
 
     let programs_section = build_programs_section();
-    println!("{}\n", programs_section.render(None));
+    println!("{}\n", programs_section.render_optimistic(None));
 
     let services_section = build_services_section();
-    println!("{}\n", services_section.render(None));
+    println!("{}\n", services_section.render_optimistic(None));
 }
 
 fn build_sniff_result_section() -> Section {

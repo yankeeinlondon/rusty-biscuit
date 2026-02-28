@@ -79,7 +79,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
     if !detail_items.is_empty() {
         let rendered: Vec<String> = detail_items
             .iter()
-            .map(|item| Prose::new(item).fallback_render(&term))
+            .map(|item| Prose::new(item).render(&term))
             .collect();
         let list = UnorderedList::new(rendered).with_bullet("  ");
         print!("{}", list.display(&term));
@@ -146,17 +146,17 @@ fn print_documents(docs: &[DocumentRef], term: &Terminal) {
     let mut items = Vec::new();
 
     for doc in &readmes {
-        items.push(Prose::new(format!("<b>{}</b>", doc.path)).fallback_render(term));
+        items.push(Prose::new(format!("<b>{}</b>", doc.path)).render(term));
     }
     if !doc_folder.is_empty() {
         items.push(
             Prose::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len()))
-                .fallback_render(term),
+                .render(term),
         );
     }
     for doc in &other_docs {
         if !doc.path.contains('/') {
-            items.push(Prose::new(format!("<dim>{}</dim>", doc.path)).fallback_render(term));
+            items.push(Prose::new(format!("<dim>{}</dim>", doc.path)).render(term));
         }
     }
 
@@ -184,7 +184,7 @@ fn print_cicd(cicd: &[CiCdInfo], term: &Terminal) {
                 .as_ref()
                 .map(|p| format!(" <dim>({})</dim>", p))
                 .unwrap_or_default();
-            Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).fallback_render(term)
+            Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).render(term)
         })
         .collect();
 
@@ -279,7 +279,7 @@ fn print_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) {
             } else {
                 ""
             };
-            Prose::new(format!("<b>{}</b>{}", tag.name, annotated)).fallback_render(term)
+            Prose::new(format!("<b>{}</b>{}", tag.name, annotated)).render(term)
         })
         .collect();
 
@@ -296,7 +296,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
             "<b>Repository:</b> <a href=\"{}\">{}</a>",
             urls.repo, urls.repo
         ))
-        .fallback_render(term),
+        .render(term),
     );
 
     if let Some(ref homepage) = urls.homepage {
@@ -304,13 +304,13 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
             Prose::new(format!(
                 "<b>Homepage:</b> <a href=\"{homepage}\">{homepage}</a>"
             ))
-            .fallback_render(term),
+            .render(term),
         );
     }
     if let Some(ref issues) = urls.issues {
         items.push(
             Prose::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"))
-                .fallback_render(term),
+                .render(term),
         );
     }
     if let Some(ref prs) = urls.pull_requests {
@@ -318,7 +318,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
             Prose::new(format!(
                 "<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>"
             ))
-            .fallback_render(term),
+            .render(term),
         );
     }
     if let Some(ref releases) = urls.releases {
@@ -326,13 +326,13 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
             Prose::new(format!(
                 "<b>Releases:</b> <a href=\"{releases}\">{releases}</a>"
             ))
-            .fallback_render(term),
+            .render(term),
         );
     }
     if let Some(ref wiki) = urls.wiki {
         items.push(
             Prose::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"))
-                .fallback_render(term),
+                .render(term),
         );
     }
 
