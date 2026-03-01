@@ -1520,7 +1520,10 @@ impl TreeFile {
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut symbols = Vec::new();
+        let mut deduped: std::collections::HashMap<
+            (usize, usize, String),
+            (SymbolInfo, Node<'_>, u8),
+        > = std::collections::HashMap::new();
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
@@ -1551,10 +1554,15 @@ impl TreeFile {
                     continue;
                 }
 
-                let kind = match symbol_kind_from_capture(capture_name) {
+                let base_kind = match symbol_kind_from_capture(capture_name) {
                     Some(kind) => kind,
                     None => continue,
                 };
+                let kind = refine_symbol_kind(base_kind, capture.node);
+                let (container_name, container_kind) =
+                    find_symbol_container(capture.node, self.language, &self.source)
+                        .map(|(name, kind)| (Some(name), Some(kind)))
+                        .unwrap_or((None, None));
 
                 let name = capture
                     .node
@@ -1580,26 +1588,221 @@ impl TreeFile {
                     (None, None, None)
                 };
 
-                symbols.push((
-                    SymbolInfo {
-                        name,
-                        kind,
-                        range: range_for_node(capture.node),
-                        language: self.language,
-                        file: self.file.clone(),
-                        doc_comment,
-                        signature,
-                        type_metadata,
-                    },
-                    capture.node,
-                ));
+                let symbol = SymbolInfo {
+                    name: name.clone(),
+                    kind,
+                    range: range_for_node(capture.node),
+                    language: self.language,
+                    file: self.file.clone(),
+                    container_name,
+                    container_kind,
+                    doc_comment,
+                    signature,
+                    type_metadata,
+                };
+
+                let key = (symbol.range.start_byte, symbol.range.end_byte, name);
+                let priority = symbol_kind_priority(symbol.kind);
+
+                if let Some((existing, _, existing_priority)) = deduped.get_mut(&key) {
+                    if priority > *existing_priority {
+                        *existing = symbol;
+                        *existing_priority = priority;
+                    } else if priority == *existing_priority {
+                        if existing.signature.is_none() {
+                            existing.signature = symbol.signature;
+                        }
+                        if existing.type_metadata.is_none() {
+                            existing.type_metadata = symbol.type_metadata;
+                        }
+                        if existing.doc_comment.is_none() {
+                            existing.doc_comment = symbol.doc_comment;
+                        }
+                    }
+                } else {
+                    deduped.insert(key, (symbol, capture.node, priority));
+                }
             }
 
             matches.advance();
         }
 
+        let mut symbols: Vec<(SymbolInfo, Node<'_>)> = deduped
+            .into_values()
+            .map(|(symbol, node, _)| (symbol, node))
+            .collect();
+        symbols.sort_by_key(|(symbol, _)| (symbol.range.start_byte, symbol.range.end_byte));
+
         Ok(symbols)
     }
+}
+
+fn symbol_kind_priority(kind: SymbolKind) -> u8 {
+    match kind {
+        SymbolKind::Method => 100,
+        SymbolKind::Function => 90,
+        SymbolKind::Constant => 85,
+        SymbolKind::Field => 80,
+        SymbolKind::Parameter => 75,
+        SymbolKind::Class
+        | SymbolKind::Interface
+        | SymbolKind::Enum
+        | SymbolKind::Trait
+        | SymbolKind::Type
+        | SymbolKind::Module
+        | SymbolKind::Namespace => 70,
+        SymbolKind::Macro => 65,
+        SymbolKind::Variable => 50,
+        SymbolKind::Unknown => 0,
+    }
+}
+
+fn refine_symbol_kind(mut kind: SymbolKind, node: Node<'_>) -> SymbolKind {
+    if kind != SymbolKind::Variable {
+        return kind;
+    }
+
+    let mut current = Some(node);
+    while let Some(cursor) = current {
+        match cursor.kind() {
+            "self_parameter"
+            | "parameter"
+            | "parameter_declaration"
+            | "typed_parameter"
+            | "typed_default_parameter"
+            | "default_parameter"
+            | "required_parameter"
+            | "optional_parameter"
+            | "formal_parameter"
+            | "formal_parameters"
+            | "parameters"
+            | "parameter_list" => {
+                kind = SymbolKind::Parameter;
+                break;
+            }
+            "field_declaration"
+            | "property_declaration"
+            | "field_definition"
+            | "property_initializer" => {
+                kind = SymbolKind::Field;
+                break;
+            }
+            "const_item" | "const_declaration" | "constant" => {
+                kind = SymbolKind::Constant;
+                break;
+            }
+            _ => {}
+        }
+
+        current = cursor.parent();
+    }
+
+    kind
+}
+
+fn find_symbol_container(
+    node: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<(String, SymbolKind)> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        match language {
+            ProgrammingLanguage::Rust => {
+                if parent.kind() == "impl_item" {
+                    let trait_name = parent
+                        .child_by_field_name("trait")
+                        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+                        .map(str::to_string);
+                    let type_name = parent
+                        .child_by_field_name("type")
+                        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+                        .map(str::to_string);
+
+                    let container = match (trait_name, type_name) {
+                        (Some(trait_name), Some(type_name)) => {
+                            format!("impl {trait_name} for {type_name}")
+                        }
+                        (None, Some(type_name)) => format!("impl {type_name}"),
+                        _ => "impl".to_string(),
+                    };
+
+                    return Some((container, SymbolKind::Type));
+                }
+
+                if let Some(container) = named_container(
+                    parent,
+                    source,
+                    &[
+                        ("trait_item", SymbolKind::Trait),
+                        ("struct_item", SymbolKind::Type),
+                        ("enum_item", SymbolKind::Enum),
+                        ("mod_item", SymbolKind::Module),
+                    ],
+                ) {
+                    return Some(container);
+                }
+            }
+            _ => {
+                if let Some(container) = named_container(
+                    parent,
+                    source,
+                    &[
+                        ("class_declaration", SymbolKind::Class),
+                        ("class_definition", SymbolKind::Class),
+                        ("struct_declaration", SymbolKind::Type),
+                        ("struct_specifier", SymbolKind::Type),
+                        ("enum_declaration", SymbolKind::Enum),
+                        ("enum_specifier", SymbolKind::Enum),
+                        ("interface_declaration", SymbolKind::Interface),
+                        ("protocol_declaration", SymbolKind::Interface),
+                        ("record_declaration", SymbolKind::Type),
+                        ("namespace_declaration", SymbolKind::Namespace),
+                        ("namespace_definition", SymbolKind::Namespace),
+                        ("module", SymbolKind::Module),
+                        ("type_declaration", SymbolKind::Type),
+                    ],
+                ) {
+                    return Some(container);
+                }
+            }
+        }
+
+        current = parent.parent();
+    }
+
+    None
+}
+
+fn named_container(
+    node: Node<'_>,
+    source: &str,
+    kind_map: &[(&str, SymbolKind)],
+) -> Option<(String, SymbolKind)> {
+    let container_kind = kind_map
+        .iter()
+        .find_map(|(kind_name, mapped_kind)| (*kind_name == node.kind()).then_some(*mapped_kind))?;
+
+    // Common field names used by tree-sitter grammars for declaration identifiers.
+    let name = ["name", "declarator", "identifier", "type", "path"]
+        .iter()
+        .find_map(|field| {
+            node.child_by_field_name(field)
+                .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find_map(|child| match child.kind() {
+                    "identifier" | "type_identifier" | "field_identifier" => {
+                        child.utf8_text(source.as_bytes()).ok().map(str::to_string)
+                    }
+                    _ => None,
+                })
+        })?;
+
+    Some((name, container_kind))
 }
 
 fn symbol_kind_from_capture(capture_name: &str) -> Option<SymbolKind> {
@@ -1652,8 +1855,15 @@ fn range_for_node(node: Node<'_>) -> CodeRange {
 }
 
 fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: Node<'_>) -> bool {
-    if matches!(symbol.kind, SymbolKind::Parameter | SymbolKind::Field) {
+    if matches!(
+        symbol.kind,
+        SymbolKind::Parameter | SymbolKind::Field | SymbolKind::Variable
+    ) {
         return false;
+    }
+
+    if symbol.language == ProgrammingLanguage::Rust {
+        return is_rust_public_definition(node);
     }
 
     let mut current = node;
@@ -1669,6 +1879,39 @@ fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: Node<'_>) -
         }
 
         current = parent;
+    }
+
+    false
+}
+
+fn is_rust_public_definition(node: Node<'_>) -> bool {
+    let mut current = Some(node);
+
+    while let Some(cursor_node) = current {
+        let mut cursor = cursor_node.walk();
+        for child in cursor_node.children(&mut cursor) {
+            if child.kind() == "visibility_modifier" {
+                return true;
+            }
+        }
+
+        if matches!(
+            cursor_node.kind(),
+            "function_item"
+                | "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "mod_item"
+                | "const_item"
+                | "static_item"
+                | "type_item"
+                | "macro_definition"
+                | "impl_item"
+        ) {
+            return false;
+        }
+
+        current = cursor_node.parent();
     }
 
     false

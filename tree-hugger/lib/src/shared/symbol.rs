@@ -522,6 +522,12 @@ pub struct SymbolInfo {
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    /// Immediate containing symbol/entity, when available (e.g., class, trait, impl).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_name: Option<String>,
+    /// Kind of the containing symbol/entity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_kind: Option<SymbolKind>,
     /// Documentation comment associated with the symbol.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,

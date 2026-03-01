@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Generator, Shell};
@@ -313,6 +314,8 @@ struct OutputConfig {
     use_hyperlinks: bool,
 }
 
+static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
+
 impl OutputConfig {
     fn new(format: OutputFormat) -> Self {
         match format {
@@ -348,6 +351,167 @@ fn style_for_kind(kind: SymbolKind) -> Style {
         SymbolKind::Constant => Style::new().bright_blue(),
         SymbolKind::Unknown => Style::new(),
     }
+}
+
+#[derive(Debug, Clone)]
+struct SymbolPresentation {
+    label: String,
+    style_kind: SymbolKind,
+}
+
+fn symbol_presentation(symbol: &SymbolInfo) -> SymbolPresentation {
+    if matches!(
+        symbol.kind,
+        SymbolKind::Variable | SymbolKind::Field | SymbolKind::Constant
+    ) && let Some(token) = binding_token_for_symbol(symbol)
+    {
+        let style_kind = match token.as_str() {
+            "const" | "static" => SymbolKind::Constant,
+            "field" => SymbolKind::Field,
+            _ => symbol.kind,
+        };
+
+        return SymbolPresentation {
+            label: token,
+            style_kind,
+        };
+    }
+
+    SymbolPresentation {
+        label: symbol.kind.to_string(),
+        style_kind: symbol.kind,
+    }
+}
+
+fn binding_token_for_symbol(symbol: &SymbolInfo) -> Option<String> {
+    let line = source_line_for_symbol(symbol)?;
+    let trimmed = line.trim_start();
+
+    let token = match symbol.language {
+        ProgrammingLanguage::Rust => {
+            if symbol.name == "self" {
+                Some("self")
+            } else if trimmed.starts_with("const ") || trimmed.contains(" const ") {
+                Some("const")
+            } else if trimmed.starts_with("static ") || trimmed.contains(" static mut ") {
+                Some("static")
+            } else if trimmed.starts_with("let ") || trimmed.contains(" let ") {
+                Some("let")
+            } else if symbol.kind == SymbolKind::Field {
+                Some("field")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+            if contains_word(trimmed, "const") {
+                Some("const")
+            } else if contains_word(trimmed, "let") {
+                Some("let")
+            } else if contains_word(trimmed, "var") {
+                Some("var")
+            } else if symbol.kind == SymbolKind::Field {
+                Some("field")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::Swift => {
+            if contains_word(trimmed, "let") {
+                Some("let")
+            } else if contains_word(trimmed, "var") {
+                Some("var")
+            } else if symbol.kind == SymbolKind::Field {
+                Some("field")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::Go => {
+            if contains_word(trimmed, "const") {
+                Some("const")
+            } else if contains_word(trimmed, "var") {
+                Some("var")
+            } else if trimmed.contains(":=") {
+                Some(":=")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::CSharp => {
+            if contains_word(trimmed, "const") {
+                Some("const")
+            } else if contains_word(trimmed, "var") {
+                Some("var")
+            } else if symbol.kind == SymbolKind::Field
+                || (symbol.kind == SymbolKind::Variable
+                    && trimmed.ends_with(';')
+                    && !trimmed.contains('('))
+            {
+                Some("field")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::Python => {
+            if trimmed.starts_with("for ") {
+                Some("for")
+            } else if trimmed.contains(":=") {
+                Some(":=")
+            } else if trimmed.contains('=') {
+                Some("=")
+            } else {
+                None
+            }
+        }
+        ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh => {
+            if contains_word(trimmed, "local") {
+                Some("local")
+            } else if contains_word(trimmed, "declare") {
+                Some("declare")
+            } else if contains_word(trimmed, "typeset") {
+                Some("typeset")
+            } else if contains_word(trimmed, "readonly") {
+                Some("readonly")
+            } else if contains_word(trimmed, "export") {
+                Some("export")
+            } else {
+                None
+            }
+        }
+        _ => {
+            if symbol.kind == SymbolKind::Constant {
+                Some("const")
+            } else if symbol.kind == SymbolKind::Field {
+                Some("field")
+            } else {
+                None
+            }
+        }
+    };
+
+    token.map(str::to_string)
+}
+
+fn contains_word(line: &str, word: &str) -> bool {
+    line.split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .any(|token| token == word)
+}
+
+fn source_line_for_symbol(symbol: &SymbolInfo) -> Option<String> {
+    let cache = SOURCE_LINE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().ok()?;
+
+    if !guard.contains_key(&symbol.file) {
+        let source = std::fs::read_to_string(&symbol.file).ok()?;
+        let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
+        guard.insert(symbol.file.clone(), lines);
+    }
+
+    let lines = guard.get(&symbol.file)?;
+    lines
+        .get(symbol.range.start_line.saturating_sub(1))
+        .cloned()
 }
 
 /// Creates an OSC8 hyperlink for a file path with line number.
@@ -1188,20 +1352,21 @@ fn render_symbol_line(
     };
 
     let name_with_sig = format_symbol_name(symbol, symbol.language);
+    let presentation = symbol_presentation(symbol);
     let visibility = symbol
         .signature
         .as_ref()
         .and_then(|signature| signature.visibility.as_ref());
 
     if config.use_colors {
-        let kind_style = style_for_kind(symbol.kind);
+        let kind_style = style_for_kind(presentation.style_kind);
         let kind_part = match visibility {
             Some(visibility) => format!(
                 "{} {}",
                 visibility.to_string().italic(),
-                symbol.kind.to_string().style(kind_style)
+                presentation.label.style(kind_style)
             ),
-            None => symbol.kind.to_string().style(kind_style).to_string(),
+            None => presentation.label.style(kind_style).to_string(),
         };
         println!(
             "  - {} {} {}",
@@ -1211,8 +1376,8 @@ fn render_symbol_line(
         );
     } else {
         let kind_part = match visibility {
-            Some(visibility) => format!("{} {}", visibility, symbol.kind),
-            None => symbol.kind.to_string(),
+            Some(visibility) => format!("{} {}", visibility, presentation.label),
+            None => presentation.label,
         };
         println!("  - {} {} {}", kind_part, name_with_sig, location_display);
     }
@@ -1241,6 +1406,7 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
 
         // Format symbol name with signature for functions/methods
         let name_with_sig = format_symbol_name(symbol, symbol.language);
+        let presentation = symbol_presentation(symbol);
 
         // Extract visibility for functions/methods
         let visibility = symbol
@@ -1249,16 +1415,16 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
             .and_then(|sig| sig.visibility.as_ref());
 
         if config.use_colors {
-            let kind_style = style_for_kind(symbol.kind);
+            let kind_style = style_for_kind(presentation.style_kind);
 
             // Format visibility (italicized) + kind + name
             let kind_part = match visibility {
                 Some(vis) => format!(
                     "{} {}",
                     vis.to_string().italic(),
-                    symbol.kind.to_string().style(kind_style)
+                    presentation.label.style(kind_style)
                 ),
-                None => symbol.kind.to_string().style(kind_style).to_string(),
+                None => presentation.label.style(kind_style).to_string(),
             };
 
             println!(
@@ -1270,8 +1436,8 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
         } else {
             // Plain text: visibility + kind + name
             let kind_part = match visibility {
-                Some(vis) => format!("{} {}", vis, symbol.kind),
-                None => symbol.kind.to_string(),
+                Some(vis) => format!("{} {}", vis, presentation.label),
+                None => presentation.label,
             };
             println!("  - {} {} {}", kind_part, name_with_sig, location_display);
         }
@@ -1284,21 +1450,39 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
 /// For types: `name { field1: T1, field2: T2 }` or `name { Variant1, Variant2 }`
 /// For other symbols: just the name
 fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> String {
-    if symbol.kind.is_function() {
-        return match &symbol.signature {
+    let base_name = if symbol.kind.is_function() {
+        match &symbol.signature {
             Some(sig) => format_function_signature(&symbol.name, sig, language),
             None => symbol.name.clone(),
-        };
-    }
-
-    if symbol.kind.is_type() {
-        return match &symbol.type_metadata {
+        }
+    } else if symbol.kind.is_type() {
+        match &symbol.type_metadata {
             Some(meta) => format_type_signature(&symbol.name, meta, language),
             None => symbol.name.clone(),
+        }
+    } else {
+        symbol.name.clone()
+    };
+
+    if let Some(container_name) = symbol.container_name.as_deref()
+        && matches!(
+            symbol.kind,
+            SymbolKind::Method | SymbolKind::Function | SymbolKind::Field | SymbolKind::Parameter
+        )
+    {
+        let container_label = match symbol.container_kind {
+            Some(kind)
+                if kind == SymbolKind::Type && container_name.trim_start().starts_with("impl ") =>
+            {
+                container_name.to_string()
+            }
+            Some(kind) => format!("{kind} {container_name}"),
+            None => container_name.to_string(),
         };
+        return format!("{base_name} [in {container_label}]");
     }
 
-    symbol.name.clone()
+    base_name
 }
 
 /// Formats a function signature like: `name(param1: T1, param2: T2) -> ReturnType`
