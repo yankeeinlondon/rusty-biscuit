@@ -8,7 +8,8 @@ use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
-    AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings, Provider,
+    AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
+    Provider,
 };
 use crate::services::{ProtectConfig, ProtectPosture};
 
@@ -788,7 +789,10 @@ mod tests {
         assert_eq!(linking.preference, vec![Provider::Claude, Provider::Gemini]);
 
         // User-scoped canonical providers survive from user config
-        assert_eq!(linking.canonical_provider.user_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.user_skill,
+            Some(Provider::Claude)
+        );
         assert_eq!(
             linking.canonical_provider.user_command,
             Some(Provider::Claude)
@@ -799,7 +803,10 @@ mod tests {
         );
 
         // Repo-scoped canonical providers come from repo config
-        assert_eq!(linking.canonical_provider.repo_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.repo_skill,
+            Some(Provider::Claude)
+        );
         assert_eq!(
             linking.canonical_provider.repo_command,
             Some(Provider::Claude)
@@ -847,9 +854,15 @@ mod tests {
         let linking = merged.settings.linking.expect("missing linking");
 
         // user_skill preserved from user config (repo didn't set it)
-        assert_eq!(linking.canonical_provider.user_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.user_skill,
+            Some(Provider::Claude)
+        );
         // repo_skill overridden by repo config
-        assert_eq!(linking.canonical_provider.repo_skill, Some(Provider::Claude));
+        assert_eq!(
+            linking.canonical_provider.repo_skill,
+            Some(Provider::Claude)
+        );
     }
 
     #[test]

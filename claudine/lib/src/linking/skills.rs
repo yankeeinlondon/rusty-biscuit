@@ -8,10 +8,10 @@ use regex::Regex;
 use crate::error::Result;
 use crate::events::Provider;
 
-use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
+use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::compatibility::parse_markdown_document;
 use super::paths::{ProviderSkillPaths, ResourceScope};
-use super::symlink::{create_skill_link, LinkResult};
+use super::symlink::{LinkResult, create_skill_link};
 
 /// Parsed skill filter with optional negation and exact-match modes.
 ///
@@ -1033,9 +1033,11 @@ mod tests {
             .filter(|d| d.provider == Provider::Gemini)
             .collect();
         assert!(!gemini_diags.is_empty());
-        assert!(gemini_diags
-            .iter()
-            .any(|d| d.message.contains("skills directory")));
+        assert!(
+            gemini_diags
+                .iter()
+                .any(|d| d.message.contains("skills directory"))
+        );
     }
 
     #[test]
@@ -1056,9 +1058,11 @@ mod tests {
             .filter(|d| d.provider == Provider::Gemini)
             .collect();
         assert!(!gemini_diags.is_empty());
-        assert!(gemini_diags
-            .iter()
-            .any(|d| d.message.contains("base configuration directory")));
+        assert!(
+            gemini_diags
+                .iter()
+                .any(|d| d.message.contains("base configuration directory"))
+        );
     }
 
     #[test]
@@ -1145,9 +1149,11 @@ mod tests {
             .collect();
         // Should have diagnostics for both user and repo scopes
         // Message contains Prose markup: "<b>repo</b> scoped"
-        assert!(gemini_diags
-            .iter()
-            .any(|d| d.message.contains("repo</b> scoped")));
+        assert!(
+            gemini_diags
+                .iter()
+                .any(|d| d.message.contains("repo</b> scoped"))
+        );
     }
 
     // ── fix_missing_skills tests ─────────────────────────────────────
@@ -1179,18 +1185,22 @@ mod tests {
         assert!(gemini_dir.join("beta").exists());
 
         // Verify they are symlinks
-        assert!(gemini_dir
-            .join("alpha")
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(gemini_dir
-            .join("beta")
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            gemini_dir
+                .join("alpha")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            gemini_dir
+                .join("beta")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[cfg(unix)]
@@ -1501,11 +1511,7 @@ mod tests {
         setup_skill(&user_dir, "python", "Python", "# P\n");
 
         // Fuzzy "rust" but exclude exact "rust"
-        let report = list_skills(
-            &paths,
-            &["rust".to_string(), "-rust!".to_string()],
-        )
-        .unwrap();
+        let report = list_skills(&paths, &["rust".to_string(), "-rust!".to_string()]).unwrap();
         let names: Vec<&str> = report.skills.iter().map(|s| s.name.as_str()).collect();
         assert!(!names.contains(&"rust"));
         assert!(names.contains(&"rusty"));

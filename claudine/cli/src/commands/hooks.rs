@@ -250,7 +250,10 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
                 effect.invalid_name
             ),
         };
-        log::data(&format!(" {}", Prose::new(msg).render_optimistic(Some(100))));
+        log::data(&format!(
+            " {}",
+            Prose::new(msg).render_optimistic(Some(100))
+        ));
     }
 
     log::data("");
@@ -528,12 +531,10 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         let support_level = provider.event_support_level(event);
         let support_cell: TableCellContent = match support_level {
             EventSupportLevel::Hook => "hook".into(),
-            EventSupportLevel::NonHook => Prose::new("{{dim}}non-hook{{reset}}")
-                .render(&term)
-                .into(),
-            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
-                .render(&term)
-                .into(),
+            EventSupportLevel::NonHook => {
+                Prose::new("{{dim}}non-hook{{reset}}").render(&term).into()
+            }
+            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
         };
 
         let actions_cell: TableCellContent = match binding {
@@ -849,7 +850,8 @@ fn run_simple(
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
+        let provider_cell: TableCellContent =
+            Prose::new(provider_link).render_optimistic(None).into();
 
         table.add_row(vec![provider_cell, bool_indicator(installed), hooks_cell]);
     }
@@ -890,7 +892,10 @@ fn run_simple(
         "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
     ];
     for hint in hints {
-        log::data(&format!(" {}", Prose::new(hint).render_optimistic(Some(100))));
+        log::data(&format!(
+            " {}",
+            Prose::new(hint).render_optimistic(Some(100))
+        ));
     }
 
     Ok(())
@@ -929,7 +934,8 @@ fn run_verbose(
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
+        let provider_cell: TableCellContent =
+            Prose::new(provider_link).render_optimistic(None).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 

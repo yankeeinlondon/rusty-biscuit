@@ -153,7 +153,12 @@ fn is_valid_env_name(name: &str) -> bool {
 fn sanitize_process_env(
     include_set: &HashSet<String>,
     auto_include: &HashSet<String>,
-) -> (HashMap<OsString, OsString>, Vec<String>, Vec<String>, Vec<String>) {
+) -> (
+    HashMap<OsString, OsString>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+) {
     let mut kept = HashMap::new();
     let mut removed = BTreeSet::new();
     let mut included = BTreeSet::new();
@@ -267,9 +272,7 @@ struct RepoContext {
 
 fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     let git_root = detect_git(cwd, false, 1)?.map(|info| info.repo_root);
-    let repo_probe_root = git_root
-        .clone()
-        .unwrap_or_else(|| cwd.to_path_buf());
+    let repo_probe_root = git_root.clone().unwrap_or_else(|| cwd.to_path_buf());
     let Some(repo) = detect_repo(&repo_probe_root)? else {
         return Ok(RepoContext {
             package_context: None,
@@ -626,10 +629,7 @@ mod tests {
         let mut removed = BTreeSet::new();
 
         for (key, value) in env {
-            if is_sensitive_key(key)
-                && !include_set.contains(key)
-                && !auto_include.contains(key)
-            {
+            if is_sensitive_key(key) && !include_set.contains(key) && !auto_include.contains(key) {
                 removed.insert(key.clone());
             } else {
                 kept.push((key.clone(), value.clone()));

@@ -242,7 +242,11 @@ mod tests {
             ResourceReference::Isolated(definition),
             ResourceReference::Link(Provider::Codex, ResourceScope::Repo),
             ResourceReference::LinkMissing(Provider::Gemini, ResourceScope::Repo),
-            ResourceReference::IncompleteLink(Provider::OpenCode, ResourceScope::Repo, IncompleteCause::NoCanonicalDefinition),
+            ResourceReference::IncompleteLink(
+                Provider::OpenCode,
+                ResourceScope::Repo,
+                IncompleteCause::NoCanonicalDefinition,
+            ),
             ResourceReference::DerivedLink(Provider::QwenCode, ResourceScope::Repo),
             ResourceReference::DerivedStale(Provider::RooCode, ResourceScope::Repo),
             ResourceReference::DerivedMissing(Provider::Goose, ResourceScope::Repo),
@@ -287,7 +291,11 @@ mod tests {
                 ReferenceStatus::IsFixable,
             ),
             (
-                ResourceReference::IncompleteLink(Provider::Codex, ResourceScope::Repo, IncompleteCause::CustomNotSupported),
+                ResourceReference::IncompleteLink(
+                    Provider::Codex,
+                    ResourceScope::Repo,
+                    IncompleteCause::CustomNotSupported,
+                ),
                 ReferenceStatus::NeedsUserAttention,
             ),
             (

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use biscuit_file::serde_yaml_ng;
 use crate::error::Result;
 use crate::events::Provider;
+use biscuit_file::serde_yaml_ng;
 
 use super::capabilities::{LinkableResource, ResourceFormat, capabilities_for};
 use super::compatibility::{classify_canonical_candidate, classify_target_reference};
@@ -335,14 +335,21 @@ fn classify_target_state(
 ) -> ResourceReference {
     let requirement_state =
         classify_target_reference(resource, canonical_ref, target_provider, model_scope);
-    if matches!(requirement_state, ResourceReference::IncompleteLink(_, _, _)) {
+    if matches!(
+        requirement_state,
+        ResourceReference::IncompleteLink(_, _, _)
+    ) {
         return requirement_state;
     }
 
     let capabilities = capabilities_for(target_provider);
     let support = capabilities.support_for(resource);
     let Some(target_format) = support.format else {
-        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::NoTargetFormat);
+        return ResourceReference::IncompleteLink(
+            target_provider,
+            model_scope,
+            IncompleteCause::NoTargetFormat,
+        );
     };
 
     if target_format == ResourceFormat::Markdown
@@ -360,7 +367,11 @@ fn classify_target_state(
 
     let conversion = conversion_for_formats(ResourceFormat::Markdown, target_format);
     if conversion.is_none() {
-        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::NoConversionPath);
+        return ResourceReference::IncompleteLink(
+            target_provider,
+            model_scope,
+            IncompleteCause::NoConversionPath,
+        );
     }
 
     classify_derived_state(
@@ -391,7 +402,11 @@ fn classify_direct_state(
     if symlink_points_to_canonical(resource, path_scope, existing, canonical_ref) {
         ResourceReference::Link(target_provider, model_scope)
     } else {
-        ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::WrongSymlinkTarget)
+        ResourceReference::IncompleteLink(
+            target_provider,
+            model_scope,
+            IncompleteCause::WrongSymlinkTarget,
+        )
     }
 }
 
@@ -407,7 +422,11 @@ fn classify_derived_state(
     };
 
     if existing.is_symlink {
-        return ResourceReference::IncompleteLink(target_provider, model_scope, IncompleteCause::UnexpectedSymlink);
+        return ResourceReference::IncompleteLink(
+            target_provider,
+            model_scope,
+            IncompleteCause::UnexpectedSymlink,
+        );
     }
 
     if derived_hashes_match(canonical_ref, &existing.path, target_format) {
@@ -599,10 +618,12 @@ fn read_yaml_hashes(path: &Path) -> Option<(u64, u64)> {
     let content = std::fs::read_to_string(path).ok()?;
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).ok()?;
     let map = value.as_mapping()?;
-    let fm_hash =
-        yaml_hash_value(map.get(serde_yaml_ng::Value::String(DERIVED_FM_HASH_KEY.to_string()))?)?;
-    let body_hash =
-        yaml_hash_value(map.get(serde_yaml_ng::Value::String(DERIVED_BODY_HASH_KEY.to_string()))?)?;
+    let fm_hash = yaml_hash_value(map.get(serde_yaml_ng::Value::String(
+        DERIVED_FM_HASH_KEY.to_string(),
+    ))?)?;
+    let body_hash = yaml_hash_value(map.get(serde_yaml_ng::Value::String(
+        DERIVED_BODY_HASH_KEY.to_string(),
+    ))?)?;
     Some((fm_hash, body_hash))
 }
 
@@ -1248,11 +1269,7 @@ mod tests {
         // Create a category-level symlink: .codex/skills -> .claude/skills
         let codex_skills = home.path().join(".codex/skills");
         std::fs::create_dir_all(codex_skills.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(
-            home.path().join(".claude/skills"),
-            &codex_skills,
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(home.path().join(".claude/skills"), &codex_skills).unwrap();
 
         let analyzed = analyze_resource_links(
             &paths,
@@ -1289,11 +1306,7 @@ mod tests {
         // Category-level symlink makes everything linked regardless
         let codex_skills = home.path().join(".codex/skills");
         std::fs::create_dir_all(codex_skills.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(
-            home.path().join(".claude/skills"),
-            &codex_skills,
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(home.path().join(".claude/skills"), &codex_skills).unwrap();
 
         let analyzed = analyze_resource_links(
             &paths,

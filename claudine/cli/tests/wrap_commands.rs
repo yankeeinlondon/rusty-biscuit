@@ -423,7 +423,9 @@ exit 0
     let warning_index = plain
         .find("- Warning: --yolo is not supported for 'opencode' and was ignored")
         .unwrap();
-    let hint_index = plain.find("Opencode requires a model be specified").unwrap();
+    let hint_index = plain
+        .find("Opencode requires a model be specified")
+        .unwrap();
 
     assert!(warning_index > summary_index);
     assert!(hint_index > summary_index);
@@ -799,7 +801,9 @@ exit 0
         .args(["codex", "--timeout", "30", "--", "hello"])
         .assert()
         .code(1)
-        .stderr(contains("--timeout can only be used with --non-interactive"));
+        .stderr(contains(
+            "--timeout can only be used with --non-interactive",
+        ));
 }
 
 // ---------------------------------------------------------------------------

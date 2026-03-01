@@ -526,9 +526,7 @@ fn reference_details(reference: &ResourceReference, detailed: bool) -> String {
         ResourceReference::LinkMissing(_, _) => {
             "missing symlink (fixable with --apply)".to_string()
         }
-        ResourceReference::IncompleteLink(_, _, cause) => {
-            cause.to_string()
-        }
+        ResourceReference::IncompleteLink(_, _, cause) => cause.to_string(),
         ResourceReference::DerivedLink(_, _) => {
             if detailed {
                 "derived artifact in sync".to_string()
@@ -569,7 +567,8 @@ fn run_support() -> Result<()> {
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link).render_optimistic(None).into();
+        let provider_cell: TableCellContent =
+            Prose::new(provider_link).render_optimistic(None).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -810,7 +809,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use claudine::linking::model::{IncompleteCause, ResourceDefinition, ResourceScope as ModelScope};
+    use claudine::linking::model::{
+        IncompleteCause, ResourceDefinition, ResourceScope as ModelScope,
+    };
 
     use super::*;
 
@@ -836,7 +837,11 @@ mod tests {
             ResourceReference::Isolated(definition),
             ResourceReference::Link(Provider::Codex, ModelScope::User),
             ResourceReference::LinkMissing(Provider::Codex, ModelScope::User),
-            ResourceReference::IncompleteLink(Provider::Codex, ModelScope::User, IncompleteCause::NoCanonicalDefinition),
+            ResourceReference::IncompleteLink(
+                Provider::Codex,
+                ModelScope::User,
+                IncompleteCause::NoCanonicalDefinition,
+            ),
             ResourceReference::DerivedLink(Provider::Codex, ModelScope::User),
             ResourceReference::DerivedStale(Provider::Codex, ModelScope::User),
             ResourceReference::DerivedMissing(Provider::Codex, ModelScope::User),

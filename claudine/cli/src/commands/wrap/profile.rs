@@ -105,11 +105,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Map the universal `--output <format>` to provider-specific flags.
     ///
     /// Default: returns a warning that the provider doesn't support it.
-    fn apply_output_format(
-        &self,
-        _args: &mut Vec<String>,
-        format: OutputFormat,
-    ) -> Option<String> {
+    fn apply_output_format(&self, _args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         Some(format!(
             "{} does not support --output {format}; this flag was skipped",
             self.provider()
@@ -121,11 +117,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Map the universal `--system-prompt <value>` to provider-specific flags.
     ///
     /// Default: returns a warning that the provider doesn't support it.
-    fn apply_system_prompt(
-        &self,
-        _args: &mut Vec<String>,
-        _prompt: &str,
-    ) -> Option<String> {
+    fn apply_system_prompt(&self, _args: &mut Vec<String>, _prompt: &str) -> Option<String> {
         Some(format!(
             "{} does not support --system-prompt; this flag was skipped",
             self.provider()
@@ -244,11 +236,7 @@ impl WrapperProfile for ClaudeWrapper {
         Ok(())
     }
 
-    fn apply_output_format(
-        &self,
-        args: &mut Vec<String>,
-        format: OutputFormat,
-    ) -> Option<String> {
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         let value = match format {
             OutputFormat::Json => "json",
             OutputFormat::Text => "text",
@@ -261,11 +249,7 @@ impl WrapperProfile for ClaudeWrapper {
         None
     }
 
-    fn apply_system_prompt(
-        &self,
-        args: &mut Vec<String>,
-        prompt: &str,
-    ) -> Option<String> {
+    fn apply_system_prompt(&self, args: &mut Vec<String>, prompt: &str) -> Option<String> {
         args.push("--system-prompt".to_string());
         args.push(prompt.to_string());
         None
@@ -329,19 +313,13 @@ impl WrapperProfile for CodexWrapper {
 
         // Validate prompt is present (consistency with EnsurePromptMode providers)
         if !has_non_flag_positional(&args[1..]) {
-            bail!(
-                "--non-interactive for codex requires a prompt after the entrypoint"
-            );
+            bail!("--non-interactive for codex requires a prompt after the entrypoint");
         }
 
         Ok(())
     }
 
-    fn apply_output_format(
-        &self,
-        args: &mut Vec<String>,
-        format: OutputFormat,
-    ) -> Option<String> {
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         match format {
             OutputFormat::Json => {
                 if !has_flag(args, "--json") {
@@ -395,9 +373,7 @@ impl WrapperProfile for GeminiWrapper {
             if let Some(existing) = option_value(args, flag)
                 && !existing.eq_ignore_ascii_case(value)
             {
-                bail!(
-                    "--yolo conflicts with existing '{flag} {existing}' for gemini"
-                );
+                bail!("--yolo conflicts with existing '{flag} {existing}' for gemini");
             }
             return Ok(None);
         }
@@ -415,8 +391,7 @@ impl WrapperProfile for GeminiWrapper {
         let flag = "--approval-mode";
         let aliases: &[&str] = &["--yolo", "-y"];
         if has_any_flag(args, flag, aliases)
-            && option_value(args, flag)
-                .is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
+            && option_value(args, flag).is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
         {
             bail!(
                 "do not pass <blue>{flag} yolo</blue> directly to claudine gemini; \
@@ -433,9 +408,7 @@ impl WrapperProfile for GeminiWrapper {
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
-            bail!(
-                "--non-interactive conflicts with interactive prompt mode for gemini"
-            );
+            bail!("--non-interactive conflicts with interactive prompt mode for gemini");
         }
         if has_flag(args, "-p") || has_flag(args, "--prompt") || has_non_flag_positional(args) {
             return Ok(());
@@ -443,11 +416,7 @@ impl WrapperProfile for GeminiWrapper {
         bail!("--non-interactive for gemini requires a prompt (positional or --prompt/-p)");
     }
 
-    fn apply_output_format(
-        &self,
-        args: &mut Vec<String>,
-        format: OutputFormat,
-    ) -> Option<String> {
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         match format {
             OutputFormat::Json => {
                 if !has_flag(args, "--output") {
@@ -544,9 +513,7 @@ impl WrapperProfile for QwenWrapper {
         if let Some(value) = option_value(args, "--approval-mode")
             && !value.eq_ignore_ascii_case("yolo")
         {
-            bail!(
-                "--yolo conflicts with existing '--approval-mode {value}' for qwen"
-            );
+            bail!("--yolo conflicts with existing '--approval-mode {value}' for qwen");
         }
         if !has_flag(args, "--yolo") {
             args.push("--yolo".to_string());
@@ -563,8 +530,7 @@ impl WrapperProfile for QwenWrapper {
         // flag extraction before reaching here. However, if the user passes
         // `--approval-mode yolo` directly, that should be rejected.
         if has_flag(args, "--approval-mode")
-            && option_value(args, "--approval-mode")
-                .is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
+            && option_value(args, "--approval-mode").is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
         {
             bail!(
                 "do not pass <blue>--approval-mode yolo</blue> directly to claudine qwen; \
@@ -577,9 +543,7 @@ impl WrapperProfile for QwenWrapper {
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
-            bail!(
-                "--non-interactive conflicts with interactive prompt mode for qwen"
-            );
+            bail!("--non-interactive conflicts with interactive prompt mode for qwen");
         }
         if has_flag(args, "-p") || has_flag(args, "--prompt") || has_non_flag_positional(args) {
             return Ok(());
@@ -640,9 +604,7 @@ impl WrapperProfile for OpencodeWrapper {
 
         // Validate prompt is present (consistency with EnsurePromptMode providers)
         if !has_non_flag_positional(&args[1..]) {
-            bail!(
-                "--non-interactive for opencode requires a prompt after the entrypoint"
-            );
+            bail!("--non-interactive for opencode requires a prompt after the entrypoint");
         }
 
         Ok(())
@@ -672,11 +634,7 @@ impl WrapperProfile for OpencodeWrapper {
         None
     }
 
-    fn apply_output_format(
-        &self,
-        args: &mut Vec<String>,
-        format: OutputFormat,
-    ) -> Option<String> {
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         match format {
             OutputFormat::Json => {
                 if !has_flag(args, "--output-format") {
@@ -714,10 +672,7 @@ impl WrapperProfile for GooseWrapper {
     ) -> Result<Option<String>> {
         let key = "GOOSE_MODE";
         let value = "auto";
-        if !env_overrides
-            .iter()
-            .any(|(k, v)| k == key && v == value)
-        {
+        if !env_overrides.iter().any(|(k, v)| k == key && v == value) {
             env_overrides.push((key.to_string(), value.to_string()));
         }
         Ok(None)
@@ -740,9 +695,7 @@ impl WrapperProfile for GooseWrapper {
 
         // Validate prompt is present (consistency with EnsurePromptMode providers)
         if !has_non_flag_positional(&args[1..]) {
-            bail!(
-                "--non-interactive for goose requires a prompt after the entrypoint"
-            );
+            bail!("--non-interactive for goose requires a prompt after the entrypoint");
         }
 
         Ok(())

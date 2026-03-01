@@ -1,5 +1,5 @@
-use claudine::events::Provider;
 use clap::{CommandFactory, Parser};
+use claudine::events::Provider;
 use color_eyre::eyre::Result;
 use tracing::level_filters::LevelFilter;
 
@@ -37,12 +37,22 @@ async fn main() -> Result<()> {
         Some(Commands::Skills(args)) => commands::skills::run(args, cli.verbose > 0).await,
         Some(Commands::Providers) => commands::providers::run(),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
-        Some(Commands::Claude(args)) => commands::wrap::run_provider_wrapper(Provider::Claude, args),
+        Some(Commands::Claude(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::Claude, args)
+        }
         Some(Commands::Codex(args)) => commands::wrap::run_provider_wrapper(Provider::Codex, args),
-        Some(Commands::Gemini(args)) => commands::wrap::run_provider_wrapper(Provider::Gemini, args),
-        Some(Commands::Kimi(args)) => commands::wrap::run_provider_wrapper(Provider::KimiCode, args),
-        Some(Commands::Qwen(args)) => commands::wrap::run_provider_wrapper(Provider::QwenCode, args),
-        Some(Commands::Opencode(args)) => commands::wrap::run_provider_wrapper(Provider::OpenCode, args),
+        Some(Commands::Gemini(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::Gemini, args)
+        }
+        Some(Commands::Kimi(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::KimiCode, args)
+        }
+        Some(Commands::Qwen(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::QwenCode, args)
+        }
+        Some(Commands::Opencode(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::OpenCode, args)
+        }
         Some(Commands::Goose(args)) => commands::wrap::run_provider_wrapper(Provider::Goose, args),
         None => {
             // No subcommand given - show help

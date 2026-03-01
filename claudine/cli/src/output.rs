@@ -1,13 +1,13 @@
-use std::path::Path;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{NON_INTERACTIVE, YOLO};
+use std::path::Path;
 
-use crate::commands::wrap::profile::WrapperProfile;
 use crate::commands::wrap::env::EnvPlan;
+use crate::commands::wrap::profile::WrapperProfile;
 use crate::log;
 
 pub(crate) fn log_wrapper_summary(
@@ -54,10 +54,12 @@ pub(crate) fn log_wrapper_summary(
 
     // Verbose level 0: header only (no env details)
     // Verbose level 1+: header + environment changes
-    if verbose > 0 || !env_plan.added.is_empty() || !env_plan.removed.is_empty() || !env_plan.included.is_empty() {
-        log::message(
-            &Prose::new("<bold>Environment Variables:</bold>").render(term),
-        );
+    if verbose > 0
+        || !env_plan.added.is_empty()
+        || !env_plan.removed.is_empty()
+        || !env_plan.included.is_empty()
+    {
+        log::message(&Prose::new("<bold>Environment Variables:</bold>").render(term));
 
         let mut items: Vec<RenderableContent> = Vec::new();
         for removed in &env_plan.removed {
@@ -85,9 +87,7 @@ pub(crate) fn log_wrapper_summary(
             )));
         }
 
-        let rendered = UnorderedList::from(items)
-            .with_bullet("• ")
-            .render(term);
+        let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
         log::message(&rendered);
     }
 }
@@ -122,14 +122,15 @@ pub(crate) fn log_dry_run(
         .chain(child_args.iter().map(|a| shell_escape(a)))
         .collect();
     log::message(
-        &Prose::new(format!("<bold>Command:</bold> <dim>{}</dim>", cmd_parts.join(" ")))
-            .render(term),
+        &Prose::new(format!(
+            "<bold>Command:</bold> <dim>{}</dim>",
+            cmd_parts.join(" ")
+        ))
+        .render(term),
     );
 
     // Environment changes
-    log::message(
-        &Prose::new("<bold>Environment Changes:</bold>").render(term),
-    );
+    log::message(&Prose::new("<bold>Environment Changes:</bold>").render(term));
     let mut items: Vec<RenderableContent> = Vec::new();
     for removed in &env_plan.removed {
         items.push(RenderableContent::from(Prose::new(format!(
@@ -151,9 +152,7 @@ pub(crate) fn log_dry_run(
             "<dim>no environment changes</dim>",
         )));
     }
-    let rendered = UnorderedList::from(items)
-        .with_bullet("• ")
-        .render(term);
+    let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
     log::message(&rendered);
 }
 
@@ -205,11 +204,9 @@ pub(crate) fn post_env_message(message: &str, term: &Terminal) -> String {
 
 pub(crate) fn post_env_warning_message(message: &str, term: &Terminal) -> String {
     let styled = style_cli_switches(message);
-    Prose::new(format!(
-        "- <orange><bold>Warning:</bold></orange> {styled}"
-    ))
-    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
-    .render(term)
+    Prose::new(format!("- <orange><bold>Warning:</bold></orange> {styled}"))
+        .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
+        .render(term)
 }
 
 pub(crate) fn style_cli_switches(message: &str) -> String {

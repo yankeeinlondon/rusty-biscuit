@@ -5,7 +5,7 @@ use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 use biscuit_file::serde_yaml_ng;
 
-use super::capabilities::{capabilities_for, LinkableResource, ALL_PROVIDERS};
+use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::detector::DiscoveredResource;
 use super::model::{IncompleteCause, ResourceDefinition, ResourceReference, ResourceScope};
 
@@ -865,21 +865,27 @@ mod tests {
     fn fallback_parser_ignores_lines_without_separator() {
         let mapping = parse_frontmatter_lines("name: valid\nno-separator\nother: also-valid\n");
         assert_eq!(mapping.len(), 2);
-        assert!(mapping
-            .get(serde_yaml_ng::Value::String("name".to_string()))
-            .is_some());
-        assert!(mapping
-            .get(serde_yaml_ng::Value::String("other".to_string()))
-            .is_some());
+        assert!(
+            mapping
+                .get(serde_yaml_ng::Value::String("name".to_string()))
+                .is_some()
+        );
+        assert!(
+            mapping
+                .get(serde_yaml_ng::Value::String("other".to_string()))
+                .is_some()
+        );
     }
 
     #[test]
     fn fallback_parser_rejects_keys_with_spaces() {
         let mapping = parse_frontmatter_lines("good-key: value\nbad key: value\n");
         assert_eq!(mapping.len(), 1);
-        assert!(mapping
-            .get(serde_yaml_ng::Value::String("good-key".to_string()))
-            .is_some());
+        assert!(
+            mapping
+                .get(serde_yaml_ng::Value::String("good-key".to_string()))
+                .is_some()
+        );
     }
 
     #[test]

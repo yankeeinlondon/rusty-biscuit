@@ -28,21 +28,16 @@ pub static NON_INTERACTIVE: LazyLock<String> = LazyLock::new(|| {
     .to_string()
 });
 
-
 pub static USER_SCOPED: LazyLock<String> = LazyLock::new(|| {
-    Prose::new(
-        "<bg-purple-300><bold><slate-900><bold> User </bold></slate-900></bg-purple-300>",
-    )
-    .render_optimistic(None)
-    .to_string()
+    Prose::new("<bg-purple-300><bold><slate-900><bold> User </bold></slate-900></bg-purple-300>")
+        .render_optimistic(None)
+        .to_string()
 });
 
 pub static REPO_SCOPED: LazyLock<String> = LazyLock::new(|| {
-    Prose::new(
-        "<bg-blue-300><bold><slate-900><bold> Repo </bold></slate-900></bg-blue-300>",
-    )
-    .render_optimistic(None)
-    .to_string()
+    Prose::new("<bg-blue-300><bold><slate-900><bold> Repo </bold></slate-900></bg-blue-300>")
+        .render_optimistic(None)
+        .to_string()
 });
 
 pub static MASKED_REPO_SCOPED: LazyLock<String> = LazyLock::new(|| {
@@ -58,5 +53,3 @@ pub static EXCEPTIONS: LazyLock<String> = LazyLock::new(|| {
         .render_optimistic(None)
         .to_string()
 });
-
-

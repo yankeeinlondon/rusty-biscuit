@@ -1,8 +1,8 @@
-use expectrl::{Expect, Session};
-use std::process::Command;
 use assert_cmd::cargo::cargo_bin;
-use tempfile::tempdir;
+use expectrl::{Expect, Session};
 use std::fs;
+use std::process::Command;
+use tempfile::tempdir;
 
 #[cfg(unix)]
 fn write_executable(path: &std::path::Path, content: &str) {
@@ -26,7 +26,7 @@ fn pty_wrapper_summary_shows_badges() {
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
     cmd.env("PATH", bin_dir);
-    
+
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");
     p.expect("Claudine").unwrap();
     p.expect("Codex").unwrap();
@@ -48,7 +48,7 @@ fn pty_non_interactive_detection() {
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
     cmd.env("PATH", bin_dir);
-    
+
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");
     p.expect("Claudine").unwrap();
     p.expect("Codex").unwrap();

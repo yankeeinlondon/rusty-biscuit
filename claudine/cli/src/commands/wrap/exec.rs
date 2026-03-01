@@ -65,8 +65,8 @@ pub(crate) fn run_child(
 /// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
 #[cfg(unix)]
 fn wait_with_signal_handling(child: &mut Child) -> Result<i32> {
-    use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU8, Ordering};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let child_pid = child.id();

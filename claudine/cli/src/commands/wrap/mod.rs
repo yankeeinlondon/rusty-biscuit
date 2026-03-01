@@ -79,8 +79,12 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs) -> Result<()>
 }
 
 fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i32> {
-    let profile = profile::profile_for_provider(provider)
-        .ok_or_else(|| eyre!("'{}' cannot be wrapped (it is a VS Code extension)", provider))?;
+    let profile = profile::profile_for_provider(provider).ok_or_else(|| {
+        eyre!(
+            "'{}' cannot be wrapped (it is a VS Code extension)",
+            provider
+        )
+    })?;
     let cwd = std::env::current_dir()?;
     let term = Terminal::new();
 
@@ -99,14 +103,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
 
     // Validate: --timeout requires --non-interactive
     if args.timeout.is_some() && !non_interactive_requested {
-        return Err(eyre!("--timeout can only be used with --non-interactive mode"));
+        return Err(eyre!(
+            "--timeout can only be used with --non-interactive mode"
+        ));
     }
 
     profile.reject_direct_yolo(&child_args)?;
 
-    if yolo_requested
-        && let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
-    {
+    if yolo_requested && let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)? {
         deferred_warnings.push(warn);
     }
     if yolo_requested && !profile.has_supported_yolo() {
@@ -140,9 +144,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
 
     // Universal --output flag
     if let Some(ref output_str) = args.output {
-        let format: OutputFormat = output_str
-            .parse()
-            .map_err(|e: String| eyre!(e))?;
+        let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
         if let Some(warn) = profile.apply_output_format(&mut child_args, format) {
             deferred_warnings.push(warn);
         }
@@ -177,7 +179,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
 
     // --dry-run: print what would be executed and exit
     if args.dry_run {
-        crate::output::log_dry_run(profile, &binary_path, &child_args, &env_plan, child_cwd, &term);
+        crate::output::log_dry_run(
+            profile,
+            &binary_path,
+            &child_args,
+            &env_plan,
+            child_cwd,
+            &term,
+        );
         return Ok(0);
     }
 
@@ -193,7 +202,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             args.verbose_level(),
         );
 
-        if let Some(info_message) = crate::output::removed_env_info_message(&env_plan.removed, &term) {
+        if let Some(info_message) =
+            crate::output::removed_env_info_message(&env_plan.removed, &term)
+        {
             log::message(&info_message);
         }
         for warning in &env_plan.warnings {
@@ -408,10 +419,10 @@ mod tests {
                 for f in &flags {
                     args.push(f.clone());
                 }
-                
+
                 // Shuffle manually or just accept order for now
                 let extracted = extract_wrapper_flags_from_passthrough(&mut args);
-                
+
                 // All 'others' should still be there
                 assert_eq!(args.len(), others.len());
                 for o in others {

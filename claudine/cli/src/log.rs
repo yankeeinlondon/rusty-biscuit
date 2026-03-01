@@ -41,7 +41,6 @@ pub fn warn(msg: &str) {
 /// styled rendering of CLI switches and other highlights.
 pub fn error(msg: &str) {
     let term = Terminal::new();
-    let rendered =
-        Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
+    let rendered = Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
     let _ = writeln!(std::io::stderr(), "\n{rendered}");
 }

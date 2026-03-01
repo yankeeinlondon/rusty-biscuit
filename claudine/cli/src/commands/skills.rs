@@ -44,9 +44,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     // When --fix is used in a git repo, check if repo canonical provider needs initialization
     if is_git_repo && args.apply && repo_canonical_needs_init(&paths) {
         log::message("");
-        log::message(
-            "Repo canonical provider is not configured. Running claudine init --repo ...",
-        );
+        log::message("Repo canonical provider is not configured. Running claudine init --repo ...");
         log::message("");
         super::init::run(super::init::InitArgs {
             quick: false,
@@ -80,10 +78,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         if args.filter.is_empty() {
             log::data("No skills found.");
         } else {
-            log::data(&format!(
-                "No skills matching: {}",
-                args.filter.join(", ")
-            ));
+            log::data(&format!("No skills matching: {}", args.filter.join(", ")));
         }
         return Ok(());
     }
@@ -94,9 +89,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     let header = Prose::new("<blue><b>Skills</b></blue>").render(&term);
     log::data("");
     log::data(&header);
-    log::data(
-        &Prose::new("<blue>==================</blue>").render(&term),
-    );
+    log::data(&Prose::new("<blue>==================</blue>").render(&term));
     log::data("");
 
     // Canonical providers line
@@ -173,8 +166,11 @@ fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_gi
         return;
     };
 
-    let user_canonical =
-        canonical_provider(&linking_settings.canonical_provider, ResourceScope::User, LinkableResource::Skill);
+    let user_canonical = canonical_provider(
+        &linking_settings.canonical_provider,
+        ResourceScope::User,
+        LinkableResource::Skill,
+    );
 
     let not_configured = "<i><red>not configured</red></i>";
 
@@ -239,10 +235,7 @@ fn render_verbose(term: &Terminal, skills: &[SkillInfo]) {
 
     for skill in skills {
         let badge = scope_badge(skill.scope);
-        let desc = skill
-            .description
-            .as_deref()
-            .unwrap_or("no description");
+        let desc = skill.description.as_deref().unwrap_or("no description");
         let item = Prose::new(format!(
             r#"<a href="{}"><b>{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
             skill.skill_md_path.display(),
@@ -337,8 +330,7 @@ fn render_exceptions(
         if let Some(type_map) = by_provider.get(provider_name) {
             for (exc_type, entries) in type_map {
                 let count = entries.len();
-                let category_label =
-                    Prose::new(format!("<b>{exc_type}</b> ({count})"));
+                let category_label = Prose::new(format!("<b>{exc_type}</b> ({count})"));
                 inner_list.add(category_label);
 
                 let mut detail_list = UnorderedList::empty();
@@ -351,8 +343,7 @@ fn render_exceptions(
                                 detail_list.add(Prose::new(diag.message.clone()));
                             }
                         }
-                        let topics: Vec<String> =
-                            entries.iter().map(|e| e.topic.clone()).collect();
+                        let topics: Vec<String> = entries.iter().map(|e| e.topic.clone()).collect();
                         let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
                             WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
                         );
@@ -419,8 +410,7 @@ fn render_exceptions(
                             if verbose
                                 && let Some(dir) = first.skill_md_path.parent()
                                 && let Some(dir_str) = dir.to_str()
-                                && let Ok(mut fs) =
-                                    FileSystem::new_with_formatting(dir_str)
+                                && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
                             {
                                 let layout = Layout {
                                     left_margin: Margin::Chars(4),
@@ -518,9 +508,7 @@ fn build_provider_header(provider_name: &str) -> String {
         .map(|p| format!("<magenta>{}</magenta>", p.display()))
         .unwrap_or_else(|| "-".to_string());
 
-    format!(
-        "<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]",
-    )
+    format!("<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]",)
 }
 
 /// Render footer messages based on current state.
