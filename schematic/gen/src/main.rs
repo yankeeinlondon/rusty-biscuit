@@ -12,6 +12,7 @@ use schematic_definitions::anthropic::define_anthropic_api;
 use schematic_definitions::bitbucket::define_bitbucket_api;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
+use schematic_definitions::eversolo::define_eversolo_api;
 use schematic_definitions::gitea::define_gitea_api;
 use schematic_definitions::github::define_github_api;
 use schematic_definitions::gitlab::define_gitlab_api;
@@ -20,6 +21,8 @@ use schematic_definitions::lmstudio::define_lmstudio_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
 use schematic_definitions::registry::get_registry;
+use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
+use schematic_gen::asyncapi_import::{self, AsyncImportOptions, WsRole as AsyncWsRole};
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::import_pipeline::{self, ImportOptions};
@@ -28,7 +31,7 @@ use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
+const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, unfolded-circle-core-rest, all";
 
 /// OpenAPI output format for CLI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -45,6 +48,28 @@ impl From<OpenApiFormat> for ExportFormat {
         match format {
             OpenApiFormat::Json => ExportFormat::Json,
             OpenApiFormat::Yaml => ExportFormat::Yaml,
+        }
+    }
+}
+
+/// WebSocket role mapping mode for AsyncAPI import.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum WsRoleArg {
+    /// Treat AsyncAPI publish as client -> server.
+    #[default]
+    Client,
+    /// Treat AsyncAPI publish as server -> client.
+    Server,
+    /// Map all messages as bidirectional.
+    Both,
+}
+
+impl From<WsRoleArg> for AsyncWsRole {
+    fn from(value: WsRoleArg) -> Self {
+        match value {
+            WsRoleArg::Client => AsyncWsRole::Client,
+            WsRoleArg::Server => AsyncWsRole::Server,
+            WsRoleArg::Both => AsyncWsRole::Both,
         }
     }
 }
@@ -136,6 +161,37 @@ enum Commands {
         #[arg(long)]
         strict: bool,
     },
+
+    /// Import an AsyncAPI specification and emit websocket import artifacts
+    ImportAsyncapi {
+        /// Path to AsyncAPI spec file (JSON or YAML)
+        #[arg(short, long)]
+        input: String,
+
+        /// Override API name (derived from spec title by default)
+        #[arg(long, value_name = "NAME")]
+        api_name: Option<String>,
+
+        /// Override module path for generated code
+        #[arg(long, value_name = "PATH")]
+        module_path: Option<String>,
+
+        /// Role mapping for publish/subscribe semantics
+        #[arg(long, value_enum, default_value = "client")]
+        ws_role: WsRoleArg,
+
+        /// Output directory for import artifacts
+        #[arg(short, long)]
+        output: String,
+
+        /// Print import summary without writing files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Fail on any warning-level diagnostic
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 /// Resolves an API name to its definition.
@@ -154,6 +210,8 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
         "ollama-openai" => Ok(define_ollama_openai_api()),
         "emqx-basic" => Ok(define_emqx_basic_api()),
         "emqx-bearer" => Ok(define_emqx_bearer_api()),
+        "eversolo" => Ok(define_eversolo_api()),
+        "unfolded-circle-core-rest" => Ok(define_unfolded_circle_core_rest_api()),
         "all" => Err(GeneratorError::ConfigError(
             "Use resolve_all_apis() for 'all'".to_string(),
         )),
@@ -180,6 +238,8 @@ fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
         define_ollama_openai_api(),
         define_emqx_basic_api(),
         define_emqx_bearer_api(),
+        define_eversolo_api(),
+        define_unfolded_circle_core_rest_api(),
     ]
 }
 
@@ -494,6 +554,8 @@ fn run_generate_all(
             ("OllamaOpenAI", "ollama-openai"),
             ("EmqxBasic", "emqx-basic"),
             ("EmqxBearer", "emqx-bearer"),
+            ("Eversolo", "eversolo"),
+            ("UnfoldedCircleCoreRest", "unfolded-circle-core-rest"),
         ];
 
         for api in &apis {
@@ -506,6 +568,78 @@ fn run_generate_all(
 
             run_openapi_export(api_name, api, openapi_dir, openapi_format, dry_run, verbose)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Runs the AsyncAPI import command.
+struct ImportAsyncapiCommandArgs<'a> {
+    input: &'a str,
+    api_name: Option<&'a str>,
+    module_path: Option<&'a str>,
+    ws_role: WsRoleArg,
+    output: &'a str,
+    dry_run: bool,
+    strict: bool,
+}
+
+/// Runs the AsyncAPI import command.
+fn run_import_asyncapi_command(
+    args: ImportAsyncapiCommandArgs<'_>,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    if verbose > 0 {
+        eprintln!("Importing AsyncAPI spec: {}", args.input);
+        eprintln!("Output directory: {}", args.output);
+        if args.dry_run {
+            eprintln!("Dry run mode - no files will be written");
+        }
+    }
+
+    println!("{}", "Importing AsyncAPI specification...".dimmed());
+
+    let options = AsyncImportOptions {
+        input: args.input.to_string(),
+        api_name: args.api_name.map(String::from),
+        module_path: args.module_path.map(String::from),
+        ws_role: args.ws_role.into(),
+        output: args.output.to_string(),
+        dry_run: args.dry_run,
+        strict: args.strict,
+        verbose: verbose > 0,
+    };
+
+    let result = asyncapi_import::run_import_asyncapi(&options)?;
+    let warn_count = result.diagnostics.iter().filter(|d| d.is_warn()).count();
+    let error_count = result.diagnostics.iter().filter(|d| d.is_error()).count();
+
+    if !args.dry_run {
+        println!(
+            "{} Imported '{}' (AsyncAPI): {} endpoints, {} messages, {} models",
+            "[OK]".green().bold(),
+            result.api_name,
+            result.endpoint_count,
+            result.message_count,
+            result.model_count,
+        );
+    } else {
+        println!(
+            "{} Dry run complete for '{}' (AsyncAPI): {} endpoints, {} messages, {} models",
+            "[OK]".green().bold(),
+            result.api_name,
+            result.endpoint_count,
+            result.message_count,
+            result.model_count,
+        );
+    }
+
+    if warn_count > 0 || error_count > 0 {
+        println!(
+            "     {} warnings, {} errors in diagnostics",
+            warn_count.to_string().yellow(),
+            error_count.to_string().red(),
+        );
     }
 
     Ok(())
@@ -641,6 +775,27 @@ fn main() -> ExitCode {
             &output,
             dry_run,
             strict,
+            cli.verbose,
+        ),
+        // Explicit subcommand: import-asyncapi
+        Some(Commands::ImportAsyncapi {
+            input,
+            api_name,
+            module_path,
+            ws_role,
+            output,
+            dry_run,
+            strict,
+        }) => run_import_asyncapi_command(
+            ImportAsyncapiCommandArgs {
+                input: &input,
+                api_name: api_name.as_deref(),
+                module_path: module_path.as_deref(),
+                ws_role,
+                output: &output,
+                dry_run,
+                strict,
+            },
             cli.verbose,
         ),
         // No subcommand: backwards-compatible mode (acts like generate)

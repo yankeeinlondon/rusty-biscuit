@@ -61,6 +61,7 @@
 //! }
 //! ```
 
+pub mod asyncapi_import;
 pub mod cargo_gen;
 pub mod codegen;
 pub mod errors;

@@ -6,10 +6,10 @@
 use std::fs;
 use std::path::Path;
 
-use schematic_define::openapi::{
-    export, serialize, ExportFormat, ExportOptions, SchemaRegistryLike,
-};
 use schematic_define::RestApi;
+use schematic_define::openapi::{
+    ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
+};
 
 use crate::errors::GeneratorError;
 
