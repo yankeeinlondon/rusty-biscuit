@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::engine::ArgValueCandidates;
 use std::path::PathBuf;
 
-use crate::commands::run::{run_model_candidates, RunnerFilter};
+use crate::commands::run::{RunnerFilter, run_model_candidates};
 
 /// Sort order for HuggingFace search results.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -218,4 +218,3 @@ mod tests {
         assert!(cli.json);
     }
 }
-

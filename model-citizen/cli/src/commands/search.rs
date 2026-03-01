@@ -1,9 +1,9 @@
 //! Search command - searches HuggingFace for GGUF models.
 
+use crate::output::print_search_results;
 use color_eyre::eyre::Result;
 use model_citizen::SortOrder;
 use model_citizen::huggingface::HuggingFaceClient;
-use crate::output::print_search_results;
 
 pub async fn run(
     query: Option<&str>,

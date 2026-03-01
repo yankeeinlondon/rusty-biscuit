@@ -47,12 +47,8 @@ async fn main() -> Result<()> {
             verbose,
             app,
             size,
-        } => {
-            commands::list::run(filter, runner, cli.json, verbose, app, size).await
-        }
-        Commands::Info { model } => {
-            commands::info::run(&model, cli.json).await
-        }
+        } => commands::list::run(filter, runner, cli.json, verbose, app, size).await,
+        Commands::Info { model } => commands::info::run(&model, cli.json).await,
         Commands::Search {
             query,
             limit,
@@ -93,9 +89,7 @@ async fn main() -> Result<()> {
             model,
             runner,
             force,
-        } => {
-            commands::remove::run(&model, runner.as_deref(), force).await
-        }
+        } => commands::remove::run(&model, runner.as_deref(), force).await,
         Commands::Run {
             model,
             runner,

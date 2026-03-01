@@ -1,12 +1,12 @@
 //! Info command - shows detailed model information.
 
+use crate::output::print_model_info;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
 use model_citizen::{
     Config, ModelRegistry, UnifiedModel,
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
 };
-use crate::output::print_model_info;
 
 pub async fn run(model_name: &str, json_output: bool) -> Result<()> {
     let config = Config::load()?;

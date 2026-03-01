@@ -201,7 +201,8 @@ impl HuggingFaceClient {
         limit: usize,
         sort: SortOrder,
     ) -> Result<Vec<SearchResult>, ModelCitizenError> {
-        self.search_models_with_filter(query, limit, sort, None).await
+        self.search_models_with_filter(query, limit, sort, None)
+            .await
     }
 
     /// Searches for GGUF models on HuggingFace.
@@ -476,10 +477,7 @@ impl HuggingFaceClient {
         }
 
         if !status.is_success() {
-            let err = ModelCitizenError::network(format!(
-                "Download failed: {}",
-                status
-            ));
+            let err = ModelCitizenError::network(format!("Download failed: {}", status));
             return if Self::is_retryable_status(status) {
                 Err(DownloadAttemptError::Retryable(err))
             } else {
@@ -780,7 +778,8 @@ mod tests {
     #[test]
     fn partial_download_size_returns_none_when_missing() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let size = HuggingFaceClient::partial_download_size(temp_dir.path(), "missing.gguf").unwrap();
+        let size =
+            HuggingFaceClient::partial_download_size(temp_dir.path(), "missing.gguf").unwrap();
         assert_eq!(size, None);
     }
 }

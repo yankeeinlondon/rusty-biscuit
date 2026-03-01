@@ -14,7 +14,12 @@ use model_citizen::{SortOrder, UnifiedModel, huggingface::SearchResult, sharing}
 const HF_BASE: &str = "https://huggingface.co";
 
 /// Prints a list of unified models, either as a terminal table or JSON.
-pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, runner_filter: Option<&str>) -> Result<()> {
+pub fn print_models(
+    models: &[UnifiedModel],
+    json_output: bool,
+    verbose: bool,
+    runner_filter: Option<&str>,
+) -> Result<()> {
     if json_output {
         let json = serde_json::to_string_pretty(&models)?;
         println!("{json}");
@@ -28,8 +33,7 @@ pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, r
 
         let mut columns = vec![
             TableColumn::new(Prose::new("Name").render(&term)),
-            TableColumn::new(Prose::new("Quant").render(&term))
-                .with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("Quant").render(&term)).with_alignment(Alignment::Center),
             TableColumn::new(Prose::new("Size").render(&term))
                 .with_type(ColumnType::String)
                 .with_alignment(Alignment::Right),
@@ -85,8 +89,11 @@ pub fn print_models(models: &[UnifiedModel], json_output: bool, verbose: bool, r
         }
 
         print!("{}", table.display(&term));
-        println!("
-Total: {} models", models.len());
+        println!(
+            "
+Total: {} models",
+            models.len()
+        );
     }
 
     Ok(())
@@ -201,8 +208,10 @@ pub fn print_model_info(model: &UnifiedModel, json_output: bool) -> Result<()> {
         {
             let shares = share_registry.get_shares(&model.path);
             if !shares.is_empty() {
-                println!("
-  Shared to:");
+                println!(
+                    "
+  Shared to:"
+                );
                 for share in shares {
                     println!("    - {}", share.display());
                 }
@@ -277,25 +286,21 @@ pub fn print_search_results(
         let mut columns = vec![
             TableColumn::new(Prose::new("Repository").render(&term)),
             TableColumn::new(
-                Prose::new(sort_header("Downloads", sort == SortOrder::Downloads))
-                    .render(&term),
+                Prose::new(sort_header("Downloads", sort == SortOrder::Downloads)).render(&term),
             )
             .with_type(ColumnType::Integer),
             TableColumn::new(
                 Prose::new(sort_header("Likes", sort == SortOrder::Likes)).render(&term),
             )
             .with_type(ColumnType::Integer),
-            TableColumn::new(Prose::new("G").render(&term))
-                .with_alignment(Alignment::Center),
-            TableColumn::new(Prose::new("ST").render(&term))
-                .with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("G").render(&term)).with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("ST").render(&term)).with_alignment(Alignment::Center),
             TableColumn::new(Prose::new("Tags").render(&term)),
         ];
         if show_created {
             columns.push(
                 TableColumn::new(
-                    Prose::new(sort_header("Created", sort == SortOrder::Created))
-                        .render(&term),
+                    Prose::new(sort_header("Created", sort == SortOrder::Created)).render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -303,8 +308,7 @@ pub fn print_search_results(
         if show_modified {
             columns.push(
                 TableColumn::new(
-                    Prose::new(sort_header("Modified", sort == SortOrder::Modified))
-                        .render(&term),
+                    Prose::new(sort_header("Modified", sort == SortOrder::Modified)).render(&term),
                 )
                 .with_alignment(Alignment::Center),
             );
@@ -435,8 +439,8 @@ mod tests {
         }];
 
         let json = serde_json::to_string_pretty(&models).unwrap();
-        
-        // Remove the path from json string because it might differ across OS 
+
+        // Remove the path from json string because it might differ across OS
         // if path representation changes, though here it's static.
         insta::assert_snapshot!(json, @r###"
         [

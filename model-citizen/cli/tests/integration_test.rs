@@ -8,7 +8,9 @@ fn test_help() {
     cmd.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("CLI for managing local LLM models"));
+        .stdout(predicate::str::contains(
+            "CLI for managing local LLM models",
+        ));
 }
 
 #[test]

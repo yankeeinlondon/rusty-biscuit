@@ -1,11 +1,11 @@
 //! List command - shows all models across runners.
 
+use crate::output::print_models;
 use color_eyre::eyre::Result;
 use model_citizen::{
     Config, ModelRegistry,
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
 };
-use crate::output::print_models;
 
 pub async fn run(
     name_filter: Option<String>,
@@ -21,9 +21,7 @@ pub async fn run(
     // Add scanners based on filter
     let filter = runner_filter.as_deref().map(|s| s.to_lowercase());
 
-    if (filter.is_none() || filter.as_deref() == Some("ollama"))
-        && config.scanners.ollama.enabled
-    {
+    if (filter.is_none() || filter.as_deref() == Some("ollama")) && config.scanners.ollama.enabled {
         registry.add_scanner(OllamaScanner::new(&config));
     }
 
