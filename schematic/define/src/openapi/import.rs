@@ -41,13 +41,13 @@
 
 use std::collections::HashSet;
 
-#[cfg(feature = "openapi")]
-use biscuit_file::serde_yaml_ng;
 use super::error::OpenApiError;
 use super::source::OpenApiSource;
 use crate::auth::AuthStrategy;
 use crate::models::ModelCatalog;
 use crate::types::RestApi;
+#[cfg(feature = "openapi")]
+use biscuit_file::serde_yaml_ng;
 
 mod diagnostics;
 mod mappings;
