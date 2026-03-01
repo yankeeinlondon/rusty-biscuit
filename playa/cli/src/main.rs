@@ -153,6 +153,10 @@ struct PlaybackOptions {
     #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"])]
     volume: Option<f32>,
 
+    /// Force host player playback (skip native decoder)
+    #[arg(long)]
+    force_host: bool,
+
     /// Disable audio ducking (attenuating other audio during playback)
     #[cfg(feature = "audio-ducking")]
     #[arg(long)]
@@ -198,6 +202,10 @@ impl PlaybackOptions {
 
         if self.meta {
             playa = playa.show_meta();
+        }
+
+        if self.force_host {
+            playa = playa.force_host();
         }
 
         #[cfg(feature = "audio-ducking")]
@@ -393,15 +401,29 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
         std::process::exit(2);
     };
 
-    // Use native SFX playback when available and ducking is not requested.
-    // Native playback bypasses host player subprocess spawning for lower latency
-    // and enables OS audio channel routing (e.g., macOS system sound device).
+    // Use native SFX playback when available (with OS audio channel routing).
+    // Ducking is set up before SFX playback so both paths benefit.
     #[cfg(feature = "sfx-native")]
-    if !opts.has_ducking() {
+    if !opts.force_host {
+        #[cfg(feature = "audio-ducking")]
+        let guard = if opts.has_ducking() {
+            let backend = create_backend();
+            match DuckConfig::new(opts.duck_ramp_ms, opts.duck_floor) {
+                Ok(config) => DuckGuard::new(backend, config).await.ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         if playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok() {
+            #[cfg(feature = "audio-ducking")]
+            if let Some(guard) = guard {
+                guard.restore().await;
+            }
             return;
         }
-        // Fall through to host player on error.
+        // Fall through to Playa builder path on error
     }
 
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
@@ -450,11 +472,10 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
 
     // Use native SFX playback when available.
     #[cfg(feature = "sfx-native")]
+    if !opts.force_host
+        && playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok()
     {
-        if playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok() {
-            return;
-        }
-        // Fall through to host player on error.
+        return;
     }
 
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
@@ -926,6 +947,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
             #[cfg(feature = "audio-ducking")]
@@ -952,6 +974,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
             #[cfg(feature = "audio-ducking")]
@@ -973,6 +996,7 @@ mod tests {
             loud: false,
             speed: Some(0.9),
             volume: Some(0.3),
+            force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
             #[cfg(feature = "audio-ducking")]
@@ -994,6 +1018,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
             #[cfg(feature = "audio-ducking")]

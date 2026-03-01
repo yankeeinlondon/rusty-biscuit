@@ -231,7 +231,7 @@ install *args="":
     # Enable macOS system sound device routing when on macOS
     EXTRA_FEATURES=""
     if [[ "$(uname)" == "Darwin" ]]; then
-        EXTRA_FEATURES="--features sfx-native-macos"
+        EXTRA_FEATURES="--features sfx-native-macos,native-playback"
     fi
     cargo install --path {{CLI_PATH}} $EXTRA_FEATURES {{args}} || ( playa effect error-2 2>/dev/null; exit 1 )
     echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
