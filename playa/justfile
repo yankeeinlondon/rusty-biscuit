@@ -228,28 +228,29 @@ install *args="":
     echo
     echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
     echo
-    # Enable native playback + platform-specific sound routing
-    # macOS: CoreAudio always available
-    # Windows: WASAPI always available
-    # Linux: requires libasound2-dev — skip native playback by default
+    # Platform-specific feature selection:
+    # - macOS/Windows: native playback always works (system audio APIs are built-in)
+    # - Linux: native playback requires libasound2-dev; fall back to host players if missing
     EXTRA_FEATURES=""
+    INSTALL_FLAGS=""
     case "$(uname)" in
         Darwin)
-            EXTRA_FEATURES="--features sfx-native-macos,native-playback"
+            EXTRA_FEATURES="--features sfx-native-macos"
             ;;
         MINGW*|MSYS*|CYGWIN*)
-            EXTRA_FEATURES="--features sfx-native-windows,native-playback"
+            EXTRA_FEATURES="--features sfx-native-windows"
             ;;
         Linux)
             if pkg-config --exists alsa 2>/dev/null; then
                 echo -e "{{DIM}}ALSA detected — enabling native playback{{RESET}}"
-                EXTRA_FEATURES="--features sfx-native-linux,native-playback"
+                EXTRA_FEATURES="--features sfx-native-linux"
             else
                 echo -e "{{DIM}}ALSA not found — using host player fallback (install libasound2-dev for native playback){{RESET}}"
+                INSTALL_FLAGS="--no-default-features"
             fi
             ;;
     esac
-    cargo install --path {{CLI_PATH}} $EXTRA_FEATURES {{args}} || ( playa effect error-2 2>/dev/null; exit 1 )
+    cargo install --path {{CLI_PATH}} $INSTALL_FLAGS $EXTRA_FEATURES {{args}} || ( playa effect error-2 2>/dev/null; exit 1 )
     echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
     echo
     playa effect drop-4 2>/dev/null || true

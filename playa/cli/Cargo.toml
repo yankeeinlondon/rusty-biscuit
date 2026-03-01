@@ -9,7 +9,7 @@ name = "playa"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["sfx-native", "native-playback"]
 native-playback = ["playa/native-playback"]
 audio-ducking = ["playa/audio-ducking", "tokio"]
 audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
