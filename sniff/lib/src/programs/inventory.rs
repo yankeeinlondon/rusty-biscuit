@@ -906,12 +906,13 @@ static CLAUDE_INSTALL: &[InstallationMethod] =
 static OPENCODE_INSTALL: &[InstallationMethod] =
     &[InstallationMethod::GoModules("github.com/opencode-ai/opencode@latest")];
 
-static ROO_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
-    "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh",
-)];
+static ROO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::RemoteBash(
+        "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh",
+    ),
+];
 
-static GEMINI_CLI_INSTALL: &[InstallationMethod] =
-    &[InstallationMethod::Npm("@google/gemini-cli")];
+static GEMINI_CLI_INSTALL: &[InstallationMethod] = &[InstallationMethod::Npm("@google/gemini-cli")];
 
 static AIDER_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Pip("aider-chat"),

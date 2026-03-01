@@ -115,11 +115,9 @@ macro_rules! direct_install_category {
             return Ok(());
         }
         if !detector.installable(program) {
-            return Err(format!(
-                "{} is not installable on this OS.",
-                program.display_name()
-            )
-            .into());
+            return Err(
+                format!("{} is not installable on this OS.", program.display_name()).into(),
+            );
         }
         println!("Installing {}...", program.display_name());
         detector.install(program)?;
@@ -131,18 +129,10 @@ macro_rules! direct_install_category {
 pub fn direct_install(filter: OutputFilter, name: &str) -> Result<(), Box<dyn Error>> {
     match filter {
         OutputFilter::Editors => {
-            direct_install_category!(
-                name,
-                resolve_editor,
-                sniff::programs::InstalledEditors
-            )
+            direct_install_category!(name, resolve_editor, sniff::programs::InstalledEditors)
         }
         OutputFilter::Utilities => {
-            direct_install_category!(
-                name,
-                resolve_utility,
-                sniff::programs::InstalledUtilities
-            )
+            direct_install_category!(name, resolve_utility, sniff::programs::InstalledUtilities)
         }
         OutputFilter::LanguagePackageManagers => {
             direct_install_category!(
@@ -173,18 +163,10 @@ pub fn direct_install(filter: OutputFilter, name: &str) -> Result<(), Box<dyn Er
             )
         }
         OutputFilter::HeadlessAudio => {
-            direct_install_category!(
-                name,
-                resolve_audio,
-                sniff::programs::InstalledHeadlessAudio
-            )
+            direct_install_category!(name, resolve_audio, sniff::programs::InstalledHeadlessAudio)
         }
         OutputFilter::AiClients => {
-            direct_install_category!(
-                name,
-                resolve_agent,
-                sniff::programs::InstalledAiClients
-            )
+            direct_install_category!(name, resolve_agent, sniff::programs::InstalledAiClients)
         }
         OutputFilter::Programs => {
             // Search all categories, install first match
@@ -225,10 +207,8 @@ macro_rules! interactive_install_category {
             let all: Vec<$enum_type> = <$enum_type>::iter().collect();
 
             let installed: Vec<_> = all.iter().filter(|p| detector.is_installed(**p)).collect();
-            let not_installed: Vec<_> = all
-                .iter()
-                .filter(|p| !detector.is_installed(**p))
-                .collect();
+            let not_installed: Vec<_> =
+                all.iter().filter(|p| !detector.is_installed(**p)).collect();
 
             if !installed.is_empty() {
                 let names: Vec<_> = installed.iter().map(|p| p.display_name()).collect();

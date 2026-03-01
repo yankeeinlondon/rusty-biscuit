@@ -309,11 +309,17 @@ fn print_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose
             format!(" [{}]", markers.join(", "))
         };
 
-        println!("  {} ({}, {}){}", dev.name, dev.kind, dev.direction, marker_str);
+        println!(
+            "  {} ({}, {}){}",
+            dev.name, dev.kind, dev.direction, marker_str
+        );
 
         if verbose > 0 {
             if dev.sample_rate > 0.0 {
-                println!("    Sample rate: {} Hz", format_sample_rate(dev.sample_rate));
+                println!(
+                    "    Sample rate: {} Hz",
+                    format_sample_rate(dev.sample_rate)
+                );
             }
             if dev.output_channels > 0 {
                 println!("    Output channels: {}", dev.output_channels);

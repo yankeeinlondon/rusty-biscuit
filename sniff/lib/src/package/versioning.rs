@@ -22,11 +22,7 @@ pub fn is_major_update(actual: &str, latest: &str) -> bool {
         }
         let major = parts[0].parse::<u64>().ok()?;
         let minor = parts[1].parse::<u64>().ok()?;
-        parts[2]
-            .split(|c: char| !c.is_ascii_digit())
-            .next()?
-            .parse::<u64>()
-            .ok()?;
+        parts[2].split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()?;
         Some((major, minor))
     };
 

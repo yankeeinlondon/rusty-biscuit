@@ -6,7 +6,9 @@ use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteRepor
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 
-use crate::args::{COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, ServiceStateArg};
+use crate::args::{
+    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, ServiceStateArg,
+};
 use crate::output::{self, OutputFilter};
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -98,13 +100,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return handle_shorthand(remote_ref, cli.json, cli.verbose).await;
         } else {
             // Git remote name (e.g., "origin")
-            let url =
-                resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
-                    format!(
-                        "Could not find remote '{}' in the current repository",
-                        remote_ref
-                    )
-                })?;
+            let url = resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
+                format!(
+                    "Could not find remote '{}' in the current repository",
+                    remote_ref
+                )
+            })?;
             return handle_remote_url(&url, cli.json, cli.verbose).await;
         }
     }
@@ -121,7 +122,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Set commit count from history flag
-    let history_count = cli.command.as_ref().map_or(DEFAULT_COMMIT_COUNT, |c| c.history());
+    let history_count = cli
+        .command
+        .as_ref()
+        .map_or(DEFAULT_COMMIT_COUNT, |c| c.history());
     config = config.commit_count(history_count);
 
     // Apply skip logic based on filter mode

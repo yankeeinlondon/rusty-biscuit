@@ -303,7 +303,9 @@ mod tests {
         // Simulate tree-hugger layout: many .scm query files outnumbering .rs files
         let queries_dir = dir.path().join("queries");
         fs::create_dir(&queries_dir).unwrap();
-        for lang in &["rust", "python", "go"] {
+        for lang in &[
+            "rust", "python", "go",
+        ] {
             let lang_dir = queries_dir.join(lang);
             fs::create_dir(&lang_dir).unwrap();
             fs::write(lang_dir.join("highlights.scm"), "(comment) @comment").unwrap();

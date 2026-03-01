@@ -208,7 +208,10 @@ fn extract_frontmatter(content: &str) -> (HashMap<String, serde_yaml_ng::Value>,
 }
 
 /// Extract a string field from the frontmatter map.
-fn get_string_field(frontmatter: &HashMap<String, serde_yaml_ng::Value>, key: &str) -> Option<String> {
+fn get_string_field(
+    frontmatter: &HashMap<String, serde_yaml_ng::Value>,
+    key: &str,
+) -> Option<String> {
     frontmatter.get(key).and_then(|v| match v {
         serde_yaml_ng::Value::String(s) => Some(s.clone()),
         serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),

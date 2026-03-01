@@ -56,9 +56,7 @@ impl RepoFilter {
         } else {
             &pkg.name
         };
-        let hit = haystack
-            .to_lowercase()
-            .contains(&self.query.to_lowercase());
+        let hit = haystack.to_lowercase().contains(&self.query.to_lowercase());
         if self.negate { !hit } else { hit }
     }
 }
@@ -184,9 +182,11 @@ fn parse_git_url(
     };
 
     // Build browsable URL based on provider
-    let browse_url = owner_repo
-        .as_ref()
-        .and_then(|repo| provider.browser_base_url().map(|base| format!("{}/{}", base, repo)));
+    let browse_url = owner_repo.as_ref().and_then(|repo| {
+        provider
+            .browser_base_url()
+            .map(|base| format!("{}/{}", base, repo))
+    });
 
     (owner_repo, browse_url)
 }
@@ -230,7 +230,10 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let date_prefix = if use_on { "<i>on</i> " } else { "" };
         let refs_part = format_ref_decorations(&commit.refs);
         let user_part = if verbose > 0 {
-            format!(" <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>", commit.author)
+            format!(
+                " <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>",
+                commit.author
+            )
         } else {
             String::new()
         };
@@ -243,7 +246,15 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 .unwrap_or_default();
             format!(
                 "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
-                sha, op, scope_part, time_str, date_prefix, date_str, refs_part, user_part, cc.description
+                sha,
+                op,
+                scope_part,
+                time_str,
+                date_prefix,
+                date_str,
+                refs_part,
+                user_part,
+                cc.description
             )
         } else {
             // Non-conventional commit
@@ -555,10 +566,7 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 .signing_key
                 .as_deref()
                 .unwrap_or("<dim><i>undefined</i></dim>");
-            crypto_list.add(Prose::new(format!(
-                "<b>GPG Key:</b> <blue>{}</blue>",
-                key
-            )));
+            crypto_list.add(Prose::new(format!("<b>GPG Key:</b> <blue>{}</blue>", key)));
 
             let commit_sign = git
                 .config
@@ -634,8 +642,16 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
 /// Arrows are always omitted when the corresponding count is 0.
 fn format_ahead_behind(ahead: usize, behind: usize, nerd_font: Option<bool>) -> String {
     let is_nerd = nerd_font == Some(true);
-    let ahead_arrow = if ahead > 0 && is_nerd { "\u{F0737} " } else { "" };
-    let behind_arrow = if behind > 0 && is_nerd { "\u{F072E} " } else { "" };
+    let ahead_arrow = if ahead > 0 && is_nerd {
+        "\u{F0737} "
+    } else {
+        ""
+    };
+    let behind_arrow = if behind > 0 && is_nerd {
+        "\u{F072E} "
+    } else {
+        ""
+    };
     format!(
         "<green>{}{} ahead</green>, <red>{}{} behind</red>",
         ahead_arrow, ahead, behind_arrow, behind
@@ -1260,10 +1276,7 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
 /// Builds a Mermaid flowchart from package dependency data and renders it
 /// inline using `MermaidRenderer`. Falls back to a code block if the
 /// terminal cannot display images or mmdc is not available.
-pub fn print_repo_deps_visual(
-    repo: &sniff::filesystem::repo::RepoInfo,
-    repo_filter: Option<&str>,
-) {
+pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
     if !repo.is_monorepo {
         eprintln!("--deps requires a monorepo (no workspace packages found)");
         return;
@@ -1304,10 +1317,7 @@ pub fn print_repo_deps_visual(
 /// Each package with dependencies or dependents is shown as a top-level item
 /// with `depends-on` and `used-by` sub-items. Isolates (packages with neither)
 /// are omitted unless an explicit filter is set.
-pub fn print_repo_deps_text(
-    repo: &sniff::filesystem::repo::RepoInfo,
-    repo_filter: Option<&str>,
-) {
+pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
     if !repo.is_monorepo {
         eprintln!("--deps requires a monorepo (no workspace packages found)");
         return;
@@ -1359,17 +1369,13 @@ pub fn print_repo_deps_text(
         let mut detail_items: Vec<String> = Vec::new();
         if !pkg.depends_on.is_empty() {
             detail_items.push(
-                Prose::new(format!(
-                    "<b>depends-on:</b> {}",
-                    pkg.depends_on.join(", ")
-                ))
-                .render(&term),
+                Prose::new(format!("<b>depends-on:</b> {}", pkg.depends_on.join(", ")))
+                    .render(&term),
             );
         }
         if !pkg.used_by.is_empty() {
             detail_items.push(
-                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", ")))
-                    .render(&term),
+                Prose::new(format!("<b>used-by:</b> {}", pkg.used_by.join(", "))).render(&term),
             );
         }
 
@@ -1384,8 +1390,10 @@ pub fn print_repo_deps_text(
 
     eprintln!(
         "\n{}",
-        Prose::new("<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>")
-            .render(&term)
+        Prose::new(
+            "<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>"
+        )
+        .render(&term)
     );
 }
 

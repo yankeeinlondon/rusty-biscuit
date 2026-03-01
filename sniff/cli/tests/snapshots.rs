@@ -43,7 +43,11 @@ fn normalize_topics_table(output: &str) -> String {
     let cleaned = normalize_text(output);
 
     // Already in markdown table form.
-    if cleaned.lines().next().is_some_and(|line| line.starts_with('|')) {
+    if cleaned
+        .lines()
+        .next()
+        .is_some_and(|line| line.starts_with('|'))
+    {
         return cleaned;
     }
 
@@ -75,7 +79,11 @@ fn normalize_topics_table(output: &str) -> String {
     lines.push(format!("| {} |", rows[0].join(" | ")));
     lines.push(format!(
         "| {} |",
-        rows[0].iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+        rows[0]
+            .iter()
+            .map(|_| "---")
+            .collect::<Vec<_>>()
+            .join(" | ")
     ));
 
     for row in rows.iter().skip(1) {
@@ -119,12 +127,18 @@ fn completions_help_output_snapshot() {
 
 #[test]
 fn topics_table_snapshot() {
-    insta::assert_snapshot!("topics_table", normalize_topics_table(&run_stdout(&["topics"])));
+    insta::assert_snapshot!(
+        "topics_table",
+        normalize_topics_table(&run_stdout(&["topics"]))
+    );
 }
 
 #[test]
 fn structure_output_snapshot() {
-    insta::assert_snapshot!("structure_output", normalize_text(&run_stdout(&["structure"])));
+    insta::assert_snapshot!(
+        "structure_output",
+        normalize_text(&run_stdout(&["structure"]))
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use super::languages::detect_languages;
 use crate::{Result, SniffError};
-use biscuit_file::toml_crate;
 use biscuit_file::serde_yaml_ng;
+use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -286,10 +286,11 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let content = std::fs::read_to_string(&cargo_toml)?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
-        domain: "repo",
-        message: e.to_string(),
-    })?;
+    let parsed: toml_crate::Value =
+        toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
+            domain: "repo",
+            message: e.to_string(),
+        })?;
 
     let workspace = match parsed.get("workspace") {
         Some(w) => w,

@@ -401,10 +401,7 @@ impl HostingProvider {
         if host == "sr.ht" || host.ends_with(".sr.ht") {
             return Self::SourceHut;
         }
-        if host == "codeberg.org"
-            || host.starts_with("forgejo.")
-            || host.contains(".forgejo.")
-        {
+        if host == "codeberg.org" || host.starts_with("forgejo.") || host.contains(".forgejo.") {
             return Self::Forgejo;
         }
         if host.starts_with("gitea.") || host.contains(".gitea.") {
@@ -429,20 +426,26 @@ fn extract_remote_host(url: &str) -> Option<&str> {
         .or_else(|| trimmed.strip_prefix("ssh://"))
         .or_else(|| trimmed.strip_prefix("git://"))
     {
-        let without_user = without_scheme
-            .rsplit_once('@')
-            .map(|(_, rest)| rest)
-            .unwrap_or(without_scheme);
+        let without_user =
+            without_scheme.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(without_scheme);
         let host_port = without_user.split('/').next()?;
         let host = host_port.split(':').next().unwrap_or(host_port);
-        return if host.is_empty() { None } else { Some(host) };
+        return if host.is_empty() {
+            None
+        } else {
+            Some(host)
+        };
     }
 
     // SCP-style SSH URL: git@host:owner/repo.git
     if let Some((_, after_at)) = trimmed.split_once('@')
         && let Some((host, _)) = after_at.split_once(':')
     {
-        return if host.is_empty() { None } else { Some(host) };
+        return if host.is_empty() {
+            None
+        } else {
+            Some(host)
+        };
     }
 
     None
@@ -1268,8 +1271,9 @@ fn get_git_config(repo: &Repository) -> GitConfig {
     // default search paths. Include it so we pick up credential.helper, etc.
     #[cfg(target_os = "macos")]
     {
-        let macos_system =
-            std::path::Path::new("/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig");
+        let macos_system = std::path::Path::new(
+            "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
+        );
         if macos_system.exists() {
             let _ = config.add_file(macos_system, git2::ConfigLevel::ProgramData, false);
         }
@@ -1296,18 +1300,11 @@ fn get_git_config(repo: &Repository) -> GitConfig {
 /// For each branch, resolves the tip commit's short hash and computes
 /// ahead/behind relative to the current branch's HEAD. The current branch
 /// itself gets ahead=0, behind=0.
-fn get_local_branches(
-    repo: &Repository,
-    current_branch: Option<&str>,
-) -> Vec<LocalBranchInfo> {
+fn get_local_branches(repo: &Repository, current_branch: Option<&str>) -> Vec<LocalBranchInfo> {
     let mut branches = Vec::new();
 
     // Resolve HEAD commit OID for ahead/behind calculations
-    let head_oid = repo
-        .head()
-        .ok()
-        .and_then(|h| h.peel_to_commit().ok())
-        .map(|c| c.id());
+    let head_oid = repo.head().ok().and_then(|h| h.peel_to_commit().ok()).map(|c| c.id());
 
     if let Ok(branch_iter) = repo.branches(Some(git2::BranchType::Local)) {
         for branch_result in branch_iter {
@@ -1466,7 +1463,11 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
 
     branches.sort();
 
-    if branches.is_empty() { None } else { Some(branches) }
+    if branches.is_empty() {
+        None
+    } else {
+        Some(branches)
+    }
 }
 
 /// Retrieves all linked worktrees for the repository.
@@ -1774,10 +1775,7 @@ mod tests {
 
     #[test]
     fn test_extract_remote_host() {
-        assert_eq!(
-            extract_remote_host("git@github.com:rust-lang/cargo.git"),
-            Some("github.com")
-        );
+        assert_eq!(extract_remote_host("git@github.com:rust-lang/cargo.git"), Some("github.com"));
         assert_eq!(
             extract_remote_host("ssh://git@gitlab.example.com:2222/team/project"),
             Some("gitlab.example.com")

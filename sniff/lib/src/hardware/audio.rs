@@ -110,22 +110,22 @@ pub struct AudioDeviceInfo {
 pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     use std::mem;
 
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
     use coreaudio_sys::{
         AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
-        AudioObjectPropertyAddress, AudioValueRange, kAudioDevicePropertyAvailableNominalSampleRates,
-        kAudioDevicePropertyDeviceNameCFString, kAudioDevicePropertyDeviceUID,
-        kAudioDevicePropertyNominalSampleRate, kAudioDevicePropertyStreamConfiguration,
-        kAudioDevicePropertyTransportType, kAudioDeviceTransportTypeBluetoothLE,
-        kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeBluetooth,
-        kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeThunderbolt,
-        kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeVirtual,
-        kAudioHardwarePropertyDefaultInputDevice,
+        AudioObjectPropertyAddress, AudioValueRange,
+        kAudioDevicePropertyAvailableNominalSampleRates, kAudioDevicePropertyDeviceNameCFString,
+        kAudioDevicePropertyDeviceUID, kAudioDevicePropertyNominalSampleRate,
+        kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyTransportType,
+        kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+        kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeHDMI,
+        kAudioDeviceTransportTypeThunderbolt, kAudioDeviceTransportTypeUSB,
+        kAudioDeviceTransportTypeVirtual, kAudioHardwarePropertyDefaultInputDevice,
         kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
     };
-    use core_foundation::base::TCFType;
-    use core_foundation::string::CFString;
 
     // --- Helper closures ---
 
@@ -188,43 +188,44 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut device_id).cast(),
             );
 
-            if status != 0 { 0 } else { device_id }
+            if status != 0 {
+                0
+            } else {
+                device_id
+            }
         }
     };
 
-    let get_cfstring_property =
-        |device_id: AudioObjectID, selector: u32| -> Option<String> {
-            unsafe {
-                let mut cf_ref: coreaudio_sys::CFStringRef = std::ptr::null();
-                let mut data_size =
-                    mem::size_of::<coreaudio_sys::CFStringRef>() as u32;
+    let get_cfstring_property = |device_id: AudioObjectID, selector: u32| -> Option<String> {
+        unsafe {
+            let mut cf_ref: coreaudio_sys::CFStringRef = std::ptr::null();
+            let mut data_size = mem::size_of::<coreaudio_sys::CFStringRef>() as u32;
 
-                let address = AudioObjectPropertyAddress {
-                    mSelector: selector,
-                    mScope: kAudioObjectPropertyScopeGlobal,
-                    mElement: kAudioObjectPropertyElementMain,
-                };
+            let address = AudioObjectPropertyAddress {
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain,
+            };
 
-                let status = AudioObjectGetPropertyData(
-                    device_id,
-                    &address,
-                    0,
-                    std::ptr::null(),
-                    &mut data_size,
-                    (&raw mut cf_ref).cast(),
-                );
+            let status = AudioObjectGetPropertyData(
+                device_id,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut data_size,
+                (&raw mut cf_ref).cast(),
+            );
 
-                if status != 0 || cf_ref.is_null() {
-                    return None;
-                }
-
-                // Cast coreaudio_sys::CFStringRef to core_foundation::CFStringRef
-                let cf_string = CFString::wrap_under_create_rule(
-                    cf_ref as core_foundation::string::CFStringRef
-                );
-                Some(cf_string.to_string())
+            if status != 0 || cf_ref.is_null() {
+                return None;
             }
-        };
+
+            // Cast coreaudio_sys::CFStringRef to core_foundation::CFStringRef
+            let cf_string =
+                CFString::wrap_under_create_rule(cf_ref as core_foundation::string::CFStringRef);
+            Some(cf_string.to_string())
+        }
+    };
 
     let get_transport_type = |device_id: AudioObjectID| -> AudioDeviceKind {
         unsafe {
@@ -338,7 +339,11 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut rate).cast(),
             );
 
-            if status != 0 { 0.0 } else { rate }
+            if status != 0 {
+                0.0
+            } else {
+                rate
+            }
         }
     };
 
@@ -391,7 +396,9 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                     if (r.mMinimum - r.mMaximum).abs() < 0.01 {
                         vec![r.mMinimum]
                     } else {
-                        vec![r.mMinimum, r.mMaximum]
+                        vec![
+                            r.mMinimum, r.mMaximum,
+                        ]
                     }
                 })
                 .collect();
@@ -420,8 +427,8 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
             _ => continue,
         };
 
-        let uid = get_cfstring_property(device_id, kAudioDevicePropertyDeviceUID)
-            .unwrap_or_default();
+        let uid =
+            get_cfstring_property(device_id, kAudioDevicePropertyDeviceUID).unwrap_or_default();
 
         let input_channels = get_channel_count(device_id, kAudioObjectPropertyScopeInput);
         let output_channels = get_channel_count(device_id, kAudioObjectPropertyScopeOutput);
@@ -521,7 +528,9 @@ mod tests {
             is_default_input: false,
             is_default_output: true,
             sample_rate: 48000.0,
-            available_sample_rates: vec![44100.0, 48000.0, 96000.0],
+            available_sample_rates: vec![
+                44100.0, 48000.0, 96000.0,
+            ],
             input_channels: 0,
             output_channels: 2,
         };
@@ -536,7 +545,12 @@ mod tests {
         assert!(!deserialized.is_default_input);
         assert!(deserialized.is_default_output);
         assert_eq!(deserialized.sample_rate, 48000.0);
-        assert_eq!(deserialized.available_sample_rates, vec![44100.0, 48000.0, 96000.0]);
+        assert_eq!(
+            deserialized.available_sample_rates,
+            vec![
+                44100.0, 48000.0, 96000.0
+            ]
+        );
         assert_eq!(deserialized.input_channels, 0);
         assert_eq!(deserialized.output_channels, 2);
     }

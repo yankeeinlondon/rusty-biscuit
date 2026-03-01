@@ -62,10 +62,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         detail_items.push(format!("<b>Language:</b> {lang}"));
     }
     if let Some(ref license) = meta.license {
-        let name = license
-            .spdx_id
-            .as_deref()
-            .unwrap_or(license.name.as_str());
+        let name = license.spdx_id.as_deref().unwrap_or(license.name.as_str());
         detail_items.push(format!("<b>License:</b> {name}"));
     }
     detail_items.push(format!("<b>Branch:</b> {}", meta.default_branch));
@@ -150,8 +147,7 @@ fn print_documents(docs: &[DocumentRef], term: &Terminal) {
     }
     if !doc_folder.is_empty() {
         items.push(
-            Prose::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len()))
-                .render(term),
+            Prose::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len())).render(term),
         );
     }
     for doc in &other_docs {
@@ -309,16 +305,12 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
     if let Some(ref issues) = urls.issues {
         items.push(
-            Prose::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>"))
-                .render(term),
+            Prose::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>")).render(term),
         );
     }
     if let Some(ref prs) = urls.pull_requests {
         items.push(
-            Prose::new(format!(
-                "<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>"
-            ))
-            .render(term),
+            Prose::new(format!("<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>")).render(term),
         );
     }
     if let Some(ref releases) = urls.releases {
@@ -330,10 +322,7 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
         );
     }
     if let Some(ref wiki) = urls.wiki {
-        items.push(
-            Prose::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>"))
-                .render(term),
-        );
+        items.push(Prose::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>")).render(term));
     }
 
     if !items.is_empty() {

@@ -55,13 +55,14 @@ macro_rules! define_program_action {
 
             <$program_enum>::iter()
                 .flat_map(|p| {
-                    let mut candidates = vec![CompletionCandidate::new(p.binary_name())
-                        .help(Some(p.description().into()))];
+                    let mut candidates = vec![
+                        CompletionCandidate::new(p.binary_name())
+                            .help(Some(p.description().into())),
+                    ];
                     let snake = p.to_string();
                     if snake != p.binary_name() {
                         candidates.push(
-                            CompletionCandidate::new(snake)
-                                .help(Some(p.description().into())),
+                            CompletionCandidate::new(snake).help(Some(p.description().into())),
                         );
                     }
                     candidates
@@ -619,7 +620,10 @@ mod tests {
 
         #[test]
         fn common_subcommands_parse() {
-            assert!(matches!(parse_args(&["os"]).unwrap().command, Some(Commands::Os)));
+            assert!(matches!(
+                parse_args(&["os"]).unwrap().command,
+                Some(Commands::Os)
+            ));
             assert!(matches!(
                 parse_args(&["hardware"]).unwrap().command,
                 Some(Commands::Hardware)
@@ -669,7 +673,10 @@ mod tests {
         #[test]
         fn git_flags_and_remote_parse() {
             let cli = parse_args(&["git", "--history", "10", "origin"]).unwrap();
-            if let Some(Commands::Git { history, remote, .. }) = cli.command {
+            if let Some(Commands::Git {
+                history, remote, ..
+            }) = cli.command
+            {
                 assert_eq!(history, 10);
                 assert_eq!(remote.as_deref(), Some("origin"));
             } else {

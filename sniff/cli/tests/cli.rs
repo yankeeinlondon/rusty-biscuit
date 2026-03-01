@@ -756,7 +756,9 @@ fn test_programs_subcommand_rejects_json_format_flag() {
         .args(["programs", "--json-format", "full"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("unexpected argument '--json-format'"));
+        .stderr(predicate::str::contains(
+            "unexpected argument '--json-format'",
+        ));
 }
 
 #[test]
