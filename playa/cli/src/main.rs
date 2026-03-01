@@ -19,7 +19,6 @@ use darkmatter::testing::strip_ansi_codes;
 use playa::ducking::{DuckConfig, backend_name, create_backend};
 
 const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
-const ITALIC: &str = "\x1b[3m";
 const RESET: &str = "\x1b[0m";
 const TABLE_DIVIDER: char = '\u{2502}';
 
@@ -698,23 +697,33 @@ async fn print_duck_info() {
 fn build_metadata_markdown() -> (String, Vec<String>) {
     let installed = InstalledHeadlessAudio::new();
     let missing = collect_missing_players(&installed);
-    let markdown = build_metadata_markdown_table();
+    let markdown = build_metadata_markdown_table(&installed);
     (markdown, missing)
 }
 
-fn build_metadata_markdown_table() -> String {
+fn build_metadata_markdown_table(installed: &InstalledHeadlessAudio) -> String {
     let mut lines = Vec::new();
-    lines.push("| Software | Codec Support | File Formats |".to_string());
-    lines.push("|---|---|---|".to_string());
+    lines.push("| I | Software | Codec Support | File Formats |".to_string());
+    lines.push("|---|---|---|---|".to_string());
 
     for player in all_players() {
         let Some(metadata) = PLAYER_LOOKUP.get(player) else {
             continue;
         };
-        let software = link_for_player(*player);
+        let is_installed = installed.is_installed(player.as_headless_audio());
+        let indicator = if is_installed { "\u{2705}" } else { "\u{274c}" };
+        // Only show clickable links for installed players
+        let software = if is_installed {
+            link_for_player(*player)
+        } else {
+            display_name_for_player(*player)
+        };
         let codecs = escape_markdown_cell(&format_codec_list(metadata.supported_codecs));
         let formats = escape_markdown_cell(&format_format_list(metadata.supported_formats));
-        lines.push(format!("| {} | {} | {} |", software, codecs, formats));
+        lines.push(format!(
+            "| {} | {} | {} | {} |",
+            indicator, software, codecs, formats
+        ));
     }
 
     lines.join("\n")
@@ -803,24 +812,34 @@ fn render_markdown(content: &str, missing_players: &[String]) {
     let markdown = Markdown::from(content.to_string());
     match for_terminal(&markdown, TerminalOptions::default()) {
         Ok(rendered) => {
-            let mut output = dim_missing_rows(&rendered, missing_players);
-            append_missing_note(&mut output);
+            let output = dim_missing_rows(&rendered, missing_players);
             print!("{}", output);
         }
         Err(_) => println!("{}", markdown.content()),
     }
+    append_native_playback_note();
 }
 
-fn append_missing_note(output: &mut String) {
-    if !output.ends_with('\n') {
-        output.push('\n');
+fn append_native_playback_note() {
+    #[cfg(feature = "native-playback")]
+    {
+        let mut list = UnorderedList::empty();
+        list.add(Prose::new(
+            "<italic>native playback is enabled and will be used for \
+             .wav, .aiff, .mp3, .flac, .m4a, .ogg, .webm; \
+             falling back to host players where needed</italic>",
+        ));
+        print!("{}", list.render_optimistic(None));
     }
-    output.push_str(&format!(
-        "- {italic}items listed in {grey}grey{reset}{italic} are not installed{reset}\n",
-        italic = ITALIC,
-        grey = MISSING_FG,
-        reset = RESET
-    ));
+    #[cfg(all(feature = "sfx-native", not(feature = "native-playback")))]
+    {
+        let mut list = UnorderedList::empty();
+        list.add(Prose::new(
+            "<italic>native playback is enabled for .wav, .mp3, .ogg; \
+             falling back to host players where needed</italic>",
+        ));
+        print!("{}", list.render_optimistic(None));
+    }
 }
 
 fn dim_missing_rows(rendered: &str, missing_players: &[String]) -> String {
@@ -840,7 +859,7 @@ fn dim_missing_rows(rendered: &str, missing_players: &[String]) -> String {
         let plain_line = strip_osc8_sequences(&strip_ansi_codes(line));
 
         if line.starts_with(TABLE_DIVIDER) {
-            if let Some(cell) = first_table_cell(&plain_line) {
+            if let Some(cell) = software_table_cell(&plain_line) {
                 let trimmed = cell.trim();
                 if !trimmed.is_empty() {
                     current_row_missing =
@@ -865,33 +884,36 @@ fn dim_missing_rows(rendered: &str, missing_players: &[String]) -> String {
 }
 
 fn dim_table_row_line(line: &str) -> String {
-    let mut output = String::with_capacity(line.len() + 16);
-    let mut in_cell = false;
+    // Split by table divider, strip all ANSI/OSC8 from cells 2+ (skip I column),
+    // and replace with uniform grey. This prevents darkmatter's inline colors
+    // (text color, hyperlink blue) from overriding the dim effect.
+    let parts: Vec<&str> = line.split(TABLE_DIVIDER).collect();
+    let mut output = String::with_capacity(line.len() + 32);
 
-    for ch in line.chars() {
-        if ch == TABLE_DIVIDER {
-            if in_cell {
-                output.push_str(RESET);
-            }
-            output.push(ch);
-            output.push_str(MISSING_FG);
-            in_cell = true;
-        } else {
-            output.push(ch);
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            output.push(TABLE_DIVIDER);
         }
-    }
-
-    if in_cell {
-        output.push_str(RESET);
+        // Cells 0 (before first │) and 1 (I column) stay untouched
+        if i >= 2 && i < parts.len() - 1 {
+            let stripped = strip_osc8_sequences(&strip_ansi_codes(part));
+            output.push_str(MISSING_FG);
+            output.push_str(&stripped);
+            output.push_str(RESET);
+        } else {
+            output.push_str(part);
+        }
     }
 
     output
 }
 
-fn first_table_cell(line: &str) -> Option<&str> {
+/// Returns the second table cell (Software column, skipping the I column).
+fn software_table_cell(line: &str) -> Option<&str> {
     let mut parts = line.split(TABLE_DIVIDER);
-    parts.next()?;
-    parts.next()
+    parts.next()?; // before first divider
+    parts.next()?; // I column
+    parts.next() // Software column
 }
 
 fn strip_osc8_sequences(input: &str) -> String {
@@ -927,13 +949,16 @@ mod tests {
 
     #[test]
     fn builds_meta_markdown_with_formatting_and_links() {
-        let markdown = build_metadata_markdown_table();
+        let installed = InstalledHeadlessAudio::new();
+        let markdown = build_metadata_markdown_table(&installed);
 
-        assert!(markdown.contains("| Software | Codec Support | File Formats |"));
+        assert!(markdown.contains("| I | Software | Codec Support | File Formats |"));
         assert!(markdown.contains("PCM"));
         assert!(markdown.contains("Vorbis"));
         assert!(markdown.contains(".wav"));
         assert!(markdown.contains(&link_for_player(AudioPlayer::Mpv)));
+        // Every row has an installed indicator
+        assert!(markdown.contains('\u{2705}') || markdown.contains('\u{274c}'));
     }
 
     #[test]
