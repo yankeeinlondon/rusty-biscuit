@@ -341,11 +341,15 @@ impl From<SymbolInfo> for SymbolRecord {
     fn from(value: SymbolInfo) -> Self {
         let kind = SymbolKindV2::from(value.kind);
         let declaration_span = text_span_from_range(&value.range);
+        let qualified_name = value
+            .container_name
+            .as_ref()
+            .map(|container| format!("{container}::{}", value.name));
         let stable_key = stable_symbol_key(
             value.language,
             &value.file,
             kind,
-            &value.name,
+            qualified_name.as_deref().unwrap_or(&value.name),
             declaration_span.start_byte,
         );
         let now = now_epoch_ms();
@@ -407,8 +411,8 @@ impl From<SymbolInfo> for SymbolRecord {
             identity: IdentityFacet {
                 name: value.name.clone(),
                 display_name: value.name,
-                qualified_name: None,
-                module_path: None,
+                qualified_name,
+                module_path: value.container_name,
                 stable_key,
             },
             source: SourceFacet {
@@ -546,6 +550,8 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
+            container_name: None,
+            container_kind: None,
             doc_comment: value.docs.raw_doc,
             signature,
             type_metadata,
@@ -587,6 +593,8 @@ mod tests {
             },
             language: ProgrammingLanguage::Rust,
             file: Path::new("src/lib.rs").to_path_buf(),
+            container_name: None,
+            container_kind: None,
             doc_comment: Some("Says hi".to_string()),
             signature: Some(FunctionSignature::new()),
             type_metadata: None,
@@ -614,6 +622,8 @@ mod tests {
             },
             language: ProgrammingLanguage::Rust,
             file: Path::new("src/lib.rs").to_path_buf(),
+            container_name: None,
+            container_kind: None,
             doc_comment: Some("Says hi".to_string()),
             signature: None,
             type_metadata: None,
