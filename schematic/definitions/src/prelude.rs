@@ -40,6 +40,7 @@ pub use crate::bitbucket::define_bitbucket_api;
 pub use crate::gitea::define_gitea_api;
 pub use crate::github::define_github_api;
 pub use crate::openai::define_openai_api;
+pub use crate::unfolded_circle::define_unfolded_circle_core_rest_api;
 
 // Response types for OpenAI
 pub use crate::openai::{DeleteModelResponse, ListModelsResponse, Model};
