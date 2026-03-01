@@ -27,7 +27,6 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `types` | List type definitions (struct, enum, class, interface, trait) |
 | `symbols` | List all symbols |
 | `imports` | List imported symbols |
-| `exports` | List exported symbols |
 | `classes` | List classes with static/instance member partitioning |
 | `lint` | Run lint and syntax diagnostics |
 | `completions` | Generate shell completions (Bash, Zsh, Fish, PowerShell) |
@@ -37,6 +36,8 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 ```rust
 let file = TreeFile::new("src/lib.rs")?;
 file.symbols()?;            // All symbols
+file.symbol_records()?;     // v2 parse records
+file.symbol_index_v2()?;    // v2 parse->bind->semantic->docs pipeline output
 file.imported_symbols()?;   // Imports
 file.exported_symbols()?;   // Exports
 file.local_symbols()?;      // Local definitions
@@ -57,6 +58,8 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 - **Capture naming**: `@local.definition.<kind>` for symbols, `@diagnostic.<rule-id>` for lint
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
+- **Schema v2**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`
+- **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands
 
 ## Detailed Documentation
 
