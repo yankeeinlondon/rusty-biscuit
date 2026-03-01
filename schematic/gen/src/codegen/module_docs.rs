@@ -168,9 +168,14 @@ impl<'a> ModuleDocBuilder<'a> {
 
         let api_name = &self.api.name;
         let method_name = to_snake_case(&endpoint.id);
+        let custom_base_url = if self.api.base_url == "http://192.168.1.1:9529" {
+            "http://192.168.1.50:9529"
+        } else {
+            "https://staging.example.com/v1"
+        };
 
         format!(
-            r#"## Example
+            r#"## Examples
 
 ```ignore
 use schematic_schema::prelude::*;
@@ -182,8 +187,16 @@ async fn main() -> Result<(), SchematicError> {{
     println!("{{:?}}", response);
     Ok(())
 }}
+```
+
+### Override Base URL
+
+```ignore
+use schematic_schema::prelude::*;
+
+let client = {}::with_base_url("{}");
 ```"#,
-            api_name, method_name
+            api_name, method_name, api_name, custom_base_url
         )
     }
 }

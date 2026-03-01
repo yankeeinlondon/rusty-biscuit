@@ -39,6 +39,18 @@ We use the `just` runner to provide the most common operations you'll need when 
 
 All packages in **Schematic** are written in Rust and use the 2024 edition.
 
-## Capabilities
+## How to Design an API
 
-The `schematic-define` library provides 
+### Key Design Primitives
+
+The following primitives are critical to understand when building an API definition in `schema-definitions`:
+
+- a
+- b
+- c
+
+### Best Practices
+
+Read the following document to make sure you're building a high quality API by learning what are considered the "best practices":
+
+- [Best Practices for Designing an API](./best-practices-in-designing-an-api.md)

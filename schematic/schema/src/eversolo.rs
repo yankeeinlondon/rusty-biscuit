@@ -25,7 +25,7 @@
 //! - `MusicSetVolume` - Set the absolute volume level
 //! - `MusicSetMute` - Set or clear mute state
 //! - `PowerGetOptions` - Get available power options (shutdown, reboot, etc.)
-//! - `PowerSetOption` - Execute a power action
+//! - `PowerSetOption` - Execute a power action (poweroff, reboot, screen, timeshutdown)
 //! - `SystemGetScreenBrightness` - Get current screen brightness level (community-discovered)
 //! - `SystemSetScreenBrightness` - Set screen brightness level (community-discovered)
 //! - `SystemGetKnobBrightness` - Get current knob LED brightness level (community-discovered)
@@ -36,7 +36,7 @@
 //! - `SystemSetSpectrumMode` - Set the spectrum display mode (community-discovered)
 //! - `SystemChangeVuDisplay` - Toggle VU display open/close (community-discovered)
 //!
-//! ## Example
+//! ## Examples
 //!
 //! ```ignore
 //! use schematic_schema::prelude::*;
@@ -48,6 +48,14 @@
 //!     println!("{:?}", response);
 //!     Ok(())
 //! }
+//! ```
+//!
+//! ### Override Base URL
+//!
+//! ```ignore
+//! use schematic_schema::prelude::*;
+//!
+//! let client = Eversolo::with_base_url("http://192.168.1.50:9529");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::eversolo::*;
@@ -101,7 +109,7 @@ impl crate::shared::EndpointSpec for DeviceGetModelRequest {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RemoteSendKeyRequest {
-    /// Query parameter: Remote key constant (e.g., Key.VolumeUp)
+    /// Query parameter: Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)
     pub key: Option<String>,
 }
 impl RemoteSendKeyRequest {
@@ -772,7 +780,7 @@ impl crate::shared::EndpointSpec for PowerGetOptionsRequest {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PowerSetOptionRequest {
-    /// Query parameter: Power option tag (e.g., poweroff, reboot)
+    /// Query parameter: Power option tag (poweroff, reboot, screen, timeshutdown)
     pub tag: Option<String>,
 }
 impl PowerSetOptionRequest {
@@ -1325,7 +1333,7 @@ pub enum EversoloRequest {
     MusicSetMute(MusicSetMuteRequest),
     /// Get available power options (shutdown, reboot, etc.)
     PowerGetOptions(PowerGetOptionsRequest),
-    /// Execute a power action
+    /// Execute a power action (poweroff, reboot, screen, timeshutdown)
     PowerSetOption(PowerSetOptionRequest),
     /// Get current screen brightness level (community-discovered)
     SystemGetScreenBrightness(SystemGetScreenBrightnessRequest),

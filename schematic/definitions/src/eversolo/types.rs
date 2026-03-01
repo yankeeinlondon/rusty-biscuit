@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Generic status response returned by most endpoints.
 ///
 /// A `status` of 200 indicates success.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub status: i32,
 }
@@ -19,7 +19,7 @@ pub struct StatusResponse {
 // =============================================================================
 
 /// Response from the `getModel` endpoint with device identity information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetModelResponse {
     pub status: i32,
@@ -28,10 +28,19 @@ pub struct GetModelResponse {
     pub net_mac: String,
     pub wifi_mac: String,
     pub firmware: String,
+    /// Android base version reported by firmware.
+    ///
+    /// This field may be absent on older firmware builds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub android_version: Option<String>,
+    /// Whether the device supports remote boot/wake behavior.
+    ///
+    /// This field may be absent on firmware versions that do not expose it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub able_remote_boot: Option<bool>,
+    /// Whether EQ settings are available on this hardware/firmware combination.
+    ///
+    /// This field may be absent on models or firmware without EQ support metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_eq_setting: Option<bool>,
 }
@@ -41,11 +50,23 @@ pub struct GetModelResponse {
 // =============================================================================
 
 /// Current playback state from `getState`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// ## Notes
+///
+/// The payload includes owned `String` fields under `playing_music`. Polling this
+/// endpoint at high frequency can create steady allocation churn in UI loops.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetStateResponse {
     pub status: i32,
     /// Playback state enum value.
+    ///
+    /// Common values observed in Zidoo-derived firmware:
+    /// - `0` = stopped
+    /// - `1` = playing
+    /// - `2` = paused
+    ///
+    /// Additional values may appear on newer firmware revisions.
     pub state: i32,
     /// Current position in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +81,7 @@ pub struct GetStateResponse {
 }
 
 /// Metadata for the currently playing track.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayingMusic {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +100,7 @@ pub struct PlayingMusic {
 ///
 /// The API spells the current volume field as `currenttVolume` (double-t typo).
 /// This is intentional and matches the actual device response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VolumeData {
     /// Current volume level (note: API spells this `currenttVolume` with double-t).
@@ -114,7 +135,7 @@ pub struct InputOutputListResponse {
 }
 
 /// An available audio input.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputItem {
     pub name: String,
@@ -126,7 +147,7 @@ pub struct InputItem {
 }
 
 /// An available audio output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputItem {
     pub name: String,
@@ -144,7 +165,7 @@ pub struct OutputItem {
 // =============================================================================
 
 /// Available power options.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerOptionsResponse {
     pub status: i32,
@@ -152,7 +173,7 @@ pub struct PowerOptionsResponse {
 }
 
 /// A power action option (e.g., poweroff, reboot, screen, timeshutdown).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerOption {
     /// Localized display name.
@@ -166,11 +187,11 @@ pub struct PowerOption {
 // =============================================================================
 
 /// Brightness level response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrightnessResponse {
     pub status: i32,
-    /// Current brightness level.
+    /// Current brightness level index, typically in the range `0..=max`.
     pub index: i32,
     /// Maximum brightness.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,7 +199,7 @@ pub struct BrightnessResponse {
 }
 
 /// List of available display modes (VU or spectrum).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplayModeListResponse {
     pub status: i32,
@@ -188,10 +209,11 @@ pub struct DisplayModeListResponse {
 }
 
 /// A display mode entry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplayMode {
     pub name: String,
+    /// Mode index accepted by `setVUMode` / `setSpPlayModeList`.
     pub index: i32,
 }
 

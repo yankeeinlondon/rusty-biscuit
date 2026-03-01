@@ -56,7 +56,7 @@ pub fn define_eversolo_api() -> RestApi {
 }
 
 fn build_endpoints() -> Vec<Endpoint> {
-    let mut eps = Vec::new();
+    let mut eps = Vec::with_capacity(24);
     eps.extend(device_endpoints());
     eps.extend(remote_endpoints());
     eps.extend(music_endpoints());
@@ -100,7 +100,7 @@ fn remote_endpoints() -> Vec<Endpoint> {
                 "key",
                 QueryParamType::String,
                 true,
-                Some("Remote key constant (e.g., Key.VolumeUp)"),
+                Some("Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)"),
             )),
         },
         Endpoint {
@@ -245,6 +245,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             request: None,
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
+            // Keep integer here: the wire contract is `0` / `1` rather than `true` / `false`.
             params: Some(EndpointParams::default().with_query_param(
                 "isMute",
                 QueryParamType::Integer,
@@ -275,7 +276,8 @@ fn power_endpoints() -> Vec<Endpoint> {
             id: "PowerSetOption".to_string(),
             method: RestMethod::Get,
             path: "/ZidooMusicControl/v2/setPowerOption".to_string(),
-            description: "Execute a power action".to_string(),
+            description: "Execute a power action (poweroff, reboot, screen, timeshutdown)"
+                .to_string(),
             request: None,
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
@@ -283,7 +285,7 @@ fn power_endpoints() -> Vec<Endpoint> {
                 "tag",
                 QueryParamType::String,
                 true,
-                Some("Power option tag (e.g., poweroff, reboot)"),
+                Some("Power option tag (poweroff, reboot, screen, timeshutdown)"),
             )),
         },
     ]
