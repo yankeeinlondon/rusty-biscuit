@@ -9,19 +9,7 @@
 //!
 //! | Module | Client | Description | Auth |
 //! |--------|--------|-------------|------|
-//! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
-//! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
-//! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
-//! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
-//! | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |
-//! | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |
-//! | [`gitlab`] | [`GitLab`](gitlab::GitLab) | GitLab REST API v4 for repository, MR, issue, and release workflows | API Key (`PRIVATE-TOKEN`) |
-//! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
-//! | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |
-//! | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |
-//! | [`ollama`] | [`OllamaOpenAI`](ollama::OllamaOpenAI) | Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients | None |
-//! | [`emqx`] | [`EmqxBasic`](emqx::EmqxBasic) | EMQX Broker REST API with Basic Authentication (API Key + Secret) | Basic |
-//! | [`emqx`] | [`EmqxBearer`](emqx::EmqxBearer) | EMQX Broker REST API with Bearer Token authentication (JWT) | Bearer |
+//! | [`eversolo`] | [`Eversolo`](eversolo::Eversolo) | Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage) | None |
 //!
 //! ## Quick Start
 //!
@@ -32,8 +20,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), SchematicError> {
-//!     let client = Anthropic::new();
-//!     let response = client.list_models().await?;
+//!     let client = Eversolo::new();
+//!     let response = client.device_get_model().await?;
 //!     println!("{:?}", response);
 //!     Ok(())
 //! }
@@ -52,19 +40,19 @@
 //! ## Variants
 //!
 //! Create alternate client configurations for staging, testing, or different
-//! environments using the [`variant()`](anthropic::Anthropic::variant) builder
-//! or [`variant_with()`](anthropic::Anthropic::variant_with) convenience method:
+//! environments using the [`variant()`](eversolo::Eversolo::variant) builder
+//! or [`variant_with()`](eversolo::Eversolo::variant_with) convenience method:
 //!
 //! ```ignore
 //! use schematic_schema::prelude::*;
 //! use schematic_define::UpdateStrategy;
 //!
-//! let client = Anthropic::new();
+//! let client = Eversolo::new();
 //!
 //! // Simple environment switch with variant_with()
 //! let staging = client.variant_with(
 //!     "https://staging.example.com/v1",
-//!     vec!["STAGING_ANTHROPIC_API_KEY".to_string()],
+//!     vec!["STAGING_API_KEY".to_string()],
 //!     UpdateStrategy::NoChange,
 //! );
 //!
@@ -85,14 +73,4 @@
 //! [`shared::SchematicError`] for the full error enum and handling examples.
 pub mod shared;
 pub mod prelude;
-pub mod anthropic;
-pub mod bitbucket;
-pub mod openai;
-pub mod elevenlabs;
-pub mod gitea;
-pub mod github;
-pub mod gitlab;
-pub mod huggingface;
-pub mod lmstudio;
-pub mod ollama;
-pub mod emqx;
+pub mod eversolo;

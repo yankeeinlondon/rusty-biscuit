@@ -15,19 +15,7 @@
 //!
 //! **Clients and request enums:**
 //!
-//! - [`Anthropic`] + [`AnthropicRequest`]
-//! - [`Bitbucket`] + [`BitbucketRequest`]
-//! - [`OpenAI`] + [`OpenAIRequest`]
-//! - [`ElevenLabs`] + [`ElevenLabsRequest`]
-//! - [`Gitea`] + [`GiteaRequest`]
-//! - [`GitHub`] + [`GitHubRequest`]
-//! - [`GitLab`] + [`GitLabRequest`]
-//! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
-//! - [`LmStudio`] + [`LmStudioRequest`]
-//! - [`OllamaNative`] + [`OllamaNativeRequest`]
-//! - [`OllamaOpenAI`] + [`OllamaOpenAIRequest`]
-//! - [`EmqxBasic`] + [`EmqxBasicRequest`]
-//! - [`EmqxBearer`] + [`EmqxBearerRequest`]
+//! - [`Eversolo`] + [`EversoloRequest`]
 //!
 //! **Shared types:**
 //!
@@ -56,16 +44,4 @@
 //! }
 //! ```
 pub use crate::shared::{RequestParts, SchematicError};
-pub use crate::anthropic::{Anthropic, AnthropicRequest};
-pub use crate::bitbucket::{Bitbucket, BitbucketRequest};
-pub use crate::openai::{OpenAI, OpenAIRequest};
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use crate::gitea::{Gitea, GiteaRequest};
-pub use crate::github::{GitHub, GitHubRequest};
-pub use crate::gitlab::{GitLab, GitLabRequest};
-pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
-pub use crate::lmstudio::{LmStudio, LmStudioRequest};
-pub use crate::ollama::{OllamaNative, OllamaNativeRequest};
-pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIRequest};
-pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
-pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};
+pub use crate::eversolo::{Eversolo, EversoloRequest};
