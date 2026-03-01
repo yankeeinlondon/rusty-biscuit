@@ -5,10 +5,10 @@
 <td><img src="../assets/playa.png" style="max-width='25%'" width=200px /></td>
 <td>
 <h2>Playa</h2>
-<p>This library leverages the host to play audio through an available headless audio program:</p>
+<p>This library leverages the host to play audio natively or via a headless audio player installed on the host.</p>
 
 <ul>
-    <li>small library and CLI binaries</li>
+    <li>small library and CLI binaries (<i>you can opt-out of native playback to make more compact</i>)</li>
     <li>audio format detection from files, URLs, or bytes</li>
     <li>capability-ranked player matching with automatic failover</li>
     <li>88 embedded sound effects across 6 categories</li>
