@@ -304,6 +304,27 @@ fn extracts_python_function_signature() -> Result<(), TreeHuggerError> {
 }
 
 #[test]
+fn captures_method_container_context() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    let method = symbols
+        .iter()
+        .find(|symbol| symbol.name == "greet" && symbol.kind == tree_hugger::SymbolKind::Method)
+        .expect("should find Greeter::greet method");
+
+    assert!(
+        method
+            .container_name
+            .as_deref()
+            .is_some_and(|name| name.contains("Greeter")),
+        "method container should include impl target"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn emits_symbol_records_v2() -> Result<(), TreeHuggerError> {
     let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
     let records = tree_file.symbol_records()?;

@@ -102,6 +102,21 @@ fn test_symbols_pretty_output_default() {
         .stdout(predicate::str::contains("\"files\"").not());
 }
 
+#[test]
+fn test_symbols_include_container_context_for_methods() {
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "method greet(self, name: &str) -> String [in impl Greeter]",
+        ));
+}
+
 // ============================================================================
 // Regression tests for flag ordering flexibility
 // Bug: Flags had to be placed in specific positions relative to subcommand
@@ -599,6 +614,20 @@ fn test_exported_flag_filters_symbols() {
         .success()
         .stdout(predicate::str::contains("Greeter"))
         .stdout(predicate::str::contains("greet"));
+}
+
+#[test]
+fn test_exported_flag_excludes_private_rust_constants() {
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/src/builtins.rs",
+            "--exported",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ZSH_BUILTINS").not());
 }
 
 #[test]
