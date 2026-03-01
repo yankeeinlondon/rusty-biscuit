@@ -30,8 +30,8 @@
 pub mod cleanup;
 pub mod delta;
 pub mod dsl;
-pub mod fs;
 mod frontmatter;
+pub mod fs;
 pub mod hash;
 pub mod highlighting;
 pub mod inline;
@@ -283,6 +283,25 @@ impl Markdown {
     /// ```
     pub fn cleanup(&mut self) -> &mut Self {
         self.content = cleanup::cleanup_content(&self.content);
+        self
+    }
+
+    /// Cleans up markdown content and enforces a consistent list indentation width.
+    ///
+    /// Each nested list level is normalized to `indent_size` spaces.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let content = "- Parent\n  - Child";
+    /// let mut md: Markdown = content.into();
+    /// md.cleanup_with_indent(4);
+    /// assert!(md.content().contains("\n    - Child"));
+    /// ```
+    pub fn cleanup_with_indent(&mut self, indent_size: usize) -> &mut Self {
+        self.content = cleanup::cleanup_content_with_indent(&self.content, indent_size);
         self
     }
 
@@ -915,6 +934,17 @@ title: Test
 
         let author: Option<String> = md.fm_get("author").unwrap();
         assert_eq!(author, Some("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_cleanup_with_indent_method() {
+        let content = "- Parent\n  - Child\n    - Grandchild";
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_indent(4);
+
+        assert!(md.content().contains("\n    - Child"));
+        assert!(md.content().contains("\n        - Grandchild"));
     }
 
     #[test]

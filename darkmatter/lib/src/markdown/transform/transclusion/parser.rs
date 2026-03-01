@@ -4,7 +4,7 @@ use super::types::{
     BlockDirective, BlockOptions, DirectiveKind, FrontmatterRefs, ReplaceOption, TransclusionError,
 };
 use crate::markdown::transform::parse_utils::{
-    find_code_regions, is_in_code_region, Cursor, CursorError,
+    Cursor, CursorError, find_code_regions, is_in_code_region,
 };
 use serde_json::Value;
 use std::collections::HashMap;

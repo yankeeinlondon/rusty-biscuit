@@ -1319,8 +1319,7 @@ impl Stylesheet {
                         prose_style_text(terminal, "<rgb 220,220,220>{text}</rgb>", &value_text)
                     }
                 };
-                let styled_semicolon =
-                    Prose::new("<rgb 160,160,160>;</rgb>").render(terminal);
+                let styled_semicolon = Prose::new("<rgb 160,160,160>;</rgb>").render(terminal);
 
                 format!("{styled_name}{styled_colon} {styled_value}{styled_semicolon}")
             })

@@ -3,7 +3,7 @@
 use super::types::{
     CleanupService, HeadingGlob, TocLinkingDirective, TocLinkingError, TocLinkingOptions,
 };
-use crate::markdown::transform::parse_utils::{find_code_regions, is_in_code_region, Cursor};
+use crate::markdown::transform::parse_utils::{Cursor, find_code_regions, is_in_code_region};
 
 /// Parses all `::toc-linking` directives from markdown content.
 pub fn parse_toc_linking_directives(
@@ -91,10 +91,7 @@ fn parse_directive_line(
     })
 }
 
-fn parse_target_chain(
-    raw: &str,
-    line: usize,
-) -> Result<(Vec<String>, bool), TocLinkingError> {
+fn parse_target_chain(raw: &str, line: usize) -> Result<(Vec<String>, bool), TocLinkingError> {
     let parts: Vec<&str> = raw.split('|').map(|s| s.trim()).collect();
     let mut targets = Vec::new();
     let mut suppress = false;
@@ -274,8 +271,7 @@ mod tests {
 
     #[test]
     fn parses_filter_and_keep() {
-        let content =
-            "::toc-linking ./doc.md filter=3.* keep=\"*important*\"\n";
+        let content = "::toc-linking ./doc.md filter=3.* keep=\"*important*\"\n";
         let directives = parse_toc_linking_directives(content).unwrap();
         assert_eq!(directives[0].options.filter_patterns.len(), 1);
         assert_eq!(directives[0].options.filter_patterns[0].pattern, "3.*");
@@ -291,7 +287,10 @@ mod tests {
     fn parses_case_sensitive_glob() {
         let content = "::toc-linking ./doc.md filter=^Important*\n";
         let directives = parse_toc_linking_directives(content).unwrap();
-        assert_eq!(directives[0].options.filter_patterns[0].pattern, "Important*");
+        assert_eq!(
+            directives[0].options.filter_patterns[0].pattern,
+            "Important*"
+        );
         assert!(directives[0].options.filter_patterns[0].case_sensitive);
     }
 
@@ -299,10 +298,7 @@ mod tests {
     fn parses_fallback_chain() {
         let content = "::toc-linking \"./a.md | ./b.md | ./c.md\"\n";
         let directives = parse_toc_linking_directives(content).unwrap();
-        assert_eq!(
-            directives[0].targets,
-            vec!["./a.md", "./b.md", "./c.md"]
-        );
+        assert_eq!(directives[0].targets, vec!["./a.md", "./b.md", "./c.md"]);
         assert!(!directives[0].suppress_not_found);
     }
 

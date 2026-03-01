@@ -24,7 +24,7 @@ pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, P
 
 use crate::markdown::Markdown;
 use biscuit_file::serde_yaml_ng;
-use biscuit_hash::{xx_hash, xx_hash_variant, HashVariant};
+use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
 /// Generates a URL-safe slug from heading text.
@@ -642,10 +642,16 @@ See [nonexistent](#nonexistent).
         assert_eq!(toc.structure[0].title, "macOS Audio");
         assert_eq!(toc.structure[0].children[0].title, "Getting Started");
 
-        let all_titles: Vec<&str> = toc.all_headings().iter().map(|node| node.title.as_str()).collect();
-        assert_eq!(all_titles, vec!["macOS Audio", "Getting Started"]);
-        assert!(!all_titles
+        let all_titles: Vec<&str> = toc
+            .all_headings()
             .iter()
-            .any(|title| title.contains("last_updated") || title.contains("update_policy")));
+            .map(|node| node.title.as_str())
+            .collect();
+        assert_eq!(all_titles, vec!["macOS Audio", "Getting Started"]);
+        assert!(
+            !all_titles
+                .iter()
+                .any(|title| title.contains("last_updated") || title.contains("update_policy"))
+        );
     }
 }

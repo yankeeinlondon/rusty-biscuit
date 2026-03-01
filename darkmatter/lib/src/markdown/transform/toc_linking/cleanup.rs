@@ -101,7 +101,10 @@ mod tests {
     fn strips_zwj_sequences() {
         // Family emoji: 👨‍👩‍👧‍👦
         assert_eq!(
-            apply_cleanup("👨\u{200D}👩\u{200D}👧\u{200D}👦 Family", &[CleanupService::EmojiLeader]),
+            apply_cleanup(
+                "👨\u{200D}👩\u{200D}👧\u{200D}👦 Family",
+                &[CleanupService::EmojiLeader]
+            ),
             "Family"
         );
     }

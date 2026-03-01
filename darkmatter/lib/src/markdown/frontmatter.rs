@@ -2,8 +2,8 @@
 
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 
 /// Strategy for merging frontmatter fields.
@@ -416,6 +416,9 @@ This is content."#;
         let input = "key: \"a\tb\"\n \tchild: true\n\t\tgrandchild: 1";
         let normalized = normalize_frontmatter_indentation(input);
 
-        assert_eq!(normalized, "key: \"a\tb\"\n   child: true\n    grandchild: 1");
+        assert_eq!(
+            normalized,
+            "key: \"a\tb\"\n   child: true\n    grandchild: 1"
+        );
     }
 }

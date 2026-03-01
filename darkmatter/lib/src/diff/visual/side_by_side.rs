@@ -11,14 +11,16 @@
 
 use super::VisualDiffOptions;
 use super::diff::{DiffLine, InlineSpan};
+use std::collections::HashSet;
 use textwrap::{Options as WrapOptions, wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ANSI escape codes
 const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
 const UNDERLINE: &str = "\x1b[4m";
+const INVERSE: &str = "\x1b[7m";
 
 // Background colors (256-color mode)
 const BG_REMOVED: &str = "\x1b[48;5;52m"; // Dark red
@@ -53,9 +55,23 @@ pub fn render(
     ));
     output.push('\n');
 
+    // Apply context filtering so large unchanged regions collapse around hunks.
+    let visible_lines = filter_with_context(diff, options.context_lines);
+    let mut prev_was_separator = true; // avoid leading separator
+
     // Track pairing of removed/added lines for side-by-side display
     let mut i = 0;
     while i < diff.len() {
+        if !visible_lines.contains(&i) {
+            if !prev_was_separator && i > 0 {
+                output.push_str(&format!("{DIM}    ···{RESET}\n"));
+                prev_was_separator = true;
+            }
+            i += 1;
+            continue;
+        }
+        prev_was_separator = false;
+
         match &diff[i] {
             DiffLine::Context {
                 line_no_old,
@@ -73,14 +89,18 @@ pub fn render(
                 // Collect consecutive removed lines
                 let mut removed_lines = vec![];
                 while i < diff.len() && diff[i].is_removed() {
-                    removed_lines.push(&diff[i]);
+                    if visible_lines.contains(&i) {
+                        removed_lines.push(&diff[i]);
+                    }
                     i += 1;
                 }
 
                 // Collect consecutive added lines
                 let mut added_lines = vec![];
                 while i < diff.len() && diff[i].is_added() {
-                    added_lines.push(&diff[i]);
+                    if visible_lines.contains(&i) {
+                        added_lines.push(&diff[i]);
+                    }
                     i += 1;
                 }
 
@@ -111,6 +131,34 @@ pub fn render(
     output
 }
 
+/// Filter lines to show only changes and surrounding context.
+fn filter_with_context(diff: &[DiffLine], context_lines: usize) -> HashSet<usize> {
+    let mut visible = HashSet::new();
+
+    // First pass: mark all change lines.
+    let change_indices: Vec<usize> = diff
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.is_context())
+        .map(|(idx, _)| idx)
+        .collect();
+
+    // Second pass: add context around each change.
+    for &change_idx in &change_indices {
+        let start = change_idx.saturating_sub(context_lines);
+        for i in start..=change_idx {
+            visible.insert(i);
+        }
+
+        let end = (change_idx + context_lines + 1).min(diff.len());
+        for i in change_idx..end {
+            visible.insert(i);
+        }
+    }
+
+    visible
+}
+
 /// Format the header line with labels.
 fn format_header(
     label_left: &str,
@@ -125,7 +173,7 @@ fn format_header(
     let right_padding = content_width.saturating_sub(right_label.width());
 
     format!(
-        "{DIM}     {BOLD}{}{RESET}{DIM}{} │      {BOLD}{}{RESET}{DIM}{}",
+        "{INVERSE}{BOLD}     {}{} │      {}{}{RESET}",
         left_label,
         " ".repeat(left_padding),
         right_label,
@@ -572,6 +620,18 @@ mod tests {
     }
 
     #[test]
+    fn test_render_header_is_inverted() {
+        let diff: Vec<DiffLine> = vec![];
+        let options = VisualDiffOptions::with_width(120);
+        let output = render(&diff, "original", "updated", &options);
+        let first_line = output.lines().next().unwrap_or_default();
+
+        assert!(first_line.starts_with(INVERSE));
+        assert!(first_line.contains("original"));
+        assert!(first_line.contains("updated"));
+    }
+
+    #[test]
     fn test_render_long_lines_wrap() {
         // Regression test: ensure long lines in full render wrap properly
         let diff = vec![
@@ -604,5 +664,62 @@ mod tests {
             "Long lines should wrap, producing more output lines. Got {} lines",
             newline_count
         );
+    }
+
+    #[test]
+    fn test_render_applies_context_filtering() {
+        let diff = vec![
+            DiffLine::Context {
+                line_no_old: 1,
+                line_no_new: 1,
+                content: "ctx 1".to_string(),
+            },
+            DiffLine::Context {
+                line_no_old: 2,
+                line_no_new: 2,
+                content: "ctx 2".to_string(),
+            },
+            DiffLine::Context {
+                line_no_old: 3,
+                line_no_new: 3,
+                content: "ctx 3".to_string(),
+            },
+            DiffLine::Removed {
+                line_no: 4,
+                content: "old".to_string(),
+                inline_changes: vec![],
+            },
+            DiffLine::Added {
+                line_no: 4,
+                content: "new".to_string(),
+                inline_changes: vec![],
+            },
+            DiffLine::Context {
+                line_no_old: 5,
+                line_no_new: 5,
+                content: "ctx 5".to_string(),
+            },
+            DiffLine::Context {
+                line_no_old: 6,
+                line_no_new: 6,
+                content: "ctx 6".to_string(),
+            },
+            DiffLine::Context {
+                line_no_old: 7,
+                line_no_new: 7,
+                content: "ctx 7".to_string(),
+            },
+        ];
+
+        let mut options = VisualDiffOptions::with_width(120);
+        options.context_lines = 1;
+        let output = render(&diff, "old.md", "new.md", &options);
+
+        // Keep only one line of context around the change.
+        assert!(output.contains("ctx 3"));
+        assert!(output.contains("ctx 5"));
+        assert!(!output.contains("ctx 1"));
+        assert!(!output.contains("ctx 7"));
+        assert!(output.contains("···"));
     }
 }

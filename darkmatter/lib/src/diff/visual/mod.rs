@@ -28,6 +28,9 @@ use terminal_size::{Width, terminal_size};
 
 /// Threshold for switching between side-by-side and unified views.
 const SIDE_BY_SIDE_THRESHOLD: u16 = 110;
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const FG_YELLOW: &str = "\x1b[33m";
 
 /// The visual diff layout mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,7 +139,7 @@ pub fn render_visual_diff(
 ) -> VisualDiffOutput {
     let diff = compute_visual_diff(input.original, input.updated);
     let mode = options.resolved_mode();
-    let rendered = match mode {
+    let mut rendered = match mode {
         VisualDiffMode::SideBySide => {
             side_by_side::render(&diff, input.label_original, input.label_updated, options)
         }
@@ -148,6 +151,9 @@ pub fn render_visual_diff(
             unified::render(&diff, input.label_original, input.label_updated, options)
         }
     };
+    if let Some(note) = eof_newline_note(input.original, input.updated) {
+        rendered.push_str(&note);
+    }
 
     let stats = compute_stats(&diff);
 
@@ -156,6 +162,30 @@ pub fn render_visual_diff(
         mode,
         stats,
     }
+}
+
+fn eof_newline_note(original: &str, updated: &str) -> Option<String> {
+    let original_has_newline = original.ends_with('\n');
+    let updated_has_newline = updated.ends_with('\n');
+
+    if original_has_newline == updated_has_newline {
+        return None;
+    }
+
+    let original_state = if original_has_newline {
+        "present"
+    } else {
+        "missing"
+    };
+    let updated_state = if updated_has_newline {
+        "present"
+    } else {
+        "missing"
+    };
+
+    Some(format!(
+        "{FG_YELLOW}{BOLD}! EOF newline changed:{RESET} original={original_state}, updated={updated_state}\n"
+    ))
 }
 
 /// Render a visual diff between two strings, returning only the rendered output.
@@ -264,5 +294,40 @@ mod tests {
         // Should contain context lines but no add/remove markers
         assert!(!output.contains("\x1b[48;5;22m")); // No green background
         assert!(!output.contains("\x1b[48;5;52m")); // No red background
+    }
+
+    #[test]
+    fn test_render_includes_eof_newline_note_when_changed() {
+        let options = VisualDiffOptions::with_width(80);
+        let output = render_visual_diff(
+            VisualDiffInput {
+                original: "Hello",
+                updated: "Hello\n",
+                label_original: "a.md",
+                label_updated: "b.md",
+            },
+            &options,
+        )
+        .rendered;
+
+        assert!(output.contains("EOF newline changed"));
+        assert!(output.contains("original=missing, updated=present"));
+    }
+
+    #[test]
+    fn test_render_omits_eof_newline_note_when_unchanged() {
+        let options = VisualDiffOptions::with_width(80);
+        let output = render_visual_diff(
+            VisualDiffInput {
+                original: "Hello\n",
+                updated: "Hello\n",
+                label_original: "a.md",
+                label_updated: "b.md",
+            },
+            &options,
+        )
+        .rendered;
+
+        assert!(!output.contains("EOF newline changed"));
     }
 }

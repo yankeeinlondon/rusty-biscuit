@@ -85,11 +85,7 @@ pub fn process_toc_linking(
         if !found {
             if directive.suppress_not_found || directive.targets.is_empty() {
                 // Suppress: replace with empty_text or empty string
-                let replacement = directive
-                    .options
-                    .empty_text
-                    .clone()
-                    .unwrap_or_default();
+                let replacement = directive.options.empty_text.clone().unwrap_or_default();
                 replacements.push((directive.span.clone(), replacement));
             } else {
                 let paths = directive.targets.join(", ");
@@ -119,12 +115,11 @@ fn resolve_file(
     source: &TransformSource,
     line: usize,
 ) -> Result<std::path::PathBuf, TocLinkingError> {
-    let path = resolve_path(target, options, source, line).map_err(|_| {
-        TocLinkingError::FileNotFound {
+    let path =
+        resolve_path(target, options, source, line).map_err(|_| TocLinkingError::FileNotFound {
             path: target.to_string(),
             line,
-        }
-    })?;
+        })?;
 
     if !path.exists() {
         return Err(TocLinkingError::FileNotFound {
@@ -184,11 +179,7 @@ mod tests {
     #[test]
     fn fallback_chain_first_missing_second_found() {
         let dir = TempDir::new().unwrap();
-        write_file(
-            dir.path(),
-            "backup.md",
-            "## Backup Section\n\nContent.\n",
-        );
+        write_file(dir.path(), "backup.md", "## Backup Section\n\nContent.\n");
         let source_path = dir.path().join("source.md");
         write_file(dir.path(), "source.md", "");
 
@@ -230,8 +221,7 @@ mod tests {
         let source_path = dir.path().join("source.md");
         write_file(dir.path(), "source.md", "");
 
-        let content =
-            "::toc-linking ./a.md\n\n::toc-linking ./b.md\n".to_string();
+        let content = "::toc-linking ./a.md\n\n::toc-linking ./b.md\n".to_string();
         let source = TransformSource::File(source_path);
         let options = TransclusionOptions {
             source: source.clone(),
@@ -248,13 +238,12 @@ mod tests {
     fn stage_toggle_disabled() {
         let dir = TempDir::new().unwrap();
         write_file(dir.path(), "api.md", "## Test\n");
-        let source_path = write_file(
-            dir.path(),
-            "source.md",
-            "::toc-linking ./api.md\n",
-        );
+        let source_path = write_file(dir.path(), "source.md", "::toc-linking ./api.md\n");
 
-        let md: Markdown = std::fs::read_to_string(&source_path).unwrap().as_str().into();
+        let md: Markdown = std::fs::read_to_string(&source_path)
+            .unwrap()
+            .as_str()
+            .into();
         let options = TransformOptions::new()
             .with_source_file(&source_path)
             .with_stages(crate::markdown::transform::Stage1Stages {
@@ -273,13 +262,12 @@ mod tests {
     fn transform_report_counts() {
         let dir = TempDir::new().unwrap();
         write_file(dir.path(), "api.md", "## Test\n");
-        let source_path = write_file(
-            dir.path(),
-            "source.md",
-            "::toc-linking ./api.md\n",
-        );
+        let source_path = write_file(dir.path(), "source.md", "::toc-linking ./api.md\n");
 
-        let md: Markdown = std::fs::read_to_string(&source_path).unwrap().as_str().into();
+        let md: Markdown = std::fs::read_to_string(&source_path)
+            .unwrap()
+            .as_str()
+            .into();
         let options = TransformOptions::new()
             .with_source_file(&source_path)
             .with_stage2(crate::markdown::transform::Stage2Stages::none());

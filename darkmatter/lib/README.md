@@ -191,6 +191,7 @@ let output = md.as_string();  // Includes frontmatter if present
 ```rust
 let mut md: Markdown = content.into();
 md.cleanup();  // Normalize spacing, align tables
+md.cleanup_with_indent(4); // Normalize with 4-space nested list indentation
 ```
 
 ### Transform Pipeline (Stage 1 + Stage 2)

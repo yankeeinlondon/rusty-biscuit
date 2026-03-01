@@ -94,8 +94,7 @@ mod tests {
 
     #[test]
     fn keep_whitelist() {
-        let filter =
-            HeadingFilter::new(&[glob("3.*")], &[], 1).unwrap();
+        let filter = HeadingFilter::new(&[glob("3.*")], &[], 1).unwrap();
         assert!(filter.should_include("3. Setup"));
         assert!(filter.should_include("3.2 Details"));
         assert!(!filter.should_include("4. Other"));
@@ -103,20 +102,14 @@ mod tests {
 
     #[test]
     fn filter_blacklist() {
-        let filter =
-            HeadingFilter::new(&[], &[glob("3.*")], 1).unwrap();
+        let filter = HeadingFilter::new(&[], &[glob("3.*")], 1).unwrap();
         assert!(!filter.should_include("3. Setup"));
         assert!(filter.should_include("4. Other"));
     }
 
     #[test]
     fn combined_keep_and_filter() {
-        let filter = HeadingFilter::new(
-            &[glob("*important*")],
-            &[glob("*draft*")],
-            1,
-        )
-        .unwrap();
+        let filter = HeadingFilter::new(&[glob("*important*")], &[glob("*draft*")], 1).unwrap();
         assert!(filter.should_include("Very important topic"));
         assert!(!filter.should_include("important draft notes"));
         assert!(!filter.should_include("Unrelated topic"));
@@ -124,8 +117,7 @@ mod tests {
 
     #[test]
     fn case_insensitive_default() {
-        let filter =
-            HeadingFilter::new(&[glob("setup*")], &[], 1).unwrap();
+        let filter = HeadingFilter::new(&[glob("setup*")], &[], 1).unwrap();
         assert!(filter.should_include("Setup Guide"));
         assert!(filter.should_include("setup guide"));
         assert!(filter.should_include("SETUP GUIDE"));
@@ -133,20 +125,15 @@ mod tests {
 
     #[test]
     fn case_sensitive_with_caret() {
-        let filter =
-            HeadingFilter::new(&[glob_sensitive("Setup*")], &[], 1).unwrap();
+        let filter = HeadingFilter::new(&[glob_sensitive("Setup*")], &[], 1).unwrap();
         assert!(filter.should_include("Setup Guide"));
         assert!(!filter.should_include("setup guide"));
     }
 
     #[test]
     fn multiple_patterns_ored() {
-        let filter = HeadingFilter::new(
-            &[glob("3.*"), glob("4.*"), glob("*important*")],
-            &[],
-            1,
-        )
-        .unwrap();
+        let filter =
+            HeadingFilter::new(&[glob("3.*"), glob("4.*"), glob("*important*")], &[], 1).unwrap();
         assert!(filter.should_include("3. Setup"));
         assert!(filter.should_include("4. Usage"));
         assert!(filter.should_include("Very important"));

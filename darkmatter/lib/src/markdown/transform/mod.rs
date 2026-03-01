@@ -27,9 +27,9 @@
 //! let report = md.transform_with(options).unwrap();
 //! ```
 
+pub(crate) mod parse_utils;
 mod state;
 mod types;
-pub(crate) mod parse_utils;
 
 pub mod interpolation;
 pub mod replacement;
@@ -198,10 +198,7 @@ impl Markdown {
                         report.toc_links_generated = count;
                     }
                     Err(e) if !options.fail_fast => {
-                        report.add_warning(TransformWarning::new(
-                            "toc_linking",
-                            e.to_string(),
-                        ));
+                        report.add_warning(TransformWarning::new("toc_linking", e.to_string()));
                     }
                     Err(e) => return Err(e.into()),
                 }
@@ -1688,7 +1685,12 @@ Rounded: {{ round(pi) }}"#;
 
         assert!(transformed.content().starts_with("Intro"));
         assert!(transformed.content().contains("Body"));
-        assert!(transformed.content().ends_with("Outro"));
+        assert!(
+            transformed
+                .content()
+                .trim_end_matches('\n')
+                .ends_with("Outro")
+        );
         assert_eq!(report.transclusions_applied, 2);
     }
 
@@ -1785,7 +1787,12 @@ Rounded: {{ round(pi) }}"#;
         let options = TransformOptions::new().with_source_file(root);
         let (transformed, report) = md.transform_with(options).unwrap();
 
-        assert!(transformed.content().ends_with("End of document."));
+        assert!(
+            transformed
+                .content()
+                .trim_end_matches('\n')
+                .ends_with("End of document.")
+        );
         assert_eq!(report.transclusions_applied, 0);
     }
 
@@ -1932,7 +1939,7 @@ Rounded: {{ round(pi) }}"#;
         let content = transformed.content();
         // "Root epilogue." should appear exactly once — at the end of root, not within child
         assert_eq!(content.matches("Root epilogue.").count(), 1);
-        assert!(content.ends_with("Root epilogue."));
+        assert!(content.trim_end_matches('\n').ends_with("Root epilogue."));
     }
 
     #[test]

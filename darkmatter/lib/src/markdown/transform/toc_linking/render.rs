@@ -30,10 +30,7 @@ pub fn render_toc_links(
         .collect();
 
     if links.is_empty() {
-        options
-            .empty_text
-            .clone()
-            .unwrap_or_default()
+        options.empty_text.clone().unwrap_or_default()
     } else {
         links.join("\n")
     }
@@ -46,13 +43,7 @@ mod tests {
     use crate::markdown::transform::toc_linking::types::CleanupService;
 
     fn make_heading(level: u8, title: &str, slug: &str) -> MarkdownTocNode {
-        MarkdownTocNode::new(
-            level,
-            title.to_string(),
-            slug.to_string(),
-            (0, 0),
-            (0, 0),
-        )
+        MarkdownTocNode::new(level, title.to_string(), slug.to_string(), (0, 0), (0, 0))
     }
 
     fn default_filter() -> HeadingFilter {
@@ -124,8 +115,12 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![&h];
         let options = TocLinkingOptions::default();
 
-        let result =
-            render_toc_links(&headings, "../relative/path.md", &options, &default_filter());
+        let result = render_toc_links(
+            &headings,
+            "../relative/path.md",
+            &options,
+            &default_filter(),
+        );
         assert!(result.contains("../relative/path.md#test"));
     }
 }

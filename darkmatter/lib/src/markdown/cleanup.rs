@@ -241,10 +241,7 @@ fn unescape_emphasis_chars(output: &mut String) {
 
 /// Cleans up markdown content by normalizing formatting.
 ///
-/// This function performs two main operations:
-/// 1. Ensures proper blank lines between block elements (via cmark Options)
-/// 2. Aligns table columns for consistent formatting
-/// 3. Preserves original list markers (*, -, +)
+/// This preserves the source document's nested list indentation style.
 ///
 /// ## Returns
 ///
@@ -260,6 +257,28 @@ fn unescape_emphasis_chars(output: &mut String) {
 /// assert!(cleaned.contains("\n\n"));
 /// ```
 pub fn cleanup_content(content: &str) -> String {
+    cleanup_content_internal(content, None)
+}
+
+/// Cleans up markdown content and enforces a consistent list indentation width.
+///
+/// When `indent_size` is provided, every nested list level is normalized to that
+/// number of spaces.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::cleanup::cleanup_content_with_indent;
+///
+/// let content = "- Parent\n  - Child";
+/// let cleaned = cleanup_content_with_indent(content, 4);
+/// assert!(cleaned.contains("\n    - Child"));
+/// ```
+pub fn cleanup_content_with_indent(content: &str, indent_size: usize) -> String {
+    cleanup_content_internal(content, Some(indent_size.max(1)))
+}
+
+fn cleanup_content_internal(content: &str, forced_indent: Option<usize>) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
     let parser = Parser::new_ext(content, cleanup_parser_options());
@@ -321,17 +340,32 @@ pub fn cleanup_content(content: &str) -> String {
     // Restore original list markers (the library normalizes to '*')
     restore_list_markers(&mut output, &list_markers);
 
-    // Fix nested list indentation (library uses 2-space, preserve original style)
-    let original_indent = detect_list_indentation(content);
-    if original_indent > 2 {
-        fix_list_indentation(&mut output, original_indent);
+    // Normalize nested list indentation.
+    // When forced indentation is provided, use it for consistent nesting.
+    // Otherwise preserve the source style when it differs from cmark's 2-space output.
+    if let Some(indent_size) = forced_indent {
+        if indent_size != 2 {
+            fix_list_indentation(&mut output, indent_size);
+        }
+    } else {
+        let original_indent = detect_list_indentation(content);
+        if original_indent > 2 {
+            fix_list_indentation(&mut output, original_indent);
+        }
     }
 
     // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
     unescape_brackets(&mut output);
 
-    // Trim leading/trailing whitespace-only lines but preserve content
-    output.trim_start_matches('\n').to_string()
+    // Trim leading blank lines, then normalize to exactly one trailing newline
+    // for non-empty documents.
+    let mut normalized = output.trim_start_matches('\n').to_string();
+    if normalized.is_empty() {
+        return normalized;
+    }
+    normalized.truncate(normalized.trim_end_matches('\n').len());
+    normalized.push('\n');
+    normalized
 }
 
 /// Extracts the list marker character for each unordered list item from the source.
@@ -1289,6 +1323,34 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_ensures_single_trailing_newline() {
+        let content = "# Title\n\nParagraph";
+        let cleaned = cleanup_content(content);
+        let trimmed = cleaned.trim_end_matches('\n');
+        let trailing_newlines = cleaned.len() - trimmed.len();
+
+        assert_eq!(
+            trailing_newlines, 1,
+            "Expected exactly one trailing newline, got:\n{:?}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_collapses_multiple_trailing_newlines_to_one() {
+        let content = "# Title\n\nParagraph\n\n\n";
+        let cleaned = cleanup_content(content);
+        let trimmed = cleaned.trim_end_matches('\n');
+        let trailing_newlines = cleaned.len() - trimmed.len();
+
+        assert_eq!(
+            trailing_newlines, 1,
+            "Expected trailing newlines to collapse to one, got:\n{:?}",
+            cleaned
+        );
+    }
+
+    #[test]
     fn test_cleanup_handles_multiple_paragraphs() {
         let content = "Para 1\n\nPara 2\n\nPara 3";
         let cleaned = cleanup_content(content);
@@ -2008,6 +2070,40 @@ mod tests {
         assert!(
             cleaned.contains("\n    - [ ] Sub-task 1"),
             "Nested TODO items should preserve 4-space indentation, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_with_indent_forces_4_space_indentation() {
+        let content = "- Level 1\n  - Level 2\n    - Level 3";
+        let cleaned = cleanup_content_with_indent(content, 4);
+
+        assert!(
+            cleaned.contains("\n    - Level 2"),
+            "Nested list should use 4-space indentation, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n        - Level 3"),
+            "Nested list should use 8-space indentation at level 2, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_with_indent_forces_2_space_indentation() {
+        let content = "- Level 1\n    - Level 2\n        - Level 3";
+        let cleaned = cleanup_content_with_indent(content, 2);
+
+        assert!(
+            cleaned.contains("\n  - Level 2"),
+            "Nested list should use 2-space indentation, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n    - Level 3"),
+            "Nested list should use 4-space indentation at level 2, got:\n{}",
             cleaned
         );
     }
