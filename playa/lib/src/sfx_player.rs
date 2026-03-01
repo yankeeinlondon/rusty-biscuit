@@ -374,8 +374,12 @@ mod windows_sfx {
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
 
+        // Extract primitive values from NonZero types.
+        let channels_u16 = channels.get();
+        let sample_rate_u32 = sample_rate.get();
+
         // Collect all samples as f32 (fine for short SFX clips).
-        let mut samples: Vec<f32> = decoder.convert_samples().collect();
+        let mut samples: Vec<f32> = decoder.collect();
 
         // Apply volume.
         if let Some(vol) = options.volume {
@@ -389,9 +393,9 @@ mod windows_sfx {
         // higher rate makes WASAPI treat the samples as "faster", producing
         // the standard speed-with-pitch-shift effect.
         let effective_rate = if let Some(speed) = options.speed {
-            (sample_rate as f32 * speed) as u32
+            (sample_rate_u32 as f32 * speed) as u32
         } else {
-            sample_rate
+            sample_rate_u32
         };
 
         unsafe {
@@ -417,10 +421,10 @@ mod windows_sfx {
 
             // Describe our decoded audio format (float32 PCM).
             let bytes_per_sample = 4u16; // f32
-            let block_align = channels * bytes_per_sample;
+            let block_align = channels_u16 * bytes_per_sample;
             let format = WAVEFORMATEX {
                 wFormatTag: WAVE_FORMAT_IEEE_FLOAT as u16,
-                nChannels: channels,
+                nChannels: channels_u16,
                 nSamplesPerSec: effective_rate,
                 nAvgBytesPerSec: effective_rate * block_align as u32,
                 nBlockAlign: block_align,
@@ -446,7 +450,8 @@ mod windows_sfx {
             client.Start()?;
 
             // Render loop: write decoded samples to the WASAPI buffer.
-            let total_frames = samples.len() / channels as usize;
+            let ch = channels_u16 as usize;
+            let total_frames = samples.len() / ch;
             let mut frame_offset = 0usize;
 
             while frame_offset < total_frames {
@@ -463,9 +468,9 @@ mod windows_sfx {
 
                 let dst = std::slice::from_raw_parts_mut(
                     buf_ptr as *mut f32,
-                    frames_to_write as usize * channels as usize,
+                    frames_to_write as usize * ch,
                 );
-                let src_start = frame_offset * channels as usize;
+                let src_start = frame_offset * ch;
                 let src_end = (src_start + dst.len()).min(samples.len());
                 let copy_len = src_end - src_start;
                 dst[..copy_len].copy_from_slice(&samples[src_start..src_end]);
@@ -577,8 +582,12 @@ mod linux {
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
 
+        // Extract primitive values from NonZero types.
+        let channels_u8 = channels.get() as u8;
+        let sample_rate_u32 = sample_rate.get();
+
         // Collect all samples as f32 (fine for short SFX clips).
-        let mut samples: Vec<f32> = decoder.convert_samples().collect();
+        let mut samples: Vec<f32> = decoder.collect();
 
         // Apply volume.
         if let Some(vol) = options.volume {
@@ -590,14 +599,14 @@ mod linux {
         // Speed: adjust the declared sample rate. PulseAudio resamples from our
         // declared rate to the device rate, producing the speed-with-pitch effect.
         let effective_rate = if let Some(speed) = options.speed {
-            (sample_rate as f32 * speed) as u32
+            (sample_rate_u32 as f32 * speed) as u32
         } else {
-            sample_rate
+            sample_rate_u32
         };
 
         let spec = Spec {
-            format: Format::Float32le,
-            channels: channels as u8,
+            format: Format::F32le,
+            channels: channels_u8,
             rate: effective_rate,
         };
 
@@ -665,7 +674,7 @@ mod linux {
         }
 
         // Convert f32 samples to little-endian byte representation.
-        let byte_data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let byte_data: Vec<u8> = samples.iter().flat_map(|s: &f32| s.to_le_bytes()).collect();
 
         // Write all audio data. PulseAudio buffers internally.
         stream.write(&byte_data, None, 0, SeekMode::Relative)?;
@@ -705,7 +714,7 @@ mod linux {
         #[test]
         fn valid_sample_spec() {
             let spec = Spec {
-                format: Format::Float32le,
+                format: Format::F32le,
                 channels: 2,
                 rate: 44100,
             };
@@ -715,7 +724,7 @@ mod linux {
         #[test]
         fn invalid_sample_spec_zero_rate() {
             let spec = Spec {
-                format: Format::Float32le,
+                format: Format::F32le,
                 channels: 2,
                 rate: 0,
             };
@@ -725,7 +734,7 @@ mod linux {
         #[test]
         fn invalid_sample_spec_zero_channels() {
             let spec = Spec {
-                format: Format::Float32le,
+                format: Format::F32le,
                 channels: 0,
                 rate: 44100,
             };
@@ -792,7 +801,7 @@ mod linux {
 
             // Create stream with media.role=event.
             let spec = Spec {
-                format: Format::Float32le,
+                format: Format::F32le,
                 channels: 1,
                 rate: 44100,
             };
