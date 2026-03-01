@@ -111,8 +111,7 @@ pub(crate) fn open_sfx_stream() -> Result<rodio::MixerDeviceSink, rodio::DeviceS
     #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
     {
         if let Ok(Some(device)) = macos::find_system_sound_device()
-            && let Ok(stream) =
-                DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+            && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
         {
             return Ok(stream);
         }
@@ -342,10 +341,10 @@ mod windows_sfx {
     use windows::Win32::{
         Media::{
             Audio::{
-                AudioCategory_SoundEffects, AudioClientProperties, IAudioClient2,
-                IAudioRenderClient, IMMDeviceEnumerator, MMDeviceEnumerator,
                 AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, WAVEFORMATEX, eMultimedia, eRender,
+                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AudioCategory_SoundEffects,
+                AudioClientProperties, IAudioClient2, IAudioRenderClient, IMMDeviceEnumerator,
+                MMDeviceEnumerator, WAVEFORMATEX, eMultimedia, eRender,
             },
             Multimedia::WAVE_FORMAT_IEEE_FLOAT,
         },
@@ -615,8 +614,7 @@ mod linux {
         }
 
         // Create PulseAudio mainloop (single-threaded, we iterate manually).
-        let mut mainloop =
-            Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
+        let mut mainloop = Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
 
         // Create and connect context.
         let mut context =
@@ -637,20 +635,14 @@ mod linux {
         }
 
         // Create stream proplist with media.role=event.
-        let mut proplist =
-            Proplist::new().ok_or("failed to create PulseAudio proplist")?;
+        let mut proplist = Proplist::new().ok_or("failed to create PulseAudio proplist")?;
         proplist
             .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
             .map_err(|()| "failed to set media.role property")?;
 
-        let mut stream = Stream::new_with_proplist(
-            &mut context,
-            "Sound Effect",
-            &spec,
-            None,
-            &mut proplist,
-        )
-        .ok_or("failed to create PulseAudio stream")?;
+        let mut stream =
+            Stream::new_with_proplist(&mut context, "Sound Effect", &spec, None, &mut proplist)
+                .ok_or("failed to create PulseAudio stream")?;
 
         // Connect stream for playback.
         stream.connect_playback(
@@ -697,9 +689,7 @@ mod linux {
     }
 
     /// Iterate the PulseAudio mainloop once, blocking until an event arrives.
-    fn iterate_or_fail(
-        mainloop: &mut Mainloop,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn iterate_or_fail(mainloop: &mut Mainloop) -> Result<(), Box<dyn std::error::Error>> {
         match mainloop.iterate(true) {
             IterateResult::Success(_) => Ok(()),
             IterateResult::Err(e) => Err(format!("PulseAudio mainloop error: {e}").into()),
@@ -752,8 +742,7 @@ mod linux {
         #[ignore = "requires PulseAudio daemon"]
         fn can_connect_pulseaudio_context() {
             let mut mainloop = Mainloop::new().expect("should create mainloop");
-            let mut context =
-                Context::new(&mainloop, "playa-test").expect("should create context");
+            let mut context = Context::new(&mainloop, "playa-test").expect("should create context");
             context
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
@@ -781,8 +770,7 @@ mod linux {
         #[ignore = "requires PulseAudio daemon"]
         fn can_create_event_stream() {
             let mut mainloop = Mainloop::new().expect("should create mainloop");
-            let mut context =
-                Context::new(&mainloop, "playa-test").expect("should create context");
+            let mut context = Context::new(&mainloop, "playa-test").expect("should create context");
             context
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
@@ -810,23 +798,12 @@ mod linux {
                 .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
                 .expect("should set media.role");
 
-            let mut stream = Stream::new_with_proplist(
-                &mut context,
-                "test-sfx",
-                &spec,
-                None,
-                &mut proplist,
-            )
-            .expect("should create stream");
+            let mut stream =
+                Stream::new_with_proplist(&mut context, "test-sfx", &spec, None, &mut proplist)
+                    .expect("should create stream");
 
             stream
-                .connect_playback(
-                    None,
-                    None,
-                    pulse::stream::FlagSet::NOFLAGS,
-                    None,
-                    None,
-                )
+                .connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
                 .expect("should connect for playback");
 
             // Wait for stream ready.

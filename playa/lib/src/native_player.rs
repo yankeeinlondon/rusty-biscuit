@@ -247,8 +247,7 @@ mod tests {
 
     #[test]
     fn decode_error_display() {
-        let err =
-            NativePlaybackError::Decode(rodio::decoder::DecoderError::UnrecognizedFormat);
+        let err = NativePlaybackError::Decode(rodio::decoder::DecoderError::UnrecognizedFormat);
         let msg = err.to_string();
         assert!(msg.contains("decode"), "error message: {msg}");
     }
