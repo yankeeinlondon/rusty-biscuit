@@ -249,6 +249,27 @@ fn test_clean_subcommand_file() {
 }
 
 #[test]
+fn test_clean_subcommand_indent() {
+    md_cmd()
+        .args(["clean", "-", "--indent", "4"])
+        .write_stdin("- Parent\n  - Child\n    - Grandchild\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\n    - Child"))
+        .stdout(predicate::str::contains("\n        - Grandchild"));
+}
+
+#[test]
+fn test_clean_subcommand_rejects_invalid_indent() {
+    md_cmd()
+        .args(["clean", "-", "--indent", "3"])
+        .write_stdin("- Parent\n  - Child\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("indent must be one of: 2, 4, 8"));
+}
+
+#[test]
 fn test_clean_subcommand_save_in_place_reports_delta() {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "# Hello \n\nWorld  \n").unwrap();
@@ -266,6 +287,24 @@ fn test_clean_subcommand_save_in_place_reports_delta() {
     assert!(updated.contains("World"));
     assert!(!updated.contains("# Hello "));
     assert!(!updated.contains("World  "));
+    assert!(updated.ends_with('\n'));
+    assert!(!updated.ends_with("\n\n"));
+}
+
+#[test]
+fn test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "# Hello \n\nWorld  \n").unwrap();
+
+    md_cmd()
+        .args(["clean", "--save", "-v"])
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Whitespace only"))
+        .stdout(predicate::str::contains("original"))
+        .stdout(predicate::str::contains("updated"))
+        .stdout(predicate::str::contains("Content Visual Diff:").not());
 }
 
 #[test]
@@ -619,16 +658,8 @@ fn test_hash_directory_frontmatter_only() {
 fn test_hash_directory_deterministic() {
     let dir = create_hash_dir();
 
-    let result1 = md_cmd()
-        .arg("hash")
-        .arg(dir.path())
-        .output()
-        .unwrap();
-    let result2 = md_cmd()
-        .arg("hash")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let result1 = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    let result2 = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
 
     assert_eq!(result1.stdout, result2.stdout);
 }
@@ -637,11 +668,7 @@ fn test_hash_directory_deterministic() {
 fn test_hash_directory_differs_from_single_file() {
     let dir = create_hash_dir();
 
-    let dir_result = md_cmd()
-        .arg("hash")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let dir_result = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
     let file_result = md_cmd()
         .arg("hash")
         .arg(dir.path().join("a.md"))
@@ -660,21 +687,13 @@ fn test_hash_directory_skips_hidden_dirs() {
     std::fs::write(dir.path().join(".hidden/secret.md"), "# Secret").unwrap();
 
     // Hash with only visible file
-    let with_hidden = md_cmd()
-        .arg("hash")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let with_hidden = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
 
     // Hash a dir that only has the visible file (no hidden dir)
     let dir2 = tempfile::tempdir().unwrap();
     std::fs::write(dir2.path().join("a.md"), "# Visible").unwrap();
 
-    let without_hidden = md_cmd()
-        .arg("hash")
-        .arg(dir2.path())
-        .output()
-        .unwrap();
+    let without_hidden = md_cmd().arg("hash").arg(dir2.path()).output().unwrap();
 
     assert_eq!(with_hidden.stdout, without_hidden.stdout);
 }
@@ -683,11 +702,7 @@ fn test_hash_directory_skips_hidden_dirs() {
 fn test_hash_directory_strict() {
     let dir = create_hash_dir();
 
-    let normal = md_cmd()
-        .arg("hash")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let normal = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
     let strict = md_cmd()
         .args(["hash", "--strict"])
         .arg(dir.path())

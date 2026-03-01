@@ -95,11 +95,17 @@ md compose README.md --output json
 # Normalize formatting (output to stdout)
 md clean README.md
 
+# Normalize formatting and force 4-space nested list indentation
+md clean README.md --indent 4
+
 # Clean from stdin
 cat README.md | md clean
 
 # Save cleaned file in place and report delta-style changes
 md clean README.md --save
+
+# Include visual diff output in save mode
+md clean README.md --save -v
 
 # Shorthand: top-level clean-and-save
 md README.md --save
@@ -137,7 +143,7 @@ md README.md -vvvv   # TRACE with file/line info
 
 ### Shell Completions
 
-Enable tab completions that filter to `.md` and `.dm` files (including one directory level deep):
+Enable tab completions for markdown files (`.md`, `.dm`) and directory traversal:
 
 ```bash
 # Bash (add to ~/.bashrc)

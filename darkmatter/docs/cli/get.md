@@ -54,10 +54,10 @@ md get doc.md title count --toml
 ### Format Selection Notes
 
 - If multiple format flags are passed, precedence is:
-  - `--json5` first
-  - then `--yaml`
-  - then `--toml`
-  - otherwise JSON
+    - `--json5` first
+    - then `--yaml`
+    - then `--toml`
+    - otherwise JSON
 - TOML output wraps scalar single-property values under `value = ...` because TOML requires a table root.
 
 ### Property Lookup Scope

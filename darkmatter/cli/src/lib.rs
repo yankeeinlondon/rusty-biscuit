@@ -81,6 +81,7 @@
 //! ```bash
 //! # Clean up markdown formatting (stdout)
 //! md clean README.md
+//! md clean README.md --indent 4
 //! echo "# Hello" | md clean -
 //!
 //! # Save cleaned content in place and print a delta-style change report

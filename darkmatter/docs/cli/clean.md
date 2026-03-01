@@ -18,8 +18,14 @@ md clean README.md
 md clean -
 cat README.md | md clean
 
+# Clean and enforce 4-space nested list indentation
+md clean README.md --indent 4
+
 # Clean in place and print a delta-style report
 md clean README.md --save
+
+# Clean in place with delta report + visual diff
+md clean README.md --save -v
 
 # Shorthand for clean-and-save
 md README.md --save
@@ -29,6 +35,12 @@ md README.md --save
 
 - `[INPUT]`: Markdown file path. Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
+- `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
+
+Shell completion notes:
+
+- `[INPUT]` completes markdown files (`.md`, `.dm`) and traversable directories.
+- `--indent` completes to `2`, `4`, or `8`.
 
 ### Output Modes
 
@@ -43,14 +55,15 @@ md README.md --save
 - Writes cleaned markdown back to the same file
 - Prints a delta-style report instead of cleaned markdown
 - Skips writing when the file is already clean (no changes detected)
+- With `-v`/`--verbose`, also prints frontmatter/content visual diffs
 
 ### Save Mode Constraints
 
 - `--save` with stdin (`-`) returns an error:
-  - `--save requires an input file path (stdin is not supported)`
+    - `--save requires an input file path (stdin is not supported)`
 - `--save` can be used either:
-  - On the subcommand: `md clean FILE.md --save`
-  - As top-level shorthand: `md FILE.md --save`
+    - On the subcommand: `md clean FILE.md --save`
+    - As top-level shorthand: `md FILE.md --save`
 
 ## Transformations Applied
 
@@ -60,18 +73,21 @@ The cleanup process applies these transformations:
 2. **List Markers**: Preserves original unordered markers (`*`, `-`, `+`)
 3. **Table Alignment**: Pads table cells for aligned columns
 4. **Emphasis Preservation**:
-   - Preserves original emphasis markers (`*` vs `_`)
-   - `PREFER_ITALICS` can influence emphasis marker style
-   - Strong/bold markers are preserved
+    - Preserves original emphasis markers (`*` vs `_`)
+    - `PREFER_ITALICS` can influence emphasis marker style
+    - Strong/bold markers are preserved
 5. **Fenced Code Blocks**: Adds `text` language when fence language is missing
 6. **Blockquote Formatting**:
-   - Fixes leading-space issues before `>`
-   - Removes invalid empty leading blockquote lines
-   - Normalizes nested blockquote spacing
-7. **List Indentation**: Preserves nested indentation depth
+    - Fixes leading-space issues before `>`
+    - Removes invalid empty leading blockquote lines
+    - Normalizes nested blockquote spacing
+7. **List Indentation**:
+    - Default: preserves source indentation style
+    - With `--indent`: enforces a consistent indentation width at every nested level
 8. **Unnecessary Escapes**:
    - Unescapes `\_` and `\*` outside code/emphasis
    - Unescapes bracket literals when not part of links
+9. **File Ending**: Ensures non-empty output ends with exactly one trailing newline
 
 ### Color and Styling
 

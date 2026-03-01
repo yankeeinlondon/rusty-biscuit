@@ -38,16 +38,16 @@ md -v delta base.md updated.md
 
 Text output starts with a symbol-based classification:
 
-| Symbol | Classification |
-| --- | --- |
-| `✓` | No changes |
-| `~` | Whitespace changes only |
-| `◈` | Frontmatter only / frontmatter and whitespace |
-| `⊕` | Structural only |
-| `△` | Minor changes |
-| `◐` | Moderate changes |
-| `◉` | Major changes |
-| `★` | Rewritten |
+| Symbol | Classification                                |
+|--------|-----------------------------------------------|
+| `✓`    | No changes                                    |
+| `~`    | Whitespace changes only                       |
+| `◈`    | Frontmatter only / frontmatter and whitespace |
+| `⊕`    | Structural only                               |
+| `△`    | Minor changes                                 |
+| `◐`    | Moderate changes                              |
+| `◉`    | Major changes                                 |
+| `★`    | Rewritten                                     |
 
 The header includes a content-change percentage.
 

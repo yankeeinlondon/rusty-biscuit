@@ -1,13 +1,15 @@
 use crate::args::{Cli, Command as CliCommand, OutputFormat};
 use crate::output::{
-    emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact, open_output_artifact,
-    print_delta, print_toc_tree, render_terminal_output, OutputArtifact,
+    OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
+    open_output_artifact, print_delta, print_toc_tree, render_terminal_output,
 };
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
-use darkmatter::markdown::highlighting::{detect_code_theme, detect_color_mode, detect_prose_theme};
+use darkmatter::markdown::highlighting::{
+    detect_code_theme, detect_color_mode, detect_prose_theme,
+};
 use darkmatter::markdown::transform::TransformOptions;
-use darkmatter::markdown::{fs::collect_markdown_files, Markdown};
+use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
@@ -47,7 +49,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_read(input.as_ref(), output, show, cli)?;
         }
-        CliCommand::Clean { input, save } => run_clean(input.as_ref(), save, cli.verbose > 0)?,
+        CliCommand::Clean {
+            input,
+            save,
+            indent,
+        } => run_clean(input.as_ref(), save, indent, cli.verbose > 0)?,
         CliCommand::Compose {
             input,
             state,
@@ -106,10 +112,15 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
 }
 
 /// Clean markdown formatting, optionally saving in place and printing a delta report.
-pub fn run_clean(input: Option<&PathBuf>, save: bool, verbose: bool) -> Result<()> {
+pub fn run_clean(
+    input: Option<&PathBuf>,
+    save: bool,
+    indent: Option<usize>,
+    verbose: bool,
+) -> Result<()> {
     if !save {
         let mut md = load_markdown(input)?;
-        md.cleanup();
+        apply_cleanup(&mut md, indent);
         println!("{}", md.as_string());
         return Ok(());
     }
@@ -124,7 +135,7 @@ pub fn run_clean(input: Option<&PathBuf>, save: bool, verbose: bool) -> Result<(
 
     let original = load_markdown(Some(input_path))?;
     let mut cleaned = original.clone();
-    cleaned.cleanup();
+    apply_cleanup(&mut cleaned, indent);
 
     let delta = original.delta(&cleaned);
     if !delta.is_unchanged() {
@@ -136,8 +147,21 @@ pub fn run_clean(input: Option<&PathBuf>, save: bool, verbose: bool) -> Result<(
     Ok(())
 }
 
+fn apply_cleanup(md: &mut Markdown, indent: Option<usize>) {
+    if let Some(indent_size) = indent {
+        md.cleanup_with_indent(indent_size);
+    } else {
+        md.cleanup();
+    }
+}
+
 /// Shared read/render logic for both implicit (no subcommand) and explicit `read` subcommand.
-pub fn run_read(input: Option<&PathBuf>, output: OutputFormat, show: bool, cli: &Cli) -> Result<()> {
+pub fn run_read(
+    input: Option<&PathBuf>,
+    output: OutputFormat,
+    show: bool,
+    cli: &Cli,
+) -> Result<()> {
     let md = load_markdown(input)?;
 
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
@@ -282,12 +306,7 @@ pub fn run_get(
 }
 
 /// Format a `serde_json::Value` according to the requested output format.
-fn format_value(
-    value: &serde_json::Value,
-    json5: bool,
-    yaml: bool,
-    toml: bool,
-) -> Result<String> {
+fn format_value(value: &serde_json::Value, json5: bool, yaml: bool, toml: bool) -> Result<String> {
     if json5 {
         let json_str = serde_json::to_string(value)?;
         let j5 = biscuit_file::Json5::from_str(&json_str)

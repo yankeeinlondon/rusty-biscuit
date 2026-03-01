@@ -55,9 +55,9 @@ Verbose mode adds:
 
 - per-heading normalized hashes in the tree
 - summary lines on stderr:
-  - heading count
-  - code block count (if present)
-  - internal link counts and broken-link count (if present)
+    - heading count
+    - code block count (if present)
+    - internal link counts and broken-link count (if present)
 - page hash details on stderr when title metadata exists
 
 The renderer also emits leading/trailing blank lines to stderr for spacing.

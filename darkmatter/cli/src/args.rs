@@ -2,6 +2,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use darkmatter::markdown::highlighting::ThemePair;
+use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// Output format for top-level render mode.
@@ -46,6 +48,15 @@ pub enum Command {
         /// Save cleaned markdown in place and report delta-style changes
         #[arg(long)]
         save: bool,
+
+        /// Normalize nested list indentation width (spaces per level)
+        #[arg(
+            long,
+            value_name = "#",
+            value_parser = parse_indent_size,
+            add = ArgValueCompleter::new(complete_indent_values)
+        )]
+        indent: Option<usize>,
     },
 
     /// Compose a document through the transform pipeline.
@@ -181,7 +192,12 @@ pub struct Cli {
     pub mermaid: bool,
 
     /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
-    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        action = clap::ArgAction::Count,
+        global = true
+    )]
     pub verbose: u8,
 
     /// Generate shell completions for the specified shell
@@ -193,10 +209,15 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-/// Completes markdown files (.md, .dm) in current directory and one level deep.
-fn complete_markdown_files(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+/// Completes markdown files (`.md`, `.dm`) and directory paths.
+fn complete_markdown_files(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_markdown_files_from(Path::new("."), current)
+}
+
+fn complete_markdown_files_from(base_dir: &Path, current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
     let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
 
     let is_markdown = |p: &Path| {
         p.extension()
@@ -205,53 +226,71 @@ fn complete_markdown_files(current: &std::ffi::OsStr) -> Vec<CompletionCandidate
             .unwrap_or(false)
     };
 
-    // Current directory files
-    if let Ok(entries) = std::fs::read_dir(".") {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && is_markdown(&path)
-                && let Some(name) = path.file_name()
-            {
-                let name = name.to_string_lossy();
-                if name.starts_with(current_str.as_ref()) {
-                    candidates.push(CompletionCandidate::new(name.into_owned()));
-                }
-            }
-        }
+    if !current_str.is_empty() && "-".starts_with(current_str.as_ref()) {
+        seen.insert("-".to_string());
+        candidates.push(CompletionCandidate::new("-"));
     }
 
-    // One level deep in subdirectories
-    if let Ok(entries) = std::fs::read_dir(".") {
-        for entry in entries.flatten() {
-            let dir_path = entry.path();
-            if dir_path.is_dir() {
-                // Skip hidden directories
-                if dir_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|n| n.starts_with('.'))
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
+    let has_trailing_sep = current_str.ends_with('/') || current_str.ends_with('\\');
+    let current_path = Path::new(current_str.as_ref());
+    let (dir_part, file_prefix) = if current_str.is_empty() {
+        (PathBuf::new(), String::new())
+    } else if has_trailing_sep {
+        (PathBuf::from(current_str.as_ref()), String::new())
+    } else {
+        let parent = current_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let prefix = current_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        (parent, prefix)
+    };
 
-                if let Ok(subentries) = std::fs::read_dir(&dir_path) {
-                    for subentry in subentries.flatten() {
-                        let file_path = subentry.path();
-                        if file_path.is_file() && is_markdown(&file_path) {
-                            // Strip leading "./" for cleaner display
-                            let relative = file_path
-                                .strip_prefix("./")
-                                .unwrap_or(&file_path)
-                                .to_string_lossy();
-                            if relative.starts_with(current_str.as_ref()) {
-                                candidates
-                                    .push(CompletionCandidate::new(relative.into_owned()));
-                            }
-                        }
-                    }
-                }
+    let search_dir = if dir_part.as_os_str().is_empty() {
+        base_dir.to_path_buf()
+    } else if dir_part.is_absolute() {
+        dir_part.clone()
+    } else {
+        base_dir.join(&dir_part)
+    };
+
+    if let Ok(entries) = std::fs::read_dir(&search_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            if !name.starts_with(&file_prefix) {
+                continue;
+            }
+
+            let is_dir = path.is_dir();
+            if !is_dir && !is_markdown(&path) {
+                continue;
+            }
+
+            let mut display_path = if current_path.is_absolute() {
+                path.to_string_lossy().to_string()
+            } else {
+                path.strip_prefix(base_dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string()
+            };
+
+            if display_path.starts_with("./") {
+                display_path = display_path.trim_start_matches("./").to_string();
+            }
+
+            if is_dir && !display_path.ends_with('/') {
+                display_path.push('/');
+            }
+
+            if seen.insert(display_path.clone()) {
+                candidates.push(CompletionCandidate::new(display_path));
             }
         }
     }
@@ -260,7 +299,111 @@ fn complete_markdown_files(current: &std::ffi::OsStr) -> Vec<CompletionCandidate
     candidates
 }
 
+/// Completes supported list indentation widths.
+fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let mut candidates: Vec<_> = ["2", "4", "8"]
+        .into_iter()
+        .filter(|value| value.starts_with(current_str.as_ref()))
+        .map(CompletionCandidate::new)
+        .collect();
+    candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+    candidates
+}
+
+/// Parses and validates list indentation width.
+pub fn parse_indent_size(s: &str) -> Result<usize, String> {
+    let value = s
+        .parse::<usize>()
+        .map_err(|_| format!("'{s}' is not a valid integer"))?;
+
+    match value {
+        2 | 4 | 8 => Ok(value),
+        _ => Err("indent must be one of: 2, 4, 8".to_string()),
+    }
+}
+
 /// Parses a theme name string into ThemePair.
 pub fn parse_theme_name(s: &str) -> Result<darkmatter::markdown::highlighting::ThemePair, String> {
     darkmatter::markdown::highlighting::ThemePair::try_from(s).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn completion_values(candidates: Vec<CompletionCandidate>) -> Vec<String> {
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn normalize_path(path: &str) -> String {
+        path.replace('\\', "/")
+    }
+
+    #[test]
+    fn test_complete_indent_values() {
+        let values = completion_values(complete_indent_values(OsStr::new("")));
+        assert_eq!(values, vec!["2", "4", "8"]);
+
+        let values = completion_values(complete_indent_values(OsStr::new("4")));
+        assert_eq!(values, vec!["4"]);
+    }
+
+    #[test]
+    fn test_parse_indent_size() {
+        assert_eq!(parse_indent_size("2"), Ok(2));
+        assert_eq!(parse_indent_size("4"), Ok(4));
+        assert_eq!(parse_indent_size("8"), Ok(8));
+        assert!(parse_indent_size("3").is_err());
+        assert!(parse_indent_size("abc").is_err());
+    }
+
+    #[test]
+    fn test_complete_markdown_files_from_supports_nested_paths() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("README.md"), "# Root").unwrap();
+        std::fs::write(temp_dir.path().join("notes.txt"), "ignore").unwrap();
+
+        let docs_dir = temp_dir.path().join("docs");
+        let deep_dir = docs_dir.join("deep");
+        std::fs::create_dir_all(&deep_dir).unwrap();
+        std::fs::write(docs_dir.join("guide.md"), "# Guide").unwrap();
+        std::fs::write(deep_dir.join("nested.md"), "# Nested").unwrap();
+
+        let root_values = completion_values(complete_markdown_files_from(
+            temp_dir.path(),
+            OsStr::new(""),
+        ));
+        let root_values: Vec<_> = root_values
+            .into_iter()
+            .map(|value| normalize_path(&value))
+            .collect();
+        assert!(root_values.contains(&"README.md".to_string()));
+        assert!(root_values.contains(&"docs/".to_string()));
+        assert!(!root_values.iter().any(|value| value.ends_with("notes.txt")));
+
+        let docs_values = completion_values(complete_markdown_files_from(
+            temp_dir.path(),
+            OsStr::new("docs/"),
+        ));
+        let docs_values: Vec<_> = docs_values
+            .into_iter()
+            .map(|value| normalize_path(&value))
+            .collect();
+        assert!(docs_values.contains(&"docs/guide.md".to_string()));
+        assert!(docs_values.contains(&"docs/deep/".to_string()));
+
+        let deep_values = completion_values(complete_markdown_files_from(
+            temp_dir.path(),
+            OsStr::new("docs/deep/"),
+        ));
+        let deep_values: Vec<_> = deep_values
+            .into_iter()
+            .map(|value| normalize_path(&value))
+            .collect();
+        assert!(deep_values.contains(&"docs/deep/nested.md".to_string()));
+    }
 }

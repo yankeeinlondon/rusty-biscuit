@@ -611,7 +611,6 @@ pub fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, up
             || delta.preamble_changed;
 
         if has_content_changes {
-            writeln!(handle, "{BOLD}Content Visual Diff:{RESET}").ok();
             writeln!(
                 handle,
                 "{}",

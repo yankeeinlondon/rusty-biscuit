@@ -2,8 +2,8 @@ use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
-use darkmatter_cli::commands::{run_clean, run_read, run_subcommand, validate_subcommand_usage};
 use darkmatter_cli::Cli;
+use darkmatter_cli::commands::{run_clean, run_read, run_subcommand, validate_subcommand_usage};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -78,7 +78,7 @@ fn main() -> Result<()> {
     }
 
     if cli.save {
-        run_clean(cli.input.as_ref(), true, cli.verbose > 0)?;
+        run_clean(cli.input.as_ref(), true, None, cli.verbose > 0)?;
         return Ok(());
     }
 
