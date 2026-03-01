@@ -21,6 +21,29 @@
 </tr>
 </table>
 
+## Usage
+
+### Build and Install
+
+You can build and install the CLI binary by running:
+
+```sh
+just install
+```
+
+> **Note**: on Linux (or WSL) you will want to make sure you have both the ALSA library and the `pkgconfig` application:
+> 
+> ```sh
+> # debian/ubuntu distros
+> sudo apt install just pkg-config libasound2-dev 
+> ```
+>
+> On **all** platforms we expect you to have the [**just**]() runner installed.
+
+### Using the CLI
+
+
+
 ## Audio Providers
 
 Players are ranked by capability score (speed control +4, volume control +3, stream input +2).
