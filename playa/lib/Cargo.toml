@@ -12,11 +12,29 @@ audio-ducking = ["tokio"]
 audio-ducking-macos = ["audio-ducking", "coreaudio-sys"]
 audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
 
-# Native sound effects playback via rodio (enables OS audio channel routing)
-sfx-native = ["rodio"]
+# Base native audio — SFX playback with common codecs
+sfx-native = [
+    "rodio",
+    "rodio/symphonia-wav",
+    "rodio/symphonia-mp3",
+    "rodio/symphonia-vorbis",
+    "rodio/symphonia-ogg",
+    "rodio/symphonia-pcm",
+]
 sfx-native-macos = ["sfx-native", "coreaudio-sys"]
 sfx-native-windows = ["sfx-native", "windows"]
 sfx-native-linux = ["sfx-native", "libpulse-binding"]
+
+# Extended native audio — general file playback with broad format support
+native-playback = [
+    "sfx-native",
+    "rodio/symphonia-aac",
+    "rodio/symphonia-alac",
+    "rodio/symphonia-aiff",
+    "rodio/symphonia-flac",
+    "rodio/symphonia-isomp4",
+    "rodio/symphonia-mkv",
+]
 
 # Umbrella feature for all effects (~30MB)
 sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
@@ -32,7 +50,7 @@ sfx-motion = []     # whooshes, air sounds (~5MB, 7 files)
 [dependencies]
 infer = "0.19"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-rodio = { version = "0.22", optional = true, default-features = false, features = ["playback", "wav", "mp3", "vorbis"] }
+rodio = { version = "0.22", optional = true, default-features = false, features = ["playback"] }
 sniff = { path = "../../sniff/lib" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["process", "io-util", "fs", "rt", "time", "sync"], optional = true }

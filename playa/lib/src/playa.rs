@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use crate::audio::Audio;
+#[cfg(feature = "native-playback")]
+use crate::audio::AudioSourceKind;
 use crate::error::{InvalidAudio, PlaybackError};
 use crate::playback::playa_with_player_and_options;
 use crate::player::{AudioPlayer, PLAYER_LOOKUP, Player, match_available_players};
@@ -36,6 +38,7 @@ pub struct Playa {
     audio: Audio,
     options: PlaybackOptions,
     show_meta: bool,
+    force_host: bool,
     #[cfg(feature = "audio-ducking")]
     duck_config: Option<DuckConfig>,
 }
@@ -47,6 +50,7 @@ impl Playa {
             audio,
             options: PlaybackOptions::default(),
             show_meta: false,
+            force_host: false,
             #[cfg(feature = "audio-ducking")]
             duck_config: None,
         }
@@ -95,6 +99,12 @@ impl Playa {
         self
     }
 
+    /// Force host player playback, bypassing the native decoder.
+    pub fn force_host(mut self) -> Self {
+        self.force_host = true;
+        self
+    }
+
     /// Enable audio ducking during playback.
     ///
     /// When enabled, system audio will be attenuated to the configured floor
@@ -127,38 +137,51 @@ impl Playa {
 
     /// Play the audio using the best available player.
     ///
-    /// If `show_meta()` was called, prints playback metadata to STDOUT before
-    /// starting playback.
+    /// When the `native-playback` feature is enabled, attempts in-process
+    /// decoding via rodio/symphonia first. Falls back to a host player
+    /// subprocess if native decoding fails or is unavailable.
     ///
     /// Note: If ducking is configured, use [`play_async`] instead as ducking
     /// requires an async runtime.
     pub fn play(self) -> Result<(), PlaybackError> {
         let format = self.audio.format();
-        let player = self.select_player(format)?;
 
+        // Try native playback first (non-URL, non-forced-host)
+        #[cfg(feature = "native-playback")]
+        if !self.force_host
+            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
+            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
+                .is_ok()
+        {
+            if self.show_meta {
+                self.print_native_meta(format);
+            }
+            return Ok(());
+        }
+
+        // Host player fallback
+        let player = self.select_player(format)?;
         if self.show_meta {
             self.print_meta(player, format);
         }
-
         playa_with_player_and_options(player, self.audio.into_data(), self.options)
     }
 
     /// Play the audio asynchronously with optional ducking support.
     ///
-    /// This method supports audio ducking when configured via [`with_ducked_audio`].
-    /// If ducking fails to initialize, playback continues with a warning.
+    /// When the `native-playback` feature is enabled, attempts in-process
+    /// decoding via rodio/symphonia first. Falls back to a host player
+    /// subprocess if native decoding fails or is unavailable.
+    ///
+    /// Ducking (if configured) is set up **before** the native/host decision
+    /// so both playback paths benefit from audio attenuation.
     ///
     /// Requires the `audio-ducking` feature flag for ducking support.
     #[cfg(feature = "audio-ducking")]
     pub async fn play_async(self) -> Result<(), PlaybackError> {
         let format = self.audio.format();
-        let player = self.select_player(format)?;
 
-        if self.show_meta {
-            self.print_meta(player, format);
-        }
-
-        // Set up ducking if configured
+        // Set up ducking BEFORE playback (covers both native and host paths)
         let guard = if let Some(config) = self.duck_config {
             let backend = create_backend();
             match DuckGuard::new(backend, config).await {
@@ -172,11 +195,29 @@ impl Playa {
             None
         };
 
-        // Play the audio (blocking call wrapped in spawn_blocking would be better,
-        // but for now we just call it directly since the player spawns a subprocess)
+        // Try native playback first (non-URL, non-forced-host)
+        #[cfg(feature = "native-playback")]
+        if !self.force_host
+            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
+            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
+                .is_ok()
+        {
+            if self.show_meta {
+                self.print_native_meta(format);
+            }
+            if let Some(guard) = guard {
+                guard.restore().await;
+            }
+            return Ok(());
+        }
+
+        // Host player fallback
+        let player = self.select_player(format)?;
+        if self.show_meta {
+            self.print_meta(player, format);
+        }
         let result = playa_with_player_and_options(player, self.audio.into_data(), self.options);
 
-        // Explicitly restore ducking (guard drop would do this too, but explicit is clearer)
         if let Some(guard) = guard {
             guard.restore().await;
         }
@@ -211,6 +252,34 @@ impl Playa {
                 PlaybackError::NoCompatiblePlayer { format }
             }
         })
+    }
+
+    /// Print playback metadata for native (rodio/symphonia) playback.
+    #[cfg(feature = "native-playback")]
+    fn print_native_meta(&self, format: AudioFormat) {
+        println!("Player: native (rodio/symphonia)");
+        println!(
+            "Volume: {}",
+            self.options
+                .volume
+                .map(|v| format!("{}%", (v * 100.0) as i32))
+                .unwrap_or_else(|| "default".to_string())
+        );
+        println!(
+            "Speed: {}",
+            self.options
+                .speed
+                .map(|s| format!("{}x", s))
+                .unwrap_or_else(|| "1.0x".to_string())
+        );
+        println!(
+            "Codec: {}",
+            format
+                .codec
+                .map(format_codec)
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+        println!("Format: {}", format_file_format(format.file_format));
     }
 
     /// Print playback metadata to STDOUT.
@@ -291,5 +360,33 @@ mod tests {
         assert_eq!(format_file_format(AudioFileFormat::Wav), ".wav");
         assert_eq!(format_file_format(AudioFileFormat::Mp3), ".mp3");
         assert_eq!(format_file_format(AudioFileFormat::Ogg), ".ogg");
+    }
+
+    #[test]
+    fn force_host_builder_sets_flag() {
+        // We can't easily construct a Playa without valid audio, but we can
+        // test the builder method indirectly by checking the struct field.
+        // Use from_bytes with minimal WAV header.
+        let wav_header: Vec<u8> = {
+            let mut h = Vec::new();
+            h.extend_from_slice(b"RIFF");
+            h.extend_from_slice(&36u32.to_le_bytes()); // file size - 8
+            h.extend_from_slice(b"WAVE");
+            h.extend_from_slice(b"fmt ");
+            h.extend_from_slice(&16u32.to_le_bytes()); // chunk size
+            h.extend_from_slice(&1u16.to_le_bytes()); // PCM
+            h.extend_from_slice(&1u16.to_le_bytes()); // mono
+            h.extend_from_slice(&44100u32.to_le_bytes()); // sample rate
+            h.extend_from_slice(&88200u32.to_le_bytes()); // byte rate
+            h.extend_from_slice(&2u16.to_le_bytes()); // block align
+            h.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+            h.extend_from_slice(b"data");
+            h.extend_from_slice(&0u32.to_le_bytes()); // data size
+            h
+        };
+        let playa = Playa::from_bytes(wav_header).unwrap();
+        assert!(!playa.force_host);
+        let playa = playa.force_host();
+        assert!(playa.force_host);
     }
 }

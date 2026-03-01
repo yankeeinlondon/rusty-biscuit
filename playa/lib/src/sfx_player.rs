@@ -107,7 +107,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
 /// On macOS with `sfx-native-macos`, attempts to route to the system sound
 /// device. Falls back to the default output device on all other platforms
 /// or if device lookup fails.
-fn open_sfx_stream() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+pub(crate) fn open_sfx_stream() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
     {
         if let Ok(Some(device)) = macos::find_system_sound_device()

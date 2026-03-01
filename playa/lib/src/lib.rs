@@ -12,6 +12,9 @@ pub mod ducking;
 #[cfg(feature = "sfx-native")]
 pub mod sfx_player;
 
+#[cfg(feature = "native-playback")]
+pub mod native_player;
+
 #[cfg(any(
     feature = "sound-effects",
     feature = "sfx-ui",

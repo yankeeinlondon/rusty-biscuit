@@ -147,6 +147,11 @@ impl Audio {
         }
     }
 
+    /// Return a reference to the underlying `AudioData`.
+    pub fn data_ref(&self) -> &AudioData {
+        &self.data
+    }
+
     /// Consume the `Audio` and return the underlying `AudioData`.
     pub fn into_data(self) -> AudioData {
         self.data
