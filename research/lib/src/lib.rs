@@ -66,11 +66,7 @@ impl<M> PromptHook<M> for TracingPromptHook
 where
     M: CompletionModel,
 {
-    async fn on_completion_call(
-        &self,
-        _prompt: &Message,
-        history: &[Message],
-    ) -> HookAction {
+    async fn on_completion_call(&self, _prompt: &Message, history: &[Message]) -> HookAction {
         debug!(
             parent: &self.span,
             history_len = history.len(),

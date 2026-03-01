@@ -4,8 +4,8 @@
 //! It ensures that required fields are present and non-empty, and provides detailed error
 //! messages for various failure scenarios.
 
-use biscuit_file::serde_yaml_ng;
 use biscuit_file::YamlParseError;
+use biscuit_file::serde_yaml_ng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
