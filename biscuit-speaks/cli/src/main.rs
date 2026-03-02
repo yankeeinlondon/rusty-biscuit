@@ -132,7 +132,10 @@ fn read_from_stdin() -> io::Result<String> {
 
     if text.is_empty() {
         eprintln!("Error: No input provided");
-        eprintln!("Usage: {} <text> or echo \"text\" | {}", CLI_BINARY_NAME, CLI_BINARY_NAME);
+        eprintln!(
+            "Usage: {} <text> or echo \"text\" | {}",
+            CLI_BINARY_NAME, CLI_BINARY_NAME
+        );
         std::process::exit(1);
     }
 
