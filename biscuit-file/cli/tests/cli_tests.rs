@@ -329,9 +329,7 @@ fn json_compact_single_line() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("{\""))
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -342,9 +340,7 @@ fn json5_compact_unquoted_keys() {
         .assert()
         .success()
         .stdout(predicate::str::contains("name: 'example'"))
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -354,9 +350,7 @@ fn json5_input_compact_json_output() {
         .arg("--compact")
         .assert()
         .success()
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -367,9 +361,7 @@ fn json5_input_compact_json5_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains("name: 'example'"))
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -379,9 +371,7 @@ fn toml_to_json_compact() {
         .arg("--compact")
         .assert()
         .success()
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -392,9 +382,7 @@ fn yaml_to_json5_compact() {
         .assert()
         .success()
         .stdout(predicate::str::contains("name: 'example'"))
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() == 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() == 1));
 }
 
 #[test]
@@ -402,9 +390,7 @@ fn default_json_is_pretty_not_compact() {
     bf().arg(fixture("sample.json"))
         .assert()
         .success()
-        .stdout(predicate::function(|s: &str| {
-            s.trim().lines().count() > 1
-        }));
+        .stdout(predicate::function(|s: &str| s.trim().lines().count() > 1));
 }
 
 // ── Mutual exclusivity ──────────────────────────────────────────────

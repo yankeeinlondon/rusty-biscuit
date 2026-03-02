@@ -85,7 +85,12 @@ fn write_array(buf: &mut String, arr: &[Value], depth: usize, compact: bool) {
     }
 }
 
-fn write_object(buf: &mut String, map: &serde_json::Map<String, Value>, depth: usize, compact: bool) {
+fn write_object(
+    buf: &mut String,
+    map: &serde_json::Map<String, Value>,
+    depth: usize,
+    compact: bool,
+) {
     if map.is_empty() {
         buf.push_str("{}");
         return;

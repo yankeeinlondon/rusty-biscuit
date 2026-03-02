@@ -3,8 +3,8 @@
 //! Convert between TOML, YAML, JSON, and extract text/markdown from PDFs.
 //! For Markdown files, extracts and converts the frontmatter block.
 
-use biscuit_file::{FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
 use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
+use biscuit_file::{FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
 use clap::{ArgGroup, Parser, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::Read;
@@ -322,7 +322,9 @@ fn process_json5(content: &[u8], format: Option<OutputFormat>, compact: bool) ->
     let output = match format.unwrap_or(OutputFormat::Json) {
         OutputFormat::Json => {
             if compact {
-                json5.as_json_compact().wrap_err("Failed to convert to JSON")?
+                json5
+                    .as_json_compact()
+                    .wrap_err("Failed to convert to JSON")?
             } else {
                 json5.as_json().wrap_err("Failed to convert to JSON")?
             }
