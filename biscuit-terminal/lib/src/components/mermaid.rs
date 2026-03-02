@@ -286,6 +286,35 @@ fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Detects system Chromium/Chrome browser for Puppeteer fallback.
+/// Returns the path to the executable if found, or None otherwise.
+fn detect_system_chromium() -> Option<String> {
+    let browsers = [
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ];
+
+    for browser in &browsers {
+        if Command::new("which")
+            .arg(browser)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            if let Ok(path) = which::which(browser) {
+                tracing::debug!("Found system Chromium: {}", path.display());
+                return Some(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
 /// Preset themes for quadrant charts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
