@@ -5,6 +5,7 @@
         "docstrings",
         "elevenlabs",
         "keepalive",
+        "lmstudio",
         "Nagle",
         "rustls",
         "tungstenite",
