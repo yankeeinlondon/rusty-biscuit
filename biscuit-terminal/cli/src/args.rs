@@ -1145,6 +1145,13 @@ pub enum Command {
 
   Combined:
     bt dir src --depth 3 --filter \".rs\"
+
+  With file metrics:
+    bt dir --size           # Show file sizes
+    bt dir --token         # Show estimated token counts
+    bt dir --modified      # Show modification timestamps
+    bt dir --updated       # Show relative modification times (\"2 days ago\")
+    bt dir --size --token --modified
 "
     )]
     Dir {
@@ -1163,6 +1170,22 @@ pub enum Command {
         /// Hide the root directory header line
         #[arg(long)]
         skip_root: bool,
+
+        /// Show file sizes (human-readable, e.g., \"1.2 KB\")
+        #[arg(long)]
+        size: bool,
+
+        /// Show estimated LLM token counts
+        #[arg(long)]
+        tokens: bool,
+
+        /// Show absolute modification timestamps
+        #[arg(long)]
+        modified: bool,
+
+        /// Show relative modification times (e.g., \"2 days ago\")
+        #[arg(long)]
+        updated: bool,
 
         #[command(flatten)]
         layout: LayoutArgs,

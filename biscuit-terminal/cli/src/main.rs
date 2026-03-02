@@ -389,9 +389,19 @@ fn main() -> color_eyre::Result<()> {
             depth,
             ref filter,
             skip_root,
+            size,
+            tokens,
+            modified,
+            updated,
             ref layout,
         }) => {
-            return render_dir(path, depth, filter, skip_root, layout);
+            let options = commands::DirOptions {
+                show_size: size,
+                show_token: tokens,
+                show_modified: modified,
+                show_updated: updated,
+            };
+            return render_dir(path, depth, filter, skip_root, layout, &options);
         }
         None => {
             // Default behavior: content analysis or terminal metadata

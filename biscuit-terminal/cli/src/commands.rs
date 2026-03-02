@@ -1843,12 +1843,22 @@ pub fn render_columns(
 }
 
 /// Render a directory tree.
+/// Options for rendering a directory tree.
+#[derive(Debug, Clone, Default)]
+pub struct DirOptions {
+    pub show_size: bool,
+    pub show_token: bool,
+    pub show_modified: bool,
+    pub show_updated: bool,
+}
+
 pub fn render_dir(
     path: &str,
     depth: Option<u32>,
     filter: &[String],
     skip_root: bool,
     layout: &LayoutArgs,
+    options: &DirOptions,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::filesystem::FileSystem;
     use biscuit_terminal::components::renderable::Renderable;
@@ -1866,6 +1876,20 @@ pub fn render_dir(
 
     if skip_root {
         fs = fs.show_root(false);
+    }
+
+    // Apply metrics
+    if options.show_size {
+        fs = fs.show_file_size();
+    }
+    if options.show_token {
+        fs = fs.show_tokens();
+    }
+    if options.show_modified {
+        fs = fs.show_modified();
+    }
+    if options.show_updated {
+        fs = fs.show_modified_since();
     }
 
     // Apply layout properties to the FileSystem component
