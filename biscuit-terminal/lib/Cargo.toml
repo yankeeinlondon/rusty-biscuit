@@ -45,6 +45,9 @@ clap = { version = "4", features = ["derive"], optional = true }
 tempfile = "3"
 chrono = { version = "0.4.43", features = ["serde"] }
 
+# Command detection (for Chromium detection)
+which = "7"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
