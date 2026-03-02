@@ -29,6 +29,7 @@
 //! - [`EmqxBasic`] + [`EmqxBasicRequest`]
 //! - [`EmqxBearer`] + [`EmqxBearerRequest`]
 //! - [`Eversolo`] + [`EversoloRequest`]
+//! - [`SamsungSmartTv`] + [`SamsungSmartTvRequest`]
 //! - [`UnfoldedCircleCoreRest`] + [`UnfoldedCircleCoreRestRequest`]
 //!
 //! **WebSocket definition helpers:**
@@ -37,6 +38,7 @@
 //! - [`define_unfolded_circle_core_ws_api_definition`] (UnfoldedCircleCoreWs)
 //! - [`define_unfolded_circle_dock_ws_api_definition`] (UnfoldedCircleDockWs)
 //! - [`define_unfolded_circle_integration_ws_api_definition`] (UnfoldedCircleIntegrationWs)
+//! - [`define_samsung_smart_tv_remote_ws_api_definition`] (SamsungSmartTvRemote)
 //!
 //! **Shared types:**
 //!
@@ -79,6 +81,7 @@ pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIRequest};
 pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
 pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};
 pub use crate::eversolo::{Eversolo, EversoloRequest};
+pub use crate::samsung_smart_tv::{SamsungSmartTv, SamsungSmartTvRequest};
 pub use crate::unfolded_circle_core_rest::{
     UnfoldedCircleCoreRest, UnfoldedCircleCoreRestRequest,
 };
@@ -86,3 +89,4 @@ pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
 pub use crate::unfolded_circle_core_ws::define_api as define_unfolded_circle_core_ws_api_definition;
 pub use crate::unfolded_circle_dock_ws::define_api as define_unfolded_circle_dock_ws_api_definition;
 pub use crate::unfolded_circle_integration_ws::define_api as define_unfolded_circle_integration_ws_api_definition;
+pub use crate::samsung_smart_tv_remote_ws::define_api as define_samsung_smart_tv_remote_ws_api_definition;

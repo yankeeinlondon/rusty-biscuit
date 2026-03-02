@@ -23,6 +23,7 @@
 //! | [`emqx`] | [`EmqxBasic`](emqx::EmqxBasic) | EMQX Broker REST API with Basic Authentication (API Key + Secret) | Basic |
 //! | [`emqx`] | [`EmqxBearer`](emqx::EmqxBearer) | EMQX Broker REST API with Bearer Token authentication (JWT) | Bearer |
 //! | [`eversolo`] | [`Eversolo`](eversolo::Eversolo) | Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage) | None |
+//! | [`samsung_smart_tv`] | [`SamsungSmartTv`](samsung_smart_tv::SamsungSmartTv) | Samsung Smart TV LAN API (S95C-focused modern Tizen subset) | None |
 //! | [`unfolded_circle_core_rest`] | [`UnfoldedCircleCoreRest`](unfolded_circle_core_rest::UnfoldedCircleCoreRest) | Unfolded Circle Core REST API | Bearer |
 //!
 //! ## Available WebSocket Definitions
@@ -33,6 +34,7 @@
 //! | [`unfolded_circle_core_ws`] | [`UnfoldedCircleCoreWs`](unfolded_circle_core_ws::define_api) | Unfolded Circle Core WebSocket API definition |
 //! | [`unfolded_circle_dock_ws`] | [`UnfoldedCircleDockWs`](unfolded_circle_dock_ws::define_api) | Unfolded Circle Dock WebSocket API definition |
 //! | [`unfolded_circle_integration_ws`] | [`UnfoldedCircleIntegrationWs`](unfolded_circle_integration_ws::define_api) | Unfolded Circle Integration WebSocket API definition |
+//! | [`samsung_smart_tv_remote_ws`] | [`SamsungSmartTvRemote`](samsung_smart_tv_remote_ws::define_api) | Samsung Smart TV Remote Control WebSocket API definition |
 //!
 //! ## Quick Start
 //!
@@ -108,9 +110,11 @@ pub mod lmstudio;
 pub mod ollama;
 pub mod emqx;
 pub mod eversolo;
+pub mod samsung_smart_tv;
 pub mod unfolded_circle_core_rest;
 pub mod ws_shared;
 pub mod elevenlabs_ws;
 pub mod unfolded_circle_core_ws;
 pub mod unfolded_circle_dock_ws;
 pub mod unfolded_circle_integration_ws;
+pub mod samsung_smart_tv_remote_ws;
