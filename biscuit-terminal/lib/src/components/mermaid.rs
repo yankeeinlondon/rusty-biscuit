@@ -1039,6 +1039,19 @@ impl MermaidRenderer {
             false
         } else if command_exists("npx") {
             tracing::info!("mmdc not found, falling back to npx");
+            // Check if Chromium is available when using npx fallback
+            // Puppeteer (used by mermaid-cli) needs a browser to render diagrams
+            if detect_system_chromium().is_none() {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "- Mermaid diagrams require mmdc to render to the terminal\n\
+                     - You do not have the Mermaid CLI installed and no system browser found\n\
+                     - Chromium is required for rendering via npx\n\
+                     - Install Chromium: sudo apt install chromium (Linux/WSL)\n\
+                     - Or install permanently: npm install -g @mermaid-js/mermaid-cli"
+                );
+                return Err(MermaidRenderError::NpmNotFound);
+            }
             // Print warning to stderr about temporary installation
             let _ = writeln!(
                 std::io::stderr(),
@@ -1193,6 +1206,17 @@ impl MermaidRenderer {
         let use_npx = if command_exists("mmdc") {
             false
         } else if command_exists("npx") {
+            // Check if Chromium is available when using npx fallback
+            if detect_system_chromium().is_none() {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "- Mermaid diagrams require mmdc to render to the terminal\n\
+                     - No system browser found for Puppeteer\n\
+                     - Install Chromium: sudo apt install chromium (Linux/WSL)\n\
+                     - Or install permanently: npm install -g @mermaid-js/mermaid-cli"
+                );
+                return Err(MermaidRenderError::NpmNotFound);
+            }
             let _ = writeln!(
                 std::io::stderr(),
                 "- Using npx to run mmdc temporarily\n\
