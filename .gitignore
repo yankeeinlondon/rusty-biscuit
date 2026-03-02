@@ -62,3 +62,5 @@ trace/*
 **/target/*
 *.afphoto~lock*
 .aider*
+
+~$*.docx
