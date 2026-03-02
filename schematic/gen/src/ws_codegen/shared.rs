@@ -1,0 +1,306 @@
+//! Shared WS runtime types generator.
+//!
+//! Generates `ws_shared.rs` containing `WsError`, `WsClientOptions`,
+//! `ReconnectPolicy`, `WsConnectionState`, `WsTransportHandle`,
+//! and `WsEncode`/`WsDecode` traits.
+
+use proc_macro2::TokenStream;
+use quote::quote;
+
+/// Generate the complete `ws_shared` module token stream.
+pub fn generate_ws_shared_module() -> TokenStream {
+    let error_type = generate_ws_error();
+    let client_options = generate_ws_client_options();
+    let reconnect_policy = generate_reconnect_policy();
+    let connection_state = generate_ws_connection_state();
+    let transport_handle = generate_ws_transport_handle();
+    let codec_traits = generate_codec_traits();
+    let writer_command = generate_writer_command();
+
+    quote! {
+        //! Shared WebSocket runtime types.
+        //!
+        //! This module provides the core runtime infrastructure used by all
+        //! generated WebSocket client and host modules.
+
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicU64;
+
+        use tokio::sync::{mpsc, oneshot, watch, Mutex};
+        use tokio::task::JoinHandle;
+
+        #error_type
+        #client_options
+        #reconnect_policy
+        #connection_state
+        #writer_command
+        #transport_handle
+        #codec_traits
+    }
+}
+
+fn generate_ws_error() -> TokenStream {
+    quote! {
+        /// Errors that can occur during WebSocket operations.
+        #[derive(Debug, thiserror::Error)]
+        pub enum WsError {
+            /// Transport-level error from tungstenite.
+            #[error("WebSocket transport error: {0}")]
+            Transport(#[from] tokio_tungstenite::tungstenite::Error),
+
+            /// JSON serialization/deserialization error.
+            #[error("Serialization error: {0}")]
+            Serde(#[from] serde_json::Error),
+
+            /// Authentication failed.
+            #[error("Authentication failed: {0}")]
+            AuthRejected(String),
+
+            /// Authentication timed out.
+            #[error("Authentication timed out")]
+            AuthTimeout,
+
+            /// Request timed out waiting for a correlated response.
+            #[error("Request timed out after {0}s")]
+            RequestTimeout(u64),
+
+            /// Connection was disconnected.
+            #[error("Connection disconnected")]
+            Disconnected,
+
+            /// Connection is shutting down.
+            #[error("Connection is shutting down")]
+            Shutdown,
+
+            /// Send queue is full (backpressure).
+            #[error("Send queue full (capacity: {0})")]
+            BackpressureFull(usize),
+
+            /// Protocol error (unexpected message format).
+            #[error("Protocol error: {0}")]
+            Protocol(String),
+
+            /// Correlation error (unmatched response).
+            #[error("Correlation error: {0}")]
+            Correlation(String),
+        }
+    }
+}
+
+fn generate_ws_client_options() -> TokenStream {
+    quote! {
+        /// Options for configuring a WebSocket client connection.
+        #[derive(Debug, Clone)]
+        pub struct WsClientOptions {
+            /// Timeout for the WebSocket handshake.
+            pub handshake_timeout: std::time::Duration,
+            /// Timeout for receiving any message.
+            pub receive_timeout: Option<std::time::Duration>,
+            /// Default timeout for correlated request-response calls.
+            pub request_timeout: std::time::Duration,
+            /// Maximum number of pending correlated requests.
+            pub max_pending_requests: usize,
+            /// Capacity of the outbound message channel.
+            pub outbound_capacity: usize,
+            /// Capacity of the inbound event channel.
+            pub inbound_capacity: usize,
+            /// Optional reconnect policy.
+            pub reconnect: Option<ReconnectPolicy>,
+            /// Whether to disable Nagle's algorithm (TCP_NODELAY).
+            pub disable_nagle: bool,
+        }
+
+        impl Default for WsClientOptions {
+            fn default() -> Self {
+                Self {
+                    handshake_timeout: std::time::Duration::from_secs(10),
+                    receive_timeout: None,
+                    request_timeout: std::time::Duration::from_secs(30),
+                    max_pending_requests: 256,
+                    outbound_capacity: 64,
+                    inbound_capacity: 256,
+                    reconnect: None,
+                    disable_nagle: false,
+                }
+            }
+        }
+    }
+}
+
+fn generate_reconnect_policy() -> TokenStream {
+    quote! {
+        /// Policy for automatic reconnection.
+        #[derive(Debug, Clone)]
+        pub struct ReconnectPolicy {
+            /// Initial backoff duration.
+            pub initial_backoff: std::time::Duration,
+            /// Maximum backoff duration.
+            pub max_backoff: std::time::Duration,
+            /// Backoff multiplier.
+            pub multiplier: f64,
+            /// Random jitter ratio (0.0 to 1.0).
+            pub jitter: f64,
+            /// Maximum number of reconnect attempts (None = unlimited).
+            pub max_attempts: Option<u32>,
+        }
+
+        impl Default for ReconnectPolicy {
+            fn default() -> Self {
+                Self {
+                    initial_backoff: std::time::Duration::from_millis(500),
+                    max_backoff: std::time::Duration::from_secs(30),
+                    multiplier: 2.0,
+                    jitter: 0.25,
+                    max_attempts: None,
+                }
+            }
+        }
+    }
+}
+
+fn generate_ws_connection_state() -> TokenStream {
+    quote! {
+        /// State of a WebSocket connection.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum WsConnectionState {
+            /// Not connected.
+            Disconnected,
+            /// Establishing connection.
+            Connecting,
+            /// Performing authentication.
+            Authenticating,
+            /// Connected and ready for messages.
+            Ready,
+            /// Graceful close in progress.
+            Closing,
+            /// Connection closed.
+            Closed,
+        }
+
+        impl std::fmt::Display for WsConnectionState {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::Disconnected => write!(f, "disconnected"),
+                    Self::Connecting => write!(f, "connecting"),
+                    Self::Authenticating => write!(f, "authenticating"),
+                    Self::Ready => write!(f, "ready"),
+                    Self::Closing => write!(f, "closing"),
+                    Self::Closed => write!(f, "closed"),
+                }
+            }
+        }
+    }
+}
+
+fn generate_writer_command() -> TokenStream {
+    quote! {
+        /// Internal command sent to the writer task.
+        #[derive(Debug)]
+        pub(crate) enum WriterCommand {
+            /// Send a text message.
+            SendText(String),
+            /// Send a binary message.
+            SendBinary(Vec<u8>),
+            /// Initiate graceful close.
+            Close,
+        }
+    }
+}
+
+fn generate_ws_transport_handle() -> TokenStream {
+    quote! {
+        /// Handle to an active WebSocket connection's transport tasks.
+        ///
+        /// Provides channels for sending messages and observing connection state.
+        /// Dropping this handle signals the transport tasks to shut down.
+        pub struct WsTransportHandle {
+            /// Channel for sending commands to the writer task.
+            pub(crate) writer_tx: mpsc::Sender<WriterCommand>,
+            /// Connection state watcher.
+            pub(crate) state_rx: watch::Receiver<WsConnectionState>,
+            /// Reader task join handle.
+            pub(crate) reader_handle: JoinHandle<()>,
+            /// Writer task join handle.
+            pub(crate) writer_handle: JoinHandle<()>,
+            /// Monotonic request ID generator.
+            pub(crate) next_id: Arc<AtomicU64>,
+            /// Pending correlated requests awaiting responses.
+            pub(crate) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        }
+
+        impl WsTransportHandle {
+            /// Returns the current connection state.
+            pub fn state(&self) -> WsConnectionState {
+                *self.state_rx.borrow()
+            }
+
+            /// Returns a cloned watch receiver for connection state changes.
+            pub fn state_watcher(&self) -> watch::Receiver<WsConnectionState> {
+                self.state_rx.clone()
+            }
+        }
+
+        impl Drop for WsTransportHandle {
+            fn drop(&mut self) {
+                self.reader_handle.abort();
+                self.writer_handle.abort();
+            }
+        }
+    }
+}
+
+fn generate_codec_traits() -> TokenStream {
+    quote! {
+        /// Trait for types that can be encoded to a WebSocket frame.
+        pub trait WsEncode {
+            /// Encode this value to a WebSocket text frame payload.
+            fn ws_encode(&self) -> Result<String, WsError>;
+        }
+
+        /// Trait for types that can be decoded from a WebSocket frame.
+        pub trait WsDecode: Sized {
+            /// Decode from a WebSocket text frame payload.
+            fn ws_decode(text: &str) -> Result<Self, WsError>;
+        }
+
+        // Blanket implementation for serde types
+        impl<T: serde::Serialize> WsEncode for T {
+            fn ws_encode(&self) -> Result<String, WsError> {
+                serde_json::to_string(self).map_err(WsError::Serde)
+            }
+        }
+
+        // Blanket implementation for serde types
+        impl<T: serde::de::DeserializeOwned> WsDecode for T {
+            fn ws_decode(text: &str) -> Result<Self, WsError> {
+                serde_json::from_str(text).map_err(WsError::Serde)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_ws_shared_produces_tokens() {
+        let tokens = generate_ws_shared_module();
+        let code = tokens.to_string();
+        assert!(code.contains("WsError"));
+        assert!(code.contains("WsClientOptions"));
+        assert!(code.contains("ReconnectPolicy"));
+        assert!(code.contains("WsConnectionState"));
+        assert!(code.contains("WsTransportHandle"));
+        assert!(code.contains("WsEncode"));
+        assert!(code.contains("WsDecode"));
+    }
+
+    #[test]
+    fn generated_ws_shared_parses_as_valid_rust() {
+        let tokens = generate_ws_shared_module();
+        let file = syn::parse2::<syn::File>(tokens);
+        assert!(file.is_ok(), "Generated ws_shared must parse: {:?}", file.err());
+    }
+}

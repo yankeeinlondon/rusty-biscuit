@@ -109,6 +109,7 @@ pub mod ollama;
 pub mod emqx;
 pub mod eversolo;
 pub mod unfolded_circle_core_rest;
+pub mod ws_shared;
 pub mod elevenlabs_ws;
 pub mod unfolded_circle_core_ws;
 pub mod unfolded_circle_dock_ws;

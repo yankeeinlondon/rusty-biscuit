@@ -113,6 +113,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
         connection_params: vec![],
         lifecycle: ConnectionLifecycle::default(),
         messages: common_messages.clone(),
+        runtime: None,
     });
     endpoints.push(WebSocketEndpoint {
         id: "CoreIntegrations".to_string(),
@@ -121,6 +122,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
         connection_params: vec![],
         lifecycle: ConnectionLifecycle::default(),
         messages: common_messages.clone(),
+        runtime: None,
     });
     endpoints.push(WebSocketEndpoint {
         id: "CoreProfiles".to_string(),
@@ -129,6 +131,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
         connection_params: vec![],
         lifecycle: ConnectionLifecycle::default(),
         messages: common_messages.clone(),
+        runtime: None,
     });
     endpoints.push(WebSocketEndpoint {
         id: "CoreEvents".to_string(),
@@ -137,6 +140,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
         connection_params: vec![],
         lifecycle: ConnectionLifecycle::default(),
         messages: common_messages,
+        runtime: None,
     });
 
     WebSocketApi {
@@ -152,6 +156,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
             "UNFOLDED_CIRCLE_API_KEY".to_string(),
         ],
         endpoints,
+        runtime: None,
     }
 }
 

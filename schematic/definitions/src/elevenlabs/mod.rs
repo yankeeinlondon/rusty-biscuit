@@ -712,6 +712,7 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                         description: Some("Audio data with alignment".to_string()),
                     },
                 ],
+                runtime: None,
             },
             WebSocketEndpoint {
                 id: "MultiContextTextToSpeech".to_string(),
@@ -766,8 +767,10 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                         description: Some("Audio data for a context".to_string()),
                     },
                 ],
+                runtime: None,
             },
         ],
+        runtime: None,
     }
 }
 

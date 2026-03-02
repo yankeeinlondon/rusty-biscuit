@@ -167,6 +167,7 @@ pub fn run_import_asyncapi(
         auth,
         env_auth,
         endpoints,
+        runtime: None,
     };
 
     let endpoint_count = ws_api.endpoints.len();
@@ -378,6 +379,7 @@ fn map_channels_to_endpoints(
                 connection_params: vec![],
                 lifecycle: ConnectionLifecycle::default(),
                 messages: dedup_messages(messages),
+                runtime: None,
             }
         })
         .collect()

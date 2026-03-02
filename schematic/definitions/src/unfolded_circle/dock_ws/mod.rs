@@ -5,7 +5,8 @@ mod types;
 pub use types::*;
 
 use schematic_define::websocket::{
-    ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
+    AuthFlowHints, ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi,
+    WebSocketEndpoint, WebSocketEndpointHints,
 };
 use schematic_define::{AuthStrategy, Schema};
 
@@ -73,7 +74,18 @@ pub fn define_unfolded_circle_dock_ws_api() -> WebSocketApi {
             connection_params: vec![],
             lifecycle: ConnectionLifecycle::default(),
             messages,
+            runtime: Some(WebSocketEndpointHints {
+                correlation: None,
+                auth_flow: Some(AuthFlowHints {
+                    challenge_message: "auth_required".to_string(),
+                    auth_request_schema: "DockWsAuthMessage".to_string(),
+                    success_indicator: Some("authentication".to_string()),
+                    failure_indicator: Some("authentication_failed".to_string()),
+                }),
+                heartbeat: None,
+            }),
         }],
+        runtime: None,
     }
 }
 
@@ -94,6 +106,11 @@ mod tests {
         assert_eq!(api.env_auth, vec!["UCR_DOCK_TOKEN".to_string()]);
         assert_eq!(api.endpoints.len(), 1);
         assert_eq!(api.endpoints[0].path, "/");
+        assert!(api.endpoints[0]
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.auth_flow.as_ref())
+            .is_some());
     }
 
     #[test]

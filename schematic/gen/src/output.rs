@@ -103,77 +103,83 @@ const WS_DEFINITION_MODULES: &[WsDefinitionModule] = &[
 ];
 
 fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
-    match module {
-        "elevenlabs_ws" => Some(quote! {
-            //! Generated WebSocket API definition helper for ElevenLabs TTS.
-            //!
-            //! This module currently exposes the typed `WebSocketApi` definition
-            //! and related model types from `schematic-definitions`.
-            //!
-            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+    use crate::ws_codegen::client::generate_ws_client_module;
+    use crate::ws_codegen::host::generate_ws_host_module;
+    use crate::ws_codegen::plan::lower_to_plan;
 
-            pub use schematic_definitions::elevenlabs::*;
-            use schematic_define::websocket::WebSocketApi;
+    // Map module name to definition function + model re-export path
+    let (define_fn, reexport_path, api_fn): (
+        fn() -> schematic_define::WebSocketApi,
+        TokenStream,
+        TokenStream,
+    ) = match module {
+        "elevenlabs_ws" => (
+            || schematic_definitions::define_elevenlabs_websocket_api(),
+            quote! { pub use schematic_definitions::elevenlabs::*; },
+            quote! {
+                /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
+                #[must_use]
+                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+                    schematic_definitions::define_elevenlabs_websocket_api()
+                }
+            },
+        ),
+        "unfolded_circle_core_ws" => (
+            || schematic_definitions::define_unfolded_circle_core_ws_api(),
+            quote! { pub use schematic_definitions::unfolded_circle::core_ws::*; },
+            quote! {
+                /// Builds the Unfolded Circle Core WebSocket API definition.
+                #[must_use]
+                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+                    schematic_definitions::define_unfolded_circle_core_ws_api()
+                }
+            },
+        ),
+        "unfolded_circle_dock_ws" => (
+            || schematic_definitions::define_unfolded_circle_dock_ws_api(),
+            quote! { pub use schematic_definitions::unfolded_circle::dock_ws::*; },
+            quote! {
+                /// Builds the Unfolded Circle Dock WebSocket API definition.
+                #[must_use]
+                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+                    schematic_definitions::define_unfolded_circle_dock_ws_api()
+                }
+            },
+        ),
+        "unfolded_circle_integration_ws" => (
+            || schematic_definitions::define_unfolded_circle_integration_ws_api(),
+            quote! { pub use schematic_definitions::unfolded_circle::integration_ws::*; },
+            quote! {
+                /// Builds the Unfolded Circle Integration WebSocket API definition.
+                #[must_use]
+                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+                    schematic_definitions::define_unfolded_circle_integration_ws_api()
+                }
+            },
+        ),
+        _ => return None,
+    };
 
-            /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
-            #[must_use]
-            pub fn define_api() -> WebSocketApi {
-                schematic_definitions::define_elevenlabs_websocket_api()
-            }
-        }),
-        "unfolded_circle_core_ws" => Some(quote! {
-            //! Generated WebSocket API definition helper for Unfolded Circle Core WS.
-            //!
-            //! This module currently exposes the typed `WebSocketApi` definition
-            //! and related model types from `schematic-definitions`.
-            //!
-            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+    let api = define_fn();
+    let plan = match lower_to_plan(&api) {
+        Ok(plan) => plan,
+        Err(_) => return None,
+    };
 
-            pub use schematic_definitions::unfolded_circle::core_ws::*;
-            use schematic_define::websocket::WebSocketApi;
+    let module_docs = crate::ws_codegen::docs::generate_module_docs(&plan);
+    let client_code = generate_ws_client_module(&plan);
+    let host_code = generate_ws_host_module(&plan);
 
-            /// Builds the Unfolded Circle Core WebSocket API definition.
-            #[must_use]
-            pub fn define_api() -> WebSocketApi {
-                schematic_definitions::define_unfolded_circle_core_ws_api()
-            }
-        }),
-        "unfolded_circle_dock_ws" => Some(quote! {
-            //! Generated WebSocket API definition helper for Unfolded Circle Dock WS.
-            //!
-            //! This module currently exposes the typed `WebSocketApi` definition
-            //! and related model types from `schematic-definitions`.
-            //!
-            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+    Some(quote! {
+        #module_docs
 
-            pub use schematic_definitions::unfolded_circle::dock_ws::*;
-            use schematic_define::websocket::WebSocketApi;
+        #reexport_path
 
-            /// Builds the Unfolded Circle Dock WebSocket API definition.
-            #[must_use]
-            pub fn define_api() -> WebSocketApi {
-                schematic_definitions::define_unfolded_circle_dock_ws_api()
-            }
-        }),
-        "unfolded_circle_integration_ws" => Some(quote! {
-            //! Generated WebSocket API definition helper for Unfolded Circle Integration WS.
-            //!
-            //! This module currently exposes the typed `WebSocketApi` definition
-            //! and related model types from `schematic-definitions`.
-            //!
-            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+        #api_fn
 
-            pub use schematic_definitions::unfolded_circle::integration_ws::*;
-            use schematic_define::websocket::WebSocketApi;
-
-            /// Builds the Unfolded Circle Integration WebSocket API definition.
-            #[must_use]
-            pub fn define_api() -> WebSocketApi {
-                schematic_definitions::define_unfolded_circle_integration_ws_api()
-            }
-        }),
-        _ => None,
-    }
+        #client_code
+        #host_code
+    })
 }
 
 fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, GeneratorError> {
@@ -186,6 +192,16 @@ fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, GeneratorEr
             Ok((format!("{}.rs", spec.module), formatted))
         })
         .collect()
+}
+
+/// Generate the ws_shared module.
+fn generate_ws_shared_module() -> Result<(String, String), GeneratorError> {
+    use crate::ws_codegen::shared::generate_ws_shared_module;
+
+    let tokens = generate_ws_shared_module();
+    let file = validate_code(&tokens)?;
+    let formatted = format_code(&file);
+    Ok(("ws_shared.rs".to_string(), formatted))
 }
 
 /// Returns the module path for the given API.
@@ -560,6 +576,12 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
             }
         })
         .collect();
+    // Add ws_shared module (must come before WS API modules that depend on it)
+    if seen_modules.insert("ws_shared".to_string()) {
+        module_decls.push(quote! {
+            pub mod ws_shared;
+        });
+    }
     for ws in WS_DEFINITION_MODULES {
         if seen_modules.insert(ws.module.to_string()) {
             let module_name = format_ident!("{}", ws.module);
@@ -1067,7 +1089,11 @@ pub fn generate_and_write_all(
         let filename = format!("{}.rs", module_path);
         api_modules.push((filename, formatted));
     }
-    // Generate WebSocket definition helper modules.
+    // Generate WebSocket shared runtime module
+    let (ws_shared_filename, ws_shared_content) = generate_ws_shared_module()?;
+    api_modules.push((ws_shared_filename, ws_shared_content));
+
+    // Generate WebSocket runtime client/host modules
     api_modules.extend(generate_ws_definition_modules()?);
 
     if dry_run {

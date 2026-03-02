@@ -75,7 +75,9 @@ pub fn define_unfolded_circle_integration_ws_api() -> WebSocketApi {
             connection_params: vec![],
             lifecycle: ConnectionLifecycle::default(),
             messages,
+            runtime: None,
         }],
+        runtime: None,
     }
 }
 

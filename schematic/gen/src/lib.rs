@@ -72,6 +72,7 @@ pub mod openapi_output;
 pub mod output;
 pub mod parser;
 pub mod validation;
+pub mod ws_codegen;
 
 pub use inference::infer_module_path;
 
