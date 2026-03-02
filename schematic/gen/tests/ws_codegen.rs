@@ -4,8 +4,9 @@
 //! verifying structural correctness and syn-parseable output for all known WS APIs.
 
 use schematic_definitions::{
-    define_elevenlabs_websocket_api, define_unfolded_circle_core_ws_api,
-    define_unfolded_circle_dock_ws_api, define_unfolded_circle_integration_ws_api,
+    define_elevenlabs_websocket_api, define_samsung_smart_tv_remote_ws_api,
+    define_unfolded_circle_core_ws_api, define_unfolded_circle_dock_ws_api,
+    define_unfolded_circle_integration_ws_api,
 };
 use schematic_gen::ws_codegen::client::generate_ws_client_module;
 use schematic_gen::ws_codegen::docs::generate_module_docs;
@@ -30,6 +31,10 @@ fn lower_all_apis() -> Vec<(&'static str, WsRuntimePlan)> {
         (
             "UnfoldedCircleIntegrationWs",
             lower_to_plan(&define_unfolded_circle_integration_ws_api()).unwrap(),
+        ),
+        (
+            "SamsungSmartTvRemote",
+            lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap(),
         ),
     ]
 }
@@ -363,4 +368,38 @@ fn full_assembly_produces_valid_rust_for_all_apis() {
             result.err()
         );
     }
+}
+
+// --- Samsung-specific tests ---
+
+#[test]
+fn samsung_remote_has_no_correlation() {
+    let plan = lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap();
+    assert_eq!(plan.endpoints.len(), 1);
+    for ep in &plan.endpoints {
+        assert!(
+            matches!(
+                ep.correlation,
+                schematic_gen::ws_codegen::plan::CorrelationStrategy::None
+            ),
+            "Samsung remote endpoint {} should NOT have correlation",
+            ep.id
+        );
+    }
+}
+
+#[test]
+fn samsung_remote_connect_has_connection_params() {
+    let plan = lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap();
+    let tokens = generate_ws_client_module(&plan);
+    let code = tokens.to_string();
+
+    assert!(
+        code.contains("connect_remote_control"),
+        "Expected connect_remote_control method"
+    );
+    assert!(
+        code.contains("RemoteControlConnectionParams"),
+        "Expected endpoint connection params struct for RemoteControl"
+    );
 }
