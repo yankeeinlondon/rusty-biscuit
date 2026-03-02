@@ -43,11 +43,7 @@ All packages in **Schematic** are written in Rust and use the 2024 edition.
 
 ### Key Design Primitives
 
-The following primitives are critical to understand when building an API definition in `schema-definitions`:
-
-- a
-- b
-- c
+TODO
 
 ### Best Practices
 
