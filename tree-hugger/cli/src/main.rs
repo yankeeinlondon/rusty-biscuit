@@ -87,7 +87,7 @@ struct CommonArgs {
     #[arg(long, conflicts_with = "prelude")]
     exported: bool,
 
-    /// Show only symbols re-exported through the prelude module
+    /// Show only symbols explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
 }
@@ -115,7 +115,7 @@ struct ClassArgs {
     #[arg(long, conflicts_with = "prelude")]
     exported: bool,
 
-    /// Show only classes re-exported through the prelude module
+    /// Show only classes explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
 }
@@ -255,7 +255,16 @@ enum SymbolFilter {
     /// Show only exported (public) symbols
     Exported,
     /// Show only symbols whose name appears in the prelude
-    Prelude(HashSet<String>),
+    Prelude(PreludeFilter),
+}
+
+/// Resolved prelude export filter data.
+#[derive(Debug, Clone)]
+struct PreludeFilter {
+    /// Symbol names explicitly listed by prelude exports (plus PRELUDE env var).
+    names: HashSet<String>,
+    /// Direct prelude export entries keyed by prelude file path.
+    exports_by_file: HashMap<PathBuf, Vec<ImportSymbol>>,
 }
 
 /// Classification of positional filter tokens.
@@ -612,7 +621,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let command_kind = cli.command.kind().expect("completions already handled");
     let scan_filters = classify_filters(filters, &command_kind);
 
-    let files = if scan_filters.file_filters.is_empty() {
+    let mut files = if scan_filters.file_filters.is_empty() {
         collect_files(&pkg_root, &[], &cli.ignore, language)?
     } else {
         collect_files(&pkg_root, &scan_filters.file_filters, &cli.ignore, language)?
@@ -622,11 +631,22 @@ fn main() -> Result<(), TreeHuggerError> {
     let symbol_filter = if cli.command.exported() {
         SymbolFilter::Exported
     } else if cli.command.prelude() {
-        let names = resolve_prelude_symbols(&pkg_root)?;
-        SymbolFilter::Prelude(names)
+        let prelude_filter = resolve_prelude_symbols(&pkg_root)?;
+        SymbolFilter::Prelude(prelude_filter)
     } else {
         SymbolFilter::None
     };
+
+    if matches!(command_kind, CommandKind::Symbols)
+        && let SymbolFilter::Prelude(filter) = &symbol_filter
+    {
+        for prelude_file in filter.exports_by_file.keys() {
+            if !files.iter().any(|file| file == prelude_file) {
+                files.push(prelude_file.clone());
+            }
+        }
+        files.sort();
+    }
 
     // Handle classes command separately due to different output structure
     if let CommandKind::Classes {
@@ -657,8 +677,8 @@ fn main() -> Result<(), TreeHuggerError> {
                         .collect();
                     class_summaries.retain(|cs| exported.contains(&cs.class.name));
                 }
-                SymbolFilter::Prelude(names) => {
-                    class_summaries.retain(|cs| names.contains(&cs.class.name));
+                SymbolFilter::Prelude(filter) => {
+                    class_summaries.retain(|cs| filter.names.contains(&cs.class.name));
                 }
                 SymbolFilter::None => {}
             }
@@ -786,13 +806,14 @@ fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
     );
 }
 
-/// Resolves the set of symbol names re-exported through a prelude module.
+/// Resolves symbol names and direct export entries from a prelude module.
 ///
 /// Looks for `{root}/src/prelude.rs` or `{root}/src/prelude/mod.rs`, parses
-/// `pub use` re-exports, and merges any additional names from the `PRELUDE`
+/// public `use` exports, and merges any additional names from the `PRELUDE`
 /// environment variable (comma-separated).
-fn resolve_prelude_symbols(root_dir: &Path) -> Result<HashSet<String>, TreeHuggerError> {
+fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerError> {
     let mut names = HashSet::new();
+    let mut exports_by_file: HashMap<PathBuf, Vec<ImportSymbol>> = HashMap::new();
 
     let candidates = [
         root_dir.join("src/prelude.rs"),
@@ -801,9 +822,21 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<HashSet<String>, TreeHugge
     for candidate in &candidates {
         if candidate.is_file() {
             let tree_file = TreeFile::with_language(candidate, None)?;
-            for import in tree_file.imported_symbols()? {
-                names.insert(import.name);
+            let source = std::fs::read_to_string(candidate).map_err(|source| TreeHuggerError::Io {
+                path: candidate.to_path_buf(),
+                source,
+            })?;
+            let exports: Vec<ImportSymbol> = tree_file
+                .imported_symbols()?
+                .into_iter()
+                .filter(|import| is_prelude_export(import, &source))
+                .collect();
+
+            for import in &exports {
+                names.insert(import.name.clone());
             }
+
+            exports_by_file.insert(candidate.to_path_buf(), exports);
             break;
         }
     }
@@ -817,7 +850,45 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<HashSet<String>, TreeHugge
         }
     }
 
-    Ok(names)
+    Ok(PreludeFilter {
+        names,
+        exports_by_file,
+    })
+}
+
+fn is_prelude_export(import: &ImportSymbol, file_source: &str) -> bool {
+    if import.language != ProgrammingLanguage::Rust {
+        return true;
+    }
+
+    let Some(statement_range) = import.statement_range.as_ref() else {
+        return true;
+    };
+    let Some(statement) = file_source.get(statement_range.start_byte..statement_range.end_byte)
+    else {
+        return false;
+    };
+
+    is_public_rust_use_statement(statement)
+}
+
+fn is_public_rust_use_statement(statement: &str) -> bool {
+    let trimmed = statement.trim_start();
+    let Some(after_pub) = trimmed.strip_prefix("pub") else {
+        return false;
+    };
+    let after_pub = after_pub.trim_start();
+    if after_pub.starts_with("use ") {
+        return true;
+    }
+
+    if let Some(after_scope) = after_pub.strip_prefix('(')
+        && let Some(close_idx) = after_scope.find(')')
+    {
+        return after_scope[close_idx + 1..].trim_start().starts_with("use ");
+    }
+
+    false
 }
 
 fn classify_filters(filters: &[String], command: &CommandKind) -> ScanFilters {
@@ -1008,10 +1079,10 @@ fn summarize_file(
                     .into_iter()
                     .filter(|s| s.kind.is_function())
                     .collect(),
-                SymbolFilter::Prelude(names) => tree_file
+                SymbolFilter::Prelude(filter) => tree_file
                     .symbols()?
                     .into_iter()
-                    .filter(|s| s.kind.is_function() && names.contains(&s.name))
+                    .filter(|s| s.kind.is_function() && filter.names.contains(&s.name))
                     .collect(),
                 SymbolFilter::None => tree_file
                     .symbols()?
@@ -1028,10 +1099,10 @@ fn summarize_file(
                     .into_iter()
                     .filter(|s| s.kind.is_type())
                     .collect(),
-                SymbolFilter::Prelude(names) => tree_file
+                SymbolFilter::Prelude(filter) => tree_file
                     .symbols()?
                     .into_iter()
-                    .filter(|s| s.kind.is_type() && names.contains(&s.name))
+                    .filter(|s| s.kind.is_type() && filter.names.contains(&s.name))
                     .collect(),
                 SymbolFilter::None => tree_file
                     .symbols()?
@@ -1047,22 +1118,37 @@ fn summarize_file(
                     summary.symbols = tree_file.exported_symbols()?;
                     summary.exports = tree_file.exported_symbols()?;
                 }
-                SymbolFilter::Prelude(names) => {
-                    summary.symbols = tree_file
-                        .symbols()?
-                        .into_iter()
-                        .filter(|s| names.contains(&s.name))
-                        .collect();
-                    summary.exports = tree_file
-                        .exported_symbols()?
-                        .into_iter()
-                        .filter(|s| names.contains(&s.name))
-                        .collect();
-                    summary.locals = tree_file
-                        .local_symbols()?
-                        .into_iter()
-                        .filter(|s| names.contains(&s.name))
-                        .collect();
+                SymbolFilter::Prelude(filter) => {
+                    if filter.exports_by_file.is_empty() {
+                        // Backwards-compatible fallback for PRELUDE env-only filtering.
+                        summary.symbols = tree_file
+                            .symbols()?
+                            .into_iter()
+                            .filter(|s| filter.names.contains(&s.name))
+                            .collect();
+                        summary.exports = tree_file
+                            .exported_symbols()?
+                            .into_iter()
+                            .filter(|s| filter.names.contains(&s.name))
+                            .collect();
+                        summary.locals = tree_file
+                            .local_symbols()?
+                            .into_iter()
+                            .filter(|s| filter.names.contains(&s.name))
+                            .collect();
+                    } else if let Some(prelude_exports) = filter.exports_by_file.get(&tree_file.file)
+                    {
+                        summary.symbols = prelude_exports
+                            .iter()
+                            .map(symbol_from_prelude_export)
+                            .collect();
+                        summary.exports = summary.symbols.clone();
+                        summary.locals.clear();
+                    } else {
+                        summary.symbols.clear();
+                        summary.exports.clear();
+                        summary.locals.clear();
+                    }
                 }
                 SymbolFilter::None => {
                     summary.symbols = tree_file.symbols()?;
@@ -1087,6 +1173,21 @@ fn summarize_file(
     }
 
     Ok(summary)
+}
+
+fn symbol_from_prelude_export(import: &ImportSymbol) -> SymbolInfo {
+    SymbolInfo {
+        name: import.name.clone(),
+        kind: SymbolKind::Unknown,
+        range: import.range.clone(),
+        language: import.language,
+        file: import.file.clone(),
+        container_name: None,
+        container_kind: None,
+        doc_comment: None,
+        signature: None,
+        type_metadata: None,
+    }
 }
 
 fn render_summary(
