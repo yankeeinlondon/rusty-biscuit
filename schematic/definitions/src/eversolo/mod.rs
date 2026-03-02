@@ -326,8 +326,7 @@ fn system_endpoints() -> Vec<Endpoint> {
             id: "SystemGetKnobBrightness".to_string(),
             method: RestMethod::Get,
             path: "/SystemSettings/displaySettings/getKnobBrightness".to_string(),
-            description: "Get current knob LED brightness level (community-discovered)"
-                .to_string(),
+            description: "Get current knob LED brightness level (community-discovered)".to_string(),
             request: None,
             response: ApiResponse::json_type("BrightnessResponse"),
             headers: vec![],
