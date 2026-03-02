@@ -54,3 +54,7 @@ The following primitives are critical to understand when building an API definit
 Read the following document to make sure you're building a high quality API by learning what are considered the "best practices":
 
 - [Best Practices for Designing an API](./best-practices-in-designing-an-api.md)
+
+Once you've made sure that your API definition meets the requirements described in the best practices guide, you then should use the completion checklist to fully verify that you are "done".
+
+- [Completion Checklist](./completion-checklist.md)
