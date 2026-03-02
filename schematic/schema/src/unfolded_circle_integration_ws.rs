@@ -10,6 +10,11 @@
 //!
 //! - `Integration` (`/intg`): Integration driver channel with role inversion support (driver-as-server). This endpoint is intentionally bidirectional for command handling and outbound event push.
 //!
+//! ## Authentication
+//!
+//! - Handshake auth strategy: API key header.
+//! - Credential environment variables: `UCR_INTEGRATION_TOKEN`.
+//!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/integration/>
 pub use schematic_definitions::unfolded_circle::integration_ws::*;
 /// Builds the Unfolded Circle Integration WebSocket API definition.
@@ -233,7 +238,14 @@ impl IntegrationClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
@@ -307,6 +319,61 @@ impl IntegrationClient {
 /// WebSocket host server.
 pub struct UnfoldedCircleIntegrationWsHost;
 impl UnfoldedCircleIntegrationWsHost {
+    fn auth_error_response(
+        status: tokio_tungstenite::tungstenite::http::StatusCode,
+        message: &str,
+    ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
+        tokio_tungstenite::tungstenite::http::Response::builder()
+            .status(status)
+            .body(Some(message.to_string()))
+            .unwrap_or_else(|_| {
+                tokio_tungstenite::tungstenite::http::Response::new(
+                    Some("Unauthorized".to_string()),
+                )
+            })
+    }
+    fn validate_upgrade_request(
+        request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+        response: tokio_tungstenite::tungstenite::handshake::server::Response,
+    ) -> Result<
+        tokio_tungstenite::tungstenite::handshake::server::Response,
+        tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+    > {
+        let expected_values: Vec<String> = vec!["UCR_INTEGRATION_TOKEN".to_string()]
+            .into_iter()
+            .filter_map(|env| std::env::var(env).ok())
+            .filter(|value| !value.trim().is_empty())
+            .collect();
+        if expected_values.is_empty() {
+            return Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "WebSocket host auth is configured but no auth env vars are set",
+                ),
+            );
+        }
+        let Some(received) = request
+            .headers()
+            .get("auth-token")
+            .and_then(|value| value.to_str().ok()) else {
+            return Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Missing authentication header",
+                ),
+            );
+        };
+        if expected_values.iter().any(|expected| expected == received) {
+            Ok(response)
+        } else {
+            Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Invalid authentication header",
+                ),
+            )
+        }
+    }
     /// Serve WebSocket connections on the given TCP listener.
     pub async fn serve<H: WsHandler + 'static>(
         listener: tokio::net::TcpListener,
@@ -319,7 +386,12 @@ impl UnfoldedCircleIntegrationWsHost {
                 .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
             let handler = handler.clone();
             tokio::spawn(async move {
-                if let Ok(ws_stream) = tokio_tungstenite::accept_async(stream).await {
+                if let Ok(ws_stream) = tokio_tungstenite::accept_hdr_async(
+                        stream,
+                        Self::validate_upgrade_request,
+                    )
+                    .await
+                {
                     Self::handle_connection(ws_stream, handler).await;
                 }
             });

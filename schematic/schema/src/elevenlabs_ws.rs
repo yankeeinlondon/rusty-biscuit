@@ -11,6 +11,11 @@
 //! - `TextToSpeech` (`/v1/text-to-speech/{voice_id}/stream-input`): Stream text and receive audio chunks in real-time
 //! - `MultiContextTextToSpeech` (`/v1/text-to-speech/{voice_id}/multi-stream-input`): Manage multiple audio streams over a single connection
 //!
+//! ## Authentication
+//!
+//! - Handshake auth strategy: API key header.
+//! - Credential environment variables: `ELEVEN_LABS_API_KEY`, `ELEVENLABS_API_KEY`.
+//!
 //! API documentation: <https://elevenlabs.io/docs/api-reference/websockets>
 pub use schematic_definitions::elevenlabs::*;
 /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
@@ -232,12 +237,33 @@ impl TextToSpeechClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
             .await
             .map_err(|_| super::ws_shared::WsError::Disconnected)
+    }
+    ///Send the `BOS` open lifecycle message.
+    pub async fn send_bos(
+        &self,
+        message: TtsInitMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_typed(&message).await
+    }
+    ///Send the `EOS` close lifecycle message.
+    pub async fn send_eos(
+        &self,
+        message: TtsCloseMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_typed(&message).await
     }
     /// Receive the next inbound event.
     pub async fn next_event(
@@ -388,12 +414,33 @@ impl MultiContextTextToSpeechClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
             .await
             .map_err(|_| super::ws_shared::WsError::Disconnected)
+    }
+    ///Send the `InitContext` open lifecycle message.
+    pub async fn send_init_context(
+        &self,
+        message: MultiContextInitMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_typed(&message).await
+    }
+    ///Send the `CloseSocket` close lifecycle message.
+    pub async fn send_close_socket(
+        &self,
+        message: MultiContextCloseSocketMessage,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_typed(&message).await
     }
     /// Receive the next inbound event.
     pub async fn next_event(

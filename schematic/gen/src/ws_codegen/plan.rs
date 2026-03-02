@@ -244,7 +244,7 @@ fn lifecycle_to_plan(
 ) -> Option<LifecycleMessagePlan> {
     message.map(|m| LifecycleMessagePlan {
         name: m.name.clone(),
-        schema_type: m.schema.name.clone(),
+        schema_type: m.schema.full_path(),
     })
 }
 

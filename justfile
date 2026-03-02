@@ -278,7 +278,7 @@ lint:
             else
                 if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
                     echo "No lint command for $area"
-                    so-you-say "The ${area} package does not define a lint command" 2>/dev/null || return 0
+                    so-you-say "The ${area} package does not define a lint command" 2>/dev/null || exit 0
                 else
                     echo "- no lint command for the area **$area**" >&2
                 fi

@@ -10,6 +10,12 @@
 //!
 //! - `DockRoot` (`/`): Dock command and telemetry channel. This endpoint uses `type` as the envelope discriminant (not `kind`) and requires post-connect authentication for most operations.
 //!
+//! ## Authentication
+//!
+//! - Message-based authentication flow with handshake strategy: none.
+//! - Credential environment variables: `UCR_DOCK_TOKEN`.
+//! - Credentials are not auto-applied to headers; send auth messages explicitly (typed lifecycle helper or `send()`).
+//!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/dock/>
 pub use schematic_definitions::unfolded_circle::dock_ws::*;
 /// Builds the Unfolded Circle Dock WebSocket API definition.
@@ -29,7 +35,13 @@ impl UnfoldedCircleDockWs {
     pub fn new() -> Self {
         Self {
             base_url: "ws://dock.local".to_string(),
-            headers: schematic_define::Headers::default(),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: None,
+                }),
         }
     }
     /// Create a new client with a custom base URL.
@@ -37,7 +49,13 @@ impl UnfoldedCircleDockWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default(),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: None,
+                }),
         }
     }
     /// Returns the configured base URL.
@@ -211,7 +229,14 @@ impl DockRootClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))

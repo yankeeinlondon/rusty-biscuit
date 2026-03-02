@@ -41,7 +41,7 @@ _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
 _sound_effect effect="drop4":
-    @playa effect "{{effect}}" --background 2>/dev/null || return 0
+    @playa effect "{{effect}}" --background 2>/dev/null || exit 0
 
 _notify message title=PACKAGE:
     #!/usr/bin/env bash

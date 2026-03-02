@@ -124,10 +124,8 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
 
             (
                 quote! {
-                    tokio_tungstenite::accept_hdr_async(stream, |request, response| {
-                        Self::validate_upgrade_request(request, response)
-                    })
-                    .await
+                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
+                        .await
                 },
                 quote! {
                     fn auth_error_response(
@@ -193,10 +191,8 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
 
             (
                 quote! {
-                    tokio_tungstenite::accept_hdr_async(stream, |request, response| {
-                        Self::validate_upgrade_request(request, response)
-                    })
-                    .await
+                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
+                        .await
                 },
                 quote! {
                     fn auth_error_response(

@@ -13,6 +13,11 @@
 //! - `CoreProfiles` (`/profiles`): Profile-focused channel for querying and tracking profile updates without subscribing to all general events.
 //! - `CoreEvents` (`/events`): General asynchronous event channel optimized for event consumers and telemetry-style subscribers.
 //!
+//! ## Authentication
+//!
+//! - Handshake auth strategy: API key header.
+//! - Credential environment variables: `UCR_CORE_API_KEY`, `UNFOLDED_CIRCLE_API_KEY`.
+//!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/ws/>
 pub use schematic_definitions::unfolded_circle::core_ws::*;
 /// Builds the Unfolded Circle Core WebSocket API definition.
@@ -281,7 +286,14 @@ impl CoreWsClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
@@ -499,7 +511,14 @@ impl CoreIntegrationsClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
@@ -717,7 +736,14 @@ impl CoreProfilesClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))
@@ -935,7 +961,14 @@ impl CoreEventsClient {
         &self,
         message: serde_json::Value,
     ) -> Result<(), super::ws_shared::WsError> {
-        let text = serde_json::to_string(&message)?;
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
         self.transport
             .writer_tx
             .send(super::ws_shared::WriterCommand::SendText(text))

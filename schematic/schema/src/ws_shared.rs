@@ -189,3 +189,8 @@ impl<T: serde::Serialize> WsEncode for T {
         serde_json::to_string(self).map_err(WsError::Serde)
     }
 }
+impl<T: serde::de::DeserializeOwned> WsDecode for T {
+    fn ws_decode(text: &str) -> Result<Self, WsError> {
+        serde_json::from_str(text).map_err(WsError::Serde)
+    }
+}
