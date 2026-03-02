@@ -2,8 +2,10 @@ Samsung TV TCP/IP API
 Deep Dive Technical Reference for S95C & Tizen-Based Smart TVs
 Complete API Endpoints, Authentication Methods & Rust Implementation Examples
 # 1. Executive Overview
+
 Samsung Smart TVs running Tizen OS (2016 and later) expose a comprehensive set of TCP/IP-based APIs that enable remote control, application management, media playback, and integration with home automation systems. These APIs operate over multiple protocols including WebSocket, REST HTTP, and UPnP/DLNA, providing developers with flexible options for building control applications. The S95C OLED model, released in 2023 as Samsung's flagship OLED television, fully supports these Tizen-based APIs while adding specific features like Art Mode for displaying artwork when the TV is in standby mode.
 This technical reference provides a complete examination of all available endpoints, authentication mechanisms, message protocols, and practical implementation examples. The APIs discussed here have been reverse-engineered from Samsung's official Smart View SDK and various open-source implementations, as Samsung does not provide official public documentation for the local network control APIs. Understanding these APIs enables developers to build sophisticated home automation integrations, custom remote control applications, and automated testing frameworks for Samsung TV applications.
+
 # 2. Supported TV Models and Architecture
 ## 2.1 Model Year Support Matrix
 Samsung's TV API landscape is divided into two primary eras based on the underlying operating system. The older Orsay-based TVs (2014-2015) use an encrypted legacy API, while Tizen-based models (2016-present) utilize the modern WebSocket and REST APIs that are the focus of this document. The S95C, being a 2023 model, runs Tizen OS 7.0 and supports the complete feature set including the latest Art Mode API version 4.x.
@@ -16,8 +18,11 @@ Samsung's TV API landscape is divided into two primary eras based on the underly
 | 2023 | S95C (OLED) | Tizen 7.0 | v2 + Art API v4 |
 
 Table 1: TV Model Year and API Support Matrix
+
 # 3. Network Architecture and Ports
+
 Samsung TVs expose multiple network services across different TCP ports, each serving specific functionality. The primary control interface operates over WebSocket connections, while REST endpoints provide device information and application management capabilities. Understanding the port layout is essential for proper network configuration and firewall rules in enterprise deployments.
+
 ## 3.1 Port Allocation
 
 | Port | Protocol | Purpose | Auth Required |
@@ -29,9 +34,11 @@ Samsung TVs expose multiple network services across different TCP ports, each se
 
 Table 2: Samsung TV Network Port Allocation
 The S95C exclusively uses port 8002 for secure WebSocket connections, requiring TLS encryption and token-based authentication. This represents a shift from earlier Tizen models that supported both encrypted (8002) and unencrypted (8001) connections. The D2D (Device-to-Device) port is dynamically allocated by the TV during Art Mode operations and is used for bulk data transfer operations such as uploading custom artwork images.
+
 # 4. Authentication Mechanisms
 ## 4.1 Token-Based Authentication Flow
 Samsung TVs implement a token-based authentication system designed to prevent unauthorized access while allowing legitimate control applications to maintain persistent connections. The authentication flow involves an initial pairing request, user confirmation on the TV screen, and subsequent token storage for reconnection. The security model ensures that only devices that have been explicitly authorized can control the TV, with the token serving as proof of prior authorization.
+
 ### 4.1.1 Initial Pairing Process
 When connecting for the first time without a stored token, the client must initiate a pairing request by connecting to the WebSocket endpoint with an empty or absent token parameter. The TV responds by displaying a confirmation dialog prompting the user to allow or deny the connection. Upon user approval, the TV returns a unique token in the WebSocket response that must be stored and presented in all subsequent connections. This token is TV-specific and client-identifier-specific, meaning different client applications will receive different tokens even when connecting to the same TV.
 
@@ -54,8 +61,10 @@ wss://192.168.1.50:8002/api/v2/channels/samsung.remote.control
 
 ## 4.2 Device Name Encoding
 The client name parameter in the connection URL must be Base64 encoded. This name appears on the TV screen during pairing and in the Device Connection Manager list, allowing users to identify which application is requesting access. The encoding ensures that special characters and spaces in the application name do not interfere with URL parsing. For example, the string "MyRemoteApp" becomes "TXlSZW1vdGVBcHA=" when Base64 encoded.
+
 # 5. WebSocket API Reference
 The WebSocket API serves as the primary control interface for Samsung TVs, providing real-time bidirectional communication for remote control commands, application management, and status updates. All messages are exchanged in JSON format, following a request-response pattern for commands and an event-based pattern for asynchronous notifications. The WebSocket connection remains open for the duration of the control session, allowing for immediate command delivery without connection overhead.
+
 ## 5.1 WebSocket Endpoints
 
 | Endpoint Channel | Purpose |
@@ -96,6 +105,7 @@ The following table documents the most commonly used key codes. Note that some k
 | Numbers | KEY_0 through KEY_9 | Numeric input |
 
 Table 4: Common Remote Control Key Codes
+
 ## 5.3 Application Control
 Application management commands use the ms.channel.emit method to launch applications, retrieve the installed application list, and control application lifecycle. The TV maintains a registry of installed applications with unique identifiers that can be either numeric IDs (assigned by Samsung) or string package names (e.g., "org.tizen.browser" for the built-in web browser). Applications can be launched in different modes depending on the desired behavior.
 
@@ -116,8 +126,10 @@ Application management commands use the ms.channel.emit method to launch applica
 ```
 
 The action_type parameter controls how the application is launched: NATIVE_LAUNCH starts the application normally, while DEEP_LINK allows passing parameters to the application (such as a URL for the browser or a video ID for streaming apps). The metaTag field contains application-specific parameters that vary depending on the target application's implementation.
+
 # 6. REST API Reference
 The REST API provides synchronous access to device information and application management functions. Unlike the WebSocket API, REST endpoints can be accessed without establishing a persistent connection, making them suitable for one-off queries and integration with systems that cannot maintain WebSocket connections. The REST API uses standard HTTP methods (GET, POST, PUT, DELETE) and returns JSON responses.
+
 ## 6.1 REST Endpoints
 
 | Method | Endpoint | URL Path | Purpose |
@@ -129,6 +141,7 @@ The REST API provides synchronous access to device information and application m
 | PUT | Install App | /api/v2/apps/{id} | Install application |
 
 Table 5: REST API Endpoints
+
 ## 6.2 Device Information Response
 The device information endpoint returns comprehensive details about the TV including model information, network configuration, and feature support. This information is essential for determining API capabilities and configuring application behavior accordingly. The response includes fields indicating support for specific features like Frame TV Art Mode, which is particularly relevant for the S95C when configured with Samsung's art accessories.
 

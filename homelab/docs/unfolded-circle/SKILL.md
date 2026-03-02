@@ -12,10 +12,14 @@ One of the most powerful universal remotes on the market in 2026 is the Unfolded
 
 The **Core** API's allow for interaction with the Unfolded Circle Remote's services. It is **not** to extend it's capabilities but to be able to remotely interact with the service.
 
+You should read the [Core API Deep Dive](./core-api.md) for architecture overview, code examples (in Rust), and 
+
 - UCR REST Core-API ( [API Docs](https://unfoldedcircle.github.io/core-api/rest/), [YAML definition](https://github.com/unfoldedcircle/core-api/tree/main/core-api/rest) )
 - UCR WS Core-API ( [API Docs](https://unfoldedcircle.github.io/core-api/ws/), [YAML definition](https://github.com/unfoldedcircle/core-api/tree/main/core-api/websocket) )
 
 The websocket API provides all the utility/functionality of the REST API but adds event subscriptions with asynchronous notifications.
+
+
 
 ### Dock APIs
 
