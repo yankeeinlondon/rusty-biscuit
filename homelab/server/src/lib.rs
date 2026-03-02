@@ -33,6 +33,7 @@ use state::AppState;
         (name = "health", description = "Health check endpoints"),
         (name = "sony_receiver", description = "Sony ES receiver management and control"),
         (name = "arcam_amp", description = "Arcam amplifier management and control"),
+        (name = "eversolo", description = "Eversolo DMP-A8 music streamer management and control"),
     )
 )]
 struct ApiDoc;
@@ -52,6 +53,11 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             "/arcam_amp",
             handlers::crud::arcam_amp_crud_routes().merge(handlers::arcam::routes_with_name()),
+        )
+        .nest(
+            "/eversolo",
+            handlers::crud::eversolo_crud_routes()
+                .merge(handlers::eversolo::routes_with_name()),
         )
         .split_for_parts();
 

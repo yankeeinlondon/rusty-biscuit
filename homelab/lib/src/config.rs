@@ -22,6 +22,10 @@ pub struct HomeyConfig {
     /// Arcam amplifier configurations keyed by device name
     #[serde(default)]
     pub arcam_amps: HashMap<String, ArcamAmpService>,
+
+    /// Eversolo DMP-A8 music streamer configurations keyed by device name
+    #[serde(default)]
+    pub eversolo_devices: HashMap<String, EversoloService>,
 }
 
 /// Configuration for a Sony ES receiver.
@@ -52,6 +56,21 @@ pub struct ArcamAmpService {
 
 fn default_arcam_port() -> u16 {
     50000
+}
+
+/// Configuration for an Eversolo DMP-A8 music streamer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EversoloService {
+    /// Hostname or IP address of the Eversolo
+    pub host: String,
+
+    /// Port number (default: 9529)
+    #[serde(default = "default_eversolo_port")]
+    pub port: u16,
+}
+
+fn default_eversolo_port() -> u16 {
+    9529
 }
 
 /// Configuration errors.
@@ -248,6 +267,39 @@ mod tests {
         let json = r#"{"host": "192.168.1.101"}"#;
         let service: ArcamAmpService = serde_json::from_str(json).unwrap();
         assert_eq!(service.port, 50000);
+    }
+
+    #[test]
+    fn test_eversolo_default_port() {
+        let json = r#"{"host": "192.168.1.50"}"#;
+        let service: EversoloService = serde_json::from_str(json).unwrap();
+        assert_eq!(service.port, 9529);
+    }
+
+    #[test]
+    fn test_config_backward_compat() {
+        let json = r#"{"sony_receivers": {}, "arcam_amps": {}}"#;
+        let config: HomeyConfig = serde_json::from_str(json).unwrap();
+        assert!(config.eversolo_devices.is_empty());
+    }
+
+    #[test]
+    fn test_config_with_eversolo() {
+        let mut config = HomeyConfig::new();
+        config.eversolo_devices.insert(
+            "living-room".to_string(),
+            EversoloService {
+                host: "192.168.1.50".to_string(),
+                port: 9529,
+            },
+        );
+
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: HomeyConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(config, parsed);
+        assert!(parsed.eversolo_devices.contains_key("living-room"));
+        assert_eq!(parsed.eversolo_devices["living-room"].port, 9529);
     }
 
     #[test]

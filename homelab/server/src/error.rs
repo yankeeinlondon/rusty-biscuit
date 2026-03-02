@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use homelab::{arcam::ArcamError, sony_receiver::SonyError};
+use homelab::{arcam::ArcamError, eversolo::EversoloError, sony_receiver::SonyError};
 use serde::Serialize;
 use std::fmt;
 use utoipa::ToSchema;
@@ -25,6 +25,8 @@ pub enum ServerError {
     Sony(SonyError),
     /// Arcam amplifier error
     Arcam(ArcamError),
+    /// Eversolo music streamer error
+    Eversolo(EversoloError),
     /// Invalid volume level (must be 0-100)
     InvalidVolume(String),
     /// Request timeout
@@ -55,6 +57,7 @@ impl fmt::Display for ServerError {
             Self::InvalidHost(msg) => write!(f, "Invalid host: {msg}"),
             Self::Sony(e) => write!(f, "Sony receiver error: {e}"),
             Self::Arcam(e) => write!(f, "Arcam amplifier error: {e}"),
+            Self::Eversolo(e) => write!(f, "Eversolo error: {e}"),
             Self::InvalidVolume(msg) => write!(f, "Invalid volume: {msg}"),
             Self::Timeout => write!(f, "Request timed out"),
             Self::ConfigIo(msg) => write!(f, "Configuration I/O error: {msg}"),
@@ -69,6 +72,7 @@ impl std::error::Error for ServerError {
         match self {
             Self::Sony(e) => Some(e),
             Self::Arcam(e) => Some(e),
+            Self::Eversolo(e) => Some(e),
             _ => None,
         }
     }
@@ -83,6 +87,12 @@ impl From<SonyError> for ServerError {
 impl From<ArcamError> for ServerError {
     fn from(err: ArcamError) -> Self {
         Self::Arcam(err)
+    }
+}
+
+impl From<EversoloError> for ServerError {
+    fn from(err: EversoloError) -> Self {
+        Self::Eversolo(err)
     }
 }
 
@@ -116,6 +126,7 @@ impl IntoResponse for ServerError {
             ServerError::InvalidHost(_) => (StatusCode::BAD_REQUEST, "INVALID_HOST"),
             ServerError::Sony(_) => (StatusCode::BAD_GATEWAY, "SONY_ERROR"),
             ServerError::Arcam(_) => (StatusCode::BAD_GATEWAY, "ARCAM_ERROR"),
+            ServerError::Eversolo(_) => (StatusCode::BAD_GATEWAY, "EVERSOLO_ERROR"),
             ServerError::InvalidVolume(_) => (StatusCode::BAD_REQUEST, "INVALID_VOLUME"),
             ServerError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "TIMEOUT"),
             ServerError::ConfigIo(_) => (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_IO_ERROR"),

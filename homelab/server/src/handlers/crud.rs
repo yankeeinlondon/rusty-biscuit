@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::config::{ArcamAmpService, SonyReceiverService, is_valid_device_name};
+use crate::config::{ArcamAmpService, EversoloService, SonyReceiverService, is_valid_device_name};
 use crate::error::{ErrorResponse, ServerError};
 use crate::state::AppState;
 
@@ -505,4 +505,235 @@ pub struct CreateDeviceRequest {
     pub host: String,
     /// Port number (optional, defaults to device-specific port)
     pub port: Option<u16>,
+}
+
+// --- Eversolo CRUD ---
+
+/// Request body for creating/updating an Eversolo device
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct EversoloRequest {
+    /// Hostname or IP address
+    pub host: String,
+    /// Port number
+    #[serde(default = "default_eversolo_port")]
+    #[schema(default = 9529)]
+    pub port: u16,
+}
+
+fn default_eversolo_port() -> u16 {
+    9529
+}
+
+/// Response for an Eversolo device
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EversoloResponse {
+    /// Device name
+    pub name: String,
+    /// Hostname or IP address
+    pub host: String,
+    /// Port number
+    pub port: u16,
+}
+
+/// Create all Eversolo device CRUD routes
+pub fn eversolo_crud_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_eversolo_devices, create_eversolo_device))
+        .routes(routes!(update_eversolo_device, delete_eversolo_device))
+        .routes(routes!(rename_eversolo_device))
+}
+
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "eversolo",
+    responses(
+        (status = 200, description = "List of Eversolo devices", body = Vec<EversoloResponse>),
+    )
+)]
+pub(crate) async fn list_eversolo_devices(State(state): State<AppState>) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let devices: Vec<EversoloResponse> = config
+        .eversolo_devices
+        .iter()
+        .map(|(name, service)| EversoloResponse {
+            name: name.clone(),
+            host: service.host.clone(),
+            port: service.port,
+        })
+        .collect();
+
+    Json(devices)
+}
+
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "eversolo",
+    request_body = inline(CreateDeviceRequest),
+    responses(
+        (status = 201, description = "Eversolo device created", body = EversoloResponse),
+        (status = 400, description = "Invalid device name or host", body = ErrorResponse),
+        (status = 409, description = "Device already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn create_eversolo_device(
+    State(state): State<AppState>,
+    Json(req): Json<CreateDeviceRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    if !is_valid_device_name(&req.name) {
+        return Err(ServerError::InvalidDeviceName(req.name));
+    }
+
+    {
+        let config = state.config.read().await;
+        if config.eversolo_devices.contains_key(&req.name) {
+            return Err(ServerError::DeviceExists(req.name));
+        }
+    }
+
+    if req.host.is_empty() {
+        return Err(ServerError::InvalidHost("empty host".to_string()));
+    }
+
+    let service = EversoloService {
+        host: req.host.clone(),
+        port: req.port.unwrap_or(9529),
+    };
+
+    state
+        .add_eversolo(req.name.clone(), service.clone())
+        .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(EversoloResponse {
+            name: req.name,
+            host: service.host,
+            port: service.port,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{name}",
+    tag = "eversolo",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    request_body = EversoloRequest,
+    responses(
+        (status = 200, description = "Eversolo device updated", body = EversoloResponse),
+        (status = 400, description = "Invalid host", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn update_eversolo_device(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<EversoloRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    {
+        let config = state.config.read().await;
+        if !config.eversolo_devices.contains_key(&name) {
+            return Err(ServerError::DeviceNotFound(name));
+        }
+    }
+
+    if req.host.is_empty() {
+        return Err(ServerError::InvalidHost("empty host".to_string()));
+    }
+
+    let service = EversoloService {
+        host: req.host.clone(),
+        port: req.port,
+    };
+
+    state.add_eversolo(name.clone(), service.clone()).await?;
+
+    Ok(Json(EversoloResponse {
+        name,
+        host: service.host,
+        port: service.port,
+    }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/{name}",
+    tag = "eversolo",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 204, description = "Eversolo device deleted"),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn delete_eversolo_device(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let removed = state.remove_eversolo(&name).await?;
+
+    if removed {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ServerError::DeviceNotFound(name))
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/{name}",
+    tag = "eversolo",
+    params(
+        ("name" = String, Path, description = "Current device name")
+    ),
+    request_body(content = String, description = "New device name (plain text)", content_type = "text/plain"),
+    responses(
+        (status = 200, description = "Eversolo device renamed", body = EversoloResponse),
+        (status = 400, description = "Invalid new device name", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 409, description = "New device name already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn rename_eversolo_device(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, ServerError> {
+    let new_name = String::from_utf8_lossy(&body).trim().to_string();
+
+    if !crate::config::is_valid_device_name(&new_name) {
+        return Err(ServerError::InvalidDeviceName(new_name));
+    }
+
+    {
+        let config = state.config.read().await;
+        if config.eversolo_devices.contains_key(&new_name) {
+            return Err(ServerError::DeviceExists(new_name));
+        }
+    }
+
+    let service = {
+        let config = state.config.read().await;
+        match config.eversolo_devices.get(&name) {
+            Some(s) => s.clone(),
+            None => return Err(ServerError::DeviceNotFound(name)),
+        }
+    };
+
+    state.rename_eversolo(&name, new_name.clone()).await?;
+
+    Ok(Json(EversoloResponse {
+        name: new_name,
+        host: service.host,
+        port: service.port,
+    }))
 }

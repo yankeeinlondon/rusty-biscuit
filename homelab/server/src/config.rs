@@ -7,8 +7,8 @@ use petname::Generator;
 
 // Re-export shared config types
 pub use homelab::config::{
-    ArcamAmpService, ConfigError, HomeyConfig, SonyReceiverService, is_valid_device_name,
-    parse_host_port,
+    ArcamAmpService, ConfigError, EversoloService, HomeyConfig, SonyReceiverService,
+    is_valid_device_name, parse_host_port,
 };
 
 /// Migrates environment variables to config if config is empty.
@@ -46,6 +46,19 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
         config
             .arcam_amps
             .insert(name, ArcamAmpService { host, port });
+        modified = true;
+    }
+
+    // Migrate EVERSOLO if present and no devices configured
+    if config.eversolo_devices.is_empty()
+        && let Ok(host) = std::env::var("EVERSOLO")
+        && !host.is_empty()
+    {
+        let name = generate_petname();
+        let (host, port) = parse_host_port(&host, 9529);
+        config
+            .eversolo_devices
+            .insert(name, EversoloService { host, port });
         modified = true;
     }
 
@@ -170,6 +183,87 @@ mod tests {
 
         unsafe {
             std::env::remove_var("SONY_RECEIVER");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_migrate_from_env_eversolo() {
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::remove_var("EVERSOLO");
+            std::env::set_var("EVERSOLO", "192.168.1.50");
+        }
+
+        let mut config = HomeyConfig::new();
+        let modified = migrate_from_env(&mut config);
+
+        assert!(modified);
+        assert_eq!(config.eversolo_devices.len(), 1);
+
+        let (name, service) = config.eversolo_devices.iter().next().unwrap();
+        assert!(is_valid_device_name(name));
+        assert_eq!(service.host, "192.168.1.50");
+        assert_eq!(service.port, 9529);
+
+        unsafe {
+            std::env::remove_var("EVERSOLO");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_migrate_from_env_eversolo_with_port() {
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::remove_var("EVERSOLO");
+            std::env::set_var("EVERSOLO", "192.168.1.50:9530");
+        }
+
+        let mut config = HomeyConfig::new();
+        let modified = migrate_from_env(&mut config);
+
+        assert!(modified);
+        assert_eq!(config.eversolo_devices.len(), 1);
+
+        let (_, service) = config.eversolo_devices.iter().next().unwrap();
+        assert_eq!(service.host, "192.168.1.50");
+        assert_eq!(service.port, 9530);
+
+        unsafe {
+            std::env::remove_var("EVERSOLO");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_migrate_skips_if_eversolo_configured() {
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::remove_var("EVERSOLO");
+            std::env::set_var("EVERSOLO", "192.168.1.50");
+        }
+
+        let mut config = HomeyConfig::new();
+        config.eversolo_devices.insert(
+            "existing".to_string(),
+            EversoloService {
+                host: "10.0.0.1".to_string(),
+                port: 9529,
+            },
+        );
+
+        let modified = migrate_from_env(&mut config);
+
+        assert!(!modified);
+        assert_eq!(config.eversolo_devices.len(), 1);
+        assert!(config.eversolo_devices.contains_key("existing"));
+
+        unsafe {
+            std::env::remove_var("EVERSOLO");
         }
     }
 

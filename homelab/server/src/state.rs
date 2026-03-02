@@ -3,7 +3,7 @@
 //! Provides both single-device (legacy ENV-based) and multi-device (config-based)
 //! state management.
 
-use crate::config::{ArcamAmpService, HomeyConfig, SonyReceiverService};
+use crate::config::{ArcamAmpService, EversoloService, HomeyConfig, SonyReceiverService};
 use homelab::{network::Host, sony_receiver::SonyReceiver};
 use std::{
     collections::HashMap, sync::Arc, sync::atomic::AtomicBool, time::Duration, time::Instant,
@@ -36,6 +36,8 @@ pub struct AppState {
     pub sony_receivers: Arc<RwLock<HashMap<String, Arc<SonyReceiver>>>>,
     /// Multi-device: Arcam hosts keyed by name
     pub arcam_hosts: Arc<RwLock<HashMap<String, ArcamAmpService>>>,
+    /// Multi-device: Eversolo devices keyed by name (connections created per-request)
+    pub eversolo_devices: Arc<RwLock<HashMap<String, EversoloService>>>,
     /// Configuration state (for CRUD operations)
     pub config: Arc<RwLock<HomeyConfig>>,
     /// Path to config file (for saving changes)
@@ -95,6 +97,7 @@ impl AppState {
             request_timeout,
             sony_receivers: Arc::new(RwLock::new(HashMap::new())),
             arcam_hosts: Arc::new(RwLock::new(HashMap::new())),
+            eversolo_devices: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(HomeyConfig::new())),
             config_path: None,
             arcam_model: Arc::new(RwLock::new(None)),
@@ -114,6 +117,7 @@ impl AppState {
     pub fn from_config(config: HomeyConfig, config_path: Option<std::path::PathBuf>) -> Self {
         let mut sony_receivers = HashMap::new();
         let mut arcam_hosts = HashMap::new();
+        let mut eversolo_devices = HashMap::new();
 
         // Build Sony receiver clients from config
         for (name, service) in &config.sony_receivers {
@@ -125,6 +129,11 @@ impl AppState {
         // Store Arcam configs (connections created per-request)
         for (name, service) in &config.arcam_amps {
             arcam_hosts.insert(name.clone(), service.clone());
+        }
+
+        // Store Eversolo configs (connections created per-request)
+        for (name, service) in &config.eversolo_devices {
+            eversolo_devices.insert(name.clone(), service.clone());
         }
 
         // Legacy fields: use first device if available
@@ -143,6 +152,7 @@ impl AppState {
             request_timeout,
             sony_receivers: Arc::new(RwLock::new(sony_receivers)),
             arcam_hosts: Arc::new(RwLock::new(arcam_hosts)),
+            eversolo_devices: Arc::new(RwLock::new(eversolo_devices)),
             config: Arc::new(RwLock::new(config)),
             config_path,
             arcam_model: Arc::new(RwLock::new(None)),
@@ -346,6 +356,107 @@ impl AppState {
         Ok(true)
     }
 
+    /// Gets an Eversolo device by name.
+    ///
+    /// ## Returns
+    ///
+    /// `Some((host, port))` if found, `None` if not configured.
+    pub async fn get_eversolo(&self, name: &str) -> Option<(String, u16)> {
+        let devices = self.eversolo_devices.read().await;
+        devices.get(name).map(|s| (s.host.clone(), s.port))
+    }
+
+    /// Adds or updates an Eversolo device and saves config.
+    pub async fn add_eversolo(
+        &self,
+        name: String,
+        service: EversoloService,
+    ) -> Result<(), crate::config::ConfigError> {
+        if service.host.is_empty() {
+            return Err(crate::config::ConfigError::InvalidHost(
+                "empty host".to_string(),
+            ));
+        }
+
+        let mut config = self.config.read().await.clone();
+        config
+            .eversolo_devices
+            .insert(name.clone(), service.clone());
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        {
+            let mut devices = self.eversolo_devices.write().await;
+            devices.insert(name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(())
+    }
+
+    /// Removes an Eversolo device and saves config.
+    pub async fn remove_eversolo(
+        &self,
+        name: &str,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+        let removed = config.eversolo_devices.remove(name).is_some();
+
+        if removed {
+            if let Some(path) = &self.config_path {
+                config.save_to(path)?;
+            }
+            {
+                let mut devices = self.eversolo_devices.write().await;
+                devices.remove(name);
+            }
+            {
+                let mut cfg = self.config.write().await;
+                *cfg = config;
+            }
+        }
+
+        Ok(removed)
+    }
+
+    /// Renames an Eversolo device and saves config.
+    pub async fn rename_eversolo(
+        &self,
+        old_name: &str,
+        new_name: String,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+
+        let service = match config.eversolo_devices.remove(old_name) {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        config
+            .eversolo_devices
+            .insert(new_name.clone(), service.clone());
+
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        {
+            let mut devices = self.eversolo_devices.write().await;
+            devices.remove(old_name);
+            devices.insert(new_name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(true)
+    }
+
     /// Renames an Arcam amplifier and saves config.
     pub async fn rename_arcam(
         &self,
@@ -537,5 +648,25 @@ mod tests {
 
         assert!(state.get_sony("nonexistent").await.is_none());
         assert!(state.get_arcam_host("nonexistent").await.is_none());
+        assert!(state.get_eversolo("nonexistent").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_from_config_creates_eversolo_devices() {
+        let mut config = HomeyConfig::new();
+        config.eversolo_devices.insert(
+            "living-room".to_string(),
+            EversoloService {
+                host: "192.168.1.50".to_string(),
+                port: 9529,
+            },
+        );
+
+        let state = AppState::from_config(config, None);
+        let device = state.get_eversolo("living-room").await;
+        assert!(device.is_some());
+        let (host, port) = device.unwrap();
+        assert_eq!(host, "192.168.1.50");
+        assert_eq!(port, 9529);
     }
 }

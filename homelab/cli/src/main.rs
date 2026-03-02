@@ -9,6 +9,7 @@ use color_eyre::Result;
 use color_eyre::eyre::WrapErr;
 use homelab::arcam::{Arcam, ArcamResponse};
 use homelab::config::{HomeyConfig, parse_host_port};
+use homelab::eversolo::{Eversolo, DEFAULT_PORT as EVERSOLO_DEFAULT_PORT};
 use homelab::network::Host;
 use homelab::sony_receiver::{
     GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
@@ -108,6 +109,20 @@ enum Commands {
     #[command(after_help = COMPLETIONS_HELP)]
     Completions,
 
+    /// Eversolo DMP-A8 music streamer control
+    Eversolo {
+        /// Device name from ~/homey.json
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Eversolo host IP or DNS name (overrides config)
+        #[arg(long, env = "EVERSOLO")]
+        host: Option<String>,
+
+        #[command(subcommand)]
+        action: EversoloAction,
+    },
+
     /// Sony STR-ZA/DN series receiver control
     Sony {
         /// Device name from ~/homey.json
@@ -151,6 +166,164 @@ enum ArcamAction {
     AutoShutdownSet {
         /// Auto shutdown value: 0=off, 1=20min, 2=30min, 3=1hr, 4=2hr
         value: u8,
+    },
+}
+
+// =============================================================================
+//                            EVERSOLO ACTIONS
+// =============================================================================
+
+#[derive(Subcommand)]
+enum EversoloAction {
+    /// Device information and identity
+    #[command(subcommand)]
+    Device(EversoloDeviceAction),
+    /// Music playback control
+    #[command(subcommand)]
+    Music(EversoloMusicAction),
+    /// Audio routing and volume
+    #[command(subcommand)]
+    Audio(EversoloAudioAction),
+    /// Power management
+    #[command(subcommand)]
+    Power(EversoloPowerAction),
+    /// Display settings (screen, knob, VU meter, spectrum)
+    #[command(subcommand)]
+    Display(EversoloDisplayAction),
+    /// Remote control key commands
+    #[command(subcommand)]
+    Remote(EversoloRemoteAction),
+}
+
+#[derive(Subcommand)]
+enum EversoloDeviceAction {
+    /// Get device model, firmware, and network information
+    Info,
+}
+
+#[derive(Subcommand)]
+enum EversoloMusicAction {
+    /// Get current playback state and track info
+    Status,
+    /// Toggle play/pause
+    PlayPause,
+    /// Skip to next track
+    Next,
+    /// Go back to previous track
+    Previous,
+    /// Seek to position in current track
+    Seek {
+        /// Position in seconds
+        seconds: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum EversoloAudioAction {
+    /// Get current volume and mute state (from music status)
+    Volume,
+    /// Set volume level
+    SetVolume {
+        /// Volume level (0 to device max)
+        level: u32,
+    },
+    /// Mute the device
+    Mute,
+    /// Unmute the device
+    Unmute,
+    /// List available audio inputs and outputs
+    Routing,
+    /// Set the active audio input
+    SetInput {
+        /// Input tag (from `routing` output)
+        tag: String,
+    },
+    /// Set the active audio output
+    SetOutput {
+        /// Output tag (from `routing` output)
+        tag: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum EversoloPowerAction {
+    /// List available power options
+    Options,
+    /// Execute a power action
+    Set {
+        /// Power action tag
+        #[arg(value_enum)]
+        action: PowerActionTag,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PowerActionTag {
+    /// Power off the device
+    Poweroff,
+    /// Reboot the device
+    Reboot,
+    /// Toggle screen on/off
+    Screen,
+    /// Set timed shutdown
+    #[value(alias = "timer")]
+    Timeshutdown,
+}
+
+impl PowerActionTag {
+    fn as_api_str(self) -> &'static str {
+        match self {
+            Self::Poweroff => "poweroff",
+            Self::Reboot => "reboot",
+            Self::Screen => "screen",
+            Self::Timeshutdown => "timeshutdown",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum EversoloDisplayAction {
+    /// Get current screen brightness
+    ScreenBrightness,
+    /// Set screen brightness level
+    SetScreenBrightness {
+        /// Brightness index (0 to max from screen-brightness output)
+        index: u32,
+    },
+    /// Get current knob LED brightness
+    KnobBrightness,
+    /// Set knob LED brightness level
+    SetKnobBrightness {
+        /// Brightness index (0 to max from knob-brightness output)
+        index: u32,
+    },
+    /// List available VU meter modes
+    VuModes,
+    /// Set VU meter display mode
+    SetVuMode {
+        /// Mode index (from `vu-modes` output)
+        index: u32,
+    },
+    /// List available spectrum display modes
+    SpectrumModes,
+    /// Set spectrum display mode
+    SetSpectrumMode {
+        /// Mode index (from `spectrum-modes` output)
+        index: u32,
+    },
+}
+
+#[derive(Subcommand)]
+enum EversoloRemoteAction {
+    /// Send a remote control key command
+    Key {
+        /// Remote control key name
+        key: String,
+    },
+    /// Send text input to the device
+    Text {
+        /// Text to input
+        text: String,
     },
 }
 
@@ -522,6 +695,9 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Commands::Arcam { action, name, host } => handle_arcam(name, host, action, json).await,
+        Commands::Eversolo { action, name, host } => {
+            handle_eversolo(name, host, action, json).await
+        }
         Commands::Sony {
             action,
             name,
@@ -838,6 +1014,608 @@ fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, 
     let available = device_names(&config.arcam_amps);
     Err(color_eyre::eyre::eyre!(
         "Host required: use --host <IP>, --name <device>, or set ARCAM_AMP env var.{}",
+        available
+    ))
+}
+
+// =============================================================================
+//                            EVERSOLO HANDLER
+// =============================================================================
+
+async fn handle_eversolo(
+    name: Option<String>,
+    host: Option<String>,
+    action: EversoloAction,
+    json: bool,
+) -> Result<()> {
+    let (resolved_host, source) = resolve_eversolo(host, name)?;
+    let (host_str, port) = parse_host_port(&resolved_host, EVERSOLO_DEFAULT_PORT);
+    let eversolo = Eversolo::new(&host_str, port);
+    let suffix = device_suffix(&host_str, port, &source);
+    let err_ctx = format!("Eversolo at {host_str}:{port}");
+
+    match action {
+        EversoloAction::Device(a) => handle_eversolo_device(&eversolo, a, json, &suffix).await,
+        EversoloAction::Music(a) => handle_eversolo_music(&eversolo, a, json, &suffix).await,
+        EversoloAction::Audio(a) => handle_eversolo_audio(&eversolo, a, json, &suffix).await,
+        EversoloAction::Power(a) => handle_eversolo_power(&eversolo, a, json, &suffix).await,
+        EversoloAction::Display(a) => handle_eversolo_display(&eversolo, a, json, &suffix).await,
+        EversoloAction::Remote(a) => handle_eversolo_remote(&eversolo, a, json, &suffix).await,
+    }
+    .wrap_err(err_ctx)
+}
+
+async fn handle_eversolo_device(
+    eversolo: &Eversolo,
+    action: EversoloDeviceAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloDeviceAction::Info => {
+            let info = eversolo.get_model().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                println!("{}", styled(format!("<b>Eversolo DMP-A8</b> {suffix}")));
+                let mut table =
+                    Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
+                table.add_row(vec!["Model".into(), info.model.as_str().into()]);
+                table.add_row(vec!["Firmware".into(), info.firmware.as_str().into()]);
+                table.add_row(vec!["IP".into(), info.ip.as_str().into()]);
+                table.add_row(vec!["Ethernet MAC".into(), info.net_mac.as_str().into()]);
+                table.add_row(vec!["WiFi MAC".into(), info.wifi_mac.as_str().into()]);
+                if let Some(ref android) = info.android_version {
+                    table.add_row(vec!["Android".into(), android.as_str().into()]);
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_eversolo_music(
+    eversolo: &Eversolo,
+    action: EversoloMusicAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloMusicAction::Status => {
+            let state = eversolo.get_state().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&state)?);
+            } else {
+                let status_label = match state.state {
+                    0 => "stopped",
+                    1 => "playing",
+                    2 => "paused",
+                    _ => "unknown",
+                };
+                println!(
+                    "{}",
+                    styled(format!(
+                        "<b>Eversolo</b> is <b>{status_label}</b> {suffix}"
+                    ))
+                );
+
+                if let Some(ref music) = state.playing_music {
+                    let mut table = Table::new()
+                        .with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
+                    if let Some(ref title) = music.title {
+                        table.add_row(vec!["Title".into(), title.as_str().into()]);
+                    }
+                    if let Some(ref artist) = music.artist {
+                        table.add_row(vec!["Artist".into(), artist.as_str().into()]);
+                    }
+                    if let Some(ref album) = music.album {
+                        table.add_row(vec!["Album".into(), album.as_str().into()]);
+                    }
+                    if let Some(ref pos) = state.position {
+                        let dur = state.duration.unwrap_or(0);
+                        table.add_row(vec![
+                            "Position".into(),
+                            format!("{} / {}", format_ms(*pos), format_ms(dur))
+                                .as_str()
+                                .into(),
+                        ]);
+                    }
+                    print!("\n{}", table.display(&Terminal::default()));
+                }
+
+                if let Some(ref vol) = state.volume_data {
+                    println!(
+                        "{}",
+                        styled(format!(
+                            "Volume: <b>{}</b>/{} {}",
+                            vol.current_volume,
+                            vol.max_volume,
+                            if vol.is_mute { "(muted)" } else { "" }
+                        ))
+                    );
+                }
+            }
+        }
+        EversoloMusicAction::PlayPause => {
+            eversolo.play_or_pause().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"action": "play_pause"}))?);
+            } else {
+                println!("{}", styled(format!("Toggled play/pause {suffix}")));
+            }
+        }
+        EversoloMusicAction::Next => {
+            eversolo.play_next().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"action": "next"}))?);
+            } else {
+                println!("{}", styled(format!("Skipped to next track {suffix}")));
+            }
+        }
+        EversoloMusicAction::Previous => {
+            eversolo.play_previous().await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"action": "previous"}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Skipped to previous track {suffix}"))
+                );
+            }
+        }
+        EversoloMusicAction::Seek { seconds } => {
+            let ms = seconds as i64 * 1000;
+            eversolo.seek_to(ms).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"action": "seek", "seconds": seconds}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Seeked to {seconds}s {suffix}"))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_eversolo_audio(
+    eversolo: &Eversolo,
+    action: EversoloAudioAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloAudioAction::Volume => {
+            let state = eversolo.get_state().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&state.volume_data)?);
+            } else if let Some(ref vol) = state.volume_data {
+                let mute_str = if vol.is_mute { " (muted)" } else { "" };
+                let db_str = vol
+                    .volume_db
+                    .as_deref()
+                    .map(|db| format!(" [{db}]"))
+                    .unwrap_or_default();
+                println!(
+                    "{}",
+                    styled(format!(
+                        "<b>Eversolo</b> volume: <b>{}</b>/{}{db_str}{mute_str} {suffix}",
+                        vol.current_volume, vol.max_volume
+                    ))
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>Eversolo</b> volume data unavailable {suffix}"))
+                );
+            }
+        }
+        EversoloAudioAction::SetVolume { level } => {
+            eversolo.set_volume(level as i64).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"volume": level}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Set volume to <b>{level}</b> {suffix}"))
+                );
+            }
+        }
+        EversoloAudioAction::Mute => {
+            eversolo.set_mute(true).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": true}))?
+                );
+            } else {
+                println!("{}", styled(format!("<b>Muted</b> {suffix}")));
+            }
+        }
+        EversoloAudioAction::Unmute => {
+            eversolo.set_mute(false).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": false}))?
+                );
+            } else {
+                println!("{}", styled(format!("<b>Unmuted</b> {suffix}")));
+            }
+        }
+        EversoloAudioAction::Routing => {
+            let io = eversolo.get_inputs_outputs().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&io)?);
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>Eversolo Audio Routing</b> {suffix}"))
+                );
+                let mut input_table = Table::new().with_columns(vec![
+                    TableColumn::new("Input"),
+                    TableColumn::new("Tag"),
+                ]);
+                for item in &io.input_data {
+                    input_table.add_row(vec![item.name.as_str().into(), item.tag.as_str().into()]);
+                }
+                print!("\n{}", input_table.display(&Terminal::default()));
+
+                let mut output_table = Table::new().with_columns(vec![
+                    TableColumn::new("Output"),
+                    TableColumn::new("Tag"),
+                    TableColumn::new("Enabled"),
+                ]);
+                for item in &io.output_data {
+                    output_table.add_row(vec![
+                        item.name.as_str().into(),
+                        item.tag.as_str().into(),
+                        on_off(item.enable).into(),
+                    ]);
+                }
+                print!("{}", output_table.display(&Terminal::default()));
+            }
+        }
+        EversoloAudioAction::SetInput { tag } => {
+            eversolo.set_input(&tag).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"input": tag}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Set input to <b>{tag}</b> {suffix}"))
+                );
+            }
+        }
+        EversoloAudioAction::SetOutput { tag } => {
+            eversolo.set_output(&tag).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"output": tag}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Set output to <b>{tag}</b> {suffix}"))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_eversolo_power(
+    eversolo: &Eversolo,
+    action: EversoloPowerAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloPowerAction::Options => {
+            let opts = eversolo.get_power_options().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&opts)?);
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>Eversolo Power Options</b> {suffix}"))
+                );
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new("Name"),
+                    TableColumn::new("Tag"),
+                ]);
+                for opt in &opts.data {
+                    table.add_row(vec![opt.name.as_str().into(), opt.tag.as_str().into()]);
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+        EversoloPowerAction::Set { action: tag } => {
+            let tag_str = tag.as_api_str();
+            eversolo.set_power_option(tag_str).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"power_action": tag_str}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Sent power action <b>{tag_str}</b> {suffix}"))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_eversolo_display(
+    eversolo: &Eversolo,
+    action: EversoloDisplayAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloDisplayAction::ScreenBrightness => {
+            let resp = eversolo.get_screen_brightness().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                let max_str = resp
+                    .max
+                    .map(|m| format!("/{m}"))
+                    .unwrap_or_default();
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Screen brightness: <b>{}</b>{max_str} {suffix}",
+                        resp.index
+                    ))
+                );
+            }
+        }
+        EversoloDisplayAction::SetScreenBrightness { index } => {
+            eversolo.set_screen_brightness(index as i64).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"screen_brightness": index}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Set screen brightness to <b>{index}</b> {suffix}"
+                    ))
+                );
+            }
+        }
+        EversoloDisplayAction::KnobBrightness => {
+            let resp = eversolo.get_knob_brightness().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                let max_str = resp
+                    .max
+                    .map(|m| format!("/{m}"))
+                    .unwrap_or_default();
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Knob brightness: <b>{}</b>{max_str} {suffix}",
+                        resp.index
+                    ))
+                );
+            }
+        }
+        EversoloDisplayAction::SetKnobBrightness { index } => {
+            eversolo.set_knob_brightness(index as i64).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"knob_brightness": index}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Set knob brightness to <b>{index}</b> {suffix}"
+                    ))
+                );
+            }
+        }
+        EversoloDisplayAction::VuModes => {
+            let resp = eversolo.get_vu_modes().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>VU Meter Modes</b> {suffix}"))
+                );
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new("Index"),
+                    TableColumn::new("Name"),
+                ]);
+                for mode in &resp.data {
+                    table.add_row(vec![
+                        mode.index.to_string().as_str().into(),
+                        mode.name.as_str().into(),
+                    ]);
+                }
+                if let Some(current) = resp.current_index {
+                    table.add_row(vec![
+                        "Current".into(),
+                        current.to_string().as_str().into(),
+                    ]);
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+        EversoloDisplayAction::SetVuMode { index } => {
+            eversolo.set_vu_mode(index as i64).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"vu_mode": index}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Set VU mode to <b>{index}</b> {suffix}"))
+                );
+            }
+        }
+        EversoloDisplayAction::SpectrumModes => {
+            let resp = eversolo.get_spectrum_modes().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>Spectrum Modes</b> {suffix}"))
+                );
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new("Index"),
+                    TableColumn::new("Name"),
+                ]);
+                for mode in &resp.data {
+                    table.add_row(vec![
+                        mode.index.to_string().as_str().into(),
+                        mode.name.as_str().into(),
+                    ]);
+                }
+                if let Some(current) = resp.current_index {
+                    table.add_row(vec![
+                        "Current".into(),
+                        current.to_string().as_str().into(),
+                    ]);
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+        EversoloDisplayAction::SetSpectrumMode { index } => {
+            eversolo.set_spectrum_mode(index as i64).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"spectrum_mode": index}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Set spectrum mode to <b>{index}</b> {suffix}"
+                    ))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_eversolo_remote(
+    eversolo: &Eversolo,
+    action: EversoloRemoteAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        EversoloRemoteAction::Key { key } => {
+            eversolo.send_key(&key).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"key": key}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Sent key <b>{key}</b> {suffix}"))
+                );
+            }
+        }
+        EversoloRemoteAction::Text { text } => {
+            eversolo.input_text(&text).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"text": text}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Sent text input {suffix}"))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Formats milliseconds as `mm:ss` or `h:mm:ss`.
+fn format_ms(ms: i64) -> String {
+    let total_secs = ms / 1000;
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// Resolves the Eversolo host from --host, --name, or config auto-select.
+fn resolve_eversolo(
+    host: Option<String>,
+    name: Option<String>,
+) -> Result<(String, DeviceSource)> {
+    // 1. Explicit --host flag (or EVERSOLO env)
+    if let Some(h) = host {
+        return Ok((h, DeviceSource::Flag));
+    }
+
+    let config = HomeyConfig::load().unwrap_or_default();
+
+    // 2. --name lookup
+    if let Some(ref n) = name {
+        if let Some(service) = config.eversolo_devices.get(n) {
+            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
+        }
+        let available = device_names(&config.eversolo_devices);
+        return Err(color_eyre::eyre::eyre!(
+            "Eversolo device '{}' not found in config.{}",
+            n,
+            available
+        ));
+    }
+
+    // 3. Auto-select if only one device
+    if config.eversolo_devices.len() == 1 {
+        let (dev_name, service) = config.eversolo_devices.iter().next().unwrap();
+        return Ok((service.host.clone(), DeviceSource::Auto(dev_name.clone())));
+    }
+
+    // 4. Error with available devices
+    let available = device_names(&config.eversolo_devices);
+    Err(color_eyre::eyre::eyre!(
+        "Host required: use --host <IP>, --name <device>, or set EVERSOLO env var.{}",
         available
     ))
 }
