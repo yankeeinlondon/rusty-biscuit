@@ -718,6 +718,26 @@ fn test_prelude_flag_with_real_prelude_file() {
 }
 
 #[test]
+fn test_symbols_prelude_reports_direct_prelude_exports() {
+    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/prelude_pkg");
+
+    let mut cmd = Command::cargo_bin("hug").unwrap();
+    cmd.current_dir(&fixture_pkg)
+        .args(["symbols", "--prelude", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("VerboseType"))
+        .stdout(predicate::str::contains("ElevatedEnum"))
+        // Private `use` should not be treated as a prelude export.
+        .stdout(predicate::str::contains("VerboseEnum").not())
+        // Prelude export view should not expand underlying type fields.
+        .stdout(predicate::str::contains("field_a").not())
+        // Output should point to prelude.rs entries.
+        .stdout(predicate::str::contains("src/prelude.rs"));
+}
+
+#[test]
 fn test_exported_flag_in_help() {
     hug_cmd()
         .args(["functions", "--help"])
