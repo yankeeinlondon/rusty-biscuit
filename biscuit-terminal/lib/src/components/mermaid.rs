@@ -297,6 +297,8 @@ fn detect_system_chromium() -> Option<String> {
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
         "/usr/bin/google-chrome",
+        "/snap/bin/chromium",
+        "/opt/chromium/chrome",
     ];
 
     for browser in &browsers {
@@ -307,11 +309,12 @@ fn detect_system_chromium() -> Option<String> {
             .unwrap_or(false)
         {
             if let Ok(path) = which::which(browser) {
-                tracing::debug!("Found system Chromium: {}", path.display());
+                tracing::info!("Found system Chromium: {}", path.display());
                 return Some(path.to_string_lossy().into_owned());
             }
         }
     }
+    tracing::debug!("No system Chromium found, Puppeteer will use bundled Chrome");
     None
 }
 
@@ -1062,9 +1065,12 @@ impl MermaidRenderer {
         // Set PUPPETEER_EXECUTABLE_PATH if system Chromium is available
         // This fixes Puppeteer issues on Linux where downloaded Chrome binary fails
         if let Some(chromium_path) = detect_system_chromium() {
-            tracing::debug!("Setting PUPPETEER_EXECUTABLE_PATH to {}", chromium_path);
+            let _ = writeln!(
+                std::io::stderr(),
+                "- Using system Chromium at: {}",
+                chromium_path
+            );
             cmd.env("PUPPETEER_EXECUTABLE_PATH", &chromium_path);
-            // Also skip Chromium download to avoid issues
             cmd.env("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true");
         }
 
