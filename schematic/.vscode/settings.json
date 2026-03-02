@@ -1,0 +1,13 @@
+{
+    "cSpell.words": [
+        "backpressure",
+        "codegen",
+        "docstrings",
+        "elevenlabs",
+        "keepalive",
+        "Nagle",
+        "rustls",
+        "tungstenite",
+        "webpki"
+    ]
+}
