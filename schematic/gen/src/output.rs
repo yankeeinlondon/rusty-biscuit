@@ -67,6 +67,127 @@ fn to_snake_case(s: &str) -> String {
     result
 }
 
+/// Metadata for generated WebSocket definition helper modules.
+struct WsDefinitionModule {
+    module: &'static str,
+    helper: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+}
+
+const WS_DEFINITION_MODULES: &[WsDefinitionModule] = &[
+    WsDefinitionModule {
+        module: "elevenlabs_ws",
+        helper: "define_elevenlabs_ws_api_definition",
+        display_name: "ElevenLabsTTS",
+        description: "ElevenLabs Text-to-Speech WebSocket API definition",
+    },
+    WsDefinitionModule {
+        module: "unfolded_circle_core_ws",
+        helper: "define_unfolded_circle_core_ws_api_definition",
+        display_name: "UnfoldedCircleCoreWs",
+        description: "Unfolded Circle Core WebSocket API definition",
+    },
+    WsDefinitionModule {
+        module: "unfolded_circle_dock_ws",
+        helper: "define_unfolded_circle_dock_ws_api_definition",
+        display_name: "UnfoldedCircleDockWs",
+        description: "Unfolded Circle Dock WebSocket API definition",
+    },
+    WsDefinitionModule {
+        module: "unfolded_circle_integration_ws",
+        helper: "define_unfolded_circle_integration_ws_api_definition",
+        display_name: "UnfoldedCircleIntegrationWs",
+        description: "Unfolded Circle Integration WebSocket API definition",
+    },
+];
+
+fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
+    match module {
+        "elevenlabs_ws" => Some(quote! {
+            //! Generated WebSocket API definition helper for ElevenLabs TTS.
+            //!
+            //! This module currently exposes the typed `WebSocketApi` definition
+            //! and related model types from `schematic-definitions`.
+            //!
+            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+
+            pub use schematic_definitions::elevenlabs::*;
+            use schematic_define::websocket::WebSocketApi;
+
+            /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
+            #[must_use]
+            pub fn define_api() -> WebSocketApi {
+                schematic_definitions::define_elevenlabs_websocket_api()
+            }
+        }),
+        "unfolded_circle_core_ws" => Some(quote! {
+            //! Generated WebSocket API definition helper for Unfolded Circle Core WS.
+            //!
+            //! This module currently exposes the typed `WebSocketApi` definition
+            //! and related model types from `schematic-definitions`.
+            //!
+            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+
+            pub use schematic_definitions::unfolded_circle::core_ws::*;
+            use schematic_define::websocket::WebSocketApi;
+
+            /// Builds the Unfolded Circle Core WebSocket API definition.
+            #[must_use]
+            pub fn define_api() -> WebSocketApi {
+                schematic_definitions::define_unfolded_circle_core_ws_api()
+            }
+        }),
+        "unfolded_circle_dock_ws" => Some(quote! {
+            //! Generated WebSocket API definition helper for Unfolded Circle Dock WS.
+            //!
+            //! This module currently exposes the typed `WebSocketApi` definition
+            //! and related model types from `schematic-definitions`.
+            //!
+            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+
+            pub use schematic_definitions::unfolded_circle::dock_ws::*;
+            use schematic_define::websocket::WebSocketApi;
+
+            /// Builds the Unfolded Circle Dock WebSocket API definition.
+            #[must_use]
+            pub fn define_api() -> WebSocketApi {
+                schematic_definitions::define_unfolded_circle_dock_ws_api()
+            }
+        }),
+        "unfolded_circle_integration_ws" => Some(quote! {
+            //! Generated WebSocket API definition helper for Unfolded Circle Integration WS.
+            //!
+            //! This module currently exposes the typed `WebSocketApi` definition
+            //! and related model types from `schematic-definitions`.
+            //!
+            //! WebSocket runtime client code generation is not yet implemented in `schematic-gen`.
+
+            pub use schematic_definitions::unfolded_circle::integration_ws::*;
+            use schematic_define::websocket::WebSocketApi;
+
+            /// Builds the Unfolded Circle Integration WebSocket API definition.
+            #[must_use]
+            pub fn define_api() -> WebSocketApi {
+                schematic_definitions::define_unfolded_circle_integration_ws_api()
+            }
+        }),
+        _ => None,
+    }
+}
+
+fn generate_ws_definition_modules() -> Result<Vec<(String, String)>, GeneratorError> {
+    WS_DEFINITION_MODULES
+        .iter()
+        .filter_map(|spec| assemble_ws_definition_module(spec.module).map(|tokens| (spec, tokens)))
+        .map(|(spec, tokens)| {
+            let file = validate_code(&tokens)?;
+            let formatted = format_code(&file);
+            Ok((format!("{}.rs", spec.module), formatted))
+        })
+        .collect()
+}
+
 /// Returns the module path for the given API.
 ///
 /// Uses `api.module_path` if set, otherwise attempts to infer from the API name.
@@ -425,7 +546,7 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     // Generate module declarations, deduplicating shared module paths
     let mut seen_modules = HashSet::new();
-    let module_decls: Vec<_> = apis
+    let mut module_decls: Vec<_> = apis
         .iter()
         .filter_map(|api| {
             let path = get_module_path(api);
@@ -439,6 +560,14 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
             }
         })
         .collect();
+    for ws in WS_DEFINITION_MODULES {
+        if seen_modules.insert(ws.module.to_string()) {
+            let module_name = format_ident!("{}", ws.module);
+            module_decls.push(quote! {
+                pub mod #module_name;
+            });
+        }
+    }
 
     // Build the API table rows for documentation
     let api_rows: Vec<String> = apis
@@ -458,6 +587,16 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
     let api_table = api_rows.join("\n");
+    let ws_rows: Vec<String> = WS_DEFINITION_MODULES
+        .iter()
+        .map(|ws| {
+            format!(
+                "//! | [`{}`] | [`{}`]({}::define_api) | {} |",
+                ws.module, ws.display_name, ws.module, ws.description
+            )
+        })
+        .collect();
+    let ws_table = ws_rows.join("\n");
 
     // Choose the first API with a GET endpoint for the quick start example
     let example_api = apis
@@ -550,20 +689,27 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
 
     // Parse the dynamic sections into token streams
     let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
+    let ws_table_tokens: TokenStream = ws_table.parse().unwrap_or_default();
     let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
     let variant_tokens: TokenStream = variant_example.parse().unwrap_or_default();
 
     quote! {
-        //! Generated REST API clients.
+        //! Generated REST API clients and WebSocket API definition helpers.
         //!
         //! Each API is available as a separate module with its client struct,
         //! request types, and response types re-exported from definitions.
         //!
-        //! ## Available APIs
+        //! ## Available REST APIs
         //!
         //! | Module | Client | Description | Auth |
         //! |--------|--------|-------------|------|
         #api_table_tokens
+        //!
+        //! ## Available WebSocket Definitions
+        //!
+        //! | Module | API | Description |
+        //! |--------|-----|-------------|
+        #ws_table_tokens
         //!
         //! ## Quick Start
         //!
@@ -617,6 +763,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
 ///
 /// A TokenStream containing the prelude.rs code.
 pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
+    assemble_prelude_with_options(apis, true)
+}
+
+/// Assembles prelude.rs with optional WebSocket definition helper exports.
+pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool) -> TokenStream {
     // Generate re-exports for each API (client and request enum only, not error)
     let api_reexports: Vec<_> = apis
         .iter()
@@ -630,6 +781,20 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
             }
         })
         .collect();
+    let ws_reexports: Vec<_> = if include_ws_helpers {
+        WS_DEFINITION_MODULES
+            .iter()
+            .map(|ws| {
+                let module_name = format_ident!("{}", ws.module);
+                let helper_name = format_ident!("{}", ws.helper);
+                quote! {
+                    pub use crate::#module_name::define_api as #helper_name;
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     // Build a list of re-exported items for documentation
     // These names are re-exported in prelude, so rustdoc resolves them directly
@@ -639,6 +804,17 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
+    let ws_helper_list_tokens: TokenStream = if include_ws_helpers {
+        WS_DEFINITION_MODULES
+            .iter()
+            .map(|ws| format!("//! - [`{}`] ({})", ws.helper, ws.display_name))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .parse()
+            .unwrap_or_default()
+    } else {
+        TokenStream::new()
+    };
 
     quote! {
         //! Convenient re-exports for working with generated API clients.
@@ -657,6 +833,10 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         //! **Clients and request enums:**
         //!
         #client_list_tokens
+        //!
+        //! **WebSocket definition helpers:**
+        //!
+        #ws_helper_list_tokens
         //!
         //! **Shared types:**
         //!
@@ -690,6 +870,9 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
 
         // API clients and request types
         #(#api_reexports)*
+
+        // WebSocket definition helpers
+        #(#ws_reexports)*
     }
 }
 
@@ -871,7 +1054,7 @@ pub fn generate_and_write_all(
         module_groups.entry(path).or_default().push(api);
     }
 
-    // Generate and validate each module (single or combined)
+    // Generate and validate each REST API module (single or combined)
     let mut api_modules: Vec<(String, String)> = Vec::new();
     for (module_path, group) in &module_groups {
         let tokens = if group.len() == 1 {
@@ -884,6 +1067,8 @@ pub fn generate_and_write_all(
         let filename = format!("{}.rs", module_path);
         api_modules.push((filename, formatted));
     }
+    // Generate WebSocket definition helper modules.
+    api_modules.extend(generate_ws_definition_modules()?);
 
     if dry_run {
         println!("=== lib.rs ===\n{}\n", lib_formatted);
@@ -1128,7 +1313,7 @@ pub fn generate_and_write_standalone(
     let shared_formatted = format_code(&shared_file);
 
     // Generate and validate prelude.rs
-    let prelude_tokens = assemble_prelude(&apis);
+    let prelude_tokens = assemble_prelude_with_options(&apis, false);
     let prelude_file = validate_code(&prelude_tokens)?;
     let prelude_formatted = format_code(&prelude_file);
 
