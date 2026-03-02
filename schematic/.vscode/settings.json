@@ -4,10 +4,13 @@
         "codegen",
         "docstrings",
         "elevenlabs",
+        "highspeed",
         "keepalive",
         "lmstudio",
         "Nagle",
         "rustls",
+        "SSDP",
+        "Tizen",
         "tungstenite",
         "webpki"
     ]

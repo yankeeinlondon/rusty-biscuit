@@ -12,6 +12,8 @@ BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 
+TODAY := `date +%F`
+
 PACKAGE := "Schematic"
 SCHEMATIC := lowercase(PACKAGE)
 DEFINE_NAME := PACKAGE + " Define Library"
@@ -239,6 +241,18 @@ release:
     @just full
     @just docs
 
+# Provides a two-step review of an API defined in Schematic
+review-api api design:
+    @echo ""
+    @echo "Review the {{BOLD}}{{api}}{{RESET}} API in schematic"
+    @echo "{{DIM}}{{ITALIC}}- review file located at {{BLUE}}./docs/{{TODAY}}-review-of-{{api}}.md{{RESET}}"
+    @touch "./docs/{{TODAY}}-review-of-{{api}}.md"
+    @claudine gemini --ni "Your task is to review the {{api}} API definition(s) which are defined in the schematic-definitions as well the generated API clients for {{api}} API's in schematic-schema. Keep in mind the best practices for API definitions found in @schematic/skill/best-practices-in-designing-an-api.md . Also review the original design document found at @schematic/docs/{{design}} . Look for for all opportunities to improve the ergonomics and/or performance of the code. Also look at the quality of documentation and ensure that it's high quality in both the schematic-definitions package but that the generated API client in schematic-schema is fully documented. Make sure that this API also exports a valid OpenAPI definition as part of the generation step. Write all your recommendations to @schematic/docs/{{TODAY}}-review-of-{{api}}.md . Remember that this is a non-interactive process so avoid asking questions and just complete the task."
+    @echo
+    @echo "First Stage of Review is Complete. Now will validate that Completion Steps have been completed."
+    @echo
+    @claudine gem --ni "A review on the {{api}} API in schematic was performed and produced the suggestions found in @schematic/docs/{{TODAY}}-review-of-{{api}}.md ; your task is to apply the completion checklist found in @schematic/skill/completion-checklist.md to the {{api}} API implementation and then add any additional suggestions you have to the same @schematic/docs/{{TODAY}}-review-of-{{api}}.md document. Remember that this is a non-interactive process so avoid asking questions and just complete the task."
+
 
 # commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
 commit:
@@ -285,7 +299,6 @@ review *args="":
     @just _speak "Review for {{DEFINE_NAME}} package has completed."
 
 
-TODAY := `date +%F`
 # the temp file for the documents prompt
 DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + SCHEMATIC + "_docs_prompt.md"
 # the temp file for the skills prompt
