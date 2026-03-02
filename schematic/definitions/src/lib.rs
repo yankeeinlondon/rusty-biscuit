@@ -144,6 +144,14 @@ pub mod openai;
 pub mod prelude;
 pub mod registry;
 pub mod unfolded_circle;
+pub mod unfolded_circle_core_rest {
+    //! Compatibility re-export module for generated `module_path` lookups.
+    //!
+    //! The Unfolded Circle Core REST definition is implemented under
+    //! [`crate::unfolded_circle::core_rest`], but code generation resolves
+    //! schemas through the top-level `module_path` value.
+    pub use crate::unfolded_circle::core_rest::*;
+}
 
 // Re-export API definition functions for convenience
 pub use anthropic::define_anthropic_api;
