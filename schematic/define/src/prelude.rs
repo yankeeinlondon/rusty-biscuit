@@ -38,6 +38,7 @@
 //!     auth: AuthStrategy::BearerToken { header: None },
 //!     env_auth: vec!["STREAM_KEY".to_string()],
 //!     endpoints: vec![],
+//!     runtime: None,
 //! };
 //! ```
 
@@ -48,6 +49,7 @@ pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};
 pub use crate::types::{Endpoint, RestApi, RestMethod};
 pub use crate::websocket::{
-    ConnectionLifecycle, ConnectionParam, MessageDirection, MessageSchema, ParamType, WebSocketApi,
-    WebSocketEndpoint,
+    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
+    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };

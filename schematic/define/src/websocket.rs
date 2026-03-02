@@ -77,8 +77,10 @@
 //!                     description: Some("Audio data chunk".to_string()),
 //!                 },
 //!             ],
+//!             runtime: None,
 //!         },
 //!     ],
+//!     runtime: None,
 //! };
 //!
 //! assert_eq!(api.name, "ElevenLabsTTS");
@@ -90,6 +92,240 @@ use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::AuthStrategy;
 use crate::schema::Schema;
+
+// ========== Runtime Hint Types ==========
+
+/// Frame format used by the WebSocket API.
+///
+/// Determines how outbound messages are framed and how inbound frames
+/// are decoded by the generated runtime.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::FrameFormat;
+/// use std::str::FromStr;
+///
+/// assert_eq!(FrameFormat::default(), FrameFormat::JsonText);
+/// assert_eq!(FrameFormat::from_str("json_binary").unwrap(), FrameFormat::JsonBinary);
+/// ```
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter,
+    EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum FrameFormat {
+    /// JSON payloads sent as text frames (most common).
+    #[default]
+    JsonText,
+    /// JSON payloads sent as binary frames.
+    JsonBinary,
+    /// Raw binary payloads (no JSON envelope).
+    RawBinary,
+    /// Mixed: some messages use text, others use binary.
+    Mixed,
+}
+
+/// Type used for request correlation IDs.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::RequestIdType;
+/// use std::str::FromStr;
+///
+/// assert_eq!(RequestIdType::default(), RequestIdType::U64);
+/// assert_eq!(RequestIdType::from_str("string").unwrap(), RequestIdType::String);
+/// ```
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter,
+    EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RequestIdType {
+    /// 64-bit unsigned integer IDs (monotonic).
+    #[default]
+    U64,
+    /// String-based IDs.
+    String,
+}
+
+/// Correlation hints for request-response matching over WebSocket.
+///
+/// When present, the generator produces `request()` methods that correlate
+/// outbound requests with inbound responses using an ID field.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::CorrelationHints;
+///
+/// let hints = CorrelationHints {
+///     request_id_field: "id".to_string(),
+///     response_id_field: "id".to_string(),
+///     default_timeout_secs: 30,
+/// };
+/// assert_eq!(hints.request_id_field, "id");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorrelationHints {
+    /// JSON field path for the request ID in outbound messages.
+    pub request_id_field: String,
+    /// JSON field path for the correlation ID in inbound responses.
+    pub response_id_field: String,
+    /// Default timeout in seconds for correlated requests.
+    #[serde(default = "default_correlation_timeout")]
+    pub default_timeout_secs: u64,
+}
+
+fn default_correlation_timeout() -> u64 {
+    30
+}
+
+/// Auth flow hints for WebSocket APIs that use message-based authentication.
+///
+/// When present, the generator produces auth challenge/response handling
+/// in the connection state machine.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::AuthFlowHints;
+///
+/// let hints = AuthFlowHints {
+///     challenge_message: "auth_required".to_string(),
+///     auth_request_schema: "AuthMessage".to_string(),
+///     success_indicator: Some("authenticated".to_string()),
+///     failure_indicator: Some("authentication_failed".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthFlowHints {
+    /// Name of the server message that signals an auth challenge.
+    pub challenge_message: String,
+    /// Schema name for the auth request message the client must send.
+    pub auth_request_schema: String,
+    /// Optional message name or field value indicating auth success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success_indicator: Option<String>,
+    /// Optional message name or field value indicating auth failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_indicator: Option<String>,
+}
+
+/// Heartbeat configuration hints for WebSocket endpoints.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::HeartbeatHints;
+///
+/// let hints = HeartbeatHints {
+///     interval_secs: 30,
+///     timeout_secs: Some(10),
+/// };
+/// assert_eq!(hints.interval_secs, 30);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatHints {
+    /// Interval in seconds between heartbeat messages.
+    pub interval_secs: u64,
+    /// Optional timeout in seconds to wait for heartbeat response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+/// Runtime hints for a WebSocket API.
+///
+/// These hints guide the code generator to produce runtime-capable clients
+/// with appropriate framing, reconnect, and ID strategies. All fields have
+/// sensible defaults so existing definitions remain valid without changes.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::{WebSocketRuntimeHints, FrameFormat, RequestIdType};
+///
+/// // All defaults
+/// let hints = WebSocketRuntimeHints::default();
+/// assert_eq!(hints.frame_format, FrameFormat::JsonText);
+/// assert!(hints.supports_reconnect);
+/// assert_eq!(hints.request_id_type, RequestIdType::U64);
+///
+/// // Custom configuration
+/// let hints = WebSocketRuntimeHints {
+///     frame_format: FrameFormat::Mixed,
+///     supports_reconnect: false,
+///     request_id_type: RequestIdType::String,
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebSocketRuntimeHints {
+    /// Frame format for this API's messages.
+    #[serde(default)]
+    pub frame_format: FrameFormat,
+    /// Whether the API supports client-initiated reconnect.
+    #[serde(default = "default_true")]
+    pub supports_reconnect: bool,
+    /// Type used for request correlation IDs.
+    #[serde(default)]
+    pub request_id_type: RequestIdType,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for WebSocketRuntimeHints {
+    fn default() -> Self {
+        Self {
+            frame_format: FrameFormat::default(),
+            supports_reconnect: true,
+            request_id_type: RequestIdType::default(),
+        }
+    }
+}
+
+/// Per-endpoint runtime hints for WebSocket endpoints.
+///
+/// These hints inform the generator about endpoint-specific behavior
+/// like correlation, auth flow, and heartbeat requirements.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::websocket::{WebSocketEndpointHints, CorrelationHints};
+///
+/// // Minimal: no special behavior
+/// let hints = WebSocketEndpointHints::default();
+/// assert!(hints.correlation.is_none());
+/// assert!(hints.auth_flow.is_none());
+/// assert!(hints.heartbeat.is_none());
+///
+/// // With correlation
+/// let hints = WebSocketEndpointHints {
+///     correlation: Some(CorrelationHints {
+///         request_id_field: "id".to_string(),
+///         response_id_field: "id".to_string(),
+///         default_timeout_secs: 30,
+///     }),
+///     ..Default::default()
+/// };
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebSocketEndpointHints {
+    /// Correlation hints for request-response matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation: Option<CorrelationHints>,
+    /// Auth flow hints for message-based authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_flow: Option<AuthFlowHints>,
+    /// Heartbeat configuration hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<HeartbeatHints>,
+}
 
 /// Parameter types for WebSocket connection parameters.
 ///
@@ -301,6 +537,7 @@ pub struct ConnectionLifecycle {
 ///             description: Some("Audio data chunk".to_string()),
 ///         },
 ///     ],
+///     runtime: None,
 /// };
 ///
 /// assert_eq!(endpoint.id, "StreamAudio");
@@ -324,6 +561,9 @@ pub struct WebSocketEndpoint {
     pub lifecycle: ConnectionLifecycle,
     /// Regular messages that can be sent/received.
     pub messages: Vec<MessageSchema>,
+    /// Optional runtime hints for code generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<WebSocketEndpointHints>,
 }
 
 /// A complete WebSocket API definition.
@@ -346,6 +586,7 @@ pub struct WebSocketEndpoint {
 ///     auth: AuthStrategy::BearerToken { header: None },
 ///     env_auth: vec!["STREAM_API_KEY".to_string()],
 ///     endpoints: vec![],
+///     runtime: None,
 /// };
 ///
 /// assert_eq!(api.name, "MyStreamingAPI");
@@ -377,6 +618,9 @@ pub struct WebSocketApi {
     pub env_auth: Vec<String>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<WebSocketEndpoint>,
+    /// Optional runtime hints for code generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<WebSocketRuntimeHints>,
 }
 
 #[cfg(test)]
@@ -599,6 +843,7 @@ mod tests {
                 schema: Schema::new("DataPayload"),
                 description: None,
             }],
+            runtime: None,
         };
 
         let serialized = serde_json::to_string(&endpoint).unwrap();
@@ -629,7 +874,9 @@ mod tests {
                     schema: Schema::new("EchoMessage"),
                     description: None,
                 }],
+                runtime: None,
             }],
+            runtime: None,
         };
 
         let serialized = serde_json::to_string(&api).unwrap();
@@ -661,6 +908,7 @@ mod tests {
                 auth: auth.clone(),
                 env_auth: vec![],
                 endpoints: vec![],
+                runtime: None,
             };
 
             // Verify it serializes and deserializes correctly
@@ -668,6 +916,231 @@ mod tests {
             let deserialized: WebSocketApi = serde_json::from_str(&serialized).unwrap();
             assert_eq!(deserialized.auth, auth);
         }
+    }
+
+    // ========== FrameFormat Tests ==========
+
+    #[test]
+    fn frame_format_default_is_json_text() {
+        assert_eq!(FrameFormat::default(), FrameFormat::JsonText);
+    }
+
+    #[test]
+    fn frame_format_display() {
+        assert_eq!(FrameFormat::JsonText.to_string(), "json_text");
+        assert_eq!(FrameFormat::JsonBinary.to_string(), "json_binary");
+        assert_eq!(FrameFormat::RawBinary.to_string(), "raw_binary");
+        assert_eq!(FrameFormat::Mixed.to_string(), "mixed");
+    }
+
+    #[test]
+    fn frame_format_serde_roundtrip() {
+        for fmt in FrameFormat::iter() {
+            let serialized = serde_json::to_string(&fmt).unwrap();
+            let deserialized: FrameFormat = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, fmt);
+        }
+    }
+
+    // ========== RequestIdType Tests ==========
+
+    #[test]
+    fn request_id_type_default_is_u64() {
+        assert_eq!(RequestIdType::default(), RequestIdType::U64);
+    }
+
+    #[test]
+    fn request_id_type_serde_roundtrip() {
+        for id_type in RequestIdType::iter() {
+            let serialized = serde_json::to_string(&id_type).unwrap();
+            let deserialized: RequestIdType = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, id_type);
+        }
+    }
+
+    // ========== CorrelationHints Tests ==========
+
+    #[test]
+    fn correlation_hints_serde_roundtrip() {
+        let hints = CorrelationHints {
+            request_id_field: "id".to_string(),
+            response_id_field: "req_id".to_string(),
+            default_timeout_secs: 60,
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        let deserialized: CorrelationHints = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, hints);
+    }
+
+    #[test]
+    fn correlation_hints_default_timeout() {
+        let json = r#"{"request_id_field":"id","response_id_field":"id"}"#;
+        let hints: CorrelationHints = serde_json::from_str(json).unwrap();
+        assert_eq!(hints.default_timeout_secs, 30);
+    }
+
+    // ========== AuthFlowHints Tests ==========
+
+    #[test]
+    fn auth_flow_hints_serde_roundtrip() {
+        let hints = AuthFlowHints {
+            challenge_message: "auth_required".to_string(),
+            auth_request_schema: "AuthMsg".to_string(),
+            success_indicator: Some("authenticated".to_string()),
+            failure_indicator: None,
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        let deserialized: AuthFlowHints = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, hints);
+    }
+
+    #[test]
+    fn auth_flow_hints_skips_none_fields() {
+        let hints = AuthFlowHints {
+            challenge_message: "auth".to_string(),
+            auth_request_schema: "AuthMsg".to_string(),
+            success_indicator: None,
+            failure_indicator: None,
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        assert!(!serialized.contains("success_indicator"));
+        assert!(!serialized.contains("failure_indicator"));
+    }
+
+    // ========== HeartbeatHints Tests ==========
+
+    #[test]
+    fn heartbeat_hints_serde_roundtrip() {
+        let hints = HeartbeatHints {
+            interval_secs: 30,
+            timeout_secs: Some(10),
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        let deserialized: HeartbeatHints = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, hints);
+    }
+
+    // ========== WebSocketRuntimeHints Tests ==========
+
+    #[test]
+    fn runtime_hints_default_values() {
+        let hints = WebSocketRuntimeHints::default();
+        assert_eq!(hints.frame_format, FrameFormat::JsonText);
+        assert!(hints.supports_reconnect);
+        assert_eq!(hints.request_id_type, RequestIdType::U64);
+    }
+
+    #[test]
+    fn runtime_hints_serde_roundtrip() {
+        let hints = WebSocketRuntimeHints {
+            frame_format: FrameFormat::Mixed,
+            supports_reconnect: false,
+            request_id_type: RequestIdType::String,
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        let deserialized: WebSocketRuntimeHints = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, hints);
+    }
+
+    #[test]
+    fn runtime_hints_deserializes_with_defaults() {
+        let json = "{}";
+        let hints: WebSocketRuntimeHints = serde_json::from_str(json).unwrap();
+        assert_eq!(hints, WebSocketRuntimeHints::default());
+    }
+
+    // ========== WebSocketEndpointHints Tests ==========
+
+    #[test]
+    fn endpoint_hints_default_all_none() {
+        let hints = WebSocketEndpointHints::default();
+        assert!(hints.correlation.is_none());
+        assert!(hints.auth_flow.is_none());
+        assert!(hints.heartbeat.is_none());
+    }
+
+    #[test]
+    fn endpoint_hints_serde_roundtrip() {
+        let hints = WebSocketEndpointHints {
+            correlation: Some(CorrelationHints {
+                request_id_field: "id".to_string(),
+                response_id_field: "id".to_string(),
+                default_timeout_secs: 30,
+            }),
+            auth_flow: None,
+            heartbeat: Some(HeartbeatHints {
+                interval_secs: 15,
+                timeout_secs: None,
+            }),
+        };
+        let serialized = serde_json::to_string(&hints).unwrap();
+        let deserialized: WebSocketEndpointHints = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, hints);
+    }
+
+    // ========== Backward Compatibility Tests ==========
+
+    #[test]
+    fn websocket_api_without_runtime_deserializes() {
+        // Existing serialized format without runtime field should still work
+        let json = r#"{
+            "name": "Test",
+            "description": "Test API",
+            "base_url": "wss://test.com",
+            "docs_url": null,
+            "auth": "None",
+            "env_auth": [],
+            "endpoints": []
+        }"#;
+        let api: WebSocketApi = serde_json::from_str(json).unwrap();
+        assert!(api.runtime.is_none());
+    }
+
+    #[test]
+    fn websocket_endpoint_without_runtime_deserializes() {
+        let json = r#"{
+            "id": "Echo",
+            "path": "/echo",
+            "description": "Echo",
+            "connection_params": [],
+            "lifecycle": {},
+            "messages": []
+        }"#;
+        let endpoint: WebSocketEndpoint = serde_json::from_str(json).unwrap();
+        assert!(endpoint.runtime.is_none());
+    }
+
+    #[test]
+    fn websocket_api_with_runtime_roundtrip() {
+        let api = WebSocketApi {
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            base_url: "wss://test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            endpoints: vec![WebSocketEndpoint {
+                id: "Echo".to_string(),
+                path: "/echo".to_string(),
+                description: "Echo".to_string(),
+                connection_params: vec![],
+                lifecycle: ConnectionLifecycle::default(),
+                messages: vec![],
+                runtime: Some(WebSocketEndpointHints {
+                    correlation: Some(CorrelationHints {
+                        request_id_field: "id".to_string(),
+                        response_id_field: "id".to_string(),
+                        default_timeout_secs: 30,
+                    }),
+                    auth_flow: None,
+                    heartbeat: None,
+                }),
+            }],
+            runtime: Some(WebSocketRuntimeHints::default()),
+        };
+        let serialized = serde_json::to_string(&api).unwrap();
+        let deserialized: WebSocketApi = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, api);
     }
 
     // ========== Integration Test ==========
@@ -750,7 +1223,9 @@ mod tests {
                         description: Some("Word-level timing alignment".to_string()),
                     },
                 ],
+                runtime: None,
             }],
+            runtime: None,
         };
 
         // Verify structure

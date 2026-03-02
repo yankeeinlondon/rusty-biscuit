@@ -157,6 +157,7 @@ pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, RestApi, RestMethod};
 pub use websocket::{
-    ConnectionLifecycle, ConnectionParam, MessageDirection, MessageSchema, ParamType, WebSocketApi,
-    WebSocketEndpoint,
+    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
+    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
