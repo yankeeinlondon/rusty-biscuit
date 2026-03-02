@@ -3575,7 +3575,19 @@ fn collect_doc_comments(
     let mut prev = node.prev_sibling();
 
     while let Some(sibling) = prev {
-        if is_doc_comment_node(sibling.kind(), language) {
+        if is_rust_doc_comment_attribute(sibling.kind(), language) {
+            // Rust attributes (e.g., #[derive(...)]) can appear between doc comments
+            // and declarations, so skip over them while scanning backwards.
+            prev = sibling.prev_sibling();
+        } else if is_doc_comment_node(sibling.kind(), language) {
+            if language == ProgrammingLanguage::Rust
+                && let Ok(text) = sibling.utf8_text(source.as_bytes())
+                && !(text.trim_start().starts_with("///") || text.trim_start().starts_with("//!"))
+            {
+                // Ignore non-doc Rust line comments.
+                prev = sibling.prev_sibling();
+                continue;
+            }
             if let Ok(text) = sibling.utf8_text(source.as_bytes()) {
                 comments.push(text.to_string());
             }
@@ -3602,6 +3614,11 @@ fn collect_doc_comments(
         .collect();
 
     Some(cleaned.join("\n"))
+}
+
+fn is_rust_doc_comment_attribute(kind: &str, language: ProgrammingLanguage) -> bool {
+    language == ProgrammingLanguage::Rust
+        && (kind == "attribute_item" || kind == "inner_attribute_item")
 }
 
 /// Checks if a node kind is a doc comment for the given language.

@@ -43,6 +43,21 @@ fn test_subcommand_help() {
         .stdout(predicate::str::contains("List all symbols"));
 }
 
+#[test]
+fn test_filter_help_describes_path_wildcard_and_exact_matching() {
+    hug_cmd()
+        .args(["functions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("File path or symbol-name filters"))
+        .stdout(predicate::str::contains("File-like filters (paths such as"))
+        .stdout(predicate::str::contains("Remaining filters are symbol-name filters"))
+        .stdout(predicate::str::contains("fuzzy"))
+        .stdout(predicate::str::contains("contains match"))
+        .stdout(predicate::str::contains("wildcard match"))
+        .stdout(predicate::str::contains("exact symbol name match"));
+}
+
 // ============================================================================
 // Regression tests for --json flag support
 // Bug: The CLI was missing --json flag support for the symbols command
@@ -117,6 +132,20 @@ fn test_symbols_include_container_context_for_methods() {
         ));
 }
 
+#[test]
+fn test_rust_structs_render_as_struct_not_type() {
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- struct Greeter"))
+        .stdout(predicate::str::contains("- type Greeter").not());
+}
+
 // ============================================================================
 // Regression tests for flag ordering flexibility
 // Bug: Flags had to be placed in specific positions relative to subcommand
@@ -181,6 +210,67 @@ fn test_language_flag_ordering() {
             "tree-hugger/cli/src/main.rs",
             "--language",
             "rust",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_language_help_uses_expected_value_names() {
+    hug_cmd()
+        .args(["functions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("javascript"))
+        .stdout(predicate::str::contains("typescript"))
+        .stdout(predicate::str::contains("c++"))
+        .stdout(predicate::str::contains("c#"))
+        .stdout(predicate::str::contains("java-script").not())
+        .stdout(predicate::str::contains("type-script").not());
+}
+
+#[test]
+fn test_language_aliases_parse_successfully() {
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.js",
+            "--language",
+            "js",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.ts",
+            "--language",
+            "ts",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.cpp",
+            "--language",
+            "c++",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.cs",
+            "--language",
+            "c#",
+            "--plain",
         ])
         .assert()
         .success();
@@ -310,6 +400,70 @@ fn test_symbol_name_filters_preserve_explicit_wildcard() {
         .stdout(predicate::str::contains("greet(").not());
 }
 
+#[test]
+fn test_symbol_name_filters_trailing_bang_means_exact_match() {
+    hug_cmd()
+        .args([
+            "functions",
+            "greet!",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet(name: &str)"))
+        .stdout(predicate::str::contains("greet_many").not());
+}
+
+#[test]
+fn test_exclude_symbols_glob_filters_output() {
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exclude-symbols",
+            "*many",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet(name: &str)"))
+        .stdout(predicate::str::contains("greet_many").not());
+}
+
+#[test]
+fn test_exclude_symbols_trailing_bang_means_exact_match() {
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exclude-symbols",
+            "greet!",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("greet(name: &str)").not())
+        .stdout(predicate::str::contains("greet_many"));
+}
+
+#[test]
+fn test_exclude_files_glob_filters_scanned_files() {
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/cli/src/main.rs",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--exclude-files",
+            "tree-hugger/cli/**",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tree-hugger/lib/tests/fixtures/sample.rs"))
+        .stdout(predicate::str::contains("tree-hugger/cli/src/main.rs").not());
+}
+
 // ============================================================================
 // Phase 7: CLI Output Enhancement tests
 // ============================================================================
@@ -331,6 +485,17 @@ fn test_comments_flag_exists_in_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--comments"));
+}
+
+#[test]
+fn test_exclude_flags_exist_in_help() {
+    hug_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--exclude-files"))
+        .stdout(predicate::str::contains("--exclude-symbols"))
+        .stdout(predicate::str::contains("--ignore").not());
 }
 
 #[test]
@@ -773,6 +938,9 @@ fn test_symbols_prelude_comments_show_resolved_doc_comments() {
         .success()
         .stdout(predicate::str::contains(
             "Type exported through the fixture prelude for comment rendering tests.",
+        ))
+        .stdout(predicate::str::contains(
+            "Enum exported through the fixture prelude with aliasing.",
         ));
 }
 

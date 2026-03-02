@@ -67,8 +67,9 @@ classified as:
 
 ### Options
 
-- `--language <LANG>` - override language detection
-- `--ignore <GLOB>` - exclude paths
+- `--language <LANG>` - override language detection (`js`/`javascript`, `ts`/`typescript`, `cpp`/`c++`, `c-sharp`/`c#`)
+- `--exclude-files <GLOB>` - exclude files matching glob patterns
+- `--exclude-symbols <GLOB>` - exclude symbol names matching glob patterns
 - `--json` - output JSON format
 - `--plain` - disable colors and hyperlinks
 - `--group-by-file` - group symbol output by file
@@ -84,6 +85,9 @@ hug symbols cache
 
 # Restrict to one file and one symbol pattern
 hug functions tree-hugger/lib/tests/fixtures/sample.rs greet
+
+# Exclude test files and private helper symbols
+hug symbols "src/**/*.rs" --exclude-files "**/tests/**" --exclude-symbols "*_internal*"
 
 # List imports as JSON
 hug imports --json "tree-hugger/lib/tests/fixtures/**/*.js"

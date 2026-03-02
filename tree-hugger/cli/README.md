@@ -28,8 +28,9 @@ hug imports --json "tests/fixtures/**/*.js"
 
 ## Options
 
-- `--language <LANG>` - Override language detection
-- `--ignore <GLOB>` - Exclude files matching pattern
+- `--language <LANG>` - Override language detection (`js`/`javascript`, `ts`/`typescript`, `cpp`/`c++`, `c-sharp`/`c#`)
+- `--exclude-files <GLOB>` - Exclude files matching glob patterns
+- `--exclude-symbols <GLOB>` - Exclude symbol names matching glob patterns
 - `--json` - Output as JSON
 - `--plain` - Disable colors and hyperlinks
 - `--group-by-file` - Group symbol output by file
@@ -45,7 +46,7 @@ The default output shows symbols with their kind, metadata, and location:
 
 ```
 /path/to/file.rs (Rust)
-  - type Cli { ignore: Vec<String>, json: bool, command: Command } [21:8]
+  - type Cli { exclude_files: Vec<String>, exclude_symbols: Vec<String>, json: bool, command: Command } [21:8]
   - type CommonArgs { inputs: Vec<String> } [57:8]
   - enum Command { Functions(CommonArgs), Types(CommonArgs), Symbols(CommonArgs) } [64:6]
   - enum OutputFormat { Pretty, Plain, Json } [112:6]
@@ -119,7 +120,10 @@ The CLI displays different symbol kinds with distinct labels:
 hug types
 
 # List functions in TypeScript files, excluding tests
-hug functions "src/**/*.ts" --ignore "**/test/**"
+hug functions "src/**/*.ts" --exclude-files "**/test/**"
+
+# List symbols while excluding generated helper names
+hug symbols "src/**/*.rs" --exclude-symbols "*_generated*"
 
 # Export all symbols as JSON for tooling
 hug symbols "lib/**/*.rs" --json > symbols.json

@@ -25,9 +25,13 @@ use tree_hugger::{
     about = "Tree Hugger diagnostics and symbol tooling"
 )]
 struct Cli {
-    /// Glob patterns for files to ignore
-    #[arg(long, value_name = "GLOB", global = true)]
-    ignore: Vec<String>,
+    /// Glob patterns for files to exclude from scanning
+    #[arg(long, value_name = "GLOB", global = true, display_order = 10)]
+    exclude_files: Vec<String>,
+
+    /// Glob patterns for symbol names to exclude from output
+    #[arg(long, value_name = "GLOB", global = true, display_order = 11)]
+    exclude_symbols: Vec<String>,
 
     /// Force a specific language
     #[arg(long, value_enum, global = true)]
@@ -81,26 +85,44 @@ impl Cli {
 /// Common arguments for all subcommands
 #[derive(clap::Args, Debug, Clone)]
 struct CommonArgs {
-    /// File or symbol filters
+    /// File path or symbol-name filters
     ///
-    /// File-like filters (path-like or extension-like) restrict scanned files.
-    /// Remaining filters are treated as symbol glob filters.
+    /// File-like filters (paths such as `src/lib.rs`, globs such as `src/**/*.rs`,
+    /// or extensions such as `rs` / `*.rs`) limit which files are scanned.
+    ///
+    /// Remaining filters are symbol-name filters.
+    ///
+    /// `parse_width` => fuzzy contains match.
+    ///
+    /// `*width*` => wildcard match.
+    ///
+    /// `parse_width_spec!` => exact symbol name match.
     #[arg(value_name = "FILTER", num_args = 0..)]
     filters: Vec<String>,
 
     /// Show only exported (public) symbols
-    #[arg(long, conflicts_with = "prelude")]
+    #[arg(long, conflicts_with = "prelude", display_order = 30)]
     exported: bool,
 
     /// Show only symbols explicitly exported by the prelude module
-    #[arg(long, conflicts_with = "exported")]
+    #[arg(long, conflicts_with = "exported", display_order = 31)]
     prelude: bool,
 }
 
 /// Arguments for the classes command
 #[derive(clap::Args, Debug, Clone)]
 struct ClassArgs {
-    /// File or symbol filters
+    /// File path or class-name filters
+    ///
+    /// File-like filters (paths, globs, or extensions) limit scanned files.
+    ///
+    /// Remaining filters are class-name filters.
+    ///
+    /// `Widget` => fuzzy contains match.
+    ///
+    /// `*Widget*` => wildcard match.
+    ///
+    /// `Widget!` => exact class name match.
     #[arg(value_name = "FILTER", num_args = 0..)]
     filters: Vec<String>,
 
@@ -385,6 +407,24 @@ struct SymbolPresentation {
 }
 
 fn symbol_presentation(symbol: &SymbolInfo) -> SymbolPresentation {
+    if symbol.language == ProgrammingLanguage::Rust
+        && symbol.kind == SymbolKind::Type
+        && let Some(line) = source_line_for_symbol(symbol)
+    {
+        let trimmed = line.trim_start();
+        let label = if contains_word(trimmed, "struct") {
+            "struct"
+        } else if contains_word(trimmed, "union") {
+            "union"
+        } else {
+            "type"
+        };
+        return SymbolPresentation {
+            label: label.to_string(),
+            style_kind: SymbolKind::Type,
+        };
+    }
+
     if matches!(
         symbol.kind,
         SymbolKind::Variable | SymbolKind::Field | SymbolKind::Constant
@@ -569,7 +609,9 @@ fn display_path(path: &Path, root: Option<&Path>) -> String {
 #[derive(ValueEnum, Debug, Clone, Copy)]
 enum LanguageArg {
     Rust,
+    #[value(name = "javascript", alias = "js")]
     JavaScript,
+    #[value(name = "typescript", alias = "ts")]
     TypeScript,
     Go,
     Python,
@@ -579,7 +621,9 @@ enum LanguageArg {
     Bash,
     Zsh,
     C,
+    #[value(name = "c++", alias = "cpp")]
     Cpp,
+    #[value(name = "c#", aliases = ["csharp", "c-sharp"])]
     CSharp,
     Swift,
     Scala,
@@ -636,11 +680,21 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let command_kind = cli.command.kind().expect("completions already handled");
     let scan_filters = classify_filters(filters, &command_kind);
+    let excluded_symbol_globs = cli
+        .exclude_symbols
+        .iter()
+        .filter_map(|glob| normalize_excluded_symbol_glob(glob))
+        .collect::<Vec<_>>();
 
     let mut files = if scan_filters.file_filters.is_empty() {
-        collect_files(&pkg_root, &[], &cli.ignore, language)?
+        collect_files(&pkg_root, &[], &cli.exclude_files, language)?
     } else {
-        collect_files(&pkg_root, &scan_filters.file_filters, &cli.ignore, language)?
+        collect_files(
+            &pkg_root,
+            &scan_filters.file_filters,
+            &cli.exclude_files,
+            language,
+        )?
     };
 
     // Build symbol filter
@@ -704,6 +758,11 @@ fn main() -> Result<(), TreeHuggerError> {
                     matches_symbol_filters(&summary.class.name, &scan_filters.symbol_globs)
                 });
             }
+            if !excluded_symbol_globs.is_empty() {
+                class_summaries.retain(|summary| {
+                    !matches_symbol_filters(&summary.class.name, &excluded_symbol_globs)
+                });
+            }
 
             if !class_summaries.is_empty() {
                 all_class_summaries.push((
@@ -752,6 +811,7 @@ fn main() -> Result<(), TreeHuggerError> {
             &command_kind,
             &symbol_filter,
             &scan_filters.symbol_globs,
+            &excluded_symbol_globs,
         )?;
         summaries.push(summary);
     }
@@ -1061,11 +1121,34 @@ fn is_file_filter_token(token: &str) -> bool {
 }
 
 fn normalize_symbol_glob(token: &str) -> String {
+    if let Some(strict_name) = token.strip_suffix('!')
+        && !strict_name.is_empty()
+    {
+        // Trailing `!` switches from fuzzy auto-wrapped matching to strict exact matching.
+        // Example: `parse_width_spec!` matches only `parse_width_spec`.
+        return strict_name.to_string();
+    }
+
     if token.contains('*') {
         token.to_string()
     } else {
         format!("*{token}*")
     }
+}
+
+fn normalize_excluded_symbol_glob(token: &str) -> Option<String> {
+    if token.is_empty() {
+        return None;
+    }
+
+    if let Some(strict_name) = token.strip_suffix('!')
+        && !strict_name.is_empty()
+    {
+        // Keep parity with positional filters: trailing `!` means strict name.
+        return Some(strict_name.to_string());
+    }
+
+    Some(token.to_string())
 }
 
 fn matches_symbol_filters(name: &str, patterns: &[String]) -> bool {
@@ -1118,29 +1201,39 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
     }
 }
 
-fn apply_symbol_glob_filter(symbols: Vec<SymbolInfo>, symbol_globs: &[String]) -> Vec<SymbolInfo> {
-    if symbol_globs.is_empty() {
+fn apply_symbol_filters(
+    symbols: Vec<SymbolInfo>,
+    include_symbol_globs: &[String],
+    exclude_symbol_globs: &[String],
+) -> Vec<SymbolInfo> {
+    if include_symbol_globs.is_empty() && exclude_symbol_globs.is_empty() {
         return symbols;
     }
 
     symbols
         .into_iter()
-        .filter(|symbol| matches_symbol_filters(&symbol.name, symbol_globs))
+        .filter(|symbol| {
+            let included = include_symbol_globs.is_empty()
+                || matches_symbol_filters(&symbol.name, include_symbol_globs);
+            let excluded = !exclude_symbol_globs.is_empty()
+                && matches_symbol_filters(&symbol.name, exclude_symbol_globs);
+            included && !excluded
+        })
         .collect()
 }
 
 fn collect_files(
     root: &Path,
     inputs: &[String],
-    ignores: &[String],
+    excluded_files: &[String],
     language: Option<ProgrammingLanguage>,
 ) -> Result<Vec<PathBuf>, TreeHuggerError> {
     let mut overrides = OverrideBuilder::new(root);
     for input in inputs {
         overrides.add(input)?;
     }
-    for ignore in ignores {
-        overrides.add(&format!("!{}", ignore))?;
+    for excluded_file in excluded_files {
+        overrides.add(&format!("!{}", excluded_file))?;
     }
 
     let overrides = overrides.build()?;
@@ -1188,7 +1281,8 @@ fn summarize_file(
     tree_file: &TreeFile,
     command: &CommandKind,
     filter: &SymbolFilter,
-    symbol_globs: &[String],
+    include_symbol_globs: &[String],
+    exclude_symbol_globs: &[String],
 ) -> Result<FileSummary, TreeHuggerError> {
     let mut summary = FileSummary {
         file: tree_file.file.clone(),
@@ -1221,7 +1315,7 @@ fn summarize_file(
                     .filter(|s| s.kind.is_function())
                     .collect(),
             };
-            summary.symbols = apply_symbol_glob_filter(symbols, symbol_globs);
+            summary.symbols = apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Types => {
             let symbols = match filter {
@@ -1241,7 +1335,7 @@ fn summarize_file(
                     .filter(|s| s.kind.is_type())
                     .collect(),
             };
-            summary.symbols = apply_symbol_glob_filter(symbols, symbol_globs);
+            summary.symbols = apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Symbols => {
             match filter {
@@ -1285,9 +1379,12 @@ fn summarize_file(
                     summary.locals = tree_file.local_symbols()?;
                 }
             }
-            summary.symbols = apply_symbol_glob_filter(summary.symbols, symbol_globs);
-            summary.exports = apply_symbol_glob_filter(summary.exports, symbol_globs);
-            summary.locals = apply_symbol_glob_filter(summary.locals, symbol_globs);
+            summary.symbols =
+                apply_symbol_filters(summary.symbols, include_symbol_globs, exclude_symbol_globs);
+            summary.exports =
+                apply_symbol_filters(summary.exports, include_symbol_globs, exclude_symbol_globs);
+            summary.locals =
+                apply_symbol_filters(summary.locals, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Imports => {
             summary.imports = tree_file.imported_symbols()?;
