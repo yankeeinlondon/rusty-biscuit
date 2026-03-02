@@ -1,0 +1,90 @@
+/* Dark theme (default) */
+:root {
+  --c-bg: #1a1a2e;
+  --c-card: #16213e;
+  --c-text: #e0e0e0;
+  --c-text-muted: #a0a0b0;
+  --c-text-dim: #606070;
+  --c-accent: #4fc3f7;
+
+  /* Status dot colors */
+  --c-dot-green: #4caf50;
+  --c-dot-amber: #ff9800;
+  --c-dot-red: #f44336;
+  --c-dot-grey: #666;
+
+  /* Badge colors */
+  --c-badge-active: rgba(79, 195, 247, 0.25);
+  --c-badge-active-text: #4fc3f7;
+  --c-badge-dim: rgba(255, 255, 255, 0.08);
+  --c-badge-dim-text: #808090;
+  --c-badge-hover: rgba(79, 195, 247, 0.15);
+  --c-badge-hover-text: #b0d0e0;
+
+  /* Popover */
+  --c-popover-bg: #1e2a45;
+  --c-popover-border: rgba(255, 255, 255, 0.12);
+  --c-popover-text: #d0d0d8;
+
+  /* Volume bar */
+  --c-volume-bg: rgba(255, 255, 255, 0.08);
+  --c-volume-fill-start: #4fc3f7;
+  --c-volume-fill-end: #29b6f6;
+  --c-volume-muted: #f44336;
+
+  /* Frost overlay */
+  --c-frost-bg: rgba(26, 26, 46, 0.85);
+  --c-frost-text: #e0e0e0;
+  --c-frost-spinner: #4fc3f7;
+}
+
+/* Light theme */
+html.light {
+  --c-bg: #f5f5f5;
+  --c-card: #ffffff;
+  --c-text: #1a1a2e;
+  --c-text-muted: #555;
+  --c-text-dim: #999;
+  --c-accent: #1976d2;
+
+  --c-dot-green: #43a047;
+  --c-dot-amber: #ef6c00;
+  --c-dot-red: #e53935;
+  --c-dot-grey: #bbb;
+
+  --c-badge-active: rgba(25, 118, 210, 0.15);
+  --c-badge-active-text: #1565c0;
+  --c-badge-dim: rgba(0, 0, 0, 0.06);
+  --c-badge-dim-text: #888;
+  --c-badge-hover: rgba(25, 118, 210, 0.1);
+  --c-badge-hover-text: #1976d2;
+
+  --c-popover-bg: #fff;
+  --c-popover-border: rgba(0, 0, 0, 0.12);
+  --c-popover-text: #333;
+
+  --c-volume-bg: rgba(0, 0, 0, 0.06);
+  --c-volume-fill-start: #1976d2;
+  --c-volume-fill-end: #1565c0;
+  --c-volume-muted: #e53935;
+
+  --c-frost-bg: rgba(245, 245, 245, 0.85);
+  --c-frost-text: #1a1a2e;
+  --c-frost-spinner: #1976d2;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
