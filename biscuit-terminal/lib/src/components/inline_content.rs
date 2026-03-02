@@ -370,10 +370,7 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![
-            RenderableContent::from("x"),
-            RenderableContent::from("y"),
-        ];
+        let items = vec![RenderableContent::from("x"), RenderableContent::from("y")];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 2);
         assert_eq!(inline.render_optimistic(Some(80)), "xy");
@@ -437,10 +434,7 @@ mod tests {
 
     #[test]
     fn test_with_chaining() {
-        let inline = InlineContent::default()
-            .with("a")
-            .with("b")
-            .with("c");
+        let inline = InlineContent::default().with("a").with("b").with("c");
         assert_eq!(inline.len(), 3);
         assert_eq!(inline.render_optimistic(Some(80)), "abc");
     }
@@ -457,16 +451,13 @@ mod tests {
 
     #[test]
     fn test_with_from_starting_point() {
-        let inline = InlineContent::from("start")
-            .with(" middle")
-            .with(" end");
+        let inline = InlineContent::from("start").with(" middle").with(" end");
         assert_eq!(inline.render_optimistic(Some(80)), "start middle end");
     }
 
     #[test]
     fn test_with_string_owned() {
-        let inline = InlineContent::default()
-            .with(String::from("owned"));
+        let inline = InlineContent::default().with(String::from("owned"));
         assert_eq!(inline.render_optimistic(Some(80)), "owned");
     }
 
@@ -500,10 +491,7 @@ mod tests {
 
     #[test]
     fn test_no_separator_by_default() {
-        let inline = InlineContent::default()
-            .with("a")
-            .with("b")
-            .with("c");
+        let inline = InlineContent::default().with("a").with("b").with("c");
         assert_eq!(inline.render_optimistic(Some(80)), "abc");
     }
 
@@ -519,9 +507,7 @@ mod tests {
 
     #[test]
     fn test_separator_with_single_item() {
-        let inline = InlineContent::default()
-            .with_separator(" | ")
-            .with("only");
+        let inline = InlineContent::default().with_separator(" | ").with("only");
         assert_eq!(inline.render_optimistic(Some(80)), "only");
     }
 
@@ -545,8 +531,7 @@ mod tests {
 
     #[test]
     fn test_separator_no_items() {
-        let inline = InlineContent::default()
-            .with_separator(", ");
+        let inline = InlineContent::default().with_separator(", ");
         assert_eq!(inline.render_optimistic(Some(80)), "");
     }
 
@@ -616,9 +601,7 @@ mod tests {
     #[test]
     fn test_push_mixed_types() {
         let mut inline = InlineContent::default();
-        inline
-            .push("text ")
-            .push(Prose::new("styled"));
+        inline.push("text ").push(Prose::new("styled"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
         assert!(output.contains("styled"));
@@ -655,9 +638,7 @@ mod tests {
     #[test]
     fn test_add_prose() {
         let mut inline = InlineContent::default();
-        inline
-            .add_text("prefix: ")
-            .add_prose(Prose::new("content"));
+        inline.add_text("prefix: ").add_prose(Prose::new("content"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("prefix: "));
         assert!(output.contains("content"));
@@ -759,10 +740,7 @@ mod tests {
 
     #[test]
     fn test_len_after_with() {
-        let inline = InlineContent::default()
-            .with("a")
-            .with("b")
-            .with("c");
+        let inline = InlineContent::default().with("a").with("b").with("c");
         assert_eq!(inline.len(), 3);
     }
 
@@ -792,9 +770,7 @@ mod tests {
 
     #[test]
     fn test_render() {
-        let inline = InlineContent::default()
-            .with("hello ")
-            .with("world");
+        let inline = InlineContent::default().with("hello ").with("world");
         let term = Terminal::new_optimistic(80);
         assert_eq!(inline.render(&term), "hello world");
     }
@@ -813,14 +789,9 @@ mod tests {
 
     #[test]
     fn test_render_and_render_optimistic_consistent_for_plain_text() {
-        let inline = InlineContent::default()
-            .with("hello ")
-            .with("world");
+        let inline = InlineContent::default().with("hello ").with("world");
         let term = Terminal::new_optimistic(80);
-        assert_eq!(
-            inline.render_optimistic(Some(80)),
-            inline.render(&term),
-        );
+        assert_eq!(inline.render_optimistic(Some(80)), inline.render(&term),);
     }
 
     #[test]
@@ -895,50 +866,43 @@ mod tests {
 
     #[test]
     fn test_left_margin_builder() {
-        let inline = InlineContent::from("test")
-            .left_margin(Margin::Chars(4));
+        let inline = InlineContent::from("test").left_margin(Margin::Chars(4));
         assert_eq!(inline.layout().left_margin, Margin::Chars(4));
     }
 
     #[test]
     fn test_right_margin_builder() {
-        let inline = InlineContent::from("test")
-            .right_margin(Margin::Chars(4));
+        let inline = InlineContent::from("test").right_margin(Margin::Chars(4));
         assert_eq!(inline.layout().right_margin, Margin::Chars(4));
     }
 
     #[test]
     fn test_top_margin_builder() {
-        let inline = InlineContent::from("test")
-            .top_margin(Margin::Chars(2));
+        let inline = InlineContent::from("test").top_margin(Margin::Chars(2));
         assert_eq!(inline.layout().top_margin, Margin::Chars(2));
     }
 
     #[test]
     fn test_bottom_margin_builder() {
-        let inline = InlineContent::from("test")
-            .bottom_margin(Margin::Chars(2));
+        let inline = InlineContent::from("test").bottom_margin(Margin::Chars(2));
         assert_eq!(inline.layout().bottom_margin, Margin::Chars(2));
     }
 
     #[test]
     fn test_alignment_builder() {
-        let inline = InlineContent::from("test")
-            .alignment(Alignment::Right);
+        let inline = InlineContent::from("test").alignment(Alignment::Right);
         assert_eq!(inline.layout().alignment, Alignment::Right);
     }
 
     #[test]
     fn test_row_fill_strategy_builder() {
-        let inline = InlineContent::from("test")
-            .row_fill_strategy(RowFill::Fill);
+        let inline = InlineContent::from("test").row_fill_strategy(RowFill::Fill);
         assert_eq!(inline.layout().row_fill_strategy, RowFill::Fill);
     }
 
     #[test]
     fn test_word_wrap_builder() {
-        let inline = InlineContent::from("test")
-            .word_wrap(WordWrap::None);
+        let inline = InlineContent::from("test").word_wrap(WordWrap::None);
         assert_eq!(inline.layout().word_wrap, WordWrap::None);
     }
 
@@ -990,9 +954,7 @@ mod tests {
 
     #[test]
     fn test_debug_shows_parts() {
-        let inline = InlineContent::default()
-            .with("a")
-            .with("b");
+        let inline = InlineContent::default().with("a").with("b");
         let debug = format!("{:?}", inline);
         assert!(debug.contains("InlineContent"));
         assert!(debug.contains("parts"));
@@ -1004,17 +966,13 @@ mod tests {
 
     #[test]
     fn test_unicode_content() {
-        let inline = InlineContent::default()
-            .with("Hello ")
-            .with("世界");
+        let inline = InlineContent::default().with("Hello ").with("世界");
         assert_eq!(inline.render_optimistic(Some(80)), "Hello 世界");
     }
 
     #[test]
     fn test_emoji_content() {
-        let inline = InlineContent::default()
-            .with("Status: ")
-            .with("✅");
+        let inline = InlineContent::default().with("Status: ").with("✅");
         assert_eq!(inline.render_optimistic(Some(80)), "Status: ✅");
     }
 
@@ -1047,10 +1005,7 @@ mod tests {
 
     #[test]
     fn test_empty_string_items() {
-        let inline = InlineContent::default()
-            .with("")
-            .with("content")
-            .with("");
+        let inline = InlineContent::default().with("").with("content").with("");
         assert_eq!(inline.render_optimistic(Some(80)), "content");
         assert_eq!(inline.len(), 3);
     }
@@ -1150,9 +1105,7 @@ mod tests {
 
     #[test]
     fn test_nested_inline_content() {
-        let inner = InlineContent::default()
-            .with("inner1")
-            .with("inner2");
+        let inner = InlineContent::default().with("inner1").with("inner2");
         let outer = InlineContent::default()
             .with("outer ")
             .with(inner)

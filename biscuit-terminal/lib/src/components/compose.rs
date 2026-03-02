@@ -244,10 +244,7 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![
-            RenderableContent::from("x"),
-            RenderableContent::from("y"),
-        ];
+        let items = vec![RenderableContent::from("x"), RenderableContent::from("y")];
         let compose = Compose::from(items);
         assert_eq!(compose.render_optimistic(Some(80)), "xy");
     }
@@ -412,9 +409,7 @@ mod tests {
     fn test_add_file_system_chaining() {
         let (_tmp, fs) = make_fs_fixture();
         let mut compose = Compose::default();
-        compose
-            .add_text("Files:\n")
-            .add_file_system(fs);
+        compose.add_text("Files:\n").add_file_system(fs);
         let output = compose.render_optimistic(Some(80));
         assert!(output.starts_with("Files:\n"));
         assert!(output.contains("hello.txt"));
@@ -473,9 +468,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Col")])
             .with_data(vec![vec!["data".into()]]);
         let mut compose = Compose::default();
-        compose
-            .add_text("Results:\n")
-            .add_table(table);
+        compose.add_text("Results:\n").add_table(table);
         let output = compose.render_optimistic(Some(80));
         assert!(output.starts_with("Results:\n"));
         assert!(output.contains("Col"));
@@ -497,8 +490,7 @@ mod tests {
 
     #[test]
     fn test_add_table_empty() {
-        let table = Table::new()
-            .with_columns(vec![TableColumn::new("Empty")]);
+        let table = Table::new().with_columns(vec![TableColumn::new("Empty")]);
         let mut compose = Compose::default();
         compose.add_table(table);
         let output = compose.render_optimistic(Some(80));
@@ -556,10 +548,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Metric")])
             .with_data(vec![vec!["count".into()]]);
         let mut compose = Compose::default();
-        compose
-            .add_table(table)
-            .add_text("\n")
-            .add_file_system(fs);
+        compose.add_table(table).add_text("\n").add_file_system(fs);
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("Metric"));
         assert!(output.contains("count"));
@@ -589,9 +578,7 @@ mod tests {
     #[test]
     fn test_no_newlines_between_mixed_items() {
         let mut compose = Compose::default();
-        compose
-            .add_text("text")
-            .add_prose(Prose::new("prose"));
+        compose.add_text("text").add_prose(Prose::new("prose"));
         let output = compose.render_optimistic(Some(80));
         assert!(!output.contains('\n'));
     }
@@ -599,9 +586,7 @@ mod tests {
     #[test]
     fn test_concatenation_preserves_spaces() {
         let mut compose = Compose::default();
-        compose
-            .add_text("hello ")
-            .add_text("world");
+        compose.add_text("hello ").add_text("world");
         assert_eq!(compose.render_optimistic(Some(80)), "hello world");
     }
 
@@ -634,10 +619,7 @@ mod tests {
         let mut compose = Compose::default();
         compose.add_text("hello ").add_text("world");
         let term = Terminal::new_optimistic(80);
-        assert_eq!(
-            compose.render_optimistic(Some(80)),
-            compose.render(&term),
-        );
+        assert_eq!(compose.render_optimistic(Some(80)), compose.render(&term),);
     }
 
     #[test]
@@ -709,50 +691,43 @@ mod tests {
 
     #[test]
     fn test_left_margin_builder() {
-        let compose = Compose::from("test")
-            .left_margin(Margin::Chars(4));
+        let compose = Compose::from("test").left_margin(Margin::Chars(4));
         assert_eq!(compose.layout().left_margin, Margin::Chars(4));
     }
 
     #[test]
     fn test_right_margin_builder() {
-        let compose = Compose::from("test")
-            .right_margin(Margin::Chars(4));
+        let compose = Compose::from("test").right_margin(Margin::Chars(4));
         assert_eq!(compose.layout().right_margin, Margin::Chars(4));
     }
 
     #[test]
     fn test_top_margin_builder() {
-        let compose = Compose::from("test")
-            .top_margin(Margin::Chars(2));
+        let compose = Compose::from("test").top_margin(Margin::Chars(2));
         assert_eq!(compose.layout().top_margin, Margin::Chars(2));
     }
 
     #[test]
     fn test_bottom_margin_builder() {
-        let compose = Compose::from("test")
-            .bottom_margin(Margin::Chars(2));
+        let compose = Compose::from("test").bottom_margin(Margin::Chars(2));
         assert_eq!(compose.layout().bottom_margin, Margin::Chars(2));
     }
 
     #[test]
     fn test_alignment_builder() {
-        let compose = Compose::from("test")
-            .alignment(Alignment::Right);
+        let compose = Compose::from("test").alignment(Alignment::Right);
         assert_eq!(compose.layout().alignment, Alignment::Right);
     }
 
     #[test]
     fn test_row_fill_strategy_builder() {
-        let compose = Compose::from("test")
-            .row_fill_strategy(RowFill::Fill);
+        let compose = Compose::from("test").row_fill_strategy(RowFill::Fill);
         assert_eq!(compose.layout().row_fill_strategy, RowFill::Fill);
     }
 
     #[test]
     fn test_word_wrap_builder() {
-        let compose = Compose::from("test")
-            .word_wrap(WordWrap::None);
+        let compose = Compose::from("test").word_wrap(WordWrap::None);
         assert_eq!(compose.layout().word_wrap, WordWrap::None);
     }
 
@@ -848,10 +823,7 @@ mod tests {
     #[test]
     fn test_whitespace_only_items() {
         let mut compose = Compose::default();
-        compose
-            .add_text("   ")
-            .add_text("text")
-            .add_text("   ");
+        compose.add_text("   ").add_text("text").add_text("   ");
         assert_eq!(compose.render_optimistic(Some(80)), "   text   ");
     }
 
@@ -864,10 +836,7 @@ mod tests {
     #[test]
     fn test_tab_characters() {
         let mut compose = Compose::default();
-        compose
-            .add_text("col1")
-            .add_text("\t")
-            .add_text("col2");
+        compose.add_text("col1").add_text("\t").add_text("col2");
         assert_eq!(compose.render_optimistic(Some(80)), "col1\tcol2");
     }
 
@@ -936,9 +905,7 @@ mod tests {
 
     #[test]
     fn test_inline_content_inside_compose() {
-        let inline = InlineContent::default()
-            .with("a")
-            .with("b");
+        let inline = InlineContent::default().with("a").with("b");
         let content = RenderableContent::from(inline);
         let mut compose = Compose::from(content);
         compose.add_text(" end");

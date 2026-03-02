@@ -1297,7 +1297,7 @@ mod tests {
         fn prop_parse_filepath_and_width_never_panics(s in ".*") {
             let _ = parse_filepath_and_width(&s);
         }
-        
+
         #[test]
         fn prop_parse_width_spec_valid_percentages(p in 1..=100u32) {
             let s = format!("{}%", p);
@@ -1310,7 +1310,7 @@ mod tests {
         fn prop_parse_width_spec_valid_characters(c in 1..=1000u32) {
             let s = format!("{}", c);
             assert!(matches!(parse_width_spec(&s).unwrap(), ImageWidth::Characters(val) if val == c));
-            
+
             let s_ch = format!("{}ch", c);
             assert!(matches!(parse_width_spec(&s_ch).unwrap(), ImageWidth::Characters(val) if val == c));
         }
@@ -1619,11 +1619,9 @@ mod tests {
 
         // Use render_kitty_for_terminal directly to avoid cursor_position()
         // which can hang when stdin is piped (DSR query blocks on read).
-        let (kitty_seq, kitty_height, _) =
-            term_img.render_kitty_for_terminal(&kitty).unwrap();
+        let (kitty_seq, kitty_height, _) = term_img.render_kitty_for_terminal(&kitty).unwrap();
         let kitty_out = format!("{}\x1b[{}B\r", kitty_seq, kitty_height);
-        let (warp_seq, _, warp_raw) =
-            term_img.render_kitty_for_terminal(&warp).unwrap();
+        let (warp_seq, _, warp_raw) = term_img.render_kitty_for_terminal(&warp).unwrap();
         let warp_rows = (warp_raw.floor() as u32).max(1);
         let warp_out = format!("{}\x1b[{}B\r", warp_seq, warp_rows);
 
@@ -1651,8 +1649,7 @@ mod tests {
 
         // Verify ceil rounding directly from a single render_iterm2_for_terminal
         // call. Avoids cursor_position() hang and cell_size() variance.
-        let (_, height_cells, raw_height) =
-            term_img.render_iterm2_for_terminal(&iterm2).unwrap();
+        let (_, height_cells, raw_height) = term_img.render_iterm2_for_terminal(&iterm2).unwrap();
         assert_eq!(
             height_cells,
             (raw_height.ceil() as u32).max(1),
@@ -1676,8 +1673,7 @@ mod tests {
         // call. Avoids comparing two render_to_terminal calls which each query
         // cell_size() independently and can get different values when a real
         // terminal is attached.
-        let (_, height_cells, raw_height) =
-            term_img.render_kitty_for_terminal(&wezterm).unwrap();
+        let (_, height_cells, raw_height) = term_img.render_kitty_for_terminal(&wezterm).unwrap();
         assert_eq!(
             height_cells,
             (raw_height.ceil() as u32).max(1),
@@ -1700,8 +1696,7 @@ mod tests {
         // Get raw_height from a single cell_size() call via render_kitty_for_terminal.
         // This avoids intermittent failures when two render_to_terminal calls
         // query the terminal independently and get different cell dimensions.
-        let (_, height_cells, raw_height) =
-            term_img.render_kitty_for_terminal(&kitty).unwrap();
+        let (_, height_cells, raw_height) = term_img.render_kitty_for_terminal(&kitty).unwrap();
         let ceil_rows = (raw_height.ceil() as u32).max(1);
         let floor_rows = (raw_height.floor() as u32).max(1);
 
@@ -1711,7 +1706,8 @@ mod tests {
         assert!(floor_rows <= ceil_rows);
         if raw_height.fract() != 0.0 {
             assert_eq!(
-                floor_rows + 1, ceil_rows,
+                floor_rows + 1,
+                ceil_rows,
                 "For fractional raw_height={raw_height:.3}, floor ({floor_rows}) + 1 should equal ceil ({ceil_rows})"
             );
         } else {

@@ -65,10 +65,7 @@ impl From<&str> for BlockQuote {
 
 impl From<Prose> for BlockQuote {
     fn from(value: Prose) -> Self {
-        BlockQuote::new(
-            RenderableContent::Component(Rc::new(value)),
-            None::<String>,
-        )
+        BlockQuote::new(RenderableContent::Component(Rc::new(value)), None::<String>)
     }
 }
 
@@ -128,7 +125,10 @@ impl BlockQuote {
             RenderableContent::Component(component) => {
                 // Use render() with the constrained child width so nested
                 // components respect the block quote's border
-                term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width))
+                term.map_or_else(
+                    || component.render_optimistic(Some(child_width)),
+                    |t| component.render_in_width(t, child_width),
+                )
             }
         };
         let mut result = String::new();
@@ -433,7 +433,10 @@ mod tests {
             .with_left_block_color(Color::Tailwind(Tailwind::Red500));
         let cloned = quote.clone();
 
-        assert_eq!(quote.render_optimistic(None), cloned.render_optimistic(None));
+        assert_eq!(
+            quote.render_optimistic(None),
+            cloned.render_optimistic(None)
+        );
         assert_eq!(quote.text_color, cloned.text_color);
         assert_eq!(quote.left_block_color, cloned.left_block_color);
     }

@@ -929,10 +929,7 @@ impl FileSystem {
         }
         // If there are only negation patterns and none matched, show the metric.
         // If there are positive patterns, at least one must match.
-        let has_positive = config
-            .filename_patterns
-            .iter()
-            .any(|p| !p.starts_with('!'));
+        let has_positive = config.filename_patterns.iter().any(|p| !p.starts_with('!'));
         if has_positive { matched } else { true }
     }
 }
@@ -1106,7 +1103,9 @@ impl FileSystem {
                     };
                 }
                 // Check for root-only icons (depth 0)
-                if depth == 0 && let Some(icon) = self.get_root_only_file_icon(name, use_nerd) {
+                if depth == 0
+                    && let Some(icon) = self.get_root_only_file_icon(name, use_nerd)
+                {
                     return icon;
                 }
                 // Check exact filename matches
@@ -1386,7 +1385,8 @@ impl FileSystem {
     pub fn ensure_tree_built(&mut self) {
         if self.tree.is_none() {
             let mut total_entries = 0;
-            self.tree = Some(self.build_tree_recursive(&self.root_path.clone(), 0, &mut total_entries));
+            self.tree =
+                Some(self.build_tree_recursive(&self.root_path.clone(), 0, &mut total_entries));
         }
     }
 
@@ -1526,12 +1526,11 @@ impl FileSystem {
 
                 *total_entries += 1;
 
-                let dir_metrics =
-                    if self.has_any_metrics() && self.show_metrics_on_directories {
-                        self.collect_file_metrics(&file_path, &file_name, true)
-                    } else {
-                        None
-                    };
+                let dir_metrics = if self.has_any_metrics() && self.show_metrics_on_directories {
+                    self.collect_file_metrics(&file_path, &file_name, true)
+                } else {
+                    None
+                };
                 entries.push(TreeNode::Dir {
                     name: file_name,
                     children,
@@ -1886,7 +1885,16 @@ impl Renderable for FileSystem {
         }
 
         // Pass is_tty=false since render_optimistic() has no terminal context
-        self.render_nodes(&mut output, tree, "", width, 0, None, false, &self.root_path);
+        self.render_nodes(
+            &mut output,
+            tree,
+            "",
+            width,
+            0,
+            None,
+            false,
+            &self.root_path,
+        );
 
         // Apply layout (margins, alignment) but NOT word wrap
         // Word wrap would break tree connectors
@@ -1990,12 +1998,7 @@ impl FileSystem {
     ///
     /// Shows the directory icon and name (e.g., ` docs`), styled bold blue
     /// when connected to a TTY.
-    fn render_root_line(
-        &self,
-        output: &mut String,
-        is_nerd_font: Option<bool>,
-        is_tty: bool,
-    ) {
+    fn render_root_line(&self, output: &mut String, is_nerd_font: Option<bool>, is_tty: bool) {
         let use_nerd = is_nerd_font.unwrap_or(false);
 
         // Resolve the display name: canonicalize relative paths like "." and ".."
@@ -2025,12 +2028,8 @@ impl FileSystem {
                     .root_path
                     .canonicalize()
                     .unwrap_or_else(|_| self.root_path.clone());
-                Prose::new(format!(
-                    "<a href=\"{}\">{}</a>",
-                    abs_path.display(),
-                    name
-                ))
-                .render_optimistic(None)
+                Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
+                    .render_optimistic(None)
             } else {
                 name
             };
@@ -2205,7 +2204,13 @@ impl FileSystem {
 
         let mut codes: Vec<&str> = Vec::new();
 
-        let is_error = matches!(node, TreeNode::Dir { has_error: true, .. });
+        let is_error = matches!(
+            node,
+            TreeNode::Dir {
+                has_error: true,
+                ..
+            }
+        );
         if is_error {
             codes.push("31");
         }
@@ -2441,11 +2446,10 @@ fn estimate_tokens(path: &Path, metadata: Option<&std::fs::Metadata>) -> Option<
 
     let chars_per_token: f64 = match ext.as_str() {
         "log" | "json" | "yaml" | "yml" | "toml" => 2.5,
-        "rs" | "ts" | "tsx" | "js" | "jsx" | "md" | "txt" | "py" | "go" | "java" | "c"
-        | "cpp" | "h" | "hpp" | "css" | "html" | "xml" | "sql" | "sh" | "bash" | "zsh"
-        | "fish" | "rb" | "php" | "swift" | "kt" | "scala" | "lua" | "r" | "pl" | "ex"
-        | "exs" | "elm" | "hs" | "ml" | "vim" | "conf" | "cfg" | "ini" | "env" | "csv"
-        | "tsv" => 4.0,
+        "rs" | "ts" | "tsx" | "js" | "jsx" | "md" | "txt" | "py" | "go" | "java" | "c" | "cpp"
+        | "h" | "hpp" | "css" | "html" | "xml" | "sql" | "sh" | "bash" | "zsh" | "fish" | "rb"
+        | "php" | "swift" | "kt" | "scala" | "lua" | "r" | "pl" | "ex" | "exs" | "elm" | "hs"
+        | "ml" | "vim" | "conf" | "cfg" | "ini" | "env" | "csv" | "tsv" => 4.0,
         _ => return None,
     };
 
@@ -2717,7 +2721,10 @@ mod tests {
         // Nerd Font icon for Rust files
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::RUST);
         // Unicode fallback
-        assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
+        assert_eq!(
+            fs.get_icon(&node, 0, Some(false)),
+            icons::unicode::file::BASE
+        );
         // None defaults to Unicode fallback
         assert_eq!(fs.get_icon(&node, 0, None), icons::unicode::file::BASE);
     }
@@ -2850,7 +2857,10 @@ mod tests {
             fs.get_icon(&node, 0, Some(true)),
             icons::nerd::file::GITIGNORE
         );
-        assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
+        assert_eq!(
+            fs.get_icon(&node, 0, Some(false)),
+            icons::unicode::file::BASE
+        );
     }
 
     #[test]
@@ -2862,7 +2872,7 @@ mod tests {
                 name: name.into(),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2881,7 +2891,7 @@ mod tests {
                 name: name.into(),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2938,7 +2948,7 @@ mod tests {
                 name: format!("file.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2957,7 +2967,7 @@ mod tests {
                 name: format!("file.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -2986,7 +2996,7 @@ mod tests {
                 name: format!("config.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -3001,7 +3011,7 @@ mod tests {
                 name: format!("package.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -3020,7 +3030,7 @@ mod tests {
                 name: format!("docs.{ext}"),
                 is_ignored: false,
                 is_symlink: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -3040,7 +3050,10 @@ mod tests {
             metrics: None,
         };
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::BASE);
-        assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
+        assert_eq!(
+            fs.get_icon(&node, 0, Some(false)),
+            icons::unicode::file::BASE
+        );
     }
 
     #[test]
@@ -3166,7 +3179,7 @@ mod tests {
                 is_symlink: false,
                 has_error: false,
                 at_depth_limit: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -3184,7 +3197,7 @@ mod tests {
                 is_symlink: false,
                 has_error: false,
                 at_depth_limit: false,
-            metrics: None,
+                metrics: None,
             };
             assert_eq!(
                 fs.get_icon(&node, 0, Some(true)),
@@ -4140,7 +4153,9 @@ mod tests {
         }
 
         // Set max_entries to 5
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").max_entries(5);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .max_entries(5);
         fs_tree.ensure_tree_built();
 
         let tree = fs_tree.tree().expect("tree should be built");
@@ -4213,7 +4228,9 @@ mod tests {
         fs::write(temp.path().join("config.toml"), "").expect("create config.toml");
 
         // Filter for .rs files only
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").filter(".rs");
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .filter(".rs");
         fs_tree.ensure_tree_built();
 
         let tree = fs_tree.tree().expect("tree should be built");
@@ -4234,11 +4251,8 @@ mod tests {
 
         // Create a regular file and a symlink to it
         fs::write(temp.path().join("target.txt"), "target").expect("create target.txt");
-        symlink(
-            temp.path().join("target.txt"),
-            temp.path().join("link.txt"),
-        )
-        .expect("create symlink");
+        symlink(temp.path().join("target.txt"), temp.path().join("link.txt"))
+            .expect("create symlink");
 
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
@@ -4373,7 +4387,10 @@ mod tests {
     #[test]
     fn test_tree_accessor_returns_none_before_build() {
         let fs_tree = FileSystem::new(".").expect("valid path");
-        assert!(fs_tree.tree().is_none(), "tree() should return None before build");
+        assert!(
+            fs_tree.tree().is_none(),
+            "tree() should return None before build"
+        );
     }
 
     #[test]
@@ -4386,7 +4403,10 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        assert!(fs_tree.tree().is_some(), "tree() should return Some after build");
+        assert!(
+            fs_tree.tree().is_some(),
+            "tree() should return Some after build"
+        );
     }
 
     // ============================================================
@@ -4436,7 +4456,10 @@ mod tests {
         let result = fs_tree.render_optimistic(Some(80));
 
         // Should contain both src directory and main.rs file
-        assert!(result.contains("src"), "Output should contain src directory");
+        assert!(
+            result.contains("src"),
+            "Output should contain src directory"
+        );
         assert!(result.contains("main.rs"), "Output should contain main.rs");
     }
 
@@ -4448,7 +4471,9 @@ mod tests {
         fs::write(temp.path().join("a.txt"), "").expect("create a.txt");
         fs::write(temp.path().join("b.txt"), "").expect("create b.txt");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .show_root(false);
         fs_tree.ensure_tree_built();
 
         let result = fs_tree.render_optimistic(Some(80));
@@ -4501,13 +4526,19 @@ mod tests {
         let temp = tempfile::tempdir().expect("create temp dir");
         fs::write(temp.path().join("a.txt"), "").expect("create a.txt");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .show_root(false);
         fs_tree.ensure_tree_built();
 
         let result = fs_tree.render_optimistic(Some(80));
         let lines: Vec<&str> = result.lines().collect();
 
-        assert_eq!(lines.len(), 1, "Should have only 1 file line (no root header)");
+        assert_eq!(
+            lines.len(),
+            1,
+            "Should have only 1 file line (no root header)"
+        );
         assert!(
             lines[0].contains("└── "),
             "File line should have LAST_BRANCH connector"
@@ -4524,7 +4555,9 @@ mod tests {
         fs::write(src_dir.join("lib.rs"), "").expect("create lib.rs");
         fs::write(src_dir.join("main.rs"), "").expect("create main.rs");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .show_root(false);
         fs_tree.ensure_tree_built();
 
         let result = fs_tree.render_optimistic(Some(80));
@@ -4576,7 +4609,8 @@ mod tests {
 
         let temp = tempfile::tempdir().expect("create temp dir");
         // Create a file with a long name
-        let long_name = "this_is_a_very_long_filename_that_should_probably_be_truncated_at_some_point.rs";
+        let long_name =
+            "this_is_a_very_long_filename_that_should_probably_be_truncated_at_some_point.rs";
         fs::write(temp.path().join(long_name), "").expect("create file");
 
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
@@ -4671,7 +4705,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("create temp dir");
         fs::write(temp.path().join("a.txt"), "").expect("create file");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .show_root(false);
         fs_tree.ensure_tree_built();
 
         // Even at very narrow width, connectors should be intact
@@ -4695,7 +4731,8 @@ mod tests {
 
         let temp = tempfile::tempdir().expect("create temp dir");
         // Create a file with a very long name
-        let long_name = "this_is_an_extremely_long_filename_that_will_definitely_need_truncation.rs";
+        let long_name =
+            "this_is_an_extremely_long_filename_that_will_definitely_need_truncation.rs";
         fs::write(temp.path().join(long_name), "").expect("create file");
 
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
@@ -4721,7 +4758,9 @@ mod tests {
         let mut fs_tree = FileSystem::new(temp.path()).expect("valid path");
         fs_tree.ensure_tree_built();
 
-        let term = crate::terminal::TerminalBuilder::default().width(50).build();
+        let term = crate::terminal::TerminalBuilder::default()
+            .width(50)
+            .build();
 
         let result = fs_tree.render(&term);
 
@@ -4751,12 +4790,16 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // With Nerd Font enabled
-        let mut term_nerd = crate::terminal::TerminalBuilder::default().width(80).build();
+        let mut term_nerd = crate::terminal::TerminalBuilder::default()
+            .width(80)
+            .build();
         term_nerd.is_nerd_font = Some(true);
         let result_nerd = fs_tree.render(&term_nerd);
 
         // With Nerd Font disabled
-        let mut term_unicode = crate::terminal::TerminalBuilder::default().width(80).build();
+        let mut term_unicode = crate::terminal::TerminalBuilder::default()
+            .width(80)
+            .build();
         term_unicode.is_nerd_font = Some(false);
         let result_unicode = fs_tree.render(&term_unicode);
 
@@ -4794,10 +4837,7 @@ mod tests {
         let canonical = temp.path().canonicalize().expect("canonicalize");
 
         // File should have an OSC8 link with the absolute path
-        let file_link = format!(
-            "\x1b]8;;file://{}/hello.txt\x1b\\",
-            canonical.display()
-        );
+        let file_link = format!("\x1b]8;;file://{}/hello.txt\x1b\\", canonical.display());
         assert!(
             result.contains(&file_link),
             "Expected OSC8 link for hello.txt in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -4806,10 +4846,7 @@ mod tests {
         );
 
         // Nested file should have full path
-        let nested_link = format!(
-            "\x1b]8;;file://{}/sub/nested.rs\x1b\\",
-            canonical.display()
-        );
+        let nested_link = format!("\x1b]8;;file://{}/sub/nested.rs\x1b\\", canonical.display());
         assert!(
             result.contains(&nested_link),
             "Expected OSC8 link for sub/nested.rs in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -4818,10 +4855,7 @@ mod tests {
         );
 
         // Directory should also be linked
-        let dir_link = format!(
-            "\x1b]8;;file://{}/sub\x1b\\",
-            canonical.display()
-        );
+        let dir_link = format!("\x1b]8;;file://{}/sub\x1b\\", canonical.display());
         assert!(
             result.contains(&dir_link),
             "Expected OSC8 link for sub/ directory in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -5054,7 +5088,10 @@ mod tests {
         };
         let styled = fs.style_name(&ignored_node, "target", false);
         assert_eq!(styled, "target", "No ANSI codes when is_tty=false");
-        assert!(!styled.contains("\x1b["), "Should not contain escape sequences");
+        assert!(
+            !styled.contains("\x1b["),
+            "Should not contain escape sequences"
+        );
 
         // Test dot file
         let dot_node = TreeNode::File {
@@ -5152,7 +5189,10 @@ mod tests {
         let styled = fs.style_name(&node, "target", true);
 
         // Should be red (highlight) not dim
-        assert!(styled.contains("\x1b[31m"), "Should have red from highlight");
+        assert!(
+            styled.contains("\x1b[31m"),
+            "Should have red from highlight"
+        );
         assert!(!styled.contains("\x1b[2"), "Should not have dim code");
     }
 
@@ -5249,7 +5289,8 @@ mod tests {
         // Create files with special characters (excluding those invalid on Windows)
         fs::write(temp.path().join("file with spaces.txt"), "").expect("create spaced file");
         fs::write(temp.path().join("file-with-dashes.txt"), "").expect("create dashed file");
-        fs::write(temp.path().join("file_with_underscores.txt"), "").expect("create underscored file");
+        fs::write(temp.path().join("file_with_underscores.txt"), "")
+            .expect("create underscored file");
         fs::write(temp.path().join("file.multiple.dots.txt"), "").expect("create multi-dot file");
         fs::write(temp.path().join("(parentheses).txt"), "").expect("create parentheses file");
         fs::write(temp.path().join("[brackets].txt"), "").expect("create brackets file");
@@ -5341,7 +5382,9 @@ mod tests {
         }
 
         // Set max_entries to 25 (less than 50 files)
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").max_entries(25);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .max_entries(25);
         fs_tree.ensure_tree_built();
 
         let tree = fs_tree.tree().expect("tree should be built");
@@ -5378,7 +5421,10 @@ mod tests {
             .hide_dot_dirs(true);
         fs_tree.ensure_tree_built();
         let tree = fs_tree.tree().expect("tree");
-        assert!(tree.is_empty(), "Should see nothing when all entries are hidden");
+        assert!(
+            tree.is_empty(),
+            "Should see nothing when all entries are hidden"
+        );
     }
 
     #[test]
@@ -5434,7 +5480,12 @@ mod tests {
     fn test_create_error_dir_node_with_symlink() {
         let node = FileSystem::create_error_dir_node("symlink_error".to_string(), true);
 
-        if let TreeNode::Dir { is_symlink, has_error, .. } = node {
+        if let TreeNode::Dir {
+            is_symlink,
+            has_error,
+            ..
+        } = node
+        {
             assert!(is_symlink, "is_symlink should be true");
             assert!(has_error, "has_error should be true");
         } else {
@@ -5472,9 +5523,9 @@ mod tests {
         let node = TreeNode::Dir {
             name: "error_ignored".into(),
             children: vec![],
-            is_ignored: true,  // Would be dim
+            is_ignored: true, // Would be dim
             is_symlink: false,
-            has_error: true,   // Error takes priority
+            has_error: true, // Error takes priority
             at_depth_limit: false,
             metrics: None,
         };
@@ -5483,7 +5534,10 @@ mod tests {
 
         // Should have red but not dim
         assert!(styled.contains("31"), "Should have red code for error");
-        assert!(!styled.contains("\x1b[2"), "Should not have dim code when error");
+        assert!(
+            !styled.contains("\x1b[2"),
+            "Should not have dim code when error"
+        );
     }
 
     #[test]
@@ -5493,7 +5547,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("create temp dir");
         fs::write(temp.path().join("a.txt"), "").expect("create file");
 
-        let mut fs_tree = FileSystem::new(temp.path()).expect("valid path").show_root(false);
+        let mut fs_tree = FileSystem::new(temp.path())
+            .expect("valid path")
+            .show_root(false);
         fs_tree.ensure_tree_built();
 
         // Very narrow width (10 columns) - connector takes 4, icon takes ~2
@@ -5548,7 +5604,9 @@ mod tests {
         fs_tree.ensure_tree_built();
 
         // Create terminal with is_tty = false
-        let mut term = crate::terminal::TerminalBuilder::default().width(80).build();
+        let mut term = crate::terminal::TerminalBuilder::default()
+            .width(80)
+            .build();
         term.is_tty = false;
 
         let result = fs_tree.render(&term);
@@ -5597,7 +5655,10 @@ mod tests {
 
         // Files without extension should get base file icon
         assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::file::BASE);
-        assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::BASE);
+        assert_eq!(
+            fs.get_icon(&node, 0, Some(false)),
+            icons::unicode::file::BASE
+        );
     }
 
     #[test]

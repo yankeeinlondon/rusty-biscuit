@@ -171,7 +171,10 @@ impl OrderedList {
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no prefix, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
+                    let content = term.map_or_else(
+                        || component.render_optimistic(Some(child_width)),
+                        |t| component.render_in_width(t, child_width),
+                    );
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -185,7 +188,10 @@ impl OrderedList {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&prefix);
                     let child_width = term_width.saturating_sub(prefix_width);
-                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
+                    let content = term.map_or_else(
+                        || component.render_optimistic(Some(child_width)),
+                        |t| component.render_in_width(t, child_width),
+                    );
                     result.push_str(&content);
                 }
             }
@@ -295,10 +301,7 @@ impl From<Vec<&RenderableContent>> for UnorderedList {
                 configure_component_wrap(item, indent);
             }
         }
-        UnorderedList {
-            items,
-            ..list
-        }
+        UnorderedList { items, ..list }
     }
 }
 
@@ -417,7 +420,10 @@ impl UnorderedList {
                 RenderableContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no bullet, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
-                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
+                    let content = term.map_or_else(
+                        || component.render_optimistic(Some(child_width)),
+                        |t| component.render_in_width(t, child_width),
+                    );
                     let indent_str = " ".repeat(indent as usize);
                     for (j, line) in content.lines().enumerate() {
                         if j > 0 {
@@ -431,7 +437,10 @@ impl UnorderedList {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&self.bullet);
                     let child_width = term_width.saturating_sub(bullet_width);
-                    let content = term.map_or_else(|| component.render_optimistic(Some(child_width)), |t| component.render_in_width(t, child_width));
+                    let content = term.map_or_else(
+                        || component.render_optimistic(Some(child_width)),
+                        |t| component.render_in_width(t, child_width),
+                    );
                     result.push_str(&content);
                 }
             }
@@ -604,7 +613,13 @@ mod tests {
         let result = list.render_optimistic(Some(width));
         for line in result.lines() {
             let vis = visible_width(line) as u32;
-            assert!(vis <= width, "Line exceeds width {}: {:?} ({})", width, line, vis);
+            assert!(
+                vis <= width,
+                "Line exceeds width {}: {:?} ({})",
+                width,
+                line,
+                vis
+            );
         }
     }
 
@@ -621,8 +636,16 @@ mod tests {
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
         for line in &lines[1..] {
-            assert!(line.starts_with("  "), "Should have 2-space indent: {:?}", line);
-            assert!(!line.starts_with("   "), "Should not exceed 2-space indent: {:?}", line);
+            assert!(
+                line.starts_with("  "),
+                "Should have 2-space indent: {:?}",
+                line
+            );
+            assert!(
+                !line.starts_with("   "),
+                "Should not exceed 2-space indent: {:?}",
+                line
+            );
         }
     }
 
@@ -632,14 +655,20 @@ mod tests {
         use crate::components::prose::Prose;
 
         let mut list = UnorderedList::empty();
-        list.add(Prose::new("This is a long prose item that should wrap automatically"));
+        list.add(Prose::new(
+            "This is a long prose item that should wrap automatically",
+        ));
         let result = list.render_optimistic(Some(25));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
         // Continuation lines aligned after bullet (2 spaces)
         for line in &lines[1..] {
-            assert!(line.starts_with("  "), "Should align after bullet: {:?}", line);
+            assert!(
+                line.starts_with("  "),
+                "Should align after bullet: {:?}",
+                line
+            );
         }
     }
 
@@ -659,8 +688,16 @@ mod tests {
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         assert!(lines[0].starts_with("• "));
         for line in &lines[1..] {
-            assert!(line.starts_with("  "), "Should have 2-space indent: {:?}", line);
-            assert!(!line.starts_with("    "), "Should NOT have 4-space double indent: {:?}", line);
+            assert!(
+                line.starts_with("  "),
+                "Should have 2-space indent: {:?}",
+                line
+            );
+            assert!(
+                !line.starts_with("    "),
+                "Should NOT have 4-space double indent: {:?}",
+                line
+            );
         }
     }
 
@@ -687,7 +724,11 @@ mod tests {
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
         // Explicit Some(4) should be preserved, not overwritten to 2
         for line in &lines[1..] {
-            assert!(line.starts_with("    "), "Should have 4-space indent: {:?}", line);
+            assert!(
+                line.starts_with("    "),
+                "Should have 4-space indent: {:?}",
+                line
+            );
         }
     }
 }

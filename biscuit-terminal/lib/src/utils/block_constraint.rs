@@ -436,9 +436,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         if is_continuation && indent > 0 {
                             head = format!("{}{}", " ".repeat(indent), head);
                         }
-                        let tail = trim_leading_whitespace_preserve_escapes(
-                            &remaining[split_at..],
-                        );
+                        let tail = trim_leading_whitespace_preserve_escapes(&remaining[split_at..]);
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -498,9 +496,7 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         // Always trim leading whitespace so that breaking on
                         // non-whitespace chars (e.g. comma in "a, b") doesn't
                         // carry a stray space into the next line.
-                        let tail = trim_leading_whitespace_preserve_escapes(
-                            &remaining[split_at..],
-                        );
+                        let tail = trim_leading_whitespace_preserve_escapes(&remaining[split_at..]);
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;

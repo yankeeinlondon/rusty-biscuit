@@ -1908,24 +1908,36 @@ mod tests {
 
     #[test]
     fn test_parse_column_width() {
-        assert!(matches!(parse_column_width("50").unwrap(), ColumnWidth::Fixed(50)));
-        assert!(matches!(parse_column_width("80ch").unwrap(), ColumnWidth::Fixed(80)));
-        
+        assert!(matches!(
+            parse_column_width("50").unwrap(),
+            ColumnWidth::Fixed(50)
+        ));
+        assert!(matches!(
+            parse_column_width("80ch").unwrap(),
+            ColumnWidth::Fixed(80)
+        ));
+
         let width = parse_column_width("40%").unwrap();
         if let ColumnWidth::Percent(p) = width {
             assert!((p - 0.4).abs() < f32::EPSILON);
         } else {
             panic!("Expected Percent");
         }
-        
+
         assert!(parse_column_width("invalid").is_err());
         assert!(parse_column_width("150%").is_err());
     }
 
     #[test]
     fn test_extract_color() {
-        assert_eq!(extract_color("Label: 10 #ff0000"), ("Label: 10", Some("#ff0000".to_string())));
-        assert_eq!(extract_color("Label: 10 color: #00ff00"), ("Label: 10", Some("#00ff00".to_string())));
+        assert_eq!(
+            extract_color("Label: 10 #ff0000"),
+            ("Label: 10", Some("#ff0000".to_string()))
+        );
+        assert_eq!(
+            extract_color("Label: 10 color: #00ff00"),
+            ("Label: 10", Some("#00ff00".to_string()))
+        );
         assert_eq!(extract_color("Label: 10"), ("Label: 10", None));
     }
 
