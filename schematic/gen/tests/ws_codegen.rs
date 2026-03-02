@@ -192,6 +192,81 @@ fn elevenlabs_client_has_api_key_env_mapping() {
     );
 }
 
+#[test]
+fn elevenlabs_connect_signature_uses_typed_path_and_query_params() {
+    let plan = lower_to_plan(&define_elevenlabs_websocket_api()).unwrap();
+    let tokens = generate_ws_client_module(&plan);
+    let code = tokens.to_string();
+
+    assert!(
+        code.contains("TextToSpeechConnectionParams"),
+        "Expected endpoint query params struct for TextToSpeech"
+    );
+    assert!(
+        code.contains("connect_text_to_speech"),
+        "Expected connect_text_to_speech method"
+    );
+    assert!(
+        code.contains("voice_id : impl Into < String >"),
+        "Expected typed voice_id path argument"
+    );
+    assert!(
+        code.contains("params : TextToSpeechConnectionParams"),
+        "Expected typed connection params argument"
+    );
+    assert!(
+        code.contains("replace")
+            && code.contains("{voice_id}")
+            && code.contains("urlencoding :: encode"),
+        "Expected path placeholder substitution"
+    );
+}
+
+#[test]
+fn correlated_clients_use_options_request_timeout() {
+    let plan = lower_to_plan(&define_unfolded_circle_core_ws_api()).unwrap();
+    let tokens = generate_ws_client_module(&plan);
+    let code = tokens.to_string();
+
+    assert!(
+        code.contains("request_timeout : _options . request_timeout"),
+        "Expected request timeout to come from options"
+    );
+    assert!(
+        !code.contains("request_timeout : std :: time :: Duration :: from_secs"),
+        "Should not hardcode correlated request timeout"
+    );
+}
+
+#[test]
+fn client_connect_uses_transport_config_and_disable_nagle() {
+    let plan = lower_to_plan(&define_unfolded_circle_core_ws_api()).unwrap();
+    let tokens = generate_ws_client_module(&plan);
+    let code = tokens.to_string();
+
+    assert!(
+        code.contains("connect_async_with_config"),
+        "Expected connect_async_with_config usage"
+    );
+    assert!(
+        code.contains("options . websocket_config . clone"),
+        "Expected websocket config to be passed into connect"
+    );
+    assert!(
+        code.contains("options . disable_nagle"),
+        "Expected disable_nagle to be passed into connect"
+    );
+}
+
+#[test]
+fn ws_shared_exposes_options_builder() {
+    let tokens = generate_ws_shared_module();
+    let code = tokens.to_string();
+    assert!(code.contains("WsClientOptionsBuilder"));
+    assert!(code.contains("fn builder"));
+    assert!(code.contains("fn build"));
+}
+
 // --- Host generation tests ---
 
 #[test]

@@ -310,7 +310,8 @@ mod tests {
                 has_lifecycle_open: false,
                 has_lifecycle_close: false,
                 has_lifecycle_keepalive: false,
-                connection_param_count: 0,
+                path_params: vec![],
+                query_params: vec![],
             }],
             diagnostics: vec![],
         }

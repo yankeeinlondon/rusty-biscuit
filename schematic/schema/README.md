@@ -9,9 +9,8 @@ Generated API outputs produced by `schematic-gen`.
 `schematic-schema` currently provides:
 
 - Generated Rust REST clients (request structs, enums, typed response handling)
-- Generated WebSocket **definition helper modules** for APIs that are defined as `WebSocketApi` in `schematic-definitions`
-
-Important: WebSocket runtime/client code generation is not implemented yet. WS modules in this crate expose typed API definitions and message model types, not a live WS transport client.
+- Generated Rust WebSocket clients and hosts (transport runtimes, event streams, correlated request-response)
+- Typed API definitions and message model types for consumption
 
 ## Available Modules
 
@@ -31,7 +30,7 @@ Important: WebSocket runtime/client code generation is not implemented yet. WS m
 - `openai`
 - `unfolded_circle_core_rest`
 
-### WebSocket definition helper modules
+### WebSocket runtime modules
 
 - `elevenlabs_ws`
 - `unfolded_circle_core_ws`
@@ -52,7 +51,7 @@ async fn main() -> Result<(), SchematicError> {
 }
 ```
 
-## WebSocket Definition Usage
+## WebSocket Usage
 
 ```rust
 use schematic_schema::prelude::*;

@@ -61,6 +61,10 @@ fn generate_ws_error() -> TokenStream {
             #[error("Authentication timed out")]
             AuthTimeout,
 
+            /// WebSocket handshake timed out.
+            #[error("Handshake timed out after {0}s")]
+            HandshakeTimeout(u64),
+
             /// Request timed out waiting for a correlated response.
             #[error("Request timed out after {0}s")]
             RequestTimeout(u64),
@@ -109,6 +113,8 @@ fn generate_ws_client_options() -> TokenStream {
             pub reconnect: Option<ReconnectPolicy>,
             /// Whether to disable Nagle's algorithm (TCP_NODELAY).
             pub disable_nagle: bool,
+            /// Optional websocket transport configuration.
+            pub websocket_config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
         }
 
         impl Default for WsClientOptions {
@@ -122,7 +128,98 @@ fn generate_ws_client_options() -> TokenStream {
                     inbound_capacity: 256,
                     reconnect: None,
                     disable_nagle: false,
+                    websocket_config: None,
                 }
+            }
+        }
+
+        impl WsClientOptions {
+            /// Create a fluent options builder.
+            #[must_use]
+            pub fn builder() -> WsClientOptionsBuilder {
+                WsClientOptionsBuilder {
+                    options: Self::default(),
+                }
+            }
+        }
+
+        /// Fluent builder for [`WsClientOptions`].
+        #[derive(Debug, Clone)]
+        pub struct WsClientOptionsBuilder {
+            options: WsClientOptions,
+        }
+
+        impl WsClientOptionsBuilder {
+            /// Set handshake timeout.
+            #[must_use]
+            pub fn handshake_timeout(mut self, timeout: std::time::Duration) -> Self {
+                self.options.handshake_timeout = timeout;
+                self
+            }
+
+            /// Set receive timeout.
+            #[must_use]
+            pub fn receive_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+                self.options.receive_timeout = timeout;
+                self
+            }
+
+            /// Set request timeout.
+            #[must_use]
+            pub fn request_timeout(mut self, timeout: std::time::Duration) -> Self {
+                self.options.request_timeout = timeout;
+                self
+            }
+
+            /// Set maximum number of pending requests.
+            #[must_use]
+            pub fn max_pending_requests(mut self, max_pending: usize) -> Self {
+                self.options.max_pending_requests = max_pending;
+                self
+            }
+
+            /// Set outbound queue capacity.
+            #[must_use]
+            pub fn outbound_capacity(mut self, capacity: usize) -> Self {
+                self.options.outbound_capacity = capacity;
+                self
+            }
+
+            /// Set inbound queue capacity.
+            #[must_use]
+            pub fn inbound_capacity(mut self, capacity: usize) -> Self {
+                self.options.inbound_capacity = capacity;
+                self
+            }
+
+            /// Set reconnect policy.
+            #[must_use]
+            pub fn reconnect(mut self, policy: Option<ReconnectPolicy>) -> Self {
+                self.options.reconnect = policy;
+                self
+            }
+
+            /// Set disable_nagle flag.
+            #[must_use]
+            pub fn disable_nagle(mut self, disable: bool) -> Self {
+                self.options.disable_nagle = disable;
+                self
+            }
+
+            /// Set websocket transport configuration.
+            #[must_use]
+            pub fn websocket_config(
+                mut self,
+                config: Option<tokio_tungstenite::tungstenite::protocol::WebSocketConfig>,
+            ) -> Self {
+                self.options.websocket_config = config;
+                self
+            }
+
+            /// Build options.
+            #[must_use]
+            pub fn build(self) -> WsClientOptions {
+                self.options
             }
         }
     }
@@ -219,10 +316,8 @@ fn generate_ws_transport_handle() -> TokenStream {
             pub(crate) writer_tx: mpsc::Sender<WriterCommand>,
             /// Connection state watcher.
             pub(crate) state_rx: watch::Receiver<WsConnectionState>,
-            /// Reader task join handle.
-            pub(crate) reader_handle: JoinHandle<()>,
-            /// Writer task join handle.
-            pub(crate) writer_handle: JoinHandle<()>,
+            /// Supervisor task join handle.
+            pub(crate) supervisor_handle: JoinHandle<()>,
             /// Monotonic request ID generator.
             pub(crate) next_id: Arc<AtomicU64>,
             /// Pending correlated requests awaiting responses.
@@ -243,9 +338,30 @@ fn generate_ws_transport_handle() -> TokenStream {
 
         impl Drop for WsTransportHandle {
             fn drop(&mut self) {
-                self.reader_handle.abort();
-                self.writer_handle.abort();
+                self.supervisor_handle.abort();
             }
+        }
+
+        /// Compute reconnect delay with capped exponential backoff and jitter.
+        pub(crate) fn reconnect_delay(policy: &ReconnectPolicy, attempt: u32) -> std::time::Duration {
+            let multiplier = policy.multiplier.max(1.0);
+            let exp = multiplier.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
+            let base_secs = (policy.initial_backoff.as_secs_f64() * exp)
+                .min(policy.max_backoff.as_secs_f64())
+                .max(0.0);
+            let jitter_ratio = policy.jitter.clamp(0.0, 1.0);
+
+            if jitter_ratio <= f64::EPSILON {
+                return std::time::Duration::from_secs_f64(base_secs);
+            }
+
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos());
+            let normalized = f64::from(nanos) / 1_000_000_000.0;
+            let span = base_secs * jitter_ratio;
+            let offset = (normalized * 2.0 - 1.0) * span;
+            std::time::Duration::from_secs_f64((base_secs + offset).max(0.0))
         }
     }
 }
@@ -290,9 +406,11 @@ mod tests {
         let code = tokens.to_string();
         assert!(code.contains("WsError"));
         assert!(code.contains("WsClientOptions"));
+        assert!(code.contains("WsClientOptionsBuilder"));
         assert!(code.contains("ReconnectPolicy"));
         assert!(code.contains("WsConnectionState"));
         assert!(code.contains("WsTransportHandle"));
+        assert!(code.contains("reconnect_delay"));
         assert!(code.contains("WsEncode"));
         assert!(code.contains("WsDecode"));
     }

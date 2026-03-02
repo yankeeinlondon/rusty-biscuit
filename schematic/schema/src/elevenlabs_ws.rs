@@ -23,6 +23,38 @@ pub use schematic_definitions::elevenlabs::*;
 pub fn define_api() -> schematic_define::websocket::WebSocketApi {
     schematic_definitions::define_elevenlabs_websocket_api()
 }
+///Typed query parameters for the TextToSpeech websocket endpoint.
+#[derive(Debug, Clone, Default)]
+pub struct TextToSpeechConnectionParams {
+    ///TTS model to use
+    pub model_id: Option<String>,
+    ///Target language code
+    pub language_code: Option<String>,
+    ///Enable logging (default: true)
+    pub enable_logging: Option<bool>,
+    ///Parse SSML tags
+    pub enable_ssml_parsing: Option<bool>,
+    ///Audio output format
+    pub output_format: Option<String>,
+    ///Timeout in seconds (default: 20)
+    pub inactivity_timeout: Option<i64>,
+    ///Synchronize alignment data
+    pub sync_alignment: Option<bool>,
+    ///Auto mode for generation
+    pub auto_mode: Option<bool>,
+    ///Text normalization: auto, on, off
+    pub apply_text_normalization: Option<String>,
+    ///Reproducibility seed
+    pub seed: Option<i64>,
+}
+///Typed query parameters for the MultiContextTextToSpeech websocket endpoint.
+#[derive(Debug, Clone, Default)]
+pub struct MultiContextTextToSpeechConnectionParams {
+    ///TTS model to use
+    pub model_id: Option<String>,
+    ///Audio output format
+    pub output_format: Option<String>,
+}
 ///ElevenLabs Text-to-Speech WebSocket API for real-time streaming
 pub struct ElevenLabsTTSWs {
     base_url: String,
@@ -82,11 +114,69 @@ impl ElevenLabsTTSWs {
     ///Connect to the TextToSpeech endpoint.
     pub async fn connect_text_to_speech(
         &self,
+        voice_id: impl Into<String>,
+        params: TextToSpeechConnectionParams,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<TextToSpeechClient, super::ws_shared::WsError> {
-        let url = format!(
-            "{}{}", self.base_url, "/v1/text-to-speech/{voice_id}/stream-input"
-        );
+        let mut path = "/v1/text-to-speech/{voice_id}/stream-input".to_string();
+        let voice_id_value = voice_id.into();
+        path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(value) = params.model_id.as_ref() {
+            query_pairs.push(("model_id".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.language_code.as_ref() {
+            query_pairs.push(("language_code".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.enable_logging.as_ref() {
+            query_pairs.push(("enable_logging".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.enable_ssml_parsing.as_ref() {
+            query_pairs.push(("enable_ssml_parsing".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.output_format.as_ref() {
+            query_pairs.push(("output_format".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.inactivity_timeout.as_ref() {
+            query_pairs.push(("inactivity_timeout".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.sync_alignment.as_ref() {
+            query_pairs.push(("sync_alignment".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.auto_mode.as_ref() {
+            query_pairs.push(("auto_mode".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.apply_text_normalization.as_ref() {
+            query_pairs
+                .push(("apply_text_normalization".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.seed.as_ref() {
+            query_pairs.push(("seed".to_string(), value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let query = query_pairs
+                .into_iter()
+                .map(|(k, v)| {
+                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push('&');
+            } else {
+                path.push('?');
+            }
+            path.push_str(&query);
+        }
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -97,11 +187,44 @@ impl ElevenLabsTTSWs {
     ///Connect to the MultiContextTextToSpeech endpoint.
     pub async fn connect_multi_context_text_to_speech(
         &self,
+        voice_id: impl Into<String>,
+        params: MultiContextTextToSpeechConnectionParams,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<MultiContextTextToSpeechClient, super::ws_shared::WsError> {
-        let url = format!(
-            "{}{}", self.base_url, "/v1/text-to-speech/{voice_id}/multi-stream-input"
-        );
+        let mut path = "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string();
+        let voice_id_value = voice_id.into();
+        path = path.replace("{voice_id}", urlencoding::encode(&voice_id_value).as_ref());
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        if let Some(value) = params.model_id.as_ref() {
+            query_pairs.push(("model_id".to_string(), value.to_string()));
+        }
+        if let Some(value) = params.output_format.as_ref() {
+            query_pairs.push(("output_format".to_string(), value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let query = query_pairs
+                .into_iter()
+                .map(|(k, v)| {
+                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push('&');
+            } else {
+                path.push('?');
+            }
+            path.push_str(&query);
+        }
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -123,16 +246,19 @@ pub struct TextToSpeechClient {
     >,
 }
 impl TextToSpeechClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -141,14 +267,32 @@ impl TextToSpeechClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -161,72 +305,102 @@ impl TextToSpeechClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let _ = event_tx.send(Ok(value)).await;
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match TextToSpeechClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let _ = event_tx.send(Ok(value)).
+                        await; } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let _ = event_tx.send(Ok(value)). await; } Err(e)
+                        => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };
@@ -300,16 +474,19 @@ pub struct MultiContextTextToSpeechClient {
     >,
 }
 impl MultiContextTextToSpeechClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -318,14 +495,32 @@ impl MultiContextTextToSpeechClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -338,72 +533,102 @@ impl MultiContextTextToSpeechClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let _ = event_tx.send(Ok(value)).await;
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match MultiContextTextToSpeechClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let _ = event_tx.send(Ok(value)).
+                        await; } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let _ = event_tx.send(Ok(value)). await; } Err(e)
+                        => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };

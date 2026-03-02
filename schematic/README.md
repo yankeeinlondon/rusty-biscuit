@@ -89,6 +89,41 @@ async fn main() -> Result<(), SchematicError> {
 }
 ```
 
+## WebSocket Quick Start
+
+```rust
+use std::time::Duration;
+
+use schematic_schema::elevenlabs_ws::{
+    ElevenLabsTTSWs, TextToSpeechConnectionParams,
+};
+use schematic_schema::ws_shared::WsClientOptions;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut api = ElevenLabsTTSWs::new();
+    api.headers = api.headers.clone().use_api_key("my-key", "xi-api-key");
+
+    let params = TextToSpeechConnectionParams {
+        model_id: Some("eleven_turbo_v2_5".to_string()),
+        ..Default::default()
+    };
+
+    let options = WsClientOptions::builder()
+        .request_timeout(Duration::from_secs(10))
+        .disable_nagle(true)
+        .build();
+
+    let ws = api
+        .connect_text_to_speech("voice_id_here", params, options)
+        .await?;
+
+    ws.send(serde_json::json!({"text": "Hello from Schematic"})).await?;
+    ws.close().await?;
+    Ok(())
+}
+```
+
 ## Packages
 
 | Package                                 | Description                    | Details                           |

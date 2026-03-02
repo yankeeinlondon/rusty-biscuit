@@ -5,6 +5,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schematic_define::websocket::{FrameFormat, ParamType};
 
 use super::plan::{
     CorrelationStrategy, EndpointPlan, LifecycleMessagePlan, WsAuthStrategy, WsRuntimePlan,
@@ -28,6 +29,98 @@ pub fn generate_ws_client_module(plan: &WsRuntimePlan) -> TokenStream {
 fn ws_struct_name(api_name: &str, suffix: &str) -> proc_macro2::Ident {
     let base = api_name.strip_suffix("Ws").unwrap_or(api_name);
     format_ident!("{}Ws{}", base, suffix)
+}
+
+fn param_struct_name(endpoint_id: &str) -> proc_macro2::Ident {
+    format_ident!("{}ConnectionParams", endpoint_id)
+}
+
+fn sanitize_ident(name: &str) -> String {
+    let mut out = String::new();
+    let mut chars = name.chars();
+
+    if let Some(first) = chars.next() {
+        if first.is_ascii_alphabetic() || first == '_' {
+            out.push(first.to_ascii_lowercase());
+        } else {
+            out.push('_');
+            if first.is_ascii_digit() {
+                out.push(first);
+            }
+        }
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+
+    if out.is_empty() {
+        "_param".to_string()
+    } else {
+        out
+    }
+}
+
+fn param_ident(name: &str) -> proc_macro2::Ident {
+    format_ident!("{}", sanitize_ident(name))
+}
+
+fn ws_param_type_tokens(param_type: ParamType) -> TokenStream {
+    match param_type {
+        ParamType::String => quote! { String },
+        ParamType::Integer => quote! { i64 },
+        ParamType::Boolean => quote! { bool },
+        ParamType::Float => quote! { f64 },
+    }
+}
+
+fn generate_connection_param_struct(ep: &EndpointPlan) -> TokenStream {
+    if ep.query_params.is_empty() {
+        return TokenStream::new();
+    }
+
+    let struct_name = param_struct_name(&ep.id);
+    let all_optional = ep.query_params.iter().all(|p| !p.required);
+    let derives = if all_optional {
+        quote! { #[derive(Debug, Clone, Default)] }
+    } else {
+        quote! { #[derive(Debug, Clone)] }
+    };
+
+    let fields: Vec<TokenStream> = ep
+        .query_params
+        .iter()
+        .map(|param| {
+            let ident = param_ident(&param.name);
+            let base_ty = ws_param_type_tokens(param.param_type);
+            let ty = if param.required {
+                quote! { #base_ty }
+            } else {
+                quote! { Option<#base_ty> }
+            };
+            let doc = param
+                .description
+                .as_deref()
+                .unwrap_or("Connection query parameter.");
+            quote! {
+                #[doc = #doc]
+                pub #ident: #ty,
+            }
+        })
+        .collect();
+
+    let doc = format!("Typed query parameters for the {} websocket endpoint.", ep.id);
+    quote! {
+        #[doc = #doc]
+        #derives
+        pub struct #struct_name {
+            #(#fields)*
+        }
+    }
 }
 
 fn generate_headers_init(plan: &WsRuntimePlan) -> TokenStream {
@@ -104,6 +197,12 @@ fn generate_api_struct(plan: &WsRuntimePlan) -> TokenStream {
     let base_url = &plan.base_url;
     let description = &plan.description;
     let headers_init = generate_headers_init(plan);
+    let connection_param_structs: Vec<TokenStream> = plan
+        .endpoints
+        .iter()
+        .map(generate_connection_param_struct)
+        .filter(|tokens| !tokens.is_empty())
+        .collect();
     let connect_methods: Vec<TokenStream> = plan
         .endpoints
         .iter()
@@ -111,6 +210,8 @@ fn generate_api_struct(plan: &WsRuntimePlan) -> TokenStream {
         .collect();
 
     quote! {
+        #(#connection_param_structs)*
+
         #[doc = #description]
         pub struct #struct_name {
             base_url: String,
@@ -159,14 +260,112 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
     let client_name = format_ident!("{}Client", ep.id);
     let path = &ep.path;
     let description = format!("Connect to the {} endpoint.", ep.id);
+    let params_struct_name = param_struct_name(&ep.id);
+
+    let mut method_args: Vec<TokenStream> = ep
+        .path_params
+        .iter()
+        .map(|param| {
+            let ident = param_ident(&param.name);
+            match param.param_type {
+                ParamType::String => quote! { #ident: impl Into<String> },
+                _ => {
+                    let ty = ws_param_type_tokens(param.param_type);
+                    quote! { #ident: #ty }
+                }
+            }
+        })
+        .collect();
+
+    if !ep.query_params.is_empty() {
+        method_args.push(quote! { params: #params_struct_name });
+    }
+    method_args.push(quote! { options: super::ws_shared::WsClientOptions });
+
+    let path_substitutions: Vec<TokenStream> = ep
+        .path_params
+        .iter()
+        .map(|param| {
+            let ident = param_ident(&param.name);
+            let placeholder = format!("{{{}}}", param.name);
+            let value_ident = format_ident!("{}_value", ident);
+            let value_expr = match param.param_type {
+                ParamType::String => quote! { #ident.into() },
+                _ => quote! { #ident.to_string() },
+            };
+
+            quote! {
+                let #value_ident = #value_expr;
+                path = path.replace(#placeholder, urlencoding::encode(&#value_ident).as_ref());
+            }
+        })
+        .collect();
+
+    let query_collectors: Vec<TokenStream> = ep
+        .query_params
+        .iter()
+        .map(|param| {
+            let ident = param_ident(&param.name);
+            let name = &param.name;
+            if param.required {
+                quote! {
+                    query_pairs.push((#name.to_string(), params.#ident.to_string()));
+                }
+            } else {
+                quote! {
+                    if let Some(value) = params.#ident.as_ref() {
+                        query_pairs.push((#name.to_string(), value.to_string()));
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let query_assembly = if ep.query_params.is_empty() {
+        TokenStream::new()
+    } else {
+        quote! {
+            let mut query_pairs: Vec<(String, String)> = Vec::new();
+            #(#query_collectors)*
+            if !query_pairs.is_empty() {
+                query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                let query = query_pairs
+                    .into_iter()
+                    .map(|(k, v)| format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v)))
+                    .collect::<Vec<_>>()
+                    .join("&");
+                if path.contains('?') {
+                    path.push('&');
+                } else {
+                    path.push('?');
+                }
+                path.push_str(&query);
+            }
+        }
+    };
+    let path_binding = if ep.path_params.is_empty() && ep.query_params.is_empty() {
+        quote! { let path = #path.to_string(); }
+    } else {
+        quote! { let mut path = #path.to_string(); }
+    };
 
     quote! {
         #[doc = #description]
         pub async fn #method_name(
             &self,
-            options: super::ws_shared::WsClientOptions,
+            #(#method_args),*
         ) -> Result<#client_name, super::ws_shared::WsError> {
-            let url = format!("{}{}", self.base_url, #path);
+            #path_binding
+            #(#path_substitutions)*
+            #query_assembly
+
+            if path.contains('{') {
+                return Err(super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ));
+            }
+
+            let url = format!("{}{}", self.base_url, path);
             let header_pairs = self.headers.clone().build()
                 .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
             #client_name::connect(url, options, header_pairs).await
@@ -174,7 +373,7 @@ fn generate_connect_method(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
     }
 }
 
-fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStream {
+fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStream {
     let client_name = format_ident!("{}Client", ep.id);
     let has_correlation = matches!(ep.correlation, CorrelationStrategy::Correlated { .. });
     let lifecycle_helpers = generate_lifecycle_helpers(ep);
@@ -185,6 +384,29 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
     } = ep.correlation
     {
         let req_field = request_id_field;
+        let request_send_command = match plan.frame_format {
+            FrameFormat::JsonBinary | FrameFormat::RawBinary | FrameFormat::Mixed => {
+                quote! {
+                    let bytes = serde_json::to_vec(&msg)?;
+                    self.transport
+                        .writer_tx
+                        .send(super::ws_shared::WriterCommand::SendBinary(bytes))
+                        .await
+                        .map_err(|_| super::ws_shared::WsError::Disconnected)?;
+                }
+            }
+            FrameFormat::JsonText => {
+                quote! {
+                    let text = serde_json::to_string(&msg)?;
+                    self.transport
+                        .writer_tx
+                        .send(super::ws_shared::WriterCommand::SendText(text))
+                        .await
+                        .map_err(|_| super::ws_shared::WsError::Disconnected)?;
+                }
+            }
+        };
+
         quote! {
             /// Send a correlated request and wait for the response.
             pub async fn request(
@@ -209,12 +431,7 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
                     map.insert(#req_field.to_string(), serde_json::Value::Number(id.into()));
                 }
 
-                let text = serde_json::to_string(&msg)?;
-                self.transport
-                    .writer_tx
-                    .send(super::ws_shared::WriterCommand::SendText(text))
-                    .await
-                    .map_err(|_| super::ws_shared::WsError::Disconnected)?;
+                #request_send_command
 
                 let timeout = self.request_timeout;
                 match tokio::time::timeout(timeout, rx).await {
@@ -231,6 +448,53 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
         TokenStream::new()
     };
 
+    let send_typed_method = match plan.frame_format {
+        FrameFormat::JsonBinary | FrameFormat::RawBinary | FrameFormat::Mixed => {
+            quote! {
+                /// Send a strongly-typed message payload.
+                pub async fn send_typed<M: serde::Serialize + ?Sized>(
+                    &self,
+                    message: &M,
+                ) -> Result<(), super::ws_shared::WsError> {
+                    let bytes = serde_json::to_vec(message)?;
+                    self.transport
+                        .writer_tx
+                        .send(super::ws_shared::WriterCommand::SendBinary(bytes))
+                        .await
+                        .map_err(|_| super::ws_shared::WsError::Disconnected)
+                }
+            }
+        }
+        FrameFormat::JsonText => {
+            quote! {
+                /// Send a strongly-typed message payload.
+                pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+                    &self,
+                    message: &M,
+                ) -> Result<(), super::ws_shared::WsError> {
+                    let text = super::ws_shared::WsEncode::ws_encode(message)?;
+                    self.transport
+                        .writer_tx
+                        .send(super::ws_shared::WriterCommand::SendText(text))
+                        .await
+                        .map_err(|_| super::ws_shared::WsError::Disconnected)
+                }
+            }
+        }
+    };
+
+    let constructor_extra_fields = if let CorrelationStrategy::Correlated {
+        ..
+    } = ep.correlation
+    {
+        quote! {
+            request_timeout: _options.request_timeout,
+            max_pending: _options.max_pending_requests,
+        }
+    } else {
+        TokenStream::new()
+    };
+
     let extra_fields = if has_correlation {
         quote! {
             request_timeout: std::time::Duration,
@@ -240,20 +504,6 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
         TokenStream::new()
     };
 
-    let constructor_extra_fields = if let CorrelationStrategy::Correlated {
-        default_timeout_secs,
-        ..
-    } = ep.correlation
-    {
-        quote! {
-            request_timeout: std::time::Duration::from_secs(#default_timeout_secs),
-            max_pending: _options.max_pending_requests,
-        }
-    } else {
-        TokenStream::new()
-    };
-
-    // Generate reader task message handling based on correlation
     let reader_message_handler = if let CorrelationStrategy::Correlated {
         ref response_id_field,
         ..
@@ -264,7 +514,7 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
             Ok(value) => {
                 let mut handled = false;
                 if let Some(req_id) = value.get(#resp_field).and_then(|v| v.as_u64()) {
-                    let mut pending = pending_clone.lock().await;
+                    let mut pending = pending_for_supervisor.lock().await;
                     if let Some(tx) = pending.remove(&req_id) {
                         let _ = tx.send(value.clone());
                         handled = true;
@@ -283,19 +533,18 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
         }
     };
 
-    let pending_clone_decl = if has_correlation {
-        quote! { let pending_clone = pending.clone(); }
-    } else {
-        TokenStream::new()
-    };
-
     let pending_cleanup = if has_correlation {
         quote! {
-            let mut pending = pending_clone.lock().await;
+            let mut pending = pending_for_supervisor.lock().await;
             for (_, tx) in pending.drain() {
                 drop(tx);
             }
         }
+    } else {
+        TokenStream::new()
+    };
+    let pending_for_supervisor_decl = if has_correlation {
+        quote! { let pending_for_supervisor = pending.clone(); }
     } else {
         TokenStream::new()
     };
@@ -311,17 +560,20 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
         }
 
         impl #client_name {
-            /// Connect to the endpoint.
-            pub(crate) async fn connect(
-                url: String,
-                _options: super::ws_shared::WsClientOptions,
-                header_pairs: Vec<(String, String)>,
-            ) -> Result<Self, super::ws_shared::WsError> {
-                use tokio_tungstenite::connect_async;
+            async fn dial(
+                url: &str,
+                options: &super::ws_shared::WsClientOptions,
+                header_pairs: &[(String, String)],
+            ) -> Result<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+                super::ws_shared::WsError,
+            > {
                 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-                let mut request = url.into_client_request()?;
-                for (name, value) in &header_pairs {
+                let mut request = url.to_string().into_client_request()?;
+                for (name, value) in header_pairs {
                     if let (Ok(hdr_name), Ok(hdr_value)) = (
                         name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                         value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
@@ -330,78 +582,168 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
                     }
                 }
 
-                let (ws_stream, _) = connect_async(request).await?;
-                let (write, read) = futures_util::StreamExt::split(ws_stream);
+                let connect = tokio_tungstenite::connect_async_with_config(
+                    request,
+                    options.websocket_config.clone(),
+                    options.disable_nagle,
+                );
 
-                let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
+                let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+                    .await
+                    .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs()))??;
+
+                Ok(ws_stream)
+            }
+
+            /// Connect to the endpoint.
+            pub(crate) async fn connect(
+                url: String,
+                _options: super::ws_shared::WsClientOptions,
+                header_pairs: Vec<(String, String)>,
+            ) -> Result<Self, super::ws_shared::WsError> {
+                let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+
+                let _receive_timeout = _options.receive_timeout;
+                // TODO: Enforce receive_timeout as an idle inbound timeout in the supervisor loop.
+
+                let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
                 let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-                let (state_tx, state_rx) = tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Ready);
+                let (state_tx, state_rx) = tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
                 let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
                 let pending: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>> =
                     std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
-                #pending_clone_decl
+                let url_for_supervisor = url.clone();
+                let header_pairs_for_supervisor = header_pairs.clone();
+                let options_for_supervisor = _options.clone();
+                #pending_for_supervisor_decl
 
-                // Spawn reader task
-                let reader_handle = tokio::spawn(async move {
-                    use futures_util::StreamExt;
+                let supervisor_handle = tokio::spawn(async move {
+                    use futures_util::{SinkExt, StreamExt};
                     use tokio_tungstenite::tungstenite::Message;
 
-                    let mut read = read;
-                    while let Some(msg_result) = read.next().await {
-                        match msg_result {
-                            Ok(Message::Text(text)) => {
-                                match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                                    #reader_message_handler
-                                    Err(e) => {
-                                        let _ = event_tx.send(Err(super::ws_shared::WsError::Serde(e))).await;
-                                    }
-                                }
-                            }
-                            Ok(Message::Close(_)) => {
+                    let mut active_stream = Some(ws_stream);
+                    let reconnect_policy = options_for_supervisor.reconnect.clone();
+                    let mut reconnect_attempt: u32 = 0;
+                    let mut manual_close = false;
+
+                    loop {
+                        let stream = if let Some(stream) = active_stream.take() {
+                            reconnect_attempt = 0;
+                            stream
+                        } else {
+                            let Some(policy) = reconnect_policy.as_ref() else {
+                                let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                                break;
+                            };
+
+                            if let Some(max_attempts) = policy.max_attempts
+                                && reconnect_attempt >= max_attempts
+                            {
                                 let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                                 break;
                             }
-                            Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Frame(_)) => {}
-                            Ok(Message::Binary(_)) => {}
-                            Err(e) => {
-                                let _ = event_tx.send(Err(super::ws_shared::WsError::Transport(e))).await;
-                                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
-                                break;
-                            }
-                        }
-                    }
 
-                    #pending_cleanup
-                });
+                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
+                            let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
+                            tokio::time::sleep(delay).await;
 
-                // Spawn writer task
-                let writer_handle = tokio::spawn(async move {
-                    use futures_util::SinkExt;
-                    use tokio_tungstenite::tungstenite::Message;
-
-                    let mut write = write;
-                    let mut writer_rx = writer_rx;
-                    while let Some(cmd) = writer_rx.recv().await {
-                        let msg = match cmd {
-                            super::ws_shared::WriterCommand::SendText(text) => Message::Text(text.into()),
-                            super::ws_shared::WriterCommand::SendBinary(data) => Message::Binary(data.into()),
-                            super::ws_shared::WriterCommand::Close => {
-                                let _ = write.close().await;
-                                break;
+                            match #client_name::dial(
+                                &url_for_supervisor,
+                                &options_for_supervisor,
+                                &header_pairs_for_supervisor,
+                            )
+                            .await
+                            {
+                                Ok(stream) => {
+                                    reconnect_attempt = reconnect_attempt.saturating_add(1);
+                                    stream
+                                }
+                                Err(err) => {
+                                    let _ = event_tx.send(Err(err)).await;
+                                    reconnect_attempt = reconnect_attempt.saturating_add(1);
+                                    continue;
+                                }
                             }
                         };
-                        if write.send(msg).await.is_err() {
+
+                        let (mut write, mut read) = stream.split();
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+
+                        loop {
+                            tokio::select! {
+                                cmd = writer_rx.recv() => {
+                                    match cmd {
+                                        Some(super::ws_shared::WriterCommand::SendText(text)) => {
+                                            if write.send(Message::Text(text.into())).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                                            if write.send(Message::Binary(data.into())).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Some(super::ws_shared::WriterCommand::Close) => {
+                                            manual_close = true;
+                                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                                            let _ = write.close().await;
+                                            break;
+                                        }
+                                        None => {
+                                            manual_close = true;
+                                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                                            let _ = write.close().await;
+                                            break;
+                                        }
+                                    }
+                                }
+                                msg_result = read.next() => {
+                                    match msg_result {
+                                        Some(Ok(Message::Text(text))) => {
+                                            match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
+                                                #reader_message_handler
+                                                Err(e) => {
+                                                    let _ = event_tx.send(Err(super::ws_shared::WsError::Serde(e))).await;
+                                                }
+                                            }
+                                        }
+                                        Some(Ok(Message::Binary(data))) => {
+                                            match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
+                                                #reader_message_handler
+                                                Err(e) => {
+                                                    let _ = event_tx.send(Err(super::ws_shared::WsError::Serde(e))).await;
+                                                }
+                                            }
+                                        }
+                                        Some(Ok(Message::Close(_))) => break,
+                                        Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                                        Some(Err(e)) => {
+                                            let _ = event_tx.send(Err(super::ws_shared::WsError::Transport(e))).await;
+                                            break;
+                                        }
+                                        None => break,
+                                    }
+                                }
+                            }
+                        }
+
+                        #pending_cleanup
+
+                        if manual_close {
+                            let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                             break;
                         }
+
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                        active_stream = None;
                     }
                 });
 
                 let transport = super::ws_shared::WsTransportHandle {
                     writer_tx,
                     state_rx,
-                    reader_handle,
-                    writer_handle,
+                    supervisor_handle,
                     next_id,
                     pending,
                 };
@@ -421,18 +763,7 @@ fn generate_endpoint_client(_plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenSt
                 self.send_typed(&message).await
             }
 
-            /// Send a strongly-typed message payload.
-            pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
-                &self,
-                message: &M,
-            ) -> Result<(), super::ws_shared::WsError> {
-                let text = super::ws_shared::WsEncode::ws_encode(message)?;
-                self.transport
-                    .writer_tx
-                    .send(super::ws_shared::WriterCommand::SendText(text))
-                    .await
-                    .map_err(|_| super::ws_shared::WsError::Disconnected)
-            }
+            #send_typed_method
 
             #(#lifecycle_helpers)*
 
@@ -564,7 +895,8 @@ mod tests {
                 has_lifecycle_open: false,
                 has_lifecycle_close: false,
                 has_lifecycle_keepalive: false,
-                connection_param_count: 0,
+                path_params: vec![],
+                query_params: vec![],
             }],
             diagnostics: vec![],
         }

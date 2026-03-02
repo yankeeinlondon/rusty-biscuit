@@ -11,7 +11,8 @@ use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use tree_hugger::{
-    Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
+    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
+    FunctionSignature,
     ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage, SchemaVersion, SourceContext,
     SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
     find_git_root, find_package_root,
@@ -39,6 +40,10 @@ struct Cli {
     /// Disable colors and hyperlinks (plain text output)
     #[arg(long, global = true)]
     plain: bool,
+
+    /// Show symbol-level documentation comments in output
+    #[arg(long, global = true)]
+    comments: bool,
 
     /// Group symbol output by file path
     #[arg(long, global = true)]
@@ -263,8 +268,16 @@ enum SymbolFilter {
 struct PreludeFilter {
     /// Symbol names explicitly listed by prelude exports (plus PRELUDE env var).
     names: HashSet<String>,
-    /// Direct prelude export entries keyed by prelude file path.
-    exports_by_file: HashMap<PathBuf, Vec<ImportSymbol>>,
+    /// Resolved prelude export symbols keyed by prelude file path.
+    exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPreludeMetadata {
+    kind: SymbolKind,
+    doc_comment: Option<String>,
+    file: Option<PathBuf>,
+    range: Option<CodeRange>,
 }
 
 /// Classification of positional filter tokens.
@@ -321,12 +334,13 @@ enum OutputFormat {
 struct OutputConfig {
     use_colors: bool,
     use_hyperlinks: bool,
+    show_comments: bool,
 }
 
 static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
 
 impl OutputConfig {
-    fn new(format: OutputFormat) -> Self {
+    fn new(format: OutputFormat, show_comments: bool) -> Self {
         match format {
             OutputFormat::Pretty => {
                 // Check NO_COLOR environment variable and TTY
@@ -336,11 +350,13 @@ impl OutputConfig {
                 Self {
                     use_colors,
                     use_hyperlinks: use_colors && is_tty,
+                    show_comments,
                 }
             }
             OutputFormat::Plain | OutputFormat::Json => Self {
                 use_colors: false,
                 use_hyperlinks: false,
+                show_comments,
             },
         }
     }
@@ -605,7 +621,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let language = cli.language.map(ProgrammingLanguage::from);
     let filters = cli.command.filters();
     let output_format = cli.output_format();
-    let output_config = OutputConfig::new(output_format);
+    let output_config = OutputConfig::new(output_format, cli.comments);
     let render_options = SymbolRenderOptions {
         group_by_file: cli.group_by_file,
         group_by_module: cli.group_by_module,
@@ -813,7 +829,8 @@ fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
 /// environment variable (comma-separated).
 fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerError> {
     let mut names = HashSet::new();
-    let mut exports_by_file: HashMap<PathBuf, Vec<ImportSymbol>> = HashMap::new();
+    let mut exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
+    let mut rust_symbol_cache: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
 
     let candidates = [
         root_dir.join("src/prelude.rs"),
@@ -831,12 +848,28 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerE
                 .into_iter()
                 .filter(|import| is_prelude_export(import, &source))
                 .collect();
+            let mut resolved_exports = Vec::with_capacity(exports.len());
 
             for import in &exports {
                 names.insert(import.name.clone());
+                let metadata =
+                    resolve_prelude_export_metadata(import, root_dir, &mut rust_symbol_cache)?
+                        .unwrap_or(ResolvedPreludeMetadata {
+                            kind: SymbolKind::Unknown,
+                            doc_comment: None,
+                            file: None,
+                            range: None,
+                        });
+                resolved_exports.push(symbol_from_prelude_export(
+                    import,
+                    metadata.kind,
+                    metadata.doc_comment,
+                    metadata.file,
+                    metadata.range,
+                ));
             }
 
-            exports_by_file.insert(candidate.to_path_buf(), exports);
+            exports_by_file.insert(candidate.to_path_buf(), resolved_exports);
             break;
         }
     }
@@ -889,6 +922,104 @@ fn is_public_rust_use_statement(statement: &str) -> bool {
     }
 
     false
+}
+
+fn resolve_prelude_export_metadata(
+    import: &ImportSymbol,
+    root_dir: &Path,
+    rust_symbol_cache: &mut HashMap<PathBuf, Vec<SymbolInfo>>,
+) -> Result<Option<ResolvedPreludeMetadata>, TreeHuggerError> {
+    if import.language != ProgrammingLanguage::Rust {
+        return Ok(None);
+    }
+
+    let Some(source) = import.source.as_deref() else {
+        return Ok(None);
+    };
+    let target_name = import_target_symbol_name(import);
+
+    for candidate in rust_module_source_candidates(root_dir, source) {
+        if !candidate.is_file() {
+            continue;
+        }
+
+        if !rust_symbol_cache.contains_key(&candidate) {
+            let tree_file = TreeFile::with_language(&candidate, Some(ProgrammingLanguage::Rust))?;
+            let mut symbols = tree_file.exported_symbols()?;
+            if symbols.is_empty() {
+                symbols = tree_file.symbols()?;
+            }
+            rust_symbol_cache.insert(candidate.clone(), symbols);
+        }
+
+        if let Some(symbol) = rust_symbol_cache
+            .get(&candidate)
+            .and_then(|symbols| symbols.iter().find(|symbol| symbol.name == target_name))
+        {
+            return Ok(Some(ResolvedPreludeMetadata {
+                kind: symbol.kind,
+                doc_comment: symbol.doc_comment.clone(),
+                file: Some(symbol.file.clone()),
+                range: Some(symbol.range.clone()),
+            }));
+        }
+
+        // Fallback for symbols not captured by tree-sitter symbol queries (e.g., some type aliases).
+        let source_text = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
+            path: candidate.clone(),
+            source,
+        })?;
+        if let Some(kind) = infer_rust_decl_kind(&source_text, target_name) {
+            return Ok(Some(ResolvedPreludeMetadata {
+                kind,
+                doc_comment: None,
+                file: None,
+                range: None,
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+fn import_target_symbol_name(import: &ImportSymbol) -> &str {
+    let raw = import.original_name.as_deref().unwrap_or(import.name.as_str());
+    raw.rsplit("::").next().unwrap_or(raw)
+}
+
+fn infer_rust_decl_kind(source: &str, target_name: &str) -> Option<SymbolKind> {
+    let patterns = [
+        (SymbolKind::Trait, format!("pub trait {target_name}")),
+        (SymbolKind::Enum, format!("pub enum {target_name}")),
+        (SymbolKind::Type, format!("pub struct {target_name}")),
+        (SymbolKind::Type, format!("pub type {target_name}")),
+        (SymbolKind::Function, format!("pub fn {target_name}")),
+        (SymbolKind::Constant, format!("pub const {target_name}")),
+        (SymbolKind::Constant, format!("pub static {target_name}")),
+    ];
+
+    patterns
+        .iter()
+        .find_map(|(kind, marker)| source.contains(marker).then_some(*kind))
+}
+
+fn rust_module_source_candidates(root_dir: &Path, source: &str) -> Vec<PathBuf> {
+    let normalized = source
+        .trim()
+        .trim_start_matches("crate::")
+        .trim_start_matches("self::")
+        .trim_start_matches("::")
+        .trim_end_matches("::");
+
+    if normalized.is_empty() || normalized.starts_with("super::") {
+        return Vec::new();
+    }
+
+    let module = normalized.replace("::", "/");
+    vec![
+        root_dir.join("src").join(format!("{module}.rs")),
+        root_dir.join("src").join(module).join("mod.rs"),
+    ]
 }
 
 fn classify_filters(filters: &[String], command: &CommandKind) -> ScanFilters {
@@ -1138,10 +1269,7 @@ fn summarize_file(
                             .collect();
                     } else if let Some(prelude_exports) = filter.exports_by_file.get(&tree_file.file)
                     {
-                        summary.symbols = prelude_exports
-                            .iter()
-                            .map(symbol_from_prelude_export)
-                            .collect();
+                        summary.symbols = prelude_exports.clone();
                         summary.exports = summary.symbols.clone();
                         summary.locals.clear();
                     } else {
@@ -1175,18 +1303,49 @@ fn summarize_file(
     Ok(summary)
 }
 
-fn symbol_from_prelude_export(import: &ImportSymbol) -> SymbolInfo {
+fn symbol_from_prelude_export(
+    import: &ImportSymbol,
+    kind: SymbolKind,
+    doc_comment: Option<String>,
+    resolved_file: Option<PathBuf>,
+    resolved_range: Option<CodeRange>,
+) -> SymbolInfo {
     SymbolInfo {
         name: import.name.clone(),
-        kind: SymbolKind::Unknown,
-        range: import.range.clone(),
+        kind,
+        range: resolved_range.unwrap_or_else(|| import.range.clone()),
         language: import.language,
-        file: import.file.clone(),
+        file: resolved_file.unwrap_or_else(|| import.file.clone()),
         container_name: None,
         container_kind: None,
-        doc_comment: None,
+        doc_comment,
         signature: None,
         type_metadata: None,
+    }
+}
+
+fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, indent: &str) {
+    if !config.show_comments {
+        return;
+    }
+
+    let Some(comment) = comment else {
+        return;
+    };
+    let trimmed = comment.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    for line in trimmed.lines().map(str::trim) {
+        if line.is_empty() {
+            continue;
+        }
+        if config.use_colors {
+            println!("{}{}", indent, line.dimmed());
+        } else {
+            println!("{indent}{line}");
+        }
     }
 }
 
@@ -1482,6 +1641,8 @@ fn render_symbol_line(
         };
         println!("  - {} {} {}", kind_part, name_with_sig, location_display);
     }
+
+    render_symbol_doc_comment(symbol.doc_comment.as_deref(), config, "    ");
 }
 
 fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
@@ -1542,6 +1703,8 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
             };
             println!("  - {} {} {}", kind_part, name_with_sig, location_display);
         }
+
+        render_symbol_doc_comment(symbol.doc_comment.as_deref(), config, "    ");
     }
 }
 
@@ -2420,6 +2583,8 @@ fn render_class_summary(
         println!("  {} {} {}", class.kind, class.name, location_display);
     }
 
+    render_symbol_doc_comment(class.doc_comment.as_deref(), config, "    ");
+
     // Render static methods
     if !summary.static_methods.is_empty() {
         render_member_section(
@@ -2509,6 +2674,8 @@ fn render_member_section(
             };
             println!("      - {}{} {}", vis_str, name_with_sig, location_display);
         }
+
+        render_symbol_doc_comment(method.doc_comment.as_deref(), config, "        ");
     }
 }
 
@@ -2544,5 +2711,7 @@ fn render_field_section(
             };
             println!("      - {}{}", vis_str, field_display);
         }
+
+        render_symbol_doc_comment(field.doc_comment.as_deref(), config, "        ");
     }
 }

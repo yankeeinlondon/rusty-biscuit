@@ -1,12 +1,13 @@
 //! WS runtime plan: lowering `WebSocketApi` into concrete generation decisions.
 
 use schematic_define::websocket::{
-    AuthFlowHints, FrameFormat, HeartbeatHints, MessageDirection, RequestIdType, WebSocketApi,
-    WebSocketEndpoint,
+    AuthFlowHints, FrameFormat, HeartbeatHints, MessageDirection, ParamType, RequestIdType,
+    WebSocketApi, WebSocketEndpoint,
 };
 use schematic_define::AuthStrategy;
 
 use crate::errors::GeneratorError;
+use crate::parser::extract_path_params;
 
 /// Diagnostic emitted during WS validation/lowering.
 #[derive(Debug, Clone)]
@@ -98,6 +99,23 @@ pub struct LifecycleMessagePlan {
     pub schema_type: String,
 }
 
+/// Typed plan for a required path parameter.
+#[derive(Debug, Clone)]
+pub struct PathParamPlan {
+    pub name: String,
+    pub param_type: ParamType,
+    pub description: Option<String>,
+}
+
+/// Typed plan for a query parameter.
+#[derive(Debug, Clone)]
+pub struct QueryParamPlan {
+    pub name: String,
+    pub param_type: ParamType,
+    pub required: bool,
+    pub description: Option<String>,
+}
+
 /// Plan for a single WS endpoint's code generation.
 #[derive(Debug, Clone)]
 pub struct EndpointPlan {
@@ -116,7 +134,8 @@ pub struct EndpointPlan {
     pub has_lifecycle_open: bool,
     pub has_lifecycle_close: bool,
     pub has_lifecycle_keepalive: bool,
-    pub connection_param_count: usize,
+    pub path_params: Vec<PathParamPlan>,
+    pub query_params: Vec<QueryParamPlan>,
 }
 
 /// Complete plan for generating a WS API runtime.
@@ -326,6 +345,10 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError
                 .runtime
                 .as_ref()
                 .and_then(|r| r.heartbeat.clone());
+            let path_placeholders: Vec<String> = extract_path_params(&ep.path)
+                .into_iter()
+                .map(std::string::ToString::to_string)
+                .collect();
 
             let client_messages: Vec<String> = ep
                 .messages
@@ -348,6 +371,79 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError
                 .map(|m| m.name.clone())
                 .collect();
 
+            let mut seen_connection_params: std::collections::BTreeMap<
+                &str,
+                &schematic_define::websocket::ConnectionParam,
+            > = std::collections::BTreeMap::new();
+            for param in &ep.connection_params {
+                if let Some(existing) = seen_connection_params.get(param.name.as_str())
+                    && (existing.param_type != param.param_type
+                        || existing.required != param.required)
+                {
+                    diagnostics.push(WsDiagnostic::warn(
+                        format!("endpoints/{}/connection_params/{}", ep.id, param.name),
+                        format!(
+                            "ConnectionParam '{}' is defined multiple times with conflicting type/required metadata.",
+                            param.name
+                        ),
+                    ));
+                }
+                seen_connection_params.insert(param.name.as_str(), param);
+            }
+
+            let mut path_params = Vec::new();
+            for placeholder in &path_placeholders {
+                let typed_param = ep.connection_params.iter().find(|p| p.name == *placeholder);
+                match typed_param {
+                    Some(param) => {
+                        if !param.required {
+                            diagnostics.push(WsDiagnostic::warn(
+                                format!("endpoints/{}/path/{}", ep.id, placeholder),
+                                format!(
+                                    "Path placeholder '{}' is optional in connection_params; generated connect arg remains required.",
+                                    placeholder
+                                ),
+                            ));
+                        }
+
+                        path_params.push(PathParamPlan {
+                            name: placeholder.clone(),
+                            param_type: param.param_type,
+                            description: param.description.clone(),
+                        });
+                    }
+                    None => {
+                        diagnostics.push(WsDiagnostic::error(
+                            format!("endpoints/{}/path/{}", ep.id, placeholder),
+                            format!(
+                                "Path placeholder '{}' has no typed ConnectionParam entry.",
+                                placeholder
+                            ),
+                        ));
+                    }
+                }
+            }
+
+            let query_params: Vec<QueryParamPlan> = ep
+                .connection_params
+                .iter()
+                .filter(|p| !path_placeholders.iter().any(|name| name == &p.name))
+                .map(|p| QueryParamPlan {
+                    name: p.name.clone(),
+                    param_type: p.param_type,
+                    required: p.required,
+                    description: p.description.clone(),
+                })
+                .collect();
+
+            if ep.path.contains('{') && path_params.len() < path_placeholders.len() {
+                diagnostics.push(WsDiagnostic::warn(
+                    format!("endpoints/{}/path", ep.id),
+                    "Unknown placeholders remain after WS path planning; runtime URL may still contain `{...}`."
+                        .to_string(),
+                ));
+            }
+
             EndpointPlan {
                 id: ep.id.clone(),
                 path: ep.path.clone(),
@@ -364,10 +460,16 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError
                 has_lifecycle_open: ep.lifecycle.open.is_some(),
                 has_lifecycle_close: ep.lifecycle.close.is_some(),
                 has_lifecycle_keepalive: ep.lifecycle.keepalive.is_some(),
-                connection_param_count: ep.connection_params.len(),
+                path_params,
+                query_params,
             }
         })
         .collect();
+
+    diagnostics.push(WsDiagnostic::info(
+        "ws_runtime/options",
+        "TODO: WsClientOptions.receive_timeout is not yet enforced by generated runtime.",
+    ));
 
     Ok(WsRuntimePlan {
         api_name: api.name.clone(),
@@ -387,7 +489,7 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError
 mod tests {
     use super::*;
     use schematic_define::websocket::{
-        ConnectionLifecycle, CorrelationHints, MessageSchema, WebSocketEndpointHints,
+        ConnectionLifecycle, CorrelationHints, MessageSchema, ParamType, WebSocketEndpointHints,
         WebSocketRuntimeHints,
     };
     use schematic_define::Schema;
@@ -468,6 +570,8 @@ mod tests {
         assert!(plan.supports_reconnect);
         assert_eq!(plan.endpoints.len(), 1);
         assert_eq!(plan.endpoints[0].id, "Echo");
+        assert!(plan.endpoints[0].path_params.is_empty());
+        assert!(plan.endpoints[0].query_params.is_empty());
         assert!(matches!(plan.auth, WsAuthStrategy::None));
     }
 
@@ -543,6 +647,33 @@ mod tests {
             vec!["ResponseEnvelope", "EventEnvelope"]
         );
         assert!(ep.bidirectional_messages.is_empty());
+    }
+
+    #[test]
+    fn lower_classifies_path_and_query_connection_params() {
+        let mut api = minimal_api();
+        api.endpoints[0].path = "/ws/{channel_id}".to_string();
+        api.endpoints[0].connection_params = vec![
+            schematic_define::websocket::ConnectionParam {
+                name: "channel_id".to_string(),
+                param_type: ParamType::String,
+                required: true,
+                description: Some("Channel identifier".to_string()),
+            },
+            schematic_define::websocket::ConnectionParam {
+                name: "limit".to_string(),
+                param_type: ParamType::Integer,
+                required: false,
+                description: Some("Optional limit".to_string()),
+            },
+        ];
+
+        let plan = lower_to_plan(&api).unwrap();
+        let ep = &plan.endpoints[0];
+        assert_eq!(ep.path_params.len(), 1);
+        assert_eq!(ep.path_params[0].name, "channel_id");
+        assert_eq!(ep.query_params.len(), 1);
+        assert_eq!(ep.query_params[0].name, "limit");
     }
 
     #[test]

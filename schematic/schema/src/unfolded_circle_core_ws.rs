@@ -86,7 +86,15 @@ impl UnfoldedCircleCoreWs {
         &self,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<CoreWsClient, super::ws_shared::WsError> {
-        let url = format!("{}{}", self.base_url, "/ws");
+        let path = "/ws".to_string();
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -99,7 +107,15 @@ impl UnfoldedCircleCoreWs {
         &self,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<CoreIntegrationsClient, super::ws_shared::WsError> {
-        let url = format!("{}{}", self.base_url, "/intg");
+        let path = "/intg".to_string();
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -112,7 +128,15 @@ impl UnfoldedCircleCoreWs {
         &self,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<CoreProfilesClient, super::ws_shared::WsError> {
-        let url = format!("{}{}", self.base_url, "/profiles");
+        let path = "/profiles".to_string();
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -125,7 +149,15 @@ impl UnfoldedCircleCoreWs {
         &self,
         options: super::ws_shared::WsClientOptions,
     ) -> Result<CoreEventsClient, super::ws_shared::WsError> {
-        let url = format!("{}{}", self.base_url, "/events");
+        let path = "/events".to_string();
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
             .headers
             .clone()
@@ -149,16 +181,19 @@ pub struct CoreWsClient {
     max_pending: usize,
 }
 impl CoreWsClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -167,14 +202,32 @@ impl CoreWsClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -187,97 +240,122 @@ impl CoreWsClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let pending_clone = pending.clone();
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let pending_for_supervisor = pending.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let mut handled = false;
-                                if let Some(req_id) = value
-                                    .get("req_id")
-                                    .and_then(|v| v.as_u64())
-                                {
-                                    let mut pending = pending_clone.lock().await;
-                                    if let Some(tx) = pending.remove(&req_id) {
-                                        let _ = tx.send(value.clone());
-                                        handled = true;
-                                    }
-                                }
-                                if !handled {
-                                    let _ = event_tx.send(Ok(value)).await;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-            let mut pending = pending_clone.lock().await;
-            for (_, tx) in pending.drain() {
-                drop(tx);
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match CoreWsClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let mut handled = false; if let
+                        Some(req_id) = value.get("req_id").and_then(| v | v.as_u64()) {
+                        let mut pending = pending_for_supervisor.lock(). await; if let
+                        Some(tx) = pending.remove(& req_id) { let _ = tx.send(value
+                        .clone()); handled = true; } } if ! handled { let _ = event_tx
+                        .send(Ok(value)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let mut handled = false; if let Some(req_id) =
+                        value.get("req_id").and_then(| v | v.as_u64()) { let mut pending
+                        = pending_for_supervisor.lock(). await; if let Some(tx) = pending
+                        .remove(& req_id) { let _ = tx.send(value.clone()); handled =
+                        true; } } if ! handled { let _ = event_tx.send(Ok(value)). await;
+                        } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                let mut pending = pending_for_supervisor.lock().await;
+                for (_, tx) in pending.drain() {
+                    drop(tx);
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };
         Ok(Self {
             transport,
             event_rx,
-            request_timeout: std::time::Duration::from_secs(30u64),
+            request_timeout: _options.request_timeout,
             max_pending: _options.max_pending_requests,
         })
     }
@@ -374,16 +452,19 @@ pub struct CoreIntegrationsClient {
     max_pending: usize,
 }
 impl CoreIntegrationsClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -392,14 +473,32 @@ impl CoreIntegrationsClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -412,97 +511,122 @@ impl CoreIntegrationsClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let pending_clone = pending.clone();
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let pending_for_supervisor = pending.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let mut handled = false;
-                                if let Some(req_id) = value
-                                    .get("req_id")
-                                    .and_then(|v| v.as_u64())
-                                {
-                                    let mut pending = pending_clone.lock().await;
-                                    if let Some(tx) = pending.remove(&req_id) {
-                                        let _ = tx.send(value.clone());
-                                        handled = true;
-                                    }
-                                }
-                                if !handled {
-                                    let _ = event_tx.send(Ok(value)).await;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-            let mut pending = pending_clone.lock().await;
-            for (_, tx) in pending.drain() {
-                drop(tx);
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match CoreIntegrationsClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let mut handled = false; if let
+                        Some(req_id) = value.get("req_id").and_then(| v | v.as_u64()) {
+                        let mut pending = pending_for_supervisor.lock(). await; if let
+                        Some(tx) = pending.remove(& req_id) { let _ = tx.send(value
+                        .clone()); handled = true; } } if ! handled { let _ = event_tx
+                        .send(Ok(value)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let mut handled = false; if let Some(req_id) =
+                        value.get("req_id").and_then(| v | v.as_u64()) { let mut pending
+                        = pending_for_supervisor.lock(). await; if let Some(tx) = pending
+                        .remove(& req_id) { let _ = tx.send(value.clone()); handled =
+                        true; } } if ! handled { let _ = event_tx.send(Ok(value)). await;
+                        } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                let mut pending = pending_for_supervisor.lock().await;
+                for (_, tx) in pending.drain() {
+                    drop(tx);
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };
         Ok(Self {
             transport,
             event_rx,
-            request_timeout: std::time::Duration::from_secs(30u64),
+            request_timeout: _options.request_timeout,
             max_pending: _options.max_pending_requests,
         })
     }
@@ -599,16 +723,19 @@ pub struct CoreProfilesClient {
     max_pending: usize,
 }
 impl CoreProfilesClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -617,14 +744,32 @@ impl CoreProfilesClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -637,97 +782,122 @@ impl CoreProfilesClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let pending_clone = pending.clone();
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let pending_for_supervisor = pending.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let mut handled = false;
-                                if let Some(req_id) = value
-                                    .get("req_id")
-                                    .and_then(|v| v.as_u64())
-                                {
-                                    let mut pending = pending_clone.lock().await;
-                                    if let Some(tx) = pending.remove(&req_id) {
-                                        let _ = tx.send(value.clone());
-                                        handled = true;
-                                    }
-                                }
-                                if !handled {
-                                    let _ = event_tx.send(Ok(value)).await;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-            let mut pending = pending_clone.lock().await;
-            for (_, tx) in pending.drain() {
-                drop(tx);
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match CoreProfilesClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let mut handled = false; if let
+                        Some(req_id) = value.get("req_id").and_then(| v | v.as_u64()) {
+                        let mut pending = pending_for_supervisor.lock(). await; if let
+                        Some(tx) = pending.remove(& req_id) { let _ = tx.send(value
+                        .clone()); handled = true; } } if ! handled { let _ = event_tx
+                        .send(Ok(value)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let mut handled = false; if let Some(req_id) =
+                        value.get("req_id").and_then(| v | v.as_u64()) { let mut pending
+                        = pending_for_supervisor.lock(). await; if let Some(tx) = pending
+                        .remove(& req_id) { let _ = tx.send(value.clone()); handled =
+                        true; } } if ! handled { let _ = event_tx.send(Ok(value)). await;
+                        } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                let mut pending = pending_for_supervisor.lock().await;
+                for (_, tx) in pending.drain() {
+                    drop(tx);
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };
         Ok(Self {
             transport,
             event_rx,
-            request_timeout: std::time::Duration::from_secs(30u64),
+            request_timeout: _options.request_timeout,
             max_pending: _options.max_pending_requests,
         })
     }
@@ -824,16 +994,19 @@ pub struct CoreEventsClient {
     max_pending: usize,
 }
 impl CoreEventsClient {
-    /// Connect to the endpoint.
-    pub(crate) async fn connect(
-        url: String,
-        _options: super::ws_shared::WsClientOptions,
-        header_pairs: Vec<(String, String)>,
-    ) -> Result<Self, super::ws_shared::WsError> {
-        use tokio_tungstenite::connect_async;
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = url.into_client_request()?;
-        for (name, value) in &header_pairs {
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
                 value
@@ -842,14 +1015,32 @@ impl CoreEventsClient {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
         }
-        let (ws_stream, _) = connect_async(request).await?;
-        let (write, read) = futures_util::StreamExt::split(ws_stream);
-        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
             _options.outbound_capacity,
         );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
         let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Ready,
+            super::ws_shared::WsConnectionState::Connecting,
         );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
@@ -862,97 +1053,122 @@ impl CoreEventsClient {
         > = std::sync::Arc::new(
             tokio::sync::Mutex::new(std::collections::HashMap::new()),
         );
-        let pending_clone = pending.clone();
-        let reader_handle = tokio::spawn(async move {
-            use futures_util::StreamExt;
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let pending_for_supervisor = pending.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
             use tokio_tungstenite::tungstenite::Message;
-            let mut read = read;
-            while let Some(msg_result) = read.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                            Ok(value) => {
-                                let mut handled = false;
-                                if let Some(req_id) = value
-                                    .get("req_id")
-                                    .and_then(|v| v.as_u64())
-                                {
-                                    let mut pending = pending_clone.lock().await;
-                                    if let Some(tx) = pending.remove(&req_id) {
-                                        let _ = tx.send(value.clone());
-                                        handled = true;
-                                    }
-                                }
-                                if !handled {
-                                    let _ = event_tx.send(Ok(value)).await;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(Err(super::ws_shared::WsError::Serde(e)))
-                                    .await;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => {
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
                         let _ = state_tx
                             .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    Ok(Message::Ping(_))
-                    | Ok(Message::Pong(_))
-                    | Ok(Message::Frame(_)) => {}
-                    Ok(Message::Binary(_)) => {}
-                    Err(e) => {
-                        let _ = event_tx
-                            .send(Err(super::ws_shared::WsError::Transport(e)))
-                            .await;
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Disconnected);
-                        break;
-                    }
-                }
-            }
-            let mut pending = pending_clone.lock().await;
-            for (_, tx) in pending.drain() {
-                drop(tx);
-            }
-        });
-        let writer_handle = tokio::spawn(async move {
-            use futures_util::SinkExt;
-            use tokio_tungstenite::tungstenite::Message;
-            let mut write = write;
-            let mut writer_rx = writer_rx;
-            while let Some(cmd) = writer_rx.recv().await {
-                let msg = match cmd {
-                    super::ws_shared::WriterCommand::SendText(text) => {
-                        Message::Text(text.into())
-                    }
-                    super::ws_shared::WriterCommand::SendBinary(data) => {
-                        Message::Binary(data.into())
-                    }
-                    super::ws_shared::WriterCommand::Close => {
-                        let _ = write.close().await;
-                        break;
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match CoreEventsClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
                     }
                 };
-                if write.send(msg).await.is_err() {
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let mut handled = false; if let
+                        Some(req_id) = value.get("req_id").and_then(| v | v.as_u64()) {
+                        let mut pending = pending_for_supervisor.lock(). await; if let
+                        Some(tx) = pending.remove(& req_id) { let _ = tx.send(value
+                        .clone()); handled = true; } } if ! handled { let _ = event_tx
+                        .send(Ok(value)). await; } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let mut handled = false; if let Some(req_id) =
+                        value.get("req_id").and_then(| v | v.as_u64()) { let mut pending
+                        = pending_for_supervisor.lock(). await; if let Some(tx) = pending
+                        .remove(& req_id) { let _ = tx.send(value.clone()); handled =
+                        true; } } if ! handled { let _ = event_tx.send(Ok(value)). await;
+                        } } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                let mut pending = pending_for_supervisor.lock().await;
+                for (_, tx) in pending.drain() {
+                    drop(tx);
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                     break;
                 }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
             }
         });
         let transport = super::ws_shared::WsTransportHandle {
             writer_tx,
             state_rx,
-            reader_handle,
-            writer_handle,
+            supervisor_handle,
             next_id,
             pending,
         };
         Ok(Self {
             transport,
             event_rx,
-            request_timeout: std::time::Duration::from_secs(30u64),
+            request_timeout: _options.request_timeout,
             max_pending: _options.max_pending_requests,
         })
     }

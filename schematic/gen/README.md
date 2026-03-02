@@ -1,10 +1,10 @@
 # schematic-gen
 
-Code generator that transforms REST API definitions into strongly-typed Rust client code.
+Code generator that transforms REST and WebSocket API definitions into strongly-typed Rust client code.
 
 ## Overview
 
-`schematic-gen` takes API definitions created with `schematic-define` and generates complete, production-ready Rust HTTP client code. The generated code includes:
+`schematic-gen` takes API definitions created with `schematic-define` and generates complete, production-ready Rust HTTP and WebSocket client code. The generated code includes:
 
 - A client struct with configurable base URL
 - Request structs for each endpoint (with path parameters as fields)

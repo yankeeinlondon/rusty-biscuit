@@ -623,6 +623,12 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                 description: "Stream text and receive audio chunks in real-time".to_string(),
                 connection_params: vec![
                     ConnectionParam {
+                        name: "voice_id".to_string(),
+                        param_type: ParamType::String,
+                        required: true,
+                        description: Some("Voice identifier used in the websocket path".to_string()),
+                    },
+                    ConnectionParam {
                         name: "model_id".to_string(),
                         param_type: ParamType::String,
                         required: false,
@@ -719,6 +725,12 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                 path: "/v1/text-to-speech/{voice_id}/multi-stream-input".to_string(),
                 description: "Manage multiple audio streams over a single connection".to_string(),
                 connection_params: vec![
+                    ConnectionParam {
+                        name: "voice_id".to_string(),
+                        param_type: ParamType::String,
+                        required: true,
+                        description: Some("Voice identifier used in the websocket path".to_string()),
+                    },
                     ConnectionParam {
                         name: "model_id".to_string(),
                         param_type: ParamType::String,

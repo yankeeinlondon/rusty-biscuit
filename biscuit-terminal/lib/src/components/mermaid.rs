@@ -1085,6 +1085,8 @@ impl MermaidRenderer {
             );
             cmd.env("PUPPETEER_EXECUTABLE_PATH", &chromium_path);
             cmd.env("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true");
+            // Add --no-sandbox for snap/Docker/container environments
+            cmd.env("PUPPETEER_ARGS", "--no-sandbox --disable-setuid-sandbox");
         }
 
         // Add common arguments
@@ -1241,6 +1243,8 @@ impl MermaidRenderer {
             tracing::debug!("Setting PUPPETEER_EXECUTABLE_PATH to {}", chromium_path);
             cmd.env("PUPPETEER_EXECUTABLE_PATH", &chromium_path);
             cmd.env("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true");
+            // Add --no-sandbox for snap/Docker/container environments
+            cmd.env("PUPPETEER_ARGS", "--no-sandbox --disable-setuid-sandbox");
         }
 
         // Add common arguments

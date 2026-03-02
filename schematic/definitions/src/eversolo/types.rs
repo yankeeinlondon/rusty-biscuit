@@ -58,7 +58,9 @@ pub struct GetModelResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetStateResponse {
-    pub status: i32,
+    /// Status code (200 = success). Absent from some firmware versions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<i32>,
     /// Playback state enum value.
     ///
     /// Common values observed in Zidoo-derived firmware:
@@ -279,12 +281,30 @@ mod tests {
             }
         }"#;
         let resp: GetStateResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.status, Some(200));
         assert_eq!(resp.state, 1);
         assert_eq!(resp.position, Some(30000));
         let music = resp.playing_music.unwrap();
         assert_eq!(music.title, Some("Test Song".to_string()));
         let vol = resp.volume_data.unwrap();
         assert_eq!(vol.current_volume, 50);
+    }
+
+    #[test]
+    fn get_state_response_without_status_field() {
+        let json = r#"{
+            "state": 0,
+            "volumeData": {
+                "currenttVolume": 160,
+                "maxVolume": 200,
+                "isMute": false
+            }
+        }"#;
+        let resp: GetStateResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.status, None);
+        assert_eq!(resp.state, 0);
+        let vol = resp.volume_data.unwrap();
+        assert_eq!(vol.current_volume, 160);
     }
 
     #[test]

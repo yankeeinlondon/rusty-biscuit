@@ -325,6 +325,15 @@ fn test_plain_flag_exists_in_help() {
 }
 
 #[test]
+fn test_comments_flag_exists_in_help() {
+    hug_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--comments"));
+}
+
+#[test]
 fn test_plain_flag_suppresses_ansi() {
     // Test that --plain output contains no ANSI escape codes
     let output = hug_cmd()
@@ -429,6 +438,20 @@ fn test_plain_flag_with_json_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"root_dir\""));
+}
+
+#[test]
+fn test_comments_flag_renders_symbol_doc_comments() {
+    hug_cmd()
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+            "--comments",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Greets a person by name."));
 }
 
 // ============================================================================
@@ -733,8 +756,24 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
         .stdout(predicate::str::contains("VerboseEnum").not())
         // Prelude export view should not expand underlying type fields.
         .stdout(predicate::str::contains("field_a").not())
-        // Output should point to prelude.rs entries.
-        .stdout(predicate::str::contains("src/prelude.rs"));
+        // Output should point to the symbol definition file, not prelude.rs.
+        .stdout(predicate::str::contains("src/alpha.rs"))
+        .stdout(predicate::str::contains("src/prelude.rs").not());
+}
+
+#[test]
+fn test_symbols_prelude_comments_show_resolved_doc_comments() {
+    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/prelude_pkg");
+
+    let mut cmd = Command::cargo_bin("hug").unwrap();
+    cmd.current_dir(&fixture_pkg)
+        .args(["symbols", "--prelude", "--plain", "--comments"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Type exported through the fixture prelude for comment rendering tests.",
+        ));
 }
 
 #[test]
