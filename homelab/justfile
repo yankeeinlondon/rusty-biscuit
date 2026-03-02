@@ -126,6 +126,7 @@ build *args="":
     @echo "Build Homelab Packages (Library, Homey CLI, Server)"
     @echo "---------------------------------------------------"
     @echo ""
+    @just build-frontend
     @cargo build -p homelab -p homelab-cli -p homelab-server {{args}}
 
 # run tests for Homelab packages
@@ -135,6 +136,7 @@ test *args="":
     @echo "-----------------------------------------------"
     @echo ""
     @cargo test -p homelab -p homelab-cli -p homelab-server {{args}}
+    @just test-frontend
 
 # run clippy on Homelab packages
 lint:
@@ -145,8 +147,10 @@ lint:
     @cargo clippy -p homelab -- -D warnings
     @cargo clippy -p homelab-cli -- -D warnings
     @cargo clippy -p homelab-server -- -D warnings
+    @just lint-frontend
 
 install *args="":
+    @just build-frontend
     @echo ""
     @echo "{{BOLD}}Building Homelab Library{{RESET}}"
     @cargo build -p homelab --release  || ( playa effect error-2 2>/dev/null && exit 1 )
@@ -181,12 +185,49 @@ test-server *args="":
 
 # install server binary
 install-server:
+    @just build-frontend
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
     @cargo install --path ./server  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
     @echo ""
+
+# build frontend SPA (installs deps if needed)
+build-frontend:
+    @echo ""
+    @echo "{{BOLD}}Building Frontend SPA{{RESET}}"
+    @cd server/frontend && pnpm install --frozen-lockfile 2>/dev/null || pnpm install && pnpm build
+    @echo ""
+
+# run frontend dev server (Vite on :5173 with proxy to :3000)
+dev-frontend:
+    @echo ""
+    @echo "{{BOLD}}Running Frontend Dev Server{{RESET}} ({{ITALIC}}Vite on :5173{{RESET}})"
+    @echo ""
+    @cd server/frontend && pnpm dev
+
+# install frontend dependencies
+install-frontend:
+    @cd server/frontend && pnpm install
+
+# lint frontend code with oxlint
+lint-frontend:
+    @echo ""
+    @echo "Linting Frontend"
+    @echo ""
+    @cd server/frontend && pnpm lint
+
+# run frontend unit tests
+test-frontend:
+    @echo ""
+    @echo "Testing Frontend"
+    @echo ""
+    @cd server/frontend && pnpm test
+
+# typecheck frontend
+typecheck-frontend:
+    @cd server/frontend && pnpm typecheck
 
 # Open Opencode in yolo mode
 oc *args="":

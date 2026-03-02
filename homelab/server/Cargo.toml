@@ -28,6 +28,8 @@ utoipa-scalar = { version = "0.3", features = ["axum"] }
 petname = "2.0"
 dirs = "6.0"
 get_if_addrs = "0.5"
+rust-embed = "8"
+mime_guess = "2"
 
 [dev-dependencies]
 axum-test = "18"
