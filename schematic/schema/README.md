@@ -1,269 +1,79 @@
 # schematic-schema
 
-Generated REST API clients produced by `schematic-gen`.
+Generated API outputs produced by `schematic-gen`.
 
-> **Note**: This package contains auto-generated code. Do not edit files in `src/` directly - they will be overwritten on regeneration.
+> Auto-generated source in `src/` should not be edited manually.
 
 ## Overview
 
-`schematic-schema` provides ready-to-use, strongly-typed Rust HTTP clients for various REST APIs. Each API is in its own module with:
+`schematic-schema` currently provides:
 
-- A client struct (e.g., `OpenAI`)
-- Request structs for each endpoint
-- A unified request enum
-- Re-exported response types from `schematic-definitions`
+- Generated Rust REST clients (request structs, enums, typed response handling)
+- Generated WebSocket **definition helper modules** for APIs that are defined as `WebSocketApi` in `schematic-definitions`
 
-## Usage
+Important: WebSocket runtime/client code generation is not implemented yet. WS modules in this crate expose typed API definitions and message model types, not a live WS transport client.
 
-### Quick Start with Prelude
+## Available Modules
+
+### REST client modules
+
+- `anthropic`
+- `bitbucket`
+- `elevenlabs`
+- `emqx`
+- `eversolo`
+- `gitea`
+- `github`
+- `gitlab`
+- `huggingface`
+- `lmstudio`
+- `ollama`
+- `openai`
+- `unfolded_circle_core_rest`
+
+### WebSocket definition helper modules
+
+- `elevenlabs_ws`
+- `unfolded_circle_core_ws`
+- `unfolded_circle_dock_ws`
+- `unfolded_circle_integration_ws`
+
+## Quick Start
 
 ```rust
 use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), SchematicError> {
-    // Create client (reads OPENAI_API_KEY from environment)
     let client = OpenAI::new();
-
-    // List all models
-    let models: ListModelsResponse = client
-        .request(ListModelsRequest::default())
-        .await?;
-
-    for model in models.data {
-        println!("{}: owned by {}", model.id, model.owned_by);
-    }
-
+    let response = client.list_models().await?;
+    println!("{}", response.data.len());
     Ok(())
 }
 ```
 
-### Direct Module Access
-
-```rust
-use schematic_schema::openai::{
-    OpenAI, OpenAIRequest,
-    ListModelsRequest, RetrieveModelRequest,
-    Model, ListModelsResponse,
-};
-
-#[tokio::main]
-async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
-    let client = OpenAI::new();
-
-    // Retrieve a specific model - type-safe construction with new()
-    let gpt4: Model = client
-        .request(RetrieveModelRequest::new("gpt-4"))
-        .await?;
-
-    // Or use From<&str> for single-param requests
-    let gpt4: Model = client
-        .request(RetrieveModelRequest::from("gpt-4"))
-        .await?;
-
-    println!("Model {} created at {}", gpt4.id, gpt4.created);
-    Ok(())
-}
-```
-
-## Available APIs
-
-| API | Module | Client Struct | Endpoints | Auth |
-|-----|--------|---------------|-----------|------|
-| Anthropic | `anthropic` | `Anthropic` | 4 | API Key (`ANTHROPIC_API_KEY`, header: `X-Api-Key`) |
-| OpenAI | `openai` | `OpenAI` | 3 | Bearer token (`OPENAI_API_KEY`) |
-| HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 28+ | Bearer token (`HUGGINGFACE_API_KEY`) |
-| ElevenLabs | `elevenlabs` | `ElevenLabs` | 45+ | API Key (`ELEVEN_LABS_API_KEY`, header: `xi-api-key`) |
-| LM Studio | `lmstudio` | `LmStudio` | 6 | Bearer (`LM_API_TOKEN`) |
-| Ollama Native | `ollama` | `OllamaNative` | 11 | None (local) |
-| Ollama OpenAI | `ollama` | `OllamaOpenAI` | 4 | None (local) |
-| EMQX Basic | `emqx` | `EmqxBasic` | 36 | Basic (`EMQX_API_KEY`, `EMQX_API_SECRET`) |
-| EMQX Bearer | `emqx` | `EmqxBearer` | 38 | Bearer (`EMQX_TOKEN`) |
-
-APIs sharing a module (Ollama, EMQX) are combined into a single file with distinct request suffixes.
-
-## Prelude Exports
-
-The prelude (`schematic_schema::prelude`) exports:
-
-- **Client structs**: `Anthropic`, `OpenAI`, `HuggingFaceHub`, `ElevenLabs`, `LmStudio`, `OllamaNative`, `OllamaOpenAI`, `EmqxBasic`, `EmqxBearer`
-- **Request enums**: `AnthropicRequest`, `OpenAIRequest`, `HuggingFaceHubRequest`, `ElevenLabsRequest`, `LmStudioRequest`, `OllamaNativeRequest`, `OllamaOpenAIRequest`, `EmqxBasicRequest`, `EmqxBearerRequest`
-- **Shared types**: `SchematicError`, `RequestParts`
-- **Constants**: Each client has `BASE_URL` and `DOCS_URL` constants
-
-**Note**: Response types must be imported from specific API modules to avoid naming conflicts:
-
-```rust
-use schematic_schema::openai::Model;
-use schematic_schema::anthropic::CreateMessageResponse;
-```
-
-## Generated Documentation
-
-All request structs include doc comments with usage examples:
-
-```rust
-/// Request for `ListModels` endpoint.
-///
-/// ## Example
-///
-/// ```ignore
-/// use schematic_schema::openai::ListModelsRequest;
-///
-/// let request = ListModelsRequest::default();
-/// ```
-pub struct ListModelsRequest {}
-```
-
-Examples show the appropriate construction pattern:
-- `default()` for requests with no required fields
-- `new(...)` for requests with required path parameters or body
-- `From<&str>`/`From<String>` for single-param no-body requests
-- `From<BodyType>` for body-only requests
-
-All async request methods are marked `#[must_use]` to warn if the returned Future is discarded without `.await`.
-
-## Client Configuration
-
-### Default Configuration
-
-```rust
-// Uses default base URL and reads credentials from environment
-let client = OpenAI::new();
-
-// Access API metadata
-println!("Base URL: {}", OpenAI::BASE_URL);
-println!("Docs: {:?}", OpenAI::DOCS_URL);
-```
-
-### Custom Base URL
-
-```rust
-// Use a different API endpoint (for testing, proxies, etc.)
-let client = OpenAI::with_base_url("http://localhost:8080/v1");
-```
-
-### Custom HTTP Client
-
-```rust
-// Use a pre-configured reqwest client
-let http_client = reqwest::Client::builder()
-    .timeout(std::time::Duration::from_secs(60))
-    .build()?;
-
-let client = OpenAI::with_client(http_client);
-
-// Or with both custom client and base URL
-let client = OpenAI::with_client_and_base_url(
-    http_client,
-    "https://api.example.com/v1"
-);
-```
-
-### Programmatic Authentication
-
-Inject tokens programmatically without requiring environment variables:
-
-```rust
-use schematic_define::Headers;
-
-// Token from runtime source (Vault, OAuth, config file, etc.)
-let token = get_token_from_somewhere();
-
-// Create client with programmatic token - no env vars needed!
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token(token))
-    .build();
-
-// Or with basic auth
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_basic_auth("user", "pass"))
-    .build();
-```
-
-When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. No need to also set `AuthStrategy::None`.
-
-### API Variants
-
-Create variants with different configurations:
-
-```rust
-use schematic_define::UpdateStrategy;
-
-let production = OpenAI::new();
-
-// Staging environment with different credentials
-let staging = production.variant_with(
-    "https://staging.openai.com/v1",
-    vec!["STAGING_OPENAI_KEY".to_string()],
-    UpdateStrategy::NoChange,
-);
-```
-
-## Error Handling
-
-All API calls return `Result<T, SchematicError>`:
+## WebSocket Definition Usage
 
 ```rust
 use schematic_schema::prelude::*;
 
-match client.request(ListModelsRequest::default()).await {
-    Ok(response) => println!("Got {} models", response.data.len()),
-    Err(SchematicError::Http(e)) => eprintln!("Network error: {}", e),
-    Err(SchematicError::Json(e)) => eprintln!("Parse error: {}", e),
-    Err(SchematicError::ApiError { status, body }) => {
-        eprintln!("API error {}: {}", status, body)
-    }
-    Err(SchematicError::MissingCredential { env_vars }) => {
-        eprintln!("Set one of: {:?}", env_vars)
-    }
-    Err(e) => eprintln!("Other error: {}", e),
-}
+let core_ws = define_unfolded_circle_core_ws_api_definition();
+let dock_ws = define_unfolded_circle_dock_ws_api_definition();
+let integration_ws = define_unfolded_circle_integration_ws_api_definition();
+
+assert_eq!(core_ws.name, "UnfoldedCircleCoreWs");
+assert_eq!(dock_ws.name, "UnfoldedCircleDockWs");
+assert_eq!(integration_ws.name, "UnfoldedCircleIntegrationWs");
 ```
+
+## Notes
+
+- There is currently no `Dock REST` API definition in `schematic-definitions`; only `Dock WebSocket` is defined.
+- Use API modules directly (for example `schematic_schema::openai::Model`) when you need response/model types.
 
 ## Regenerating
 
-To regenerate the API clients:
-
 ```bash
-# From the schematic directory
+cd schematic
 just generate
-
-# Or with verification
-just full
 ```
-
-## File Structure
-
-```
-schema/
-├── Cargo.toml        # Auto-generated manifest
-└── src/
-    ├── lib.rs        # Module declarations
-    ├── prelude.rs    # Convenient re-exports
-    ├── shared.rs     # RequestParts, SchematicError, reqwest re-export
-    ├── anthropic.rs  # Anthropic API client
-    ├── openai.rs     # OpenAI API client
-    ├── elevenlabs.rs # ElevenLabs API client
-    ├── huggingface.rs # HuggingFace Hub API client
-    ├── lmstudio.rs   # LM Studio API client
-    ├── ollama.rs     # OllamaNative + OllamaOpenAI (combined)
-    └── emqx.rs       # EmqxBasic + EmqxBearer (combined)
-```
-
-## Dependencies
-
-The generated code requires (automatically managed):
-
-- `reqwest` - HTTP client
-- `serde` / `serde_json` - Serialization
-- `thiserror` - Error types
-- `tokio` - Async runtime
-- `schematic-define` - Auth strategy types
-- `schematic-definitions` - Response types
-
-## License
-
-AGPL-3.0-only
