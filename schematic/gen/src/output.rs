@@ -100,6 +100,12 @@ const WS_DEFINITION_MODULES: &[WsDefinitionModule] = &[
         display_name: "UnfoldedCircleIntegrationWs",
         description: "Unfolded Circle Integration WebSocket API definition",
     },
+    WsDefinitionModule {
+        module: "samsung_smart_tv_remote_ws",
+        helper: "define_samsung_smart_tv_remote_ws_api_definition",
+        display_name: "SamsungSmartTvRemote",
+        description: "Samsung Smart TV Remote Control WebSocket API definition",
+    },
 ];
 
 fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
@@ -154,6 +160,17 @@ fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
                 #[must_use]
                 pub fn define_api() -> schematic_define::websocket::WebSocketApi {
                     schematic_definitions::define_unfolded_circle_integration_ws_api()
+                }
+            },
+        ),
+        "samsung_smart_tv_remote_ws" => (
+            || schematic_definitions::define_samsung_smart_tv_remote_ws_api(),
+            quote! { pub use schematic_definitions::samsung_smart_tv::remote_ws::*; },
+            quote! {
+                /// Builds the Samsung Smart TV Remote Control WebSocket API definition.
+                #[must_use]
+                pub fn define_api() -> schematic_define::websocket::WebSocketApi {
+                    schematic_definitions::define_samsung_smart_tv_remote_ws_api()
                 }
             },
         ),

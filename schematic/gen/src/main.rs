@@ -21,6 +21,7 @@ use schematic_definitions::lmstudio::define_lmstudio_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
 use schematic_definitions::registry::get_registry;
+use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
 use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
 use schematic_gen::asyncapi_import::{self, AsyncImportOptions, WsRole as AsyncWsRole};
 use schematic_gen::cargo_gen::write_cargo_toml;
@@ -31,7 +32,7 @@ use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, unfolded-circle-core-rest, all";
+const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
 
 /// OpenAPI output format for CLI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -211,6 +212,7 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
         "emqx-basic" => Ok(define_emqx_basic_api()),
         "emqx-bearer" => Ok(define_emqx_bearer_api()),
         "eversolo" => Ok(define_eversolo_api()),
+        "samsung-smart-tv" => Ok(define_samsung_smart_tv_api()),
         "unfolded-circle-core-rest" => Ok(define_unfolded_circle_core_rest_api()),
         "all" => Err(GeneratorError::ConfigError(
             "Use resolve_all_apis() for 'all'".to_string(),
@@ -239,6 +241,7 @@ fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
         define_emqx_basic_api(),
         define_emqx_bearer_api(),
         define_eversolo_api(),
+        define_samsung_smart_tv_api(),
         define_unfolded_circle_core_rest_api(),
     ]
 }
@@ -419,7 +422,7 @@ fn run_openapi_export(
                 api_name
             );
             println!(
-                "         {} Currently only 'openai' has complete schema registries.",
+                "         {} Currently only 'openai' and 'samsung-smart-tv' have complete schema registries.",
                 "Hint:".cyan()
             );
             return Ok(());
@@ -555,6 +558,7 @@ fn run_generate_all(
             ("EmqxBasic", "emqx-basic"),
             ("EmqxBearer", "emqx-bearer"),
             ("Eversolo", "eversolo"),
+            ("SamsungSmartTv", "samsung-smart-tv"),
             ("UnfoldedCircleCoreRest", "unfolded-circle-core-rest"),
         ];
 
