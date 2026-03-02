@@ -17,6 +17,7 @@
 //! - [`lmstudio`] - LM Studio local LLM inference (v1 native API)
 //! - [`ollama`] - Ollama local LLM inference (native + OpenAI-compatible APIs)
 //! - [`openai`] - OpenAI Models API definition
+//! - [`samsung_smart_tv`] - Samsung Smart TV LAN REST + Remote WebSocket API definitions
 //! - [`unfolded_circle`] - Unfolded Circle Core REST + WebSocket API definitions
 //!
 //! ## Examples
@@ -128,6 +129,21 @@
 //! assert_eq!(api.name, "Bitbucket");
 //! assert_eq!(api.endpoints.len(), 15);
 //! ```
+//!
+//! ```
+//! use schematic_definitions::samsung_smart_tv::{
+//!     define_samsung_smart_tv_api,
+//!     remote_ws::define_samsung_smart_tv_remote_ws_api,
+//! };
+//!
+//! let rest_api = define_samsung_smart_tv_api();
+//! assert_eq!(rest_api.name, "SamsungSmartTv");
+//! assert_eq!(rest_api.endpoints.len(), 4);
+//!
+//! let ws_api = define_samsung_smart_tv_remote_ws_api();
+//! assert_eq!(ws_api.name, "SamsungSmartTvRemote");
+//! assert_eq!(ws_api.endpoints.len(), 1);
+//! ```
 
 pub mod anthropic;
 pub mod bitbucket;
@@ -143,6 +159,7 @@ pub mod ollama;
 pub mod openai;
 pub mod prelude;
 pub mod registry;
+pub mod samsung_smart_tv;
 pub mod unfolded_circle;
 pub mod unfolded_circle_core_rest {
     //! Compatibility re-export module for generated `module_path` lookups.
@@ -166,6 +183,8 @@ pub use huggingface::define_huggingface_hub_api;
 pub use lmstudio::define_lmstudio_api;
 pub use ollama::{define_ollama_native_api, define_ollama_openai_api};
 pub use openai::define_openai_api;
+pub use samsung_smart_tv::define_samsung_smart_tv_api;
+pub use samsung_smart_tv::remote_ws::define_samsung_smart_tv_remote_ws_api;
 pub use unfolded_circle::{
     define_unfolded_circle_core_rest_api, define_unfolded_circle_core_ws_api,
     define_unfolded_circle_dock_ws_api, define_unfolded_circle_integration_ws_api,

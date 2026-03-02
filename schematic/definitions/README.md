@@ -29,6 +29,13 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
 | GitLab | `gitlab` | `define_gitlab_api()` | 18 | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | `define_gitea_api()` | 15 | Gitea REST API for self-hosted Git forge instances |
+| Eversolo | `eversolo` | `define_eversolo_api()` | 24 | Eversolo DMP-A8 local HTTP control API |
+| Samsung Smart TV REST | `samsung_smart_tv` | `define_samsung_smart_tv_api()` | 4 | Samsung S95C-focused LAN API (Smart View) |
+| Samsung Smart TV Remote WS | `samsung_smart_tv::remote_ws` | `define_samsung_smart_tv_remote_ws_api()` | 1 | Samsung remote control WebSocket channel |
+| Unfolded Circle Core REST | `unfolded_circle::core_rest` | `define_unfolded_circle_core_rest_api()` | 11 | Unfolded Circle Core REST API |
+| Unfolded Circle Core WS | `unfolded_circle::core_ws` | `define_unfolded_circle_core_ws_api()` | 4 | Unfolded Circle Core WebSocket API |
+| Unfolded Circle Dock WS | `unfolded_circle::dock_ws` | `define_unfolded_circle_dock_ws_api()` | 1 | Unfolded Circle Dock WebSocket API |
+| Unfolded Circle Integration WS | `unfolded_circle::integration_ws` | `define_unfolded_circle_integration_ws_api()` | 1 | Unfolded Circle Integration WS API |
 
 ## Usage
 
