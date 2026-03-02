@@ -1059,6 +1059,15 @@ impl MermaidRenderer {
             Command::new("mmdc")
         };
 
+        // Set PUPPETEER_EXECUTABLE_PATH if system Chromium is available
+        // This fixes Puppeteer issues on Linux where downloaded Chrome binary fails
+        if let Some(chromium_path) = detect_system_chromium() {
+            tracing::debug!("Setting PUPPETEER_EXECUTABLE_PATH to {}", chromium_path);
+            cmd.env("PUPPETEER_EXECUTABLE_PATH", &chromium_path);
+            // Also skip Chromium download to avoid issues
+            cmd.env("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true");
+        }
+
         // Add common arguments
         let input_path_str =
             input_file
@@ -1196,6 +1205,13 @@ impl MermaidRenderer {
         } else {
             Command::new("mmdc")
         };
+
+        // Set PUPPETEER_EXECUTABLE_PATH if system Chromium is available
+        if let Some(chromium_path) = detect_system_chromium() {
+            tracing::debug!("Setting PUPPETEER_EXECUTABLE_PATH to {}", chromium_path);
+            cmd.env("PUPPETEER_EXECUTABLE_PATH", &chromium_path);
+            cmd.env("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", "true");
+        }
 
         // Add common arguments
         let input_path_str =
