@@ -119,6 +119,7 @@
             "libpipewire",
             "libpulse",
             "libvorbis",
+            "lmstudio",
             "LPCM",
             "MMAP",
             "nextest",
