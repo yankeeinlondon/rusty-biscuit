@@ -13,6 +13,59 @@ use crate::{
     },
 };
 
+/// Renders quoted text with a distinctive left border.
+///
+/// A block quote displays text with a visual border on the left side,
+/// typically used to highlight quoted content, testimonials, or
+/// notable passages in a visually distinct manner.
+///
+/// ## Structure
+///
+/// - Each line is prefixed with `│ ` (U+2502 + space)
+/// - Optional attribution can be added at the bottom preceded by `—`
+/// - Content is automatically wrapped to fit the terminal width
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::block_quote::BlockQuote;
+/// use biscuit_terminal::components::renderable::Renderable;
+///
+/// // Simple block quote from a string
+/// let quote = BlockQuote::from("The only way to do great work is to love what you do.");
+/// let result = quote.render_optimistic(Some(60));
+/// assert!(result.contains("│ The only way"));
+///
+/// // Block quote with attribution
+/// let quote = BlockQuote::new(
+///     "To be, or not to be, that is the question.",
+///     Some("William Shakespeare")
+/// );
+/// let result = quote.render_optimistic(None);
+/// assert!(result.contains("│ To be, or not to be"));
+/// assert!(result.contains("│ — William Shakespeare"));
+///
+/// // Styled block quote with custom colors
+/// use biscuit_terminal::utils::color::{Color, Tailwind};
+/// let quote = BlockQuote::from("Important quote")
+///     .with_text_color(Color::Tailwind(Tailwind::White))
+///     .with_bg_color(Color::Tailwind(Tailwind::Gray800))
+///     .with_left_block_color(Color::Tailwind(Tailwind::Blue400));
+/// let result = quote.render_optimistic(None);
+/// assert!(result.contains("│ Important quote"));
+///
+/// // Block quote from Prose component (rich text)
+/// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::RenderableContent;
+/// let prose = Prose::new("This is <b>bold</b> and <i>italic</i> text.");
+/// let quote = BlockQuote::new(
+///     RenderableContent::from(prose),
+///     Some("Anonymous")
+/// );
+/// let result = quote.render_optimistic(None);
+/// assert!(result.contains("│"));
+/// assert!(result.contains("— Anonymous"));
+/// ```
 #[derive(Debug, Clone)]
 pub struct BlockQuote {
     /// the content being wrapped in the block quote

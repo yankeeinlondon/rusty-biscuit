@@ -67,9 +67,54 @@ const DEFAULT_SCALE: u32 = 2;
 /// - More stable async diagram generation
 ///
 /// Older versions will work but may have rendering quirks.
+///
+/// ## Examples
+///
+/// ```rust,no_run
+/// use biscuit_terminal::components::mermaid::{MMDC_MIN_VERSION, MmdcVersion, detect_mmdc_version};
+///
+/// // Check if installed version meets minimum
+/// if let Some(version) = detect_mmdc_version() {
+///     if version.meets_minimum() {
+///         println!("mmdc {} meets minimum requirement {}", version, MMDC_MIN_VERSION);
+///     } else {
+///         eprintln!("Warning: consider upgrading mmdc to {}", MMDC_MIN_VERSION);
+///     }
+/// }
+/// ```
 pub const MMDC_MIN_VERSION: &str = "10.6.0";
 
 /// Parsed version for comparison operations.
+///
+/// This struct represents a semantic version string (X.Y.Z) with support
+/// for parsing, comparison, and minimum version checking.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::mermaid::MmdcVersion;
+///
+/// // Parse a version string
+/// let v = MmdcVersion::parse("10.6.0").unwrap();
+/// assert_eq!(v.major, 10);
+/// assert_eq!(v.minor, 6);
+/// assert_eq!(v.patch, 0);
+///
+/// // Version comparison
+/// let v1 = MmdcVersion::parse("10.6.0").unwrap();
+/// let v2 = MmdcVersion::parse("11.0.0").unwrap();
+/// assert!(v1 < v2);
+///
+/// // Check minimum requirement
+/// assert!(v1.meets_minimum());
+///
+/// // Display formatting
+/// assert_eq!(v1.to_string(), "10.6.0");
+///
+/// // Invalid version returns None
+/// assert!(MmdcVersion::parse("invalid").is_none());
+/// assert!(MmdcVersion::parse("1.0").is_none());
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MmdcVersion {
     /// Major version number
@@ -175,6 +220,41 @@ pub fn detect_mmdc_version() -> Option<MmdcVersion> {
 /// Mermaid theme options.
 ///
 /// These correspond to the built-in themes available in mermaid-cli.
+/// Each theme provides different color schemes suitable for various
+/// terminal backgrounds and use cases.
+///
+/// ## Variants
+///
+/// - **Dark**: Light text on dark background - ideal for dark terminals
+/// - **Default**: Dark text on light background - ideal for light terminals
+/// - **Forest**: Green tones - suitable for nature-themed diagrams
+/// - **Neutral**: Grayscale - works well with transparent backgrounds
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::mermaid::MermaidTheme;
+/// use biscuit_terminal::discovery::detection::ColorMode;
+///
+/// // Use specific theme
+/// let theme = MermaidTheme::Dark;
+/// assert_eq!(theme.as_str(), "dark");
+///
+/// // Auto-select based on terminal color mode
+/// let dark_terminal = MermaidTheme::for_color_mode(ColorMode::Dark);
+/// assert_eq!(dark_terminal, MermaidTheme::Dark);
+///
+/// let light_terminal = MermaidTheme::for_color_mode(ColorMode::Light);
+/// assert_eq!(light_terminal, MermaidTheme::Default);
+///
+/// // Get inverse theme for solid background rendering
+/// let inverse = MermaidTheme::Dark.inverse();
+/// assert_eq!(inverse, MermaidTheme::Default);
+///
+/// // Default is Dark
+/// let default: MermaidTheme = Default::default();
+/// assert_eq!(default, MermaidTheme::Dark);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MermaidTheme {
     /// Dark theme - light text on dark background (default for dark terminals)
@@ -229,6 +309,50 @@ impl MermaidTheme {
 }
 
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
+///
+/// ## Error Variants
+///
+/// - `MmdcNotFound` - The `mmdc` CLI is not installed or not in PATH
+/// - `NpmNotFound` - npm/npx is not available (needed to run mmdc)
+/// - `MmdcExecutionFailed` - mmdc ran but failed with a non-zero exit code
+/// - `ContentTooLarge` - Diagram source exceeds size limits
+/// - `DisplayError` - Terminal failed to render the generated image
+/// - `IoError` - File system operations failed
+/// - `TerminalIncapable` - Terminal doesn't support inline images
+///
+/// ## Handling Errors
+///
+/// ```
+/// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidRenderError};
+///
+/// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+///
+/// match renderer.render_for_terminal() {
+///     Ok(()) => println!("Rendered successfully!"),
+///     Err(MermaidRenderError::MmdcNotFound) => {
+///         eprintln!("Install mmdc: npm install -g @mermaid-js/mermaid-cli");
+///         println!("{}", renderer.fallback_code_block());
+///     }
+///     Err(MermaidRenderError::MmdcExecutionFailed { exit_code, stderr }) => {
+///         eprintln!("mmdc failed ({}): {}", exit_code, stderr);
+///     }
+///     Err(MermaidRenderError::TerminalIncapable) => {
+///         println!("Using fallback:\n{}", renderer.fallback_code_block());
+///     }
+///     Err(e) => {
+///         eprintln!("Error: {}", e);
+///     }
+/// }
+/// ```
+///
+/// ## Recovery Strategies
+///
+/// | Error | Recovery |
+/// |-------|----------|
+/// | MmdcNotFound | Install @mermaid-js/mermaid-cli or use fallback |
+/// | MmdcExecutionFailed | Check diagram syntax, reduce complexity |
+/// | ContentTooLarge | Simplify diagram or increase limit |
+/// | TerminalIncapable | Use `fallback_code_block()` method |
 #[derive(Error, Debug)]
 pub enum MermaidRenderError {
     /// mmdc CLI not found in PATH (and npx fallback not used).
@@ -319,6 +443,41 @@ fn detect_system_chromium() -> Option<String> {
 }
 
 /// Preset themes for quadrant charts.
+///
+/// Quadrant themes customize the color scheme for quadrant charts (such as
+/// Gartner-style magic quadrant visualizations).
+///
+/// ## Variants
+///
+/// - **`Default`**: Uses Mermaid's default colors with no customization.
+/// - **`MagicQuadrangle`**: Gartner-inspired theme with semantic colors:
+///   - Top-right (leaders): subtle green
+///   - Bottom-left (niche players): subtle red
+///   - Top-left and bottom-right: neutral color (adapts to light/dark mode)
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::components::mermaid::{MermaidConfig, QuadrantTheme};
+/// use biscuit_terminal::discovery::detection::ColorMode;
+///
+/// // Use default theme
+/// let config = QuadrantTheme::Default.apply(MermaidConfig::new(), ColorMode::Dark);
+///
+/// // Use Gartner-style Magic Quadrangle theme
+/// let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), ColorMode::Dark);
+/// // Quadrant 1 (top-right) gets subtle green
+/// // Quadrant 3 (bottom-left) gets subtle red
+/// ```
+///
+/// ```rust
+/// use biscuit_terminal::components::mermaid::QuadrantTheme;
+///
+/// // Parse from string (case-insensitive)
+/// assert_eq!(QuadrantTheme::parse("default"), Some(QuadrantTheme::Default));
+/// assert_eq!(QuadrantTheme::parse("magic-quadrangle"), Some(QuadrantTheme::MagicQuadrangle));
+/// assert_eq!(QuadrantTheme::parse("MAGIC_QUADRANGLE"), Some(QuadrantTheme::MagicQuadrangle));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum QuadrantTheme {
@@ -409,6 +568,45 @@ impl QuadrantTheme {
 ///
 /// These options are passed to mmdc via a temporary config file.
 /// Only non-None values are included in the generated config.
+///
+/// ## Supported Diagrams
+///
+/// Currently, these options primarily affect **quadrant charts**:
+/// - `point_label_font_size` - Font size for point labels
+/// - `point_radius` - Radius of data points
+/// - `quadrant1_fill` through `quadrant4_fill` - Background fill colors per quadrant
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::mermaid::MermaidConfig;
+///
+/// // Empty config (uses mmdc defaults)
+/// let config = MermaidConfig::new();
+///
+/// // Customized quadrant chart config
+/// let config = MermaidConfig::new()
+///     .with_point_label_font_size(14)
+///     .with_point_radius(8)
+///     .with_quadrant_fill(1, "#ff0000")   // top-right: red
+///     .with_quadrant_fill(2, "#00ff00")   // top-left: green  
+///     .with_quadrant_fill(3, "#0000ff")   // bottom-left: blue
+///     .with_quadrant_fill(4, "#ffff00");  // bottom-right: yellow
+///
+/// // Generate JSON config for mmdc
+/// let json = config.to_json();
+/// println!("{}", json);
+/// ```
+///
+/// ## Quadrant Numbering
+///
+/// ```
+///     │
+///  2  │  1
+/// ────┼────
+///  3  │  4
+///     │
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct MermaidConfig {
     /// Quadrant chart: point label font size (default: 12)
@@ -542,17 +740,58 @@ impl MermaidConfig {
 /// ```rust,no_run
 /// use biscuit_terminal::components::mermaid::MermaidRenderer;
 ///
-/// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+/// Renders Mermaid diagrams to terminal-compatible image formats.
 ///
-/// // Try to render as an image, or get the fallback code block
-/// match renderer.render_for_terminal() {
-///     Ok(()) => println!("Diagram rendered successfully!"),
-///     Err(e) => {
-///         eprintln!("Render failed: {}", e);
-///         println!("{}", renderer.fallback_code_block());
-///     }
+/// This renderer converts Mermaid diagram definitions into PNG images
+/// that can be displayed inline in terminals supporting Kitty/iTerm2
+/// image protocols.
+///
+/// ## Usage
+///
+/// ```
+/// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+/// use biscuit_terminal::components::mermaid::MermaidConfig;
+///
+/// // Basic usage with default settings (dark theme, 2x scale)
+/// let mut renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+///
+/// // Customize rendering
+/// renderer
+///     .with_theme(MermaidTheme::Forest)
+///     .with_scale(3)           // Higher resolution
+///     .with_transparent_background(true)
+///     .with_title("My Flowchart")
+///     .with_config(MermaidConfig::new().with_point_label_font_size(16));
+///
+/// // Render to terminal (requires capable terminal)
+/// if let Err(e) = renderer.render_for_terminal() {
+///     // Fall back to code block on incapable terminals
+///     println!("{}", renderer.fallback_code_block());
 /// }
 /// ```
+///
+/// ## Supported Diagram Types
+///
+/// - Flowcharts (flowchart, graph)
+/// - Sequence diagrams
+/// - Class diagrams
+/// - State diagrams
+/// - Entity relationship diagrams
+/// - Gantt charts
+/// - Pie charts
+/// - Quadrant charts
+/// - And more (see Mermaid documentation)
+///
+/// ## Terminal Compatibility
+///
+/// For inline image display, use a capable terminal:
+/// - **Kitty** - Full support
+/// - **iTerm2** - Full support
+/// - **WezTerm** - Full support
+/// - **Ghostty** - Full support
+/// - **Windows Terminal** - Limited support
+///
+/// On incompatible terminals, use `fallback_code_block()` for plain text output.
 #[derive(Debug, Clone)]
 pub struct MermaidRenderer {
     /// The Mermaid diagram instructions

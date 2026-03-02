@@ -38,6 +38,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-sandbox-cli"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.60",
+ "clap_complete",
+ "color-eyre",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

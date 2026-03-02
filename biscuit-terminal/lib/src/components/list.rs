@@ -47,7 +47,32 @@ fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32
 // =============================================================================
 
 /// An **OrderedList** contains a list of renderable items
-/// which will be rendered into an **ordered** list.
+/// which will be rendered into an **ordered** (numbered) list.
+///
+/// OrderedList renders items with numeric prefixes (1., 2., 3., etc.)
+/// and handles word-wrapping with proper indentation so continuation
+/// lines align with the start of the item text.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::list::OrderedList;
+///
+/// // Create from a vec of strings
+/// let list = OrderedList::new(vec!["First item", "Second item", "Third item"]);
+/// // Renders as:
+/// // 1. First item
+/// // 2. Second item
+/// // 3. Third item
+///
+/// // Build incrementally with add()
+/// let mut list = OrderedList::empty();
+/// list.add("Install dependencies").add("Run build").add("Deploy");
+///
+/// // Add with custom indentation for nested content
+/// let list = OrderedList::new(vec!["Parent item"])
+///     .with_indent_children(8);  // 8 spaces for nested content
+/// ```
 #[derive(Debug)]
 pub struct OrderedList {
     items: Vec<RenderableContent>,
@@ -240,8 +265,43 @@ impl Renderable for OrderedList {
 // =============================================================================
 
 /// An **UnorderedList** contains a list of renderable items
-/// which will be rendered into an **unordered** list, a bullet
-/// point will precede each line.
+/// which will be rendered into an **unordered** (bullet-point) list.
+///
+/// Each item is prefixed with a bullet character (default: `• `) and
+/// supports proper word-wrapping with hanging indentation so that
+/// continuation lines align with the start of the item text.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::list::UnorderedList;
+///
+/// // Create from a vec of strings
+/// let list = UnorderedList::new(vec!["First item", "Second item", "Third item"]);
+/// // Renders as:
+/// // • First item
+/// // • Second item
+/// // • Third item
+///
+/// // Build incrementally with add()
+/// let mut list = UnorderedList::empty();
+/// list.add("Install dependencies").add("Run build").add("Deploy");
+///
+/// // Custom bullet character
+/// let list = UnorderedList::new(vec!["Option A", "Option B", "Option C"])
+///     .with_bullet("→ ");  // Renders with → instead of •
+///
+/// // Disable hanging indent for wrapped lines
+/// let list = UnorderedList::new(vec!["Long item that wraps"])
+///     .without_hanging_indent();
+/// ```
+///
+/// ## Features
+///
+/// - **Hanging indent**: Continuation lines align after the bullet (enabled by default)
+/// - **Custom bullets**: Use any character or string as the bullet marker
+/// - **Nested content**: Block-level children are indented without bullets
+/// - **Mixed content**: Supports both string items and renderable components
 #[derive(Debug)]
 pub struct UnorderedList {
     items: Vec<RenderableContent>,

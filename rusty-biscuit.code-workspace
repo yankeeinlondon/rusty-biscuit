@@ -5,6 +5,10 @@
             "name": "ai"
         },
         {
+            "path": "agent-sandbox",
+            "name": "agent-sandbox"
+        },
+        {
             "path": "biscuit-file",
             "name": "biscuit-file"
         },
@@ -72,6 +76,7 @@
             "path": "unchained-ai",
             "name": "unchained-ai"
         },
+
         {
             "path": ".",
             "name": "~ monorepo"

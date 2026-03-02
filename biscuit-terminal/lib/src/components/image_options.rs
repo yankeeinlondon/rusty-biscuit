@@ -157,7 +157,46 @@ impl TerminalImageOptions {
 
 /// Builder for `TerminalImageOptions`.
 ///
-/// Provides a fluent API for constructing `TerminalImageOptions` instances.
+/// Provides a fluent API for constructing `TerminalImageOptions` instances
+/// with optional configuration. Any field not explicitly set will use its
+/// default value when `build()` is called.
+///
+/// ## Usage
+///
+/// ```
+/// use std::path::PathBuf;
+/// use biscuit_terminal::components::image_options::{TerminalImageOptions, ImageWidth};
+///
+/// // Using all options
+/// let options = TerminalImageOptions::builder()
+///     .base_path(PathBuf::from("/safe/directory"))
+///     .max_file_size(5 * 1024 * 1024)  // 5MB limit
+///     .allow_remote(false)              // Block remote URLs
+///     .width(ImageWidth::Percent(0.75)) // 75% width
+///     .build();
+///
+/// // Using just some options (others use defaults)
+/// let options = TerminalImageOptions::builder()
+///     .max_file_size(2 * 1024 * 1024)  // 2MB limit
+///     .build();
+///
+/// // All defaults
+/// let options = TerminalImageOptions::default();
+/// ```
+///
+/// ## Method Chaining
+///
+/// All builder methods return `Self` to enable method chaining:
+///
+/// ```
+/// use biscuit_terminal::components::image_options::TerminalImageOptions;
+///
+/// let options = TerminalImageOptions::builder()
+///     .max_file_size(1024 * 1024)
+///     .allow_remote(true)
+///     .width(ImageWidth::Fill)
+///     .build();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct TerminalImageOptionsBuilder {
     base_path: Option<PathBuf>,

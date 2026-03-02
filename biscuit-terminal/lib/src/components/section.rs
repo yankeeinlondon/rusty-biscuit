@@ -5,6 +5,24 @@ use crate::{
 };
 
 /// Heading level for sections, from h1 (largest) to h6 (smallest).
+///
+/// Levels h1-h3 use bold styling, h4-h5 use italic, and h6 renders as plain text.
+/// The level also determines the Markdown-style prefix: `# ` for h1, `## ` for h2, etc.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::section::{Section, HeadingLevel};
+///
+/// // Create sections at different levels
+/// let h1 = Section::new(HeadingLevel::h1, "Title");
+/// let h2 = Section::new(HeadingLevel::h2, "Section");
+/// let h3 = Section::new(HeadingLevel::h3, "Subsection");
+/// let h6 = Section::new(HeadingLevel::h6, "Minor heading");
+///
+/// // Get numeric level
+/// assert_eq!(HeadingLevel::h2.level(), 2);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum HeadingLevel {
@@ -31,6 +49,37 @@ impl HeadingLevel {
 }
 
 /// A section with a heading and content.
+///
+/// Sections render a Markdown-style heading followed by arbitrary content.
+/// The heading level (h1-h6) controls both the visual styling and the
+/// Markdown prefix (`#`, `##`, etc.).
+///
+/// ## Heading Levels
+///
+/// - Levels h1-h3: Bold styling
+/// - Levels h4-h5: Italic styling
+/// - Level h6: Plain text (no styling)
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::section::{Section, HeadingLevel};
+/// use biscuit_terminal::components::renderable::Renderable;
+///
+/// // Create a section with heading and content
+/// let section = Section::new(HeadingLevel::h2, "Getting Started")
+///     .push("Welcome to the tutorial.")
+///     .push("Let's begin with installation.");
+///
+/// // Render to terminal string
+/// let output = section.render_optimistic(Some(80));
+/// assert!(output.contains("## Getting Started"));
+/// ```
+///
+/// ## Notes
+///
+/// Content can be strings, [`Prose`][crate::components::prose::Prose],
+/// or any type implementing [`Into<RenderableContent>`][crate::components::renderable::RenderableContent].
 #[derive(Debug)]
 pub struct Section {
     level: HeadingLevel,

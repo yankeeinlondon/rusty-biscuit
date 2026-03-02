@@ -64,7 +64,57 @@ use super::mermaid::{MermaidConfig, MermaidTheme};
 /// A cache key for mermaid diagram renders.
 ///
 /// Generated from all parameters that affect the rendered output to ensure
-/// cache correctness and collision resistance.
+/// cache correctness and collision resistance. Uses xxHash for fast,
+/// deterministic key generation.
+///
+/// ## Cache Key Components
+///
+/// The key incorporates:
+/// - Diagram source code
+/// - Theme selection
+/// - Scale factor
+/// - Configuration options
+/// - Background transparency
+/// - Optional title
+/// - mmdc CLI version (for version-specific rendering differences)
+///
+/// ## Why xxHash?
+///
+/// xxHash provides:
+/// - Extremely fast hashing (10+ GB/s)
+/// - Good distribution (minimal collisions)
+/// - Fixed-length output (consistent key sizes)
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::mermaid_cache::MermaidCacheKey;
+/// use biscuit_terminal::components::mermaid::{MermaidTheme, MermaidConfig};
+///
+/// // Same diagram, same params → same hash
+/// let key1 = MermaidCacheKey::new(
+///     "flowchart LR\n    A --> B",
+///     MermaidTheme::Dark,
+///     2,
+///     &MermaidConfig::new(),
+///     false,
+///     None,
+///     "3.0.0",
+/// );
+///
+/// // Different theme → different hash
+/// let key2 = MermaidCacheKey::new(
+///     "flowchart LR\n    A --> B",
+///     MermaidTheme::Default,
+///     2,
+///     &MermaidConfig::new(),
+///     false,
+///     None,
+///     "3.0.0",
+/// );
+///
+/// assert_ne!(key1.hash(), key2.hash());
+/// ```
 #[derive(Debug, Clone)]
 pub struct MermaidCacheKey {
     /// The xxHash of all input parameters
@@ -158,6 +208,50 @@ impl MermaidCacheKey {
 /// File-based cache for mermaid diagram renders.
 ///
 /// Uses the OS temp directory for storage with auto-cleanup.
+/// Cached renders persist across invocations, enabling fast subsequent displays.
+///
+/// ## Storage Location
+///
+/// - macOS: `$TMPDIR/mermaid-cache/`
+/// - Linux: `/tmp/mermaid-cache/`
+/// - Windows: `%TEMP%\mermaid-cache\`
+///
+/// The OS handles cleanup of old temp files automatically.
+///
+/// ## Usage
+///
+/// ```
+/// use biscuit_terminal::components::mermaid_cache::{MermaidCache, MermaidCacheKey};
+/// use biscuit_terminal::components::mermaid::{MermaidTheme, MermaidConfig};
+/// use std::path::Path;
+///
+/// let cache = MermaidCache::new();
+/// let key = MermaidCacheKey::new(
+///     "flowchart LR\n    A --> B",
+///     MermaidTheme::Dark,
+///     2,
+///     &MermaidConfig::new(),
+///     false,
+///     None,
+///     "3.0.0",
+/// );
+///
+/// // Check for cached render
+/// if let Some(cached_path) = cache.get(&key) {
+///     println!("Using cached render: {}", cached_path.display());
+/// } else {
+///     // Render and cache the result
+///     let new_path = Path::new("/tmp/new-render.png");
+///     cache.store(&key, new_path).ok();
+/// }
+///
+/// // Clear cache if needed
+/// cache.clear().ok();
+/// ```
+///
+/// ## Thread Safety
+///
+/// `MermaidCache` is safe to share across threads using `Arc`.
 #[derive(Debug)]
 pub struct MermaidCache {
     /// Base directory for cache storage
@@ -537,12 +631,10 @@ mod tests {
     #[test]
     fn test_cache_new() {
         let cache = MermaidCache::new();
-        assert!(
-            cache
-                .cache_dir()
-                .to_string_lossy()
-                .contains("mermaid-cache")
-        );
+        assert!(cache
+            .cache_dir()
+            .to_string_lossy()
+            .contains("mermaid-cache"));
     }
 
     #[test]

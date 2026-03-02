@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -847,6 +847,7 @@ fn main() -> Result<(), TreeHuggerError> {
                     &command_kind,
                     &output_config,
                     display_root.as_deref(),
+                    &git_root,
                     render_options,
                 );
             } else {
@@ -884,54 +885,52 @@ fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
 
 /// Resolves symbol names and direct export entries from a prelude module.
 ///
-/// Looks for `{root}/src/prelude.rs` or `{root}/src/prelude/mod.rs`, parses
-/// public `use` exports, and merges any additional names from the `PRELUDE`
-/// environment variable (comma-separated).
+/// Resolves prelude exports from `{root}/src/prelude.rs`,
+/// `{root}/src/prelude/mod.rs`, and direct child package roots such as
+/// `{root}/lib/src/prelude.rs`.
+///
+/// Parses public `use` exports and merges any additional names from the
+/// `PRELUDE` environment variable (comma-separated).
 fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerError> {
     let mut names = HashSet::new();
     let mut exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
     let mut rust_symbol_cache: HashMap<PathBuf, Vec<SymbolInfo>> = HashMap::new();
 
-    let candidates = [
-        root_dir.join("src/prelude.rs"),
-        root_dir.join("src/prelude/mod.rs"),
-    ];
-    for candidate in &candidates {
-        if candidate.is_file() {
-            let tree_file = TreeFile::with_language(candidate, None)?;
-            let source = std::fs::read_to_string(candidate).map_err(|source| TreeHuggerError::Io {
-                path: candidate.to_path_buf(),
-                source,
-            })?;
-            let exports: Vec<ImportSymbol> = tree_file
-                .imported_symbols()?
-                .into_iter()
-                .filter(|import| is_prelude_export(import, &source))
-                .collect();
-            let mut resolved_exports = Vec::with_capacity(exports.len());
+    for candidate in discover_prelude_files(root_dir)? {
+        let tree_file = TreeFile::with_language(&candidate, None)?;
+        let source = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
+            path: candidate.clone(),
+            source,
+        })?;
+        let exports: Vec<ImportSymbol> = tree_file
+            .imported_symbols()?
+            .into_iter()
+            .filter(|import| is_prelude_export(import, &source))
+            .collect();
+        let mut resolved_exports = Vec::with_capacity(exports.len());
+        let package_root = package_root_for_prelude_file(&candidate)
+            .unwrap_or_else(|| root_dir.to_path_buf());
 
-            for import in &exports {
-                names.insert(import.name.clone());
-                let metadata =
-                    resolve_prelude_export_metadata(import, root_dir, &mut rust_symbol_cache)?
-                        .unwrap_or(ResolvedPreludeMetadata {
-                            kind: SymbolKind::Unknown,
-                            doc_comment: None,
-                            file: None,
-                            range: None,
-                        });
-                resolved_exports.push(symbol_from_prelude_export(
-                    import,
-                    metadata.kind,
-                    metadata.doc_comment,
-                    metadata.file,
-                    metadata.range,
-                ));
-            }
-
-            exports_by_file.insert(candidate.to_path_buf(), resolved_exports);
-            break;
+        for import in &exports {
+            names.insert(import.name.clone());
+            let metadata =
+                resolve_prelude_export_metadata(import, &package_root, &mut rust_symbol_cache)?
+                    .unwrap_or(ResolvedPreludeMetadata {
+                        kind: SymbolKind::Unknown,
+                        doc_comment: None,
+                        file: None,
+                        range: None,
+                    });
+            resolved_exports.push(symbol_from_prelude_export(
+                import,
+                metadata.kind,
+                metadata.doc_comment,
+                metadata.file,
+                metadata.range,
+            ));
         }
+
+        exports_by_file.insert(candidate, resolved_exports);
     }
 
     if let Ok(env_val) = std::env::var("PRELUDE") {
@@ -947,6 +946,98 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerE
         names,
         exports_by_file,
     })
+}
+
+fn discover_prelude_files(root_dir: &Path) -> Result<Vec<PathBuf>, TreeHuggerError> {
+    let mut package_roots = BTreeSet::new();
+    package_roots.insert(root_dir.to_path_buf());
+
+    if let Ok(entries) = std::fs::read_dir(root_dir) {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if has_package_manifest(&path) {
+                package_roots.insert(path);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    for package_root in package_roots {
+        let prelude_rs = package_root.join("src/prelude.rs");
+        if prelude_rs.is_file() {
+            files.push(prelude_rs);
+        }
+
+        let prelude_mod_rs = package_root.join("src/prelude/mod.rs");
+        if prelude_mod_rs.is_file() {
+            files.push(prelude_mod_rs);
+        }
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn package_root_for_prelude_file(path: &Path) -> Option<PathBuf> {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("prelude.rs") => path.parent().and_then(Path::parent).map(Path::to_path_buf),
+        Some("mod.rs") => path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .map(Path::to_path_buf),
+        _ => None,
+    }
+}
+
+fn has_package_manifest(path: &Path) -> bool {
+    const MANIFESTS: &[&str] = &[
+        "Cargo.toml",
+        "package.json",
+        "go.mod",
+        "pyproject.toml",
+        "setup.py",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "composer.json",
+    ];
+
+    for manifest in MANIFESTS {
+        let file = path.join(manifest);
+        if !file.is_file() {
+            continue;
+        }
+
+        match *manifest {
+            "Cargo.toml" => {
+                let is_package = std::fs::read_to_string(&file)
+                    .map(|contents| contents.contains("[package]"))
+                    .unwrap_or(false);
+                if is_package {
+                    return true;
+                }
+            }
+            "package.json" => {
+                let is_package = std::fs::read_to_string(&file)
+                    .map(|contents| !contents.contains("\"workspaces\""))
+                    .unwrap_or(false);
+                if is_package {
+                    return true;
+                }
+            }
+            _ => return true,
+        }
+    }
+
+    false
 }
 
 fn is_prelude_export(import: &ImportSymbol, file_source: &str) -> bool {
@@ -1499,6 +1590,49 @@ fn render_symbol_summaries(
     command: &CommandKind,
     config: &OutputConfig,
     display_root: Option<&Path>,
+    git_root: &Path,
+    options: SymbolRenderOptions,
+) {
+    let packages = summarize_packages(summaries, git_root);
+    let packages_with_symbols = packages
+        .iter()
+        .filter(|(_, package_summaries)| {
+            package_summaries
+                .iter()
+                .any(|summary| !summary.symbols.is_empty())
+        })
+        .count();
+
+    if packages.len() <= 1 || packages_with_symbols <= 1 {
+        let package_summaries = summaries.iter().collect::<Vec<_>>();
+        render_symbol_summaries_for_package(
+            &package_summaries,
+            command,
+            config,
+            display_root,
+            options,
+        );
+        return;
+    }
+
+    for (package_root, package_summaries) in packages {
+        render_package_heading(&package_root, config, display_root);
+        render_symbol_summaries_for_package(
+            &package_summaries,
+            command,
+            config,
+            display_root,
+            options,
+        );
+        println!();
+    }
+}
+
+fn render_symbol_summaries_for_package(
+    summaries: &[&FileSummary],
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
     options: SymbolRenderOptions,
 ) {
     let mut symbols: Vec<SymbolInfo> = summaries
@@ -1526,6 +1660,32 @@ fn render_symbol_summaries(
     } else {
         render_flat_symbol_list(&symbols, command, config, display_root);
     }
+}
+
+fn summarize_packages<'a>(
+    summaries: &'a [FileSummary],
+    git_root: &Path,
+) -> Vec<(PathBuf, Vec<&'a FileSummary>)> {
+    let mut grouped: BTreeMap<PathBuf, Vec<&FileSummary>> = BTreeMap::new();
+
+    for summary in summaries {
+        let start = summary.file.parent().unwrap_or(summary.file.as_path());
+        let package_root = find_package_root(start, git_root);
+        grouped.entry(package_root).or_default().push(summary);
+    }
+
+    grouped.into_iter().collect()
+}
+
+fn render_package_heading(package_root: &Path, config: &OutputConfig, display_root: Option<&Path>) {
+    let package_display = display_path(package_root, display_root);
+    println!();
+    if config.use_colors {
+        println!("{}", package_display.blue().bold());
+    } else {
+        println!("{package_display}");
+    }
+    println!();
 }
 
 fn sort_symbols(

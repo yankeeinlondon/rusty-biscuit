@@ -179,6 +179,48 @@ pub trait Renderable: std::fmt::Debug + Any {
     }
 }
 
+/// Content that can be rendered as either plain text or a component.
+///
+/// This enum allows unified handling of both simple string content and
+/// complex renderable components that implement the `Renderable` trait.
+///
+/// ## Variants
+///
+/// - **`String(String)`**: Plain text content that is rendered directly.
+/// - **`Component(Rc<dyn Renderable>)**: A reference-counted pointer to a
+///   component that implements the `Renderable` trait.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+/// use biscuit_terminal::terminal::Terminal;
+///
+/// // Create from a plain string
+/// let content: RenderableContent = RenderableContent::String("Hello, world!".to_string());
+///
+/// // Or use the From impl for seamless conversion
+/// let string_content: RenderableContent = "Hello".into();
+/// ```
+///
+/// ```rust
+/// use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+/// use biscuit_terminal::components::prose::Prose;
+///
+/// // Create from a Prose component
+/// let prose = Prose::new("<bold>Styled text</bold>");
+/// let component_content: RenderableContent = prose.into();
+/// ```
+///
+/// ## Extracting Content
+///
+/// ```rust
+/// use biscuit_terminal::components::renderable::RenderableContent;
+///
+/// let string_content = RenderableContent::String("hello".to_string());
+/// let text = string_content.as_str();
+/// assert_eq!(text, "hello");
+/// ```
 #[derive(Debug)]
 pub enum RenderableContent {
     String(String),

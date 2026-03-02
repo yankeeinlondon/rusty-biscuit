@@ -17,13 +17,45 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::discovery::detection::TerminalApp;
 use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
 
 /// Error types for terminal image operations.
+///
+/// This enum variants cover the full lifecycle of terminal image rendering:
+/// file access, validation, loading, encoding, and terminal compatibility.
+///
+/// ## Error Categories
+///
+/// - **File Errors**: `FileNotFound`, `InvalidPath`, `IoError` - problems accessing image files
+/// - **Validation Errors**: `InvalidWidthSpec`, `PathTraversalBlocked`, `FileTooLarge`, `RemoteUrlBlocked` - security and configuration issues
+/// - **Processing Errors**: `ImageLoadError`, `EncodingError` - image decoding and encoding failures
+/// - **Runtime Errors**: `UnsupportedTerminal`, `ViuerError` - terminal capability issues
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::terminal_image::TerminalImageError;
+///
+/// // Pattern matching on error variants
+/// let err = TerminalImageError::FileNotFound {
+///     path: "/missing/image.png".to_string()
+/// };
+/// match err {
+///     TerminalImageError::FileNotFound { path } => {
+///         eprintln!("Image not found: {}", path);
+///     }
+///     TerminalImageError::UnsupportedTerminal => {
+///         eprintln!("Terminal doesn't support images");
+///     }
+///     _ => {
+///         eprintln!("Other error: {}", err);
+///     }
+/// }
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalImageError {
     /// File does not exist at the specified path.
@@ -74,6 +106,43 @@ pub enum TerminalImageError {
 }
 
 /// Width specification for image rendering.
+///
+/// Controls how wide an image displays in the terminal. The width is resolved
+/// against the available terminal space (terminal width minus left and right margins).
+///
+/// ## Variants
+///
+/// - **`Fill`**: Use all available space. The image expands to fill the entire
+///   available width calculated from `terminal_width - margin_left - margin_right`.
+///
+/// - **`Percent(f32)`**: Use a percentage of available space. Values range from 0.0 to 1.0
+///   (internally, the percentage is specified as 0-100 in width spec strings like `"50%"`).
+///
+/// - **`Characters(u32)`**: Fixed width in terminal character cells. The image is scaled
+///   to occupy exactly this many columns.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::terminal_image::ImageWidth;
+///
+/// // Fill available space
+/// let fill = ImageWidth::Fill;
+///
+/// // 50% of available width (default)
+/// let half = ImageWidth::Percent(0.5);
+///
+/// // Fixed 80 character width
+/// let fixed = ImageWidth::Characters(80);
+/// ```
+///
+/// ## Width Specification Syntax
+///
+/// When parsing from strings (e.g., `"image.png|50%"`), these formats are supported:
+/// - `"fill"` → `ImageWidth::Fill`
+/// - `"50%"` → `ImageWidth::Percent(0.5)`
+/// - `"80"` → `ImageWidth::Characters(80)`
+/// - `"40ch"` → `ImageWidth::Characters(40)`
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImageWidth {
     /// Fill available space (using margins as offsets).
@@ -92,6 +161,69 @@ impl Default for ImageWidth {
 }
 
 /// A terminal image component that can be rendered using various protocols.
+///
+/// This struct represents an image file that can be displayed in terminals
+/// supporting inline graphics. It supports the **Kitty graphics protocol**
+/// and **iTerm2 inline images**, with automatic protocol selection based on
+/// terminal capabilities.
+///
+/// ## Protocol Support
+///
+/// | Terminal | Protocol | Notes |
+/// |----------|----------|-------|
+/// | Kitty    | Kitty    | Primary support, best feature set |
+/// | iTerm2   | iTerm2   | Native OSC 1337 handling |
+/// | WezTerm  | Kitty    | Requires explicit cell sizing |
+/// | Ghostty  | Kitty    | Full support |
+/// | Warp     | Kitty    | Uses floor-based row counting |
+/// | Other    | None     | Falls back to alt text |
+///
+/// ## Usage
+///
+/// Create a `TerminalImage` from a file path and render it:
+///
+/// ```rust
+/// use biscuit_terminal::components::terminal_image::TerminalImage;
+/// use biscuit_terminal::terminal::Terminal;
+/// use std::path::Path;
+///
+/// // Create from file path
+/// let image = TerminalImage::new(Path::new("screenshot.png")).unwrap();
+///
+/// // Or parse from string with width specification
+/// let image = TerminalImage::from_spec("diagram.svg|50%").unwrap();
+///
+/// // Render to terminal
+/// let term = Terminal::new();
+/// let output = image.render(&term);
+/// print!("{}", output);
+/// ```
+///
+/// ## Width Specification
+///
+/// Images can be sized using the `|` delimiter:
+///
+/// ```rust
+/// use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
+/// use std::path::Path;
+///
+/// // Fixed 25 character width
+/// let img = TerminalImage::new(Path::new("img.png")).unwrap()
+///     .with_width(ImageWidth::Characters(25));
+///
+/// // 50% of available terminal width (default)
+/// let img = TerminalImage::new(Path::new("img.png")).unwrap()
+///     .with_width(ImageWidth::Percent(0.5));
+///
+/// // Fill all available width
+/// let img = TerminalImage::new(Path::new("img.png")).unwrap()
+///     .with_width(ImageWidth::Fill);
+/// ```
+///
+/// ## Security
+///
+/// The `TerminalImage` type validates paths to prevent path traversal attacks.
+/// Use `TerminalImageOptions` with a `base_path` to restrict file access.
 #[derive(Debug)]
 pub struct TerminalImage {
     /// Fully qualified filename (absolute path).
@@ -169,10 +301,60 @@ impl Renderable for TerminalImage {
     }
 }
 
-/// Resolved dimensions for image rendering.
+/// Computed dimensions for terminal image rendering.
 ///
 /// This struct captures the calculated dimensions after applying margins,
-/// width specifications, and alignment.
+/// width specifications, and alignment. It is returned by `TerminalImage::resolve_dimensions()`
+/// to provide all the necessary values for positioning and rendering an image
+/// within a terminal of known width.
+///
+/// ## Fields
+///
+/// - **`available_width`**: The width remaining after left and right margins are subtracted
+///   from the terminal width.
+/// - **`image_width`**: The resolved width of the image in terminal character cells.
+/// - **`x_offset`**: The horizontal offset where image rendering begins (includes left margin
+///   and any alignment adjustment).
+/// - **`left_margin`**: The left margin in character cells.
+/// - **`right_margin`**: The right margin in character cells.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::components::terminal_image::TerminalImage;
+///
+/// let image = TerminalImage::new("test.png")
+///     .with_width_percent(80)  // Use 80% of available width
+///     .with_margin_left(10)
+///     .with_margin_right(10);
+///
+/// // Resolve dimensions for a 80-character wide terminal
+/// let dims = image.resolve_dimensions(80);
+///
+/// // available_width = 80 - 10 - 10 = 60
+/// // image_width = 60 * 0.8 = 48 (rounded)
+/// // x_offset = 10 (left margin, assuming left alignment)
+/// assert_eq!(dims.left_margin, 10);
+/// assert_eq!(dims.right_margin, 10);
+/// ```
+///
+/// ```rust
+/// use biscuit_terminal::components::terminal_image::TerminalImage;
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, Margin};
+///
+/// let image = TerminalImage::new("diagram.svg")
+///     .with_layout(Layout {
+///         left_margin: Margin::Percent(10.0),
+///         right_margin: Margin::Percent(10.0),
+///         alignment: Alignment::Center,
+///         ..Layout::default()
+///     });
+///
+/// let dims = image.resolve_dimensions(100);
+/// // Left and right margins are 10% of 100 = 10 chars each
+/// // available_width = 100 - 10 - 10 = 80
+/// assert_eq!(dims.available_width, 80);
+/// ```
 #[derive(Debug, Clone)]
 pub struct ResolvedDimensions {
     /// Available width after margins are applied
@@ -1471,7 +1653,7 @@ mod tests {
         assert!(result.contains("f=100")); // PNG format
         assert!(result.contains("a=T")); // Transmit and display
         assert!(result.contains("t=d")); // Direct transmission
-        // Should end with string terminator
+                                         // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 

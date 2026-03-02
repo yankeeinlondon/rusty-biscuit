@@ -107,6 +107,52 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
     m
 });
 
+/// A TODO item with state tracking for terminal rendering.
+///
+/// Todo represents a task or item that can be in one of several states:
+/// - **Open**: Not yet started, rendered with `[ ]` or ⬜
+/// - **InProgress**: Currently being worked on, rendered with `[▶]` or ⏺
+/// - **Completed**: Finished task, rendered with `[✔]` or ✓
+/// - **Cancelled**: Abandoned task, rendered with `[-]` (strikethrough)
+/// - **Blocked**: Cannot proceed, rendered with `[!]` or ⏺
+///
+/// The rendering automatically adapts to the terminal:
+/// - Nerd Font terminals use icon glyphs (e.g., ⬜, ⏺, ✓)
+/// - Regular terminals use ASCII fallbacks (e.g., `[ ]`, `[x]`, `[-]`)
+/// - Colorless terminals strip all styling
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::todo::{Todo, TodoState};
+///
+/// // Create a new open TODO
+/// let todo = Todo::new("Review pull request #42");
+/// assert_eq!(todo.state, TodoState::Open);
+///
+/// // Render to string
+/// let output = todo.render_optimistic(Some(80));
+/// assert!(output.contains("Review pull request #42"));
+///
+/// // Build TODO with specific state
+/// let completed = Todo {
+///     state: TodoState::Completed,
+///     description: "Write documentation".to_string(),
+///     created: chrono::Utc::now(),
+///     last_updated: chrono::Utc::now(),
+///     layout: Default::default(),
+/// };
+/// ```
+///
+/// ## State Rendering
+///
+/// | State        | Nerd Font  | Fallback | Color |
+/// |--------------|------------|----------|-------|
+/// | Open         | ⬜         | `[ ]`    | none  |
+/// | InProgress   | ⏺         | `[▶]`    | green |
+/// | Completed    | ✓          | `[✔]`    | green |
+/// | Cancelled    | ⃠          | `[-]`    | dim   |
+/// | Blocked      | ⏺         | `[!]`    | red   |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Todo {
     state: TodoState,

@@ -177,7 +177,43 @@ pub trait TermColor<'a> {
     fn bg(self, content: impl Into<Cow<'a, str>>) -> String;
 }
 
-/// Basic 8 color mode (ANSI colors 0-7 and bright variants 8-15).
+/// The 8 basic ANSI colors (0-7) plus their bright variants (8-15).
+///
+/// This enum represents the standard 16-color terminal palette:
+/// - Standard colors: Black, Red, Green, Yellow, Blue, Magenta, Cyan, White
+/// - Bright variants: BrightBlack, BrightRed, BrightGreen, BrightYellow,
+///   BrightBlue, BrightMagenta, BrightCyan, BrightWhite
+///
+/// These colors are supported by virtually all terminal emulators and provide
+/// consistent rendering across different platforms.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::color::{BasicColor, TermColor};
+///
+/// // Color text using the TermColor trait
+/// let red_text = BasicColor::Red.fg("This is red");
+/// assert!(red_text.contains("\x1b[31m"));
+/// assert!(red_text.contains("\x1b[39m")); // reset code
+///
+/// // Color background
+/// let blue_bg = BasicColor::Blue.bg("Blue background");
+/// assert!(blue_bg.contains("\x1b[44m")); // blue background code
+///
+/// // Bright colors for higher contrast
+/// let bright_green = BasicColor::BrightGreen.fg("High visibility");
+/// assert!(bright_green.contains("\x1b[92m")); // bright green foreground
+///
+/// // Combine multiple colors in a string
+/// let combined = format!(
+///     "{} and {}",
+///     BasicColor::Red.fg("error"),
+///     BasicColor::Green.fg("success")
+/// );
+/// assert!(combined.contains("\x1b[31m"));
+/// assert!(combined.contains("\x1b[32m"));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BasicColor {
     Black,
@@ -474,10 +510,38 @@ impl HdrColor {
     }
 }
 
-/// Use any of the named CSS/Web Colors.
+/// CSS named colors for terminal output.
 ///
-/// These correspond to the 148 named colors defined in the CSS Color Module Level 4
-/// specification.
+/// This enum provides access to the 148 named colors defined in the
+/// CSS Color Module Level 4 specification. These colors can be used
+/// anywhere a [`Color`] is accepted, enabling consistent theming
+/// across terminal applications.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::color::{WebColor, TermColor};
+/// use biscuit_terminal::utils::color::Color;
+///
+/// // Use a web color for foreground text
+/// let colored = WebColor::Coral.fg("Warm coral text");
+/// assert!(colored.contains("\x1b[38;2;"));
+///
+/// // Create a Color from a WebColor
+/// let color = Color::Web(WebColor::MidnightBlue);
+///
+/// // Common color categories:
+/// // - Blues: SteelBlue, SlateBlue, MidnightBlue, NavyBlue
+/// // - Greens: SeaGreen, ForestGreen, LimeGreen, OliveDrab
+/// // - Reds: IndianRed, FireBrick, DarkRed, Crimson
+/// // - Grays: DimGray, SlateGray, LightSlateGray, DarkGray
+/// ```
+///
+/// ## Color Mapping
+///
+/// Web colors are rendered using 24-bit RGB escape sequences (`\x1b[38;2;r;g;bm`).
+/// For terminals without true color support, a fallback [`BasicColor`] is
+/// automatically selected based on the closest match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WebColor {
     /// Alice Blue color (240, 248, 255).
@@ -1036,6 +1100,59 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m
 });
 
+/// Tailwind CSS color palette.
+///
+/// This enum provides access to the complete Tailwind CSS color scale,
+/// from `50` (lightest) through `950` (darkest) for each color family.
+///
+/// ## Color Families
+///
+/// Each color family (Red, Orange, Amber, Yellow, Lime, Green, Emerald,
+/// Teal, Cyan, Sky, Blue, Indigo, Violet, Purple, Fuchsia, Pink, Rose,
+/// Slate, Gray, Zinc, Neutral) has shades from 50 to 950, plus special
+/// values: `Inherit`, `Current`, `Transparent`, `Black`, `White`.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::color::Tailwind;
+///
+/// // Access specific colors from the palette
+/// let primary = Tailwind::Blue500;
+/// let light_bg = Tailwind::Slate50;
+/// let dark_text = Tailwind::Gray900;
+///
+/// // Common special values
+/// let transparent = Tailwind::Transparent;
+/// let black = Tailwind::Black;
+/// let white = Tailwind::White;
+///
+/// // Color intensity scales (50 = lightest, 950 = darkest)
+/// let red_light = Tailwind::Red200;
+/// let red_main = Tailwind::Red500;
+/// let red_dark = Tailwind::Red800;
+/// ```
+///
+/// ## Usage with RgbColor
+///
+/// Convert to RGB for terminal rendering:
+///
+/// ```
+/// use biscuit_terminal::utils::color::{Tailwind, RgbColor};
+///
+/// let color = Tailwind::Emerald600;
+/// let rgb = color.to_rgb();
+/// println!("R: {}, G: {}, B: {}", rgb.r, rgb.g, rgb.b);
+/// ```
+///
+/// ## Notes
+///
+/// The palette follows the official Tailwind CSS color values.
+/// Shades are designed for both light and dark backgrounds:
+/// - 50-200: Light backgrounds, subtle highlights
+/// - 300-500: Primary interactive elements
+/// - 600-700: Active states, emphasis
+/// - 800-950: Dark backgrounds, heavy text
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tailwind {
     // “specials” commonly present in Tailwind palettes
@@ -1316,7 +1433,61 @@ pub enum Tailwind {
 // Provides: to_hdr_color(), css_var(), hex()
 include!(concat!(env!("OUT_DIR"), "/tailwind_colors.rs"));
 
-/// An enumeration for specifying color for the terminal
+/// A unified color type supporting multiple color representations.
+///
+/// This enum provides a single interface for specifying colors across
+/// different color spaces and sources, enabling flexible color configuration
+/// for terminal rendering.
+///
+/// ## Variants
+///
+/// - `BasicColor(BasicColor)` - Standard 16-color ANSI palette
+/// - `Rgb(RgbColor)` - True 24-bit RGB color with ANSI fallback
+/// - `Web(WebColor)` - 148 CSS named colors (e.g., "tomato", "steelblue")
+/// - `Tailwind(Tailwind)` - Tailwind CSS color palette
+/// - `DefaultForeground` - Terminal's default text color
+/// - `DefaultBackground` - Terminal's default background color
+/// - `Reset` - Reset all color attributes
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::color::{Color, BasicColor, RgbColor, WebColor, Tailwind};
+///
+/// // Basic ANSI colors
+/// let red = Color::BasicColor(BasicColor::Red);
+///
+/// // RGB with fallback for limited terminals
+/// let orange = Color::Rgb(RgbColor::new(255, 165, 0, BasicColor::Yellow));
+///
+/// // CSS named colors
+/// let tomato = Color::Web(WebColor::Tomato);
+///
+/// // Tailwind palette colors
+/// let blue_500 = Color::Tailwind(Tailwind::Blue500);
+///
+/// // Use terminal defaults
+/// let default_fg = Color::DefaultForeground;
+/// let default_bg = Color::DefaultBackground;
+///
+/// // Pattern matching on Color enum
+/// match blue_500 {
+///     Color::Tailwind(tw) => println!("Tailwind color: {:?}", tw),
+///     Color::Web(web) => println!("Web color: {:?}", web),
+///     _ => println!("Other color type"),
+/// }
+/// ```
+///
+/// ## Converting to RGB
+///
+/// ```
+/// use biscuit_terminal::utils::color::Color;
+///
+/// let color = Color::Web(biscuit_terminal::utils::color::WebColor::Crimson);
+/// if let Some((r, g, b)) = color.to_rgb() {
+///     println!("RGB: ({}, {}, {})", r, g, b);
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Color {
     BasicColor(BasicColor),

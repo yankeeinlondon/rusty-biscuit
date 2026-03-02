@@ -2,16 +2,16 @@ use std::path::{Path, PathBuf};
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
-    color_mode, detect_connection, get_terminal_app, image_support, is_tty, italics_support,
-    osc8_link_support, terminal_height, terminal_width, underline_support,
+    color_depth, color_mode, detect_connection, get_terminal_app, image_support, is_tty,
+    italics_support, osc8_link_support, terminal_height, terminal_width, underline_support,
+    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport,
 };
 use crate::discovery::fonts::{
-    FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
+    detect_nerd_font, font_ligatures, font_name, font_size, FontLigature,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
-    LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
+    detect_linux_distro, detect_os_type, is_ci, LinuxDistro, OsType,
 };
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
@@ -69,11 +69,43 @@ fn new_terminal() -> Terminal {
 ///
 /// This struct aggregates all detected terminal information including
 /// the terminal application, OS details, and various capability flags.
+/// It is used throughout biscuit-terminal to make rendering decisions
+/// based on what the terminal actually supports.
+///
+/// ## Terminal Detection
+///
+/// On creation, `Terminal::new()` automatically detects:
+/// - **Application**: Which terminal emulator is running (Kitty, WezTerm, iTerm2, etc.)
+/// - **Operating System**: macOS, Linux, Windows, or unknown
+/// - **Linux Distribution**: On Linux, which distro is running (Ubuntu, Arch, etc.)
+/// - **Features**: Support for italics, images, underlines, OSC8 links
+/// - **Color Depth**: From 8-color to TrueColor (24-bit)
+///
+/// ## Rendering Decisions
+///
+/// Use the capability fields to conditionally render content:
+///
+/// ```rust
+/// use biscuit_terminal::terminal::Terminal;
+///
+/// let term = Terminal::new();
+///
+/// // Only send image data to terminals that support it
+/// if matches!(term.image_support, ImageSupport::Kitty) {
+///     // Render using Kitty protocol
+/// }
+///
+/// // Use TrueColor escapes for modern terminals
+/// if term.color_depth >= ColorDepth::TrueColor {
+///     // Use 24-bit colors
+/// }
+/// ```
 ///
 /// ## Examples
 ///
 /// ```
 /// use biscuit_terminal::terminal::Terminal;
+/// use biscuit_terminal::discovery::detection::ImageSupport;
 ///
 /// let term = Terminal::new();
 /// println!("Terminal: {:?}", term.app);
@@ -83,6 +115,31 @@ fn new_terminal() -> Terminal {
 /// if let Some(config) = &term.config_file {
 ///     println!("Config file: {:?}", config);
 /// }
+///
+/// // Check specific capabilities
+/// if term.supports_italic {
+///     println!("Italics are supported!");
+/// }
+///
+/// match term.image_support {
+///     ImageSupport::Kitty => println!("Using Kitty graphics protocol"),
+///     ImageSupport::ITerm => println!("Using iTerm2 protocol"),
+///     ImageSupport::None => println!("No image support"),
+/// }
+/// ```
+///
+/// ## Testing
+///
+/// Use `Terminal::new_optimistic()` for testing with predictable capabilities:
+///
+/// ```
+/// use biscuit_terminal::terminal::Terminal;
+/// use biscuit_terminal::discovery::detection::{ImageSupport, ColorDepth};
+///
+/// // Creates a terminal with all modern features enabled
+/// let term = Terminal::new_optimistic(80);
+/// assert!(term.image_support == ImageSupport::Kitty);
+/// assert!(term.color_depth == ColorDepth::TrueColor);
 /// ```
 #[derive(Debug, Clone)]
 pub struct Terminal {

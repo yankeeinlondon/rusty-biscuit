@@ -1,0 +1,18 @@
+[package]
+name = "agent-sandbox-cli"
+description = "CLI for terminal utilities including syntax highlighting and themes"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+
+[[bin]]
+name = "sandbox"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.60", features = ["derive", "unstable-ext"] }
+clap_complete = { version = "4.5.66", features = ["unstable-dynamic"] }
+color-eyre = "0.6.5"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

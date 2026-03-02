@@ -10,8 +10,11 @@ use crate::components::{
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
-/// The **Compose** struct allows you to _compose_
-/// 1 or more _renderable_ components together.
+/// Composes multiple renderable components into a single renderable output.
+///
+/// This struct allows combining text, styled prose, tables, lists, and other
+/// renderable components into one cohesive output for terminal display.
+/// Parts are rendered sequentially with no automatic spacing between them.
 ///
 /// ## Examples
 ///
@@ -28,9 +31,32 @@ use crate::utils::layout::Layout;
 /// ```
 /// use biscuit_terminal::prelude::*;
 ///
-/// // Builder-style
+/// // Builder-style with fluent API
 /// let mut compose = Compose::default();
-/// compose.add_text("Hello, ").add_prose(Prose::new("{{bold}}world{{reset}}!"));
+/// compose
+///     .add_text("Hello, ")
+///     .add_prose(Prose::new("{{bold}}world{{reset}}!"));
+/// ```
+///
+/// ```
+/// use biscuit_terminal::prelude::*;
+///
+/// // Using From implementations for ergonomic creation
+/// let text: Compose = "Hello, ".into();
+/// let prose: Compose = Prose::new("{{bold}}bold text{{reset}}").into();
+/// let combined = Compose::new(vec![text.into(), prose.into()]);
+/// ```
+///
+/// ```
+/// use biscuit_terminal::prelude::*;
+///
+/// // Building a mixed content document
+/// let mut doc = Compose::default();
+/// doc
+///     .add_heading("Project Overview", 1)
+///     .add_text("This project contains ")
+///     .add_prose(Prose::new("{{bold}}important{{reset}} files"))
+///     .add_text(" for processing.");
 /// ```
 #[derive(Debug)]
 pub struct Compose {

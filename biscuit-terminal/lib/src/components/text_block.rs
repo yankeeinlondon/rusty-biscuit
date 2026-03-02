@@ -8,7 +8,42 @@ use crate::{
     },
 };
 
-/// Provides uniform styling support to a block of text
+/// A uniformly styled block of text for terminal output.
+///
+/// TextBlock provides a convenient way to apply consistent styling (colors,
+/// font weights, italic, underline, etc.) to a block of text. It handles
+/// the ANSI escape sequences required for terminal rendering and supports
+/// both foreground and background colors.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::text_block::TextBlock;
+/// use biscuit_terminal::utils::color::{BasicColor, Color};
+///
+/// // Basic usage - create styled text
+/// let block = TextBlock::new("Hello, World!");
+///
+/// // Builder pattern for styling
+/// let mut styled = TextBlock::new("Important message");
+/// styled
+///     .using_bold_text()
+///     .with_foreground_color(Color::Basic(BasicColor::Red))
+///     .with_background_color(Color::Basic(BasicColor::BrightBlack));
+///
+/// // Render to string with ANSI escape codes
+/// let output = styled.render_optimistic(Some(80));
+/// assert!(output.contains("\x1b[1m")); // bold
+/// ```
+///
+/// ## Supported Styles
+///
+/// - **Font weight**: Normal, Bold, Dim
+/// - **Colors**: Foreground and background colors (Basic, RGB, or Web colors)
+/// - **Italic**: Italic text styling
+/// - **Strikethrough**: Strikethrough text
+/// - **Blink**: Blinking text (rarely supported)
+/// - **Underline**: Single, double, or curl underlining
 #[derive(Debug)]
 pub struct TextBlock {
     content: String,

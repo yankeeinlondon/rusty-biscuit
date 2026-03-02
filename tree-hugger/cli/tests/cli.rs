@@ -945,6 +945,27 @@ fn test_symbols_prelude_comments_show_resolved_doc_comments() {
 }
 
 #[test]
+fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let package_area_root = repo_root.join("biscuit-terminal");
+
+    let mut cmd = Command::cargo_bin("hug").unwrap();
+    cmd.current_dir(&package_area_root)
+        .args(["functions", "--prelude", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\n\nbiscuit-terminal/cli\n\n").not())
+        .stdout(predicate::str::contains("\n\nbiscuit-terminal/lib\n\n").not())
+        .stdout(predicate::str::contains("parse_width_spec"))
+        .stdout(predicate::str::contains("(no symbols)").not());
+}
+
+#[test]
 fn test_exported_flag_in_help() {
     hug_cmd()
         .args(["functions", "--help"])

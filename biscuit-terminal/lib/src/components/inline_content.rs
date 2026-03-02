@@ -6,13 +6,17 @@ use crate::components::text_block::TextBlock;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
-/// Concatenates one or more items into a single line without inserting
+/// A component that concatenates multiple items into a single line without inserting
 /// newlines between them.
 ///
 /// Each item can be a plain string or any [`Renderable`] component.
 /// When rendered, every item is resolved to its string form and the
 /// results are joined directly — or with an optional separator if one
 /// is configured via [`with_separator`](InlineContent::with_separator).
+///
+/// Unlike block-level components (like [`TextBlock`] or [`Section`]), `InlineContent`
+/// does not add line breaks between items. This makes it ideal for creating
+/// horizontal sequences of text, styled spans, or comma-separated lists.
 ///
 /// ## Examples
 ///
@@ -53,6 +57,24 @@ use crate::utils::layout::Layout;
 ///     .with("two")
 ///     .with("three");
 /// assert_eq!(inline.render_optimistic(Some(80)), "one | two | three");
+/// ```
+///
+/// ## Comparison with Block-Level Components
+///
+/// ```
+/// use biscuit_terminal::prelude::*;
+///
+/// // InlineContent: no newlines between items
+/// let inline = InlineContent::default()
+///     .with("a")
+///     .with("b")
+///     .with("c");
+/// assert!(!inline.render_optimistic(Some(80)).contains('\n'));
+/// // Output: "abc"
+///
+/// // TextBlock: each item on its own line (block-level)
+/// // let block = TextBlock::new("a").push("b").push("c");
+/// // Output: "a\nb\nc"
 /// ```
 #[derive(Debug)]
 pub struct InlineContent {

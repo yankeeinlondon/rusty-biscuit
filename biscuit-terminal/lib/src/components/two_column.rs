@@ -3,6 +3,44 @@ use crate::prelude::*;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 
 /// Determines how wide a column should be.
+///
+/// This enum provides two options for specifying column widths:
+/// - **Fixed**: A specific number of character cells
+/// - **Percent**: A percentage of the available width
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::two_column::ColumnWidth;
+///
+/// // Fixed width of 30 characters
+/// let fixed = ColumnWidth::Fixed(30);
+/// match fixed {
+///     ColumnWidth::Fixed(chars) => println!("Fixed width: {} chars", chars),
+///     _ => unreachable!(),
+/// }
+///
+/// // Percentage-based: 60% of available space
+/// let percent = ColumnWidth::Percent(0.6);
+/// match percent {
+///     ColumnWidth::Percent(pct) => println!("Percent: {}%", (pct * 100.0) as i32),
+///     _ => unreachable!(),
+/// }
+///
+/// // Common use case: 50/50 split (default)
+/// let half = ColumnWidth::Percent(0.5);
+///
+/// // Use case: 70/30 split
+/// let narrow_right = ColumnWidth::Percent(0.7);
+/// ```
+///
+/// ## Width Resolution
+///
+/// When rendering, column widths are resolved as follows:
+/// 1. Fixed widths are used as-is
+/// 2. Percentages are multiplied by the available width (terminal width minus gaps)
+/// 3. If the combined widths exceed available space, columns are clamped
+/// 4. If either column would be less than 1 character, content stacks vertically
 #[derive(Debug, Clone, Copy)]
 pub enum ColumnWidth {
     /// Fixed width in characters.
@@ -58,10 +96,48 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
     output
 }
 
-/// Renders content into two columns side by side.
+/// A side-by-side two-column layout for terminal rendering.
 ///
-/// - allows for columns to be of variant widths to each other
-///   but the default is to split render window 50/50.
+/// TwoColumn arranges two pieces of content side by side, making it ideal
+/// for key-value displays, comparisons, or any scenario where related content
+/// should be shown in parallel columns. The layout automatically handles
+/// word-wrapping within each column and can adapt to narrow terminals.
+///
+/// ## Column Widths
+///
+/// Columns can be sized using either:
+/// - **Fixed**: A specific number of character cells
+/// - **Percent**: A percentage of available space (0.0 to 1.0)
+///
+/// The default is a 50/50 split with a 3-character gap between columns.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::two_column::TwoColumn;
+///
+/// // Basic 50/50 split
+/// let cols = TwoColumn::new("Left content", "Right content");
+///
+/// // 70/30 split for narrow right column
+/// let cols = TwoColumn::new("Details:", "Some value here")
+///     .with_left_percent(0.7);
+///
+/// // Fixed width left column (30 chars), rest goes to right
+/// use biscuit_terminal::components::two_column::ColumnWidth;
+/// let cols = TwoColumn::new("Label", "Value")
+///     .with_left_width(ColumnWidth::Fixed(30))
+///     .with_gap(2);  // 2 char gap instead of default 3
+///
+/// // Render to string
+/// let output = cols.render_optimistic(Some(80));
+/// ```
+///
+/// ## Responsive Behavior
+///
+/// When the terminal is too narrow, columns automatically stack vertically
+/// to ensure content remains readable. The breakpoint depends on the gap
+/// and minimum column widths.
 #[derive(Debug, Clone)]
 pub struct TwoColumn {
     left: RenderableContent,

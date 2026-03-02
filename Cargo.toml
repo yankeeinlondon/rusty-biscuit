@@ -32,6 +32,6 @@ members = [
     "tui",
     "unchained-ai/cli",
     "unchained-ai/gen",
-    "unchained-ai/lib",
+    "unchained-ai/lib", "agent-sandbox/cli",
 ]
 exclude = ["schematic/schema"]

@@ -8,75 +8,67 @@ use crate::{
     utils::layout::{Layout, Margin, WordWrap},
 };
 
-/// Prose content allows plain text to be passed in and that content will be parsed
-/// for two kinds of tokens:
+/// Styled text with token and block tag support for rich terminal output.
 ///
-/// ## Atomic Tokens
+/// This struct wraps text content that gets parsed for styling tokens and
+/// rendered with ANSI escape codes.
 ///
-/// Atomic tokens will be of the form `{{token}}` and the prose
-/// parser does a simple lookup table on the atomic token and
-/// replaces it with an escape code.
+/// ## Token Types
 ///
-/// Examples include:
+/// ### Atomic Tokens (`{{token}}`)
+/// Single-use tokens that apply styling and require manual `{{reset}}`:
 ///
-/// - `{{bold}}`, `{{dim}}`
-/// - `{{italic}}`, `{{underline}}`, `{{strikethrough}}`
-/// - `{{double-underline}}`, `{{curly-underline}}`, `{{dotted-underline}}`, `{{dashed-underline}}`
-/// - `{{red}}`, `{{blue}}`, `{{bright-red}}`, etc.
-/// - `{{bg-red}}`, `{{bg-blue}}`, etc.
-/// - `{{reset}}`, `{{reset-fg}}`, `{{reset-bg}}`
-/// - `{{normal-font-weight}}`, `{{not-italic}}`, `{{not-underline}}`, `{{not-strikethrough}}`
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
 ///
-/// The key characteristic of these atomic tokens is that they don't clean up
-/// after themselves and require the caller to use the `{{reset}}` token whenever
-/// they want to return to a known/default state.
+/// let prose = Prose::new("{{bold}}Important:{{reset}} This is bold text");
+/// let rendered = prose.render_string();
+/// // Contains ANSI bold escape codes
+/// ```
 ///
-/// **Note:** a `{{reset}}` is _always_ added to the end of a prose section which
-/// has used at least one atomic token. This is just to be sure that styles do not
-/// bleed out.
+/// Supported tokens: `{{bold}}`, `{{dim}}`, `{{italic}}`, `{{underline}}`,
+/// `{{red}}`, `{{bg-blue}}`, `{{reset}}`, etc.
 ///
-/// ## Block Tokens
+/// ### Block Tags (`<tag>content</tag>`)
+/// Self-closing tags that auto-reset:
 ///
-/// Block tokens use an _HTML-like_ syntax but are really just a tiny subset of HTML's
-/// vast catalog of tags. A block tag, in contrast to an atomic token, has a clear
-/// start and stop token and like HTML we use the nomenclature of `<tag>content</tag>`.
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
 ///
-/// Supported block tokens are:
+/// let prose = Prose::new("<bold>This is bold</bold> and <red>this is red</red>");
+/// let rendered = prose.render_string();
+/// // Both styles auto-reset after their content
+/// ```
 ///
-/// - `<bold>` or `<b>` for bold text
-/// - `<dim>` for dim text
-/// - `<italic>` or `<i>` for italic text
-/// - `<underline>` or `<u>` for underlined text
-/// - `<double-underline>` or `<uu>` for double-underlined text
-/// - `<curly-underline>` for curly-underlined text
-/// - `<dotted-underline>` for dotted-underlined text
-/// - `<dashed-underline>` for dashed-underlined text
-/// - `<blink>` for blinking text
-/// - `<inverse>` or `<reverse>` for inverse video
-/// - `<hidden>` for hidden text
-/// - `<strikethrough>` or `<~>` for strikethrough content
-/// - `<a href="...">content</a>` for an OSC8 link to a file or URL
-/// - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text (comma-separated)
-/// - `<rgb 125 67 45>content</rgb>` for RGB colored foreground text (space-separated)
-/// - `<rgb #8B0000>content</rgb>` for RGB colored foreground text (hex with #)
-/// - `<rgb 8B0000>content</rgb>` for RGB colored foreground text (hex without #)
-/// - `<red>content</red>` for named color foreground text
-/// - `<bg-rgb 125,67,45>content</bg-rgb>` for RGB colored background text (comma-separated)
-/// - `<bg-rgb 125 67 45>content</bg-rgb>` for RGB colored background text (space-separated)
-/// - `<bg-rgb #8B0000>content</bg-rgb>` for RGB colored background text (hex with #)
-/// - `<bg-coral>content</bg-coral>` for named color (web) background text
-/// - `<bg-red-800>content</bg-red-800>` for Tailwind color background text
-/// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
+/// Supported tags: `<bold>`, `<italic>`, `<red>`, `<bg-coral>`, `<a href="url">link</a>`,
+/// `<rgb #ff0000>colored</rgb>`, etc.
 ///
 /// ## Escaping
 ///
-/// Use a backslash to output literal characters that would otherwise be parsed:
+/// Use backslash to output literal characters:
 ///
-/// - `\<` → literal `<`
-/// - `\>` → literal `>`
-/// - `\{` → literal `{`
-/// - `\\` → literal `\`
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
 ///
+/// let prose = Prose::new(r"\<literal \<angles\>");
+/// assert!(prose.render_string().contains("literal <angles>"));
+/// ```
+///
+/// ## Layout
+///
+/// Configure margins, alignment, and word wrapping:
+///
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, WordWrap};
+///
+/// let prose = Prose::new("Styled content")
+///     .with_layout(Layout {
+///         alignment: Alignment::Center,
+///         word_wrap: Some(WordWrap::None),
+///         ..Layout::default()
+///     });
+/// ```
 #[derive(Debug, Clone)]
 pub struct Prose {
     /// the raw content as received

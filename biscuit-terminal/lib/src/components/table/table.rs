@@ -12,6 +12,44 @@ use super::types::{ColumnType, Currency, VerticalAlign};
 use crate::discovery::detection::{ColorDepth, ColorMode};
 
 /// Content for a table cell.
+///
+/// This enum supports four cell types that each have distinct rendering behavior:
+///
+/// - **Text**: Renders as-is, supports word wrapping and alignment
+/// - **Integer**: Formats with thousands separators (e.g., `1,234,567`)
+/// - **Float**: Formats with two decimal places (e.g., `12,345.67`)
+/// - **Currency**: Formats with currency symbol prefix and two decimal places (e.g., `$1,234.56`)
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::table::table::TableCellContent;
+/// use biscuit_terminal::components::table::types::Currency;
+///
+/// // Different cell content types
+/// let text = TableCellContent::Text("Hello World".into());
+/// let integer = TableCellContent::Integer(1234567);
+/// let float = TableCellContent::Float(12345.678);
+/// let currency = TableCellContent::Currency(Currency::USD, 1234.56);
+///
+/// // Display formatting
+/// assert_eq!(format!("{}", text), "Hello World");
+/// assert_eq!(format!("{}", integer), "1,234,567");
+/// assert_eq!(format!("{}", float), "12,345.67");
+/// assert_eq!(format!("{}", currency), "$1,234.56");
+/// ```
+///
+/// ## Type Conversions
+///
+/// Convenience `From` implementations allow using primitive types directly:
+///
+/// ```
+/// use biscuit_terminal::components::table::table::TableCellContent;
+///
+/// let text: TableCellContent = "hello".into();
+/// let num: TableCellContent = 42i64.into();
+/// let decimals: TableCellContent = 3.14f64.into();
+/// ```
 #[derive(Debug, Clone)]
 pub enum TableCellContent {
     /// Text (which can include escape characters)
@@ -223,26 +261,56 @@ impl Conditional {
 /// A `TableColumn` defines the header, data type, width constraints, alignment,
 /// word wrapping, and vertical alignment for a column in a [`Table`].
 ///
+/// ## Width Constraints
+///
+/// - `fixed_width`: Exact column width (overrides auto-calculation)
+/// - `min_width`: Minimum width constraint
+/// - `max_width`: Maximum width constraint (triggers word wrap for text)
+///
 /// ## Examples
 ///
 /// ```
 /// use biscuit_terminal::components::table::table::TableColumn;
 /// use biscuit_terminal::components::table::types::{ColumnType, Currency, VerticalAlign};
-/// use biscuit_terminal::utils::layout::WordWrap;
+/// use biscuit_terminal::utils::layout::{Alignment, WordWrap};
 ///
-/// // Simple text column
+/// // Simple text column with default settings
 /// let name_col = TableColumn::new("Name");
 ///
-/// // Numeric column with min width
+/// // Bold header column
+/// let header_col = TableColumn::new_with_bold("Status");
+///
+/// // Numeric column with currency formatting and minimum width
 /// let price_col = TableColumn::new("Price")
 ///     .with_type(ColumnType::Currency(Currency::USD))
-///     .with_min_width(10);
+///     .with_min_width(12)
+///     .with_alignment(Alignment::Right);
 ///
-/// // Text column with custom word wrap and vertical alignment
+/// // Text column with word wrap and max width
 /// let desc_col = TableColumn::new("Description")
 ///     .with_max_width(40)
 ///     .with_word_wrap(WordWrap::WrapProse(Some(4), None))
 ///     .with_vertical_align(VerticalAlign::Top);
+///
+/// // Column that hides on narrow terminals
+/// let details_col = TableColumn::new("Details")
+///     .with_when(Conditional::WidthGreaterThan(80));
+/// ```
+///
+/// ## Conditional Visibility
+///
+/// Use [`TableColumn::with_when`] to control visibility based on terminal width:
+///
+/// ```
+/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
+///
+/// // Only visible when terminal > 60 columns
+/// let narrow_col = TableColumn::new("Notes")
+///     .with_when(Conditional::WidthGreaterThan(60));
+///
+/// // Only visible when terminal <= 40 columns
+/// let compact_col = TableColumn::new("Summary")
+///     .with_when(Conditional::LessThanOrEqual(40));
 /// ```
 #[derive(Debug, Clone)]
 pub struct TableColumn {
@@ -460,6 +528,85 @@ impl TableColumn {
 }
 
 /// A table component for rendering tabular data.
+///
+/// Tables render with Unicode box-drawing characters and support:
+/// - Multi-line cell content with word wrapping
+/// - Conditional column visibility based on terminal width
+/// - Column-specific alignment and formatting
+/// - Alternating row colors (background and text tint)
+///
+/// ## Basic Usage
+///
+/// ```
+/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::components::renderable::Renderable;
+///
+/// // Build a table with columns and data
+/// let mut table = Table::new()
+///     .with_title("Product Inventory")
+///     .with_columns(vec![
+///         TableColumn::new("Product"),
+///         TableColumn::new("Price").with_type(ColumnType::Currency(Currency::USD)),
+///         TableColumn::new("Stock"),
+///     ]);
+///
+/// table.add_row(vec![
+///     TableCellContent::Text("Widget".into()),
+///     TableCellContent::Currency(Currency::USD, 29.99),
+///     TableCellContent::Integer(150),
+/// ]);
+///
+/// table.add_row(vec![
+///     TableCellContent::Text("Gadget".into()),
+///     TableCellContent::Currency(Currency::USD, 49.99),
+///     TableCellContent::Integer(75),
+/// ]);
+///
+/// let output = table.render_optimistic(Some(80));
+/// assert!(output.contains("Product Inventory"));
+/// ```
+///
+/// ## Row Striping
+///
+/// Enable alternating row colors for improved readability:
+///
+/// ```
+/// use biscuit_terminal::components::table::table::Table;
+///
+/// let table = Table::new()
+///     .with_columns(vec![
+///         TableColumn::new("ID"),
+///         TableColumn::new("Name"),
+///     ])
+///     .with_data(vec![
+///         vec![TableCellContent::Integer(1), TableCellContent::Text("First".into())],
+///         vec![TableCellContent::Integer(2), TableCellContent::Text("Second".into())],
+///     ])
+///     .alternate_background_color()  // Subtle background on even rows
+///     .alternate_text_color();       // Subtle text tint on even rows
+/// ```
+///
+/// ## Multi-line Content
+///
+/// Cells can contain newlines for multi-line content:
+///
+/// ```
+/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+///
+/// let table = Table::new()
+///     .with_columns(vec![
+///         TableColumn::new("Task")
+///             .with_max_width(20)
+///             .with_word_wrap(WordWrap::WrapProse(Some(3), None)),
+///         TableColumn::new("Status"),
+///     ])
+///     .with_data(vec![
+///         vec![
+///             TableCellContent::Text("Complete the\nproject documentation".into()),
+///             TableCellContent::Text("Done".into()),
+///         ],
+///     ]);
+/// ```
 #[derive(Debug, Default)]
 pub struct Table {
     title: Option<String>,

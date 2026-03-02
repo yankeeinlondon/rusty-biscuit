@@ -16,19 +16,61 @@ pub trait RenderableWrapper {
     fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String;
 }
 
-/// The **TextAlignment** enumeration allows for
-/// terminal components to express how they should
-/// _align_ to the terminal window once the layout
-/// for the text block has been configured.
+/// Specifies the horizontal alignment of content within a text block.
 ///
-/// - by default `TextAlignment::Left` is chosen as
-///   this is the most common expectation for callers
-///   as well as the easiest to implement
-/// - even though the `TextAlignment::Left` has less
-///   dependencies to being rendered than the other alignments
-///   it still needs to know that the `left_margin` is.
-/// - both `TextAlignment::Right` and `TextAlignment::Center`
-///   are only able to be expressed
+/// This enum controls how text is positioned horizontally when there's extra
+/// horizontal space available (e.g., when the content is shorter than the
+/// container width or when margins create unused space).
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, WordWrap};
+///
+/// // Left-aligned text (default)
+/// let layout = Layout {
+///     alignment: Alignment::Left,
+///     ..Layout::default()
+/// };
+/// let result = layout.apply_layout("Hello", 80);
+/// assert!(result.starts_with("Hello"));
+///
+/// // Centered text - content is centered within the available width
+/// let layout = Layout {
+///     alignment: Alignment::Center,
+///     ..Layout::default()
+/// };
+/// let result = layout.apply_layout("Hi", 80);
+/// // With 80 width and 2 char content, 78 chars of padding are added
+/// // 39 chars before, 39 chars after
+/// assert!(result.starts_with("                                       Hi"));
+///
+/// // Right-aligned text - content pushed to the right edge
+/// let layout = Layout {
+///     alignment: Alignment::Right,
+///     ..Layout::default()
+/// };
+/// let result = layout.apply_layout("End", 80);
+/// assert!(result.ends_with("End"));
+/// ```
+///
+/// ## Alignment with Margins
+///
+/// When combined with margins, alignment applies to the content area
+/// between the margins:
+///
+/// ```
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, Margin};
+///
+/// let layout = Layout {
+///     left_margin: Margin::Chars(10),
+///     right_margin: Margin::Chars(10),
+///     alignment: Alignment::Center,
+///     ..Layout::default()
+/// };
+/// // Available width is 60 (80 - 10 - 10), "Hi" is centered in that space
+/// let result = layout.apply_layout("Hi", 80);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Alignment {
@@ -38,8 +80,59 @@ pub enum Alignment {
     Right,
 }
 
-/// The **Margin** allows for a fixed or percentage based margins to be
-/// added to the renderable component.
+/// Specifies a margin value that can be either fixed or percentage-based.
+///
+/// Margins control the whitespace around renderable content. They are resolved
+/// against the terminal width when rendering occurs.
+///
+/// ## Variants
+///
+/// - **`None`**: No margin (zero whitespace).
+///
+/// - **`Chars(u32)`**: Fixed margin in terminal character cells. The margin
+///   is exactly this many characters regardless of terminal width.
+///
+/// - **`Percent(f32)`**: Percentage of the terminal width. The margin is
+///   calculated as `(terminal_width * percent / 100.0)`. Values typically
+///   range from 0.0 to 100.0.
+///
+/// - **`Offset(Box<Margin>, u32)`**: Lazy composition of a base margin plus
+///   an additional character offset. Used when nesting components to accumulate
+///   margin without resolving percentages prematurely. The `add_chars` method
+///   constructs this automatically.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::layout::Margin;
+///
+/// // No margin
+/// let none = Margin::None;
+///
+/// // Fixed 4 character margin
+/// let chars = Margin::Chars(4);
+///
+/// // 10% of terminal width
+/// let percent = Margin::Percent(10.0);
+///
+/// // Combining: 10% + 4 characters
+/// let offset = Margin::Percent(10.0).add_chars(4);
+///
+/// // Chaining: 2 + 3 = 5 characters
+/// let chained = Margin::Chars(2).add_chars(3);
+/// ```
+///
+/// ## Resolution
+///
+/// Margins are resolved to character counts at render time:
+///
+/// ```
+/// use biscuit_terminal::utils::layout::Layout;
+///
+/// assert_eq!(Layout::resolve_margin(&Margin::Chars(4), 80), 4);
+/// assert_eq!(Layout::resolve_margin(&Margin::Percent(10.0), 100), 10);
+/// assert_eq!(Layout::resolve_margin(&Margin::None, 80), 0);
+/// ```
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum Margin {
     #[default]
@@ -72,12 +165,69 @@ impl Margin {
     }
 }
 
-/// The **RowFill** determines if rows in the text block should
-/// be padded to ensure that they are always the length of the renderable
-/// window.
+/// Row padding strategy for text block rendering.
 ///
-/// This can be useful when you set a background color to be something
-/// other than the default color.
+/// Determines whether rows in a text block should be padded to match the
+/// maximum width of the renderable area. This is particularly useful when
+/// rendering styled content with background colors to ensure proper visual
+/// alignment.
+///
+/// ## Variants
+///
+/// - **`Auto`** (default): Pad rows only when background color is not the default.
+///   Rows are extended to the max width of the text block if a custom background
+///   color is set; otherwise, no padding is added.
+///
+/// - **`Fill`**: Always pad each line to precisely the max width of the block's
+///   constraint, regardless of background color.
+///
+/// - **`Exact`**: Do not add any padding. Rows maintain their natural width,
+///   matching only the content length.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::utils::layout::RowFill;
+///
+/// // Auto-fill only when using custom background colors
+/// let fill_auto = RowFill::Auto;
+///
+/// // Always fill to max width
+/// let fill_always = RowFill::Fill;
+///
+/// // Never add padding
+/// let no_fill = RowFill::Exact;
+/// ```
+///
+/// ```rust
+/// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::utils::layout::{Layout, RowFill};
+///
+/// // Create prose with auto row fill (default behavior)
+/// let prose = Prose::new("Hello, world!");
+/// let layout = prose.layout().clone();
+/// assert_eq!(layout.row_fill, RowFill::Auto);
+///
+/// // Explicitly set to always fill
+/// let prose = Prose::new("Styled content")
+///     .with_layout(Layout {
+///         row_fill: RowFill::Fill,
+///         ..Layout::default()
+///     });
+/// ```
+///
+/// ```rust
+/// use biscuit_terminal::utils::layout::{Layout, RowFill, Margin};
+///
+/// // Use RowFill::Exact with margins for precise control
+/// let layout = Layout {
+///     row_fill: RowFill::Exact,
+///     left_margin: Margin::Chars(5),
+///     right_margin: Margin::Chars(5),
+///     ..Layout::default()
+/// };
+/// // Each line will have 5 char margins but no extra padding
+/// ```
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum RowFill {
     /// if the background color _is **not**_ the default background color
@@ -155,6 +305,63 @@ impl Default for WordWrap {
     }
 }
 
+/// Layout configuration for renderable components.
+///
+/// Controls margins, alignment, word-wrapping, and background color for
+/// terminal-rendered content. Every component that implements [`Renderable`]
+/// has an associated `Layout` that determines how it appears in the terminal.
+///
+/// ## Fields
+///
+/// - **`left_margin`**, **`right_margin`**, **`top_margin`**, **`bottom_margin`**:
+///   Control whitespace around the content. See [`Margin`] for specification options.
+///
+/// - **`alignment`**: Horizontal alignment within the available width
+///   ([`Alignment::Left`], [`Alignment::Center`], or [`Alignment::Right`]).
+///
+/// - **`row_fill_strategy`**: Whether to pad rows to fill the available width
+///   (useful for background colors). See [`RowFill`].
+///
+/// - **`word_wrap`**: How to handle lines that exceed the available width.
+///   See [`WordWrap`] for options like wrap-with-hyphenation, truncate, or none.
+///
+/// - **`page_bg_color`**: Optional background color for the entire content area.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::layout::{Layout, Margin, Alignment, WordWrap};
+///
+/// // Centered content with margins
+/// let layout = Layout {
+///     left_margin: Margin::Chars(4),
+///     right_margin: Margin::Chars(4),
+///     alignment: Alignment::Center,
+///     ..Default::default()
+/// };
+///
+/// // Word-wrapped content at 50% width
+/// let wrapped = Layout {
+///     left_margin: Margin::Percent(25.0),
+///     right_margin: Margin::Percent(25.0),
+///     word_wrap: WordWrap::WrapProse(Some(8), Some(4)),
+///     ..Default::default()
+/// };
+/// ```
+///
+/// ## Usage with Components
+///
+/// Most components provide builder methods to configure layout:
+///
+/// ```
+/// use biscuit_terminal::prelude::*;
+/// use biscuit_terminal::utils::layout::{Margin, Alignment, Layout};
+/// use biscuit_terminal::components::section::{Section, HeadingLevel};
+///
+/// let section = Section::new(HeadingLevel::h2, "Title")
+///     .left_margin(Margin::Chars(2))
+///     .alignment(Alignment::Center);
+/// ```
 #[derive(Debug, Clone)]
 pub struct Layout {
     /// how much whitespace is required to the _left_ of this text block
