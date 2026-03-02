@@ -32,8 +32,8 @@
 //! ```
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2, Params,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
 use rand::rngs::OsRng;
 use thiserror::Error;
