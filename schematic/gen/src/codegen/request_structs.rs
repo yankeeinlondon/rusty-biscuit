@@ -13,6 +13,22 @@ use crate::parser::extract_path_params;
 /// Default suffix for request struct names.
 const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 
+/// Converts a PascalCase or camelCase string to snake_case.
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('_');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Extracts query parameters from an endpoint's params field.
 fn extract_query_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
     match params {
@@ -292,8 +308,8 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            let setter_name = format_ident!("{}", qp.name);
-            lines.push(format!("     .with_{}(/* value */)", setter_name));
+            let snake_name = to_snake_case(&qp.name);
+            lines.push(format!("     .with_{}(/* value */)", snake_name));
         }
         lines.push(";".to_string());
     } else if !path_params.is_empty() {
@@ -310,7 +326,7 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            lines.push(format!("     .with_{}(/* value */)", qp.name));
+            lines.push(format!("     .with_{}(/* value */)", to_snake_case(&qp.name)));
         }
         lines.push(";".to_string());
     } else {
@@ -321,7 +337,7 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            lines.push(format!("     .with_{}(/* value */)", qp.name));
+            lines.push(format!("     .with_{}(/* value */)", to_snake_case(&qp.name)));
         }
         lines.push(";".to_string());
     }
@@ -351,7 +367,7 @@ fn generate_path_param_fields(path_params: &[&str]) -> TokenStream {
 /// have default values on the server side.
 fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> TokenStream {
     let fields = query_params.iter().map(|qp| {
-        let field_name = format_ident!("{}", qp.name);
+        let field_name = format_ident!("{}", to_snake_case(&qp.name));
         let rust_type = query_param_type_to_rust_type(&qp.param_type);
         let doc = qp
             .description
@@ -380,10 +396,11 @@ fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> TokenStream {
 /// for method chaining.
 fn generate_query_builder_methods(query_params: &[QueryParamInfo]) -> TokenStream {
     let methods = query_params.iter().map(|qp| {
-        let method_name = format_ident!("with_{}", qp.name);
-        let field_name = format_ident!("{}", qp.name);
+        let snake_name = to_snake_case(&qp.name);
+        let method_name = format_ident!("with_{}", snake_name);
+        let field_name = format_ident!("{}", snake_name);
         let rust_type = query_param_type_to_rust_type(&qp.param_type);
-        let doc = format!(" Sets the `{}` query parameter.", qp.name);
+        let doc = format!(" Sets the `{}` query parameter.", snake_name);
 
         quote! {
             #[doc = #doc]
@@ -466,7 +483,7 @@ fn generate_from_body_impl(
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", qp.name);
+                let name = format_ident!("{}", to_snake_case(&qp.name));
                 quote! { #name: None }
             })
             .collect();
@@ -526,7 +543,7 @@ fn generate_from_string_impls(
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", qp.name);
+                let name = format_ident!("{}", to_snake_case(&qp.name));
                 quote! { #name: None }
             })
             .collect();
@@ -590,7 +607,7 @@ fn generate_new_method(
     let query_field_inits: Vec<_> = query_params
         .iter()
         .map(|qp| {
-            let name = format_ident!("{}", qp.name);
+            let name = format_ident!("{}", to_snake_case(&qp.name));
             quote! { #name: None }
         })
         .collect();
@@ -769,7 +786,7 @@ fn generate_path_format(
     } else {
         // Generate collection statements for each param
         let query_param_collectors = query_params.iter().map(|qp| {
-            let field_name = format_ident!("{}", qp.name);
+            let field_name = format_ident!("{}", to_snake_case(&qp.name));
             let param_name = &qp.name;
 
             match &qp.param_type {
@@ -1780,6 +1797,58 @@ mod tests {
         // new() should include path params
         assert!(
             code.contains("pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self")
+        );
+    }
+
+    #[test]
+    fn generates_snake_case_query_param_fields_from_camel_case() {
+        let endpoint = make_endpoint_with_query(
+            "SetMute",
+            RestMethod::Get,
+            "/audio/mute",
+            None,
+            vec![
+                ("isMute", false, Some("Whether to mute"), QueryParamType::Boolean),
+                ("openType", false, None, QueryParamType::String),
+            ],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Rust fields should be snake_case
+        assert!(
+            code.contains("pub is_mute: Option<bool>"),
+            "Expected snake_case field is_mute, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("pub open_type: Option<String>"),
+            "Expected snake_case field open_type, got:\n{}",
+            code
+        );
+
+        // Builder methods should be snake_case
+        assert!(
+            code.contains("fn with_is_mute("),
+            "Expected with_is_mute builder method, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("fn with_open_type("),
+            "Expected with_open_type builder method, got:\n{}",
+            code
+        );
+
+        // Wire-format query string names should preserve original camelCase
+        assert!(
+            code.contains(r#""isMute""#),
+            "Expected original isMute in query string, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains(r#""openType""#),
+            "Expected original openType in query string, got:\n{}",
+            code
         );
     }
 

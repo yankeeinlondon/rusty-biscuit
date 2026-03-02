@@ -1,87 +1,85 @@
 {
     "folders": [
         {
-            "path": ".ai",
-            "name": "ai"
+            "name": "ai",
+            "path": ".ai"
         },
         {
-            "path": "agent-sandbox",
-            "name": "agent-sandbox"
+            "name": "agent-sandbox",
+            "path": "agent-sandbox"
         },
         {
-            "path": "biscuit-file",
-            "name": "biscuit-file"
+            "name": "biscuit-file",
+            "path": "biscuit-file"
         },
         {
-            "path": "biscuit-hash",
-            "name": "biscuit-hash"
+            "name": "biscuit-hash",
+            "path": "biscuit-hash"
         },
         {
-            "path": "biscuit-speaks",
-            "name": "biscuit-speaks"
+            "name": "biscuit-speaks",
+            "path": "biscuit-speaks"
         },
         {
-            "path": "biscuit-terminal",
-            "name": "biscuit-terminal"
+            "name": "biscuit-terminal",
+            "path": "biscuit-terminal"
         },
         {
-            "path": "claudine",
-            "name": "claudine"
+            "name": "claudine",
+            "path": "claudine"
         },
         {
-            "path": "darkmatter",
-            "name": "darkmatter"
+            "name": "darkmatter",
+            "path": "darkmatter"
         },
         {
-            "path": "homelab",
-            "name": "homelab"
+            "name": "homelab",
+            "path": "homelab"
         },
         {
-            "path": "model-citizen",
-            "name": "model-citizen"
+            "name": "model-citizen",
+            "path": "model-citizen"
         },
         {
-            "path": "playa",
-            "name": "playa"
+            "name": "playa",
+            "path": "playa"
         },
         {
-            "path": "queue",
-            "name": "queue"
+            "name": "queue",
+            "path": "queue"
         },
         {
-            "path": "research",
-            "name": "research"
+            "name": "research",
+            "path": "research"
         },
         {
-            "path": "schematic",
-            "name": "schematic"
+            "name": "schematic",
+            "path": "schematic"
         },
         {
-            "path": "sniff",
-            "name": "sniff"
+            "name": "sniff",
+            "path": "sniff"
         },
         {
-            "path": "tabby",
-            "name": "tabby"
+            "name": "tabby",
+            "path": "tabby"
         },
         {
-            "path": "tree-hugger",
-            "name": "tree-hugger"
+            "name": "tree-hugger",
+            "path": "tree-hugger"
         },
         {
-            "path": "tui",
-            "name": "tui"
+            "name": "tui",
+            "path": "tui"
         },
         {
-            "path": "unchained-ai",
-            "name": "unchained-ai"
+            "name": "unchained-ai",
+            "path": "unchained-ai"
         },
-
         {
-            "path": ".",
-            "name": "~ monorepo"
-        },
-
+            "name": "~ monorepo",
+            "path": "."
+        }
     ],
     "settings": {
         "editor.tabSize": 4,

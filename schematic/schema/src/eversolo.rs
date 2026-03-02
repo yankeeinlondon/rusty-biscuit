@@ -674,22 +674,22 @@ impl crate::shared::EndpointSpec for MusicSetVolumeRequest {
 /// use schematic_schema::eversolo::MusicSetMuteRequest;
 ///
 /// let request = MusicSetMuteRequest::default()
-///     .with_isMute(/* value */)
+///     .with_is_mute(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MusicSetMuteRequest {
     /// Query parameter: Mute state: 0 = unmuted, 1 = muted
-    pub isMute: Option<i64>,
+    pub is_mute: Option<i64>,
 }
 impl MusicSetMuteRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self { isMute: None }
+        Self { is_mute: None }
     }
-    /// Sets the `isMute` query parameter.
-    pub fn with_isMute(mut self, value: i64) -> Self {
-        self.isMute = Some(value);
+    /// Sets the `is_mute` query parameter.
+    pub fn with_is_mute(mut self, value: i64) -> Self {
+        self.is_mute = Some(value);
         self
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -709,7 +709,7 @@ impl MusicSetMuteRequest {
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/setMuteVolume".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
-        if let Some(ref value) = self.isMute {
+        if let Some(ref value) = self.is_mute {
             query_pairs.push(("isMute", value.to_string()));
         }
         if !query_pairs.is_empty() {
@@ -1244,22 +1244,22 @@ impl crate::shared::EndpointSpec for SystemSetSpectrumModeRequest {
 /// use schematic_schema::eversolo::SystemChangeVuDisplayRequest;
 ///
 /// let request = SystemChangeVuDisplayRequest::default()
-///     .with_openType(/* value */)
+///     .with_open_type(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SystemChangeVuDisplayRequest {
     /// Query parameter: Display open type
-    pub openType: Option<i64>,
+    pub open_type: Option<i64>,
 }
 impl SystemChangeVuDisplayRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self { openType: None }
+        Self { open_type: None }
     }
-    /// Sets the `openType` query parameter.
-    pub fn with_openType(mut self, value: i64) -> Self {
-        self.openType = Some(value);
+    /// Sets the `open_type` query parameter.
+    pub fn with_open_type(mut self, value: i64) -> Self {
+        self.open_type = Some(value);
         self
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -1279,7 +1279,7 @@ impl SystemChangeVuDisplayRequest {
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = "/ZidooMusicControl/v2/changVUDisplay".to_string();
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
-        if let Some(ref value) = self.openType {
+        if let Some(ref value) = self.open_type {
             query_pairs.push(("openType", value.to_string()));
         }
         if !query_pairs.is_empty() {

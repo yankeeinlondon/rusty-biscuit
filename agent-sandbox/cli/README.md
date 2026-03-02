@@ -9,3 +9,5 @@ The `sandbox` CLI provides convenient ways for:
 
 - `start <name> <...params[]>`
     - starts a container using the Docker runtime
+    - the "name" is optional and if not specified will allow Docker to name for us
+    - 
