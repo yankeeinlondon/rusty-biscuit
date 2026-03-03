@@ -1,8 +1,0 @@
-{"run_id":"1772141843-636456000","line":441,"new":{"module_name":"model__output__tests","snapshot_name":"model_json_snapshot","metadata":{"source":"model-citizen/cli/src/output.rs","assertion_line":441,"expression":"json"},"snapshot":"[\n  {\n    \"id\": \"test-model-1\",\n    \"name\": \"Llama-2-7b-test\",\n    \"size_bytes\": 4000000000,\n    \"quantization\": \"Q4_KM\",\n    \"architecture\": \"llama\",\n    \"source\": \"llamacpp\",\n    \"format\": \"gguf\",\n    \"path\": \"/path/to/llama.gguf\",\n    \"metadata\": {}\n  }\n]"},"old":{"module_name":"model__output__tests","metadata":{},"snapshot":"[\n  {\n    \"id\": \"test-model-1\",\n    \"name\": \"Llama-2-7b-test\",\n    \"size_bytes\": 4000000000,\n    \"architecture\": \"llama\",\n    \"quantization\": \"Q4_K_M\",\n    \"source\": \"LlamaCpp\",\n    \"format\": \"Gguf\",\n    \"metadata\": {},\n    \"path\": \"/path/to/llama.gguf\"\n  }\n]"}}
-{"run_id":"1772141859-958798000","line":441,"new":null,"old":null}
-{"run_id":"1772144553-184177000","line":441,"new":null,"old":null}
-{"run_id":"1772144772-153774000","line":441,"new":null,"old":null}
-{"run_id":"1772144795-834853000","line":441,"new":null,"old":null}
-{"run_id":"1772148233-566251000","line":441,"new":null,"old":null}
-{"run_id":"1772207762-867566000","line":441,"new":null,"old":null}
-{"run_id":"1772295046-922461000","line":441,"new":null,"old":null}
