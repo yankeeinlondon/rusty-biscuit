@@ -1001,7 +1001,7 @@ schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
 Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint type names) for round-trip fidelity.
 
-> **Note**: OpenAPI export requires a schema registry for the API. Currently only APIs with complete registries (e.g., `openai`) produce exports; others print a warning and skip.
+> **Note**: OpenAPI export requires a schema registry for the API. Currently only APIs with complete registries (for example, `openai` and `samsung-smart-tv`) produce exports; others print a warning and skip.
 
 ### Module Reference: `import_pipeline`
 

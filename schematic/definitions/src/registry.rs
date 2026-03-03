@@ -200,12 +200,14 @@ impl schematic_define::openapi::SchemaRegistryLike for SchemaRegistry {
 /// Returns the OpenAPI schema registry for the specified API.
 ///
 /// This function provides a central lookup for all available API schema registries.
-/// Currently only OpenAI has a complete registry with `JsonSchema` derives on all types.
+/// OpenAI and Samsung Smart TV currently have complete registries with
+/// `JsonSchema` derives on their REST response types.
 ///
 /// ## Arguments
 ///
 /// * `api_name` - The name of the API (case-insensitive). Supported values:
 ///   - `"openai"` - OpenAI Models API registry
+///   - `"samsung-smart-tv"` - Samsung Smart TV REST registry
 ///
 /// ## Returns
 ///
@@ -226,6 +228,7 @@ impl schematic_define::openapi::SchemaRegistryLike for SchemaRegistry {
 pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
     match api_name.to_lowercase().as_str() {
         "openai" => Some(crate::openai::openapi_registry()),
+        "samsung-smart-tv" => Some(crate::samsung_smart_tv::openapi_registry()),
         // Other APIs don't yet have JsonSchema derives on their types
         // Add them here as they're implemented:
         // "anthropic" => Some(crate::anthropic::openapi_registry()),
@@ -449,6 +452,7 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
 mod tests {
     use super::*;
     use crate::openai::{DeleteModelResponse, ListModelsResponse, Model, define_openai_api};
+    use crate::samsung_smart_tv::define_samsung_smart_tv_api;
 
     // =============================================
     // SchemaRegistry::new() tests
@@ -761,12 +765,25 @@ mod tests {
     }
 
     #[test]
+    fn get_registry_returns_samsung_smart_tv() {
+        use super::get_registry;
+
+        let registry = get_registry("samsung-smart-tv");
+        assert!(registry.is_some());
+
+        let registry = registry.unwrap();
+        assert!(registry.get("SamsungDeviceInfoResponse").is_some());
+        assert!(registry.get("SamsungDeviceInfo").is_some());
+    }
+
+    #[test]
     fn get_registry_case_insensitive() {
         use super::get_registry;
 
         assert!(get_registry("OpenAI").is_some());
         assert!(get_registry("OPENAI").is_some());
         assert!(get_registry("openai").is_some());
+        assert!(get_registry("SAMSUNG-SMART-TV").is_some());
     }
 
     #[test]
@@ -784,6 +801,17 @@ mod tests {
 
         let registry = get_registry("openai").unwrap();
         let api = define_openai_api();
+
+        let result = registry.validate_completeness(&api);
+        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+    }
+
+    #[test]
+    fn get_registry_validates_against_samsung_api() {
+        use super::get_registry;
+
+        let registry = get_registry("samsung-smart-tv").unwrap();
+        let api = define_samsung_smart_tv_api();
 
         let result = registry.validate_completeness(&api);
         assert!(result.is_ok(), "Registry should be complete: {:?}", result);
