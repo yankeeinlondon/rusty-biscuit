@@ -115,6 +115,7 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 ///
 /// ```
 /// use biscuit_terminal::components::two_column::TwoColumn;
+/// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// // Basic 50/50 split
 /// let cols = TwoColumn::new("Left content", "Right content");

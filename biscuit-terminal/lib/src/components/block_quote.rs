@@ -38,7 +38,7 @@ use crate::{
 ///
 /// // Block quote with attribution
 /// let quote = BlockQuote::new(
-///     "To be, or not to be, that is the question.",
+///     "To be, or not to be, that is the question.".into(),
 ///     Some("William Shakespeare")
 /// );
 /// let result = quote.render_optimistic(None);

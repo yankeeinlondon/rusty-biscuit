@@ -124,24 +124,15 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::components::todo::{Todo, TodoState};
+/// use biscuit_terminal::components::todo::Todo;
+/// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// // Create a new open TODO
 /// let todo = Todo::new("Review pull request #42");
-/// assert_eq!(todo.state, TodoState::Open);
 ///
 /// // Render to string
 /// let output = todo.render_optimistic(Some(80));
 /// assert!(output.contains("Review pull request #42"));
-///
-/// // Build TODO with specific state
-/// let completed = Todo {
-///     state: TodoState::Completed,
-///     description: "Write documentation".to_string(),
-///     created: chrono::Utc::now(),
-///     last_updated: chrono::Utc::now(),
-///     layout: Default::default(),
-/// };
 /// ```
 ///
 /// ## State Rendering

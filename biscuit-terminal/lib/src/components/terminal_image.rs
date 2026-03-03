@@ -182,8 +182,9 @@ impl Default for ImageWidth {
 ///
 /// Create a `TerminalImage` from a file path and render it:
 ///
-/// ```rust
+/// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
+/// use biscuit_terminal::components::renderable::Renderable;
 /// use biscuit_terminal::terminal::Terminal;
 /// use std::path::Path;
 ///
@@ -203,7 +204,7 @@ impl Default for ImageWidth {
 ///
 /// Images can be sized using the `|` delimiter:
 ///
-/// ```rust
+/// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
 /// use std::path::Path;
 ///
@@ -320,13 +321,16 @@ impl Renderable for TerminalImage {
 ///
 /// ## Examples
 ///
-/// ```rust
-/// use biscuit_terminal::components::terminal_image::TerminalImage;
+/// ```rust,no_run
+/// use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
+/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::utils::layout::Margin;
+/// use std::path::Path;
 ///
-/// let image = TerminalImage::new("test.png")
-///     .with_width_percent(80)  // Use 80% of available width
-///     .with_margin_left(10)
-///     .with_margin_right(10);
+/// let image = TerminalImage::new(Path::new("test.png")).unwrap()
+///     .with_width(ImageWidth::Percent(0.8))
+///     .left_margin(Margin::Chars(10))
+///     .right_margin(Margin::Chars(10));
 ///
 /// // Resolve dimensions for a 80-character wide terminal
 /// let dims = image.resolve_dimensions(80);
@@ -338,11 +342,13 @@ impl Renderable for TerminalImage {
 /// assert_eq!(dims.right_margin, 10);
 /// ```
 ///
-/// ```rust
+/// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
+/// use biscuit_terminal::components::renderable::Renderable;
 /// use biscuit_terminal::utils::layout::{Alignment, Layout, Margin};
+/// use std::path::Path;
 ///
-/// let image = TerminalImage::new("diagram.svg")
+/// let image = TerminalImage::new(Path::new("diagram.svg")).unwrap()
 ///     .with_layout(Layout {
 ///         left_margin: Margin::Percent(10.0),
 ///         right_margin: Margin::Percent(10.0),

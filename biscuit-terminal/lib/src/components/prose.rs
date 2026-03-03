@@ -20,9 +20,10 @@ use crate::{
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// let prose = Prose::new("{{bold}}Important:{{reset}} This is bold text");
-/// let rendered = prose.render_string();
+/// let rendered = prose.render_optimistic(None);
 /// // Contains ANSI bold escape codes
 /// ```
 ///
@@ -34,9 +35,10 @@ use crate::{
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// let prose = Prose::new("<bold>This is bold</bold> and <red>this is red</red>");
-/// let rendered = prose.render_string();
+/// let rendered = prose.render_optimistic(None);
 /// // Both styles auto-reset after their content
 /// ```
 ///
@@ -49,9 +51,10 @@ use crate::{
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// let prose = Prose::new(r"\<literal \<angles\>");
-/// assert!(prose.render_string().contains("literal <angles>"));
+/// assert!(prose.render_optimistic(None).contains("literal <angles>"));
 /// ```
 ///
 /// ## Layout
@@ -60,12 +63,13 @@ use crate::{
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::Renderable;
 /// use biscuit_terminal::utils::layout::{Alignment, Layout, WordWrap};
 ///
 /// let prose = Prose::new("Styled content")
 ///     .with_layout(Layout {
 ///         alignment: Alignment::Center,
-///         word_wrap: Some(WordWrap::None),
+///         word_wrap: WordWrap::None,
 ///         ..Layout::default()
 ///     });
 /// ```

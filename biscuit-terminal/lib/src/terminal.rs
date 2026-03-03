@@ -87,6 +87,7 @@ fn new_terminal() -> Terminal {
 ///
 /// ```rust
 /// use biscuit_terminal::terminal::Terminal;
+/// use biscuit_terminal::discovery::detection::{ImageSupport, ColorDepth};
 ///
 /// let term = Terminal::new();
 ///
@@ -96,7 +97,7 @@ fn new_terminal() -> Terminal {
 /// }
 ///
 /// // Use TrueColor escapes for modern terminals
-/// if term.color_depth >= ColorDepth::TrueColor {
+/// if matches!(term.color_depth, ColorDepth::TrueColor) {
 ///     // Use 24-bit colors
 /// }
 /// ```

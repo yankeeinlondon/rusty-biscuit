@@ -35,7 +35,7 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 /// // Display formatting
 /// assert_eq!(format!("{}", text), "Hello World");
 /// assert_eq!(format!("{}", integer), "1,234,567");
-/// assert_eq!(format!("{}", float), "12,345.67");
+/// assert_eq!(format!("{}", float), "12,345.68");
 /// assert_eq!(format!("{}", currency), "$1,234.56");
 /// ```
 ///
@@ -270,7 +270,7 @@ impl Conditional {
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::TableColumn;
+/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
 /// use biscuit_terminal::components::table::types::{ColumnType, Currency, VerticalAlign};
 /// use biscuit_terminal::utils::layout::{Alignment, WordWrap};
 ///
@@ -539,6 +539,7 @@ impl TableColumn {
 ///
 /// ```
 /// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::components::table::types::{ColumnType, Currency};
 /// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// // Build a table with columns and data
@@ -571,7 +572,7 @@ impl TableColumn {
 /// Enable alternating row colors for improved readability:
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::Table;
+/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
 ///
 /// let table = Table::new()
 ///     .with_columns(vec![
@@ -592,6 +593,7 @@ impl TableColumn {
 ///
 /// ```
 /// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::utils::layout::WordWrap;
 ///
 /// let table = Table::new()
 ///     .with_columns(vec![

@@ -151,10 +151,12 @@ impl ColumnType {
 /// ```
 ///
 /// ```
-/// use biscuit_terminal::components::table::types::{Currency, ColumnType, Column};
+/// use biscuit_terminal::components::table::table::TableColumn;
+/// use biscuit_terminal::components::table::types::{Currency, ColumnType};
 ///
 /// // Create a currency column for prices
-/// let price_column = Column::new("Price", ColumnType::Currency(Currency::USD));
+/// let price_column = TableColumn::new("Price")
+///     .with_type(ColumnType::Currency(Currency::USD));
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Currency {

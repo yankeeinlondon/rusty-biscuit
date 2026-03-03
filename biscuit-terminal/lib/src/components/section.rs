@@ -67,7 +67,8 @@ impl HeadingLevel {
 /// use biscuit_terminal::components::renderable::Renderable;
 ///
 /// // Create a section with heading and content
-/// let section = Section::new(HeadingLevel::h2, "Getting Started")
+/// let mut section = Section::new(HeadingLevel::h2, "Getting Started");
+/// section
 ///     .push("Welcome to the tutorial.")
 ///     .push("Let's begin with installation.");
 ///

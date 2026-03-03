@@ -189,7 +189,7 @@ impl TerminalImageOptions {
 /// All builder methods return `Self` to enable method chaining:
 ///
 /// ```
-/// use biscuit_terminal::components::image_options::TerminalImageOptions;
+/// use biscuit_terminal::components::image_options::{ImageWidth, TerminalImageOptions};
 ///
 /// let options = TerminalImageOptions::builder()
 ///     .max_file_size(1024 * 1024)

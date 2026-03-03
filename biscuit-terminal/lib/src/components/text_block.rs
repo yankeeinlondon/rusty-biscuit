@@ -19,6 +19,7 @@ use crate::{
 ///
 /// ```
 /// use biscuit_terminal::components::text_block::TextBlock;
+/// use biscuit_terminal::components::renderable::Renderable;
 /// use biscuit_terminal::utils::color::{BasicColor, Color};
 ///
 /// // Basic usage - create styled text
@@ -28,8 +29,8 @@ use crate::{
 /// let mut styled = TextBlock::new("Important message");
 /// styled
 ///     .using_bold_text()
-///     .with_foreground_color(Color::Basic(BasicColor::Red))
-///     .with_background_color(Color::Basic(BasicColor::BrightBlack));
+///     .with_foreground_color(Color::BasicColor(BasicColor::Red))
+///     .with_background_color(Color::BasicColor(BasicColor::BrightBlack));
 ///
 /// // Render to string with ANSI escape codes
 /// let output = styled.render_optimistic(Some(80));

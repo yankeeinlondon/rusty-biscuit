@@ -322,7 +322,7 @@ impl MermaidTheme {
 ///
 /// ## Handling Errors
 ///
-/// ```
+/// ```rust,no_run
 /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidRenderError};
 ///
 /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
@@ -336,7 +336,7 @@ impl MermaidTheme {
 ///     Err(MermaidRenderError::MmdcExecutionFailed { exit_code, stderr }) => {
 ///         eprintln!("mmdc failed ({}): {}", exit_code, stderr);
 ///     }
-///     Err(MermaidRenderError::TerminalIncapable) => {
+///     Err(MermaidRenderError::NoImageSupport) => {
 ///         println!("Using fallback:\n{}", renderer.fallback_code_block());
 ///     }
 ///     Err(e) => {
@@ -431,11 +431,10 @@ fn detect_system_chromium() -> Option<String> {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+            && let Ok(path) = which::which(browser)
         {
-            if let Ok(path) = which::which(browser) {
-                tracing::info!("Found system Chromium: {}", path.display());
-                return Some(path.to_string_lossy().into_owned());
-            }
+            tracing::info!("Found system Chromium: {}", path.display());
+            return Some(path.to_string_lossy().into_owned());
         }
     }
     tracing::debug!("No system Chromium found, Puppeteer will use bundled Chrome");
@@ -595,12 +594,12 @@ impl QuadrantTheme {
 ///
 /// // Generate JSON config for mmdc
 /// let json = config.to_json();
-/// println!("{}", json);
+/// println!("{:?}", json);
 /// ```
 ///
 /// ## Quadrant Numbering
 ///
-/// ```
+/// ```text
 ///     │
 ///  2  │  1
 /// ────┼────
@@ -738,25 +737,10 @@ impl MermaidConfig {
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use biscuit_terminal::components::mermaid::MermaidRenderer;
-///
-/// Renders Mermaid diagrams to terminal-compatible image formats.
-///
-/// This renderer converts Mermaid diagram definitions into PNG images
-/// that can be displayed inline in terminals supporting Kitty/iTerm2
-/// image protocols.
-///
-/// ## Usage
-///
-/// ```
-/// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
-/// use biscuit_terminal::components::mermaid::MermaidConfig;
+/// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme, MermaidConfig};
 ///
 /// // Basic usage with default settings (dark theme, 2x scale)
-/// let mut renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-///
-/// // Customize rendering
-/// renderer
+/// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
 ///     .with_theme(MermaidTheme::Forest)
 ///     .with_scale(3)           // Higher resolution
 ///     .with_transparent_background(true)
