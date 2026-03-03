@@ -34,9 +34,19 @@ export interface DeviceStatusJson {
   detail?: SonyDetail | ArcamActiveDetail | ArcamStandbyDetail | null
 }
 
+export interface EversoloDetail {
+  volume?: number
+  max_volume?: number
+  muted?: boolean
+  title?: string
+  artist?: string
+}
+
 export interface StatusResponse {
   sony: DeviceStatusJson
   arcam: DeviceStatusJson
+  eversolo?: DeviceStatusJson
+  samsung_tv?: DeviceStatusJson
 }
 
 export interface DeviceInfo {

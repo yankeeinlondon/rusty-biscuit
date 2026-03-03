@@ -27,6 +27,8 @@ export function useDeviceControl() {
   // Status state
   const sonyStatus = ref<DeviceStatusJson>({ status: 'not_configured', label: 'Loading...' })
   const arcamStatus = ref<DeviceStatusJson>({ status: 'not_configured', label: 'Loading...' })
+  const eversoloStatus = ref<DeviceStatusJson | null>(null)
+  const samsungTvStatus = ref<DeviceStatusJson | null>(null)
 
   // Cached details for optimistic rendering
   const lastSonyDetail = ref<SonyDetail | null>(null)
@@ -100,6 +102,16 @@ export function useDeviceControl() {
     }
 
     arcamStatus.value = data.arcam
+
+    // Eversolo status (simple pass-through, no optimistic locks needed)
+    if (data.eversolo) {
+      eversoloStatus.value = data.eversolo
+    }
+
+    // Samsung TV status
+    if (data.samsung_tv) {
+      samsungTvStatus.value = data.samsung_tv
+    }
   }
 
   function processSourceLock(data: StatusResponse) {
@@ -265,6 +277,8 @@ export function useDeviceControl() {
     arcamDeviceInfo,
     eversoloDevices,
     samsungDevices,
+    eversoloStatus,
+    samsungTvStatus,
     // Locks (for checking in template)
     sonyPowerLock,
     arcamPowerLock,

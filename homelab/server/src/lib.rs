@@ -15,6 +15,8 @@ use axum::{
     routing::{get, put},
 };
 use homelab::arcam::Arcam;
+use homelab::eversolo::Eversolo;
+use homelab::samsung_tv::SamsungTv;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Instant;
@@ -98,6 +100,10 @@ pub struct DeviceStatusJson {
 struct StatusResponse {
     sony: DeviceStatusJson,
     arcam: DeviceStatusJson,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eversolo: Option<DeviceStatusJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    samsung_tv: Option<DeviceStatusJson>,
 }
 
 /// Probe the Sony receiver and return its status.
@@ -222,6 +228,119 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
             }
         },
     }
+}
+
+/// Probe the first configured Eversolo device and return its status.
+///
+/// Returns `None` if no Eversolo devices are configured.
+/// Calls `get_state()` to determine reachability and playback state.
+async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
+    let devices = state.eversolo_devices.read().await;
+    let (name, service) = devices.iter().next()?;
+    let eversolo = Eversolo::new(service.host.clone(), service.port);
+    let _ = name; // used only for iteration
+
+    Some(
+        match timeout(state.request_timeout, eversolo.get_state()).await {
+            Ok(Ok(resp)) => {
+                let label = match resp.state {
+                    1 => "Playing",
+                    2 => "Paused",
+                    _ => "Active",
+                };
+                let mut detail = serde_json::Map::new();
+                if let Some(vol) = &resp.volume_data {
+                    detail.insert("volume".into(), json!(vol.current_volume));
+                    detail.insert("max_volume".into(), json!(vol.max_volume));
+                    detail.insert("muted".into(), json!(vol.is_mute));
+                }
+                if let Some(music) = &resp.playing_music {
+                    if let Some(title) = &music.title {
+                        detail.insert("title".into(), json!(title));
+                    }
+                    if let Some(artist) = &music.artist {
+                        detail.insert("artist".into(), json!(artist));
+                    }
+                }
+                DeviceStatusJson {
+                    status: "active",
+                    label: label.to_string(),
+                    detail: if detail.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(detail))
+                    },
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "Eversolo probe error");
+                DeviceStatusJson {
+                    status: "error",
+                    label: "Unreachable".to_string(),
+                    detail: None,
+                }
+            }
+            Err(_) => {
+                tracing::warn!("Eversolo probe timeout");
+                DeviceStatusJson {
+                    status: "error",
+                    label: "Timeout".to_string(),
+                    detail: None,
+                }
+            }
+        },
+    )
+}
+
+/// Probe the first configured Samsung TV and return its status.
+///
+/// Returns `None` if no Samsung TVs are configured.
+/// Calls `get_device_info()` to determine reachability.
+async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
+    let tvs = state.samsung_tvs.read().await;
+    let (_name, service) = tvs.iter().next()?;
+    let tv = SamsungTv::new(service.host.clone(), service.rest_port, service.ws_port);
+
+    Some(
+        match timeout(state.request_timeout, tv.get_device_info()).await {
+            Ok(Ok(info)) => {
+                let mut detail = serde_json::Map::new();
+                if let Some(name) = &info.name {
+                    detail.insert("name".into(), json!(name));
+                }
+                if let Some(device) = &info.device {
+                    if let Some(model) = &device.model_name {
+                        detail.insert("model".into(), json!(model));
+                    }
+                }
+                DeviceStatusJson {
+                    status: "active",
+                    label: "On".to_string(),
+                    detail: if detail.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(detail))
+                    },
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "Samsung TV probe error");
+                DeviceStatusJson {
+                    status: "error",
+                    label: "Unreachable".to_string(),
+                    detail: None,
+                }
+            }
+            Err(_) => {
+                tracing::warn!("Samsung TV probe timeout");
+                DeviceStatusJson {
+                    status: "error",
+                    label: "Timeout".to_string(),
+                    detail: None,
+                }
+            }
+        },
+    )
 }
 
 /// Formats a source name for display.
@@ -1066,9 +1185,18 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
 
 /// JSON status endpoint polled by the index page.
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    let arcam = get_cached_or_fresh_arcam(&state).await;
-    let sony = probe_sony(&state).await;
-    Json(StatusResponse { sony, arcam })
+    let (sony, arcam, eversolo, samsung_tv) = tokio::join!(
+        probe_sony(&state),
+        get_cached_or_fresh_arcam(&state),
+        probe_eversolo(&state),
+        probe_samsung_tv(&state),
+    );
+    Json(StatusResponse {
+        sony,
+        arcam,
+        eversolo,
+        samsung_tv,
+    })
 }
 
 /// Get Arcam status with rate limiting based on Auto Shutdown setting.

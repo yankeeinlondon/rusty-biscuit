@@ -14,6 +14,8 @@ const {
   arcamDeviceInfo,
   eversoloDevices,
   samsungDevices,
+  eversoloStatus,
+  samsungTvStatus,
   sonyPowerLock,
   arcamPowerLock,
   toggleSonyPower,
@@ -80,6 +82,16 @@ const arcamHostHtml = computed(() => {
   if (!arcamDeviceInfo.value) return ''
   return `${arcamDeviceInfo.value.host}<span class="port">:${arcamDeviceInfo.value.port}</span>`
 })
+
+// Eversolo status
+const eversoloDotColor = computed(() =>
+  eversoloStatus.value ? statusToDotColor(eversoloStatus.value.status) : 'grey',
+)
+
+// Samsung TV status
+const samsungDotColor = computed(() =>
+  samsungTvStatus.value ? statusToDotColor(samsungTvStatus.value.status) : 'grey',
+)
 
 // Add-service modal
 const showAddModal = ref(false)
@@ -161,9 +173,9 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
       v-for="device in eversoloDevices"
       :key="`eversolo-${device.name}`"
       :name="`Eversolo — ${device.name}`"
-      label="Configured"
+      :label="eversoloStatus?.label ?? 'Loading...'"
       :host="`${device.host}<span class='port'>:${device.port}</span>`"
-      dot-color="grey"
+      :dot-color="eversoloDotColor"
     />
 
     <!-- Samsung TVs -->
@@ -171,9 +183,9 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
       v-for="device in samsungDevices"
       :key="`samsung-${device.name}`"
       :name="`Samsung TV — ${device.name}`"
-      label="Configured"
+      :label="samsungTvStatus?.label ?? 'Loading...'"
       :host="`${device.host}<span class='port'>:${device.port}</span>`"
-      dot-color="grey"
+      :dot-color="samsungDotColor"
     />
 
     <p class="explore">
