@@ -12,12 +12,15 @@ const {
   isUnreachable,
   sonyDeviceInfo,
   arcamDeviceInfo,
+  eversoloDevices,
+  samsungDevices,
   sonyPowerLock,
   arcamPowerLock,
   toggleSonyPower,
   toggleArcamPower,
   selectSonySource,
   setAutoShutdown,
+  refreshDevices,
 } = useDeviceControl()
 
 // Effective dot colors (respecting optimistic locks)
@@ -153,6 +156,26 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
       </template>
     </DeviceCard>
 
+    <!-- Eversolo Streamers -->
+    <DeviceCard
+      v-for="device in eversoloDevices"
+      :key="`eversolo-${device.name}`"
+      :name="`Eversolo — ${device.name}`"
+      label="Configured"
+      :host="`${device.host}<span class='port'>:${device.port}</span>`"
+      dot-color="grey"
+    />
+
+    <!-- Samsung TVs -->
+    <DeviceCard
+      v-for="device in samsungDevices"
+      :key="`samsung-${device.name}`"
+      :name="`Samsung TV — ${device.name}`"
+      label="Configured"
+      :host="`${device.host}<span class='port'>:${device.port}</span>`"
+      dot-color="grey"
+    />
+
     <p class="explore">
       Try interacting with the API by using the <a href="/explore">explore</a> UI.
     </p>
@@ -201,7 +224,7 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
     <AddServiceModal
       :visible="showAddModal"
       @close="showAddModal = false"
-      @created="showAddModal = false"
+      @created="refreshDevices()"
     />
   </div>
 </template>

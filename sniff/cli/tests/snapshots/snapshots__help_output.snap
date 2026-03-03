@@ -1,5 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
+assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -33,6 +34,9 @@ Commands:
 
   Filesystem details:
     sniff git                        Show only git repository information
+    sniff git --hash HEAD            Show details for the latest commit
+    sniff git --hash abc1234         Show details for a specific commit
+    sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand
     sniff git https://github.com/... Inspect a remote by URL

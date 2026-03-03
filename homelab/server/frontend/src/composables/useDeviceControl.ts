@@ -21,6 +21,8 @@ export function useDeviceControl() {
   // Device info
   const sonyDeviceInfo = ref<DeviceInfo | null>(null)
   const arcamDeviceInfo = ref<DeviceInfo | null>(null)
+  const eversoloDevices = ref<DeviceInfo[]>([])
+  const samsungDevices = ref<DeviceInfo[]>([])
 
   // Status state
   const sonyStatus = ref<DeviceStatusJson>({ status: 'not_configured', label: 'Loading...' })
@@ -217,16 +219,21 @@ export function useDeviceControl() {
     api.setAutoShutdown(value)
   }
 
-  onMounted(async () => {
-    // Fetch device names
+  async function refreshDevices() {
     try {
       const devices = await api.getDevices()
       if (devices.sony.length > 0) sonyDeviceInfo.value = devices.sony[0]
       if (devices.arcam.length > 0) arcamDeviceInfo.value = devices.arcam[0]
+      eversoloDevices.value = devices.eversolo
+      samsungDevices.value = devices.samsung_tv
     }
     catch {
       // Devices may not be configured yet
     }
+  }
+
+  onMounted(async () => {
+    await refreshDevices()
 
     // Start status polling
     usePolling(api.getStatus, {
@@ -256,6 +263,8 @@ export function useDeviceControl() {
     isUnreachable: health.isUnreachable,
     sonyDeviceInfo,
     arcamDeviceInfo,
+    eversoloDevices,
+    samsungDevices,
     // Locks (for checking in template)
     sonyPowerLock,
     arcamPowerLock,
@@ -264,5 +273,6 @@ export function useDeviceControl() {
     toggleArcamPower,
     selectSonySource,
     setAutoShutdown,
+    refreshDevices,
   }
 }
