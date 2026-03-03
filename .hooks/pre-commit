@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Collect package names from staged .rs files
-declare -A packages
+declare -A packages=()
 
 for file in $(git diff --cached --name-only --diff-filter=ACM -- '*.rs'); do
     # Walk up from the file to find the nearest Cargo.toml
