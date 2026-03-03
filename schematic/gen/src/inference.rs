@@ -19,7 +19,9 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```
+//! use schematic_gen::infer_module_path;
+//!
 //! // Variant suffix detected - extract base name
 //! assert_eq!(infer_module_path("OllamaNative"), Some("ollama".to_string()));
 //! assert_eq!(infer_module_path("HuggingFaceHub"), Some("huggingface".to_string()));
@@ -48,7 +50,9 @@ const VARIANT_SUFFIXES: &[&str] = &["Native", "Client", "Service", "Hub", "Api",
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```
+/// use schematic_gen::infer_module_path;
+///
 /// // Variant suffix detected
 /// assert_eq!(infer_module_path("OllamaNative"), Some("ollama".to_string()));
 /// assert_eq!(infer_module_path("HuggingFaceHub"), Some("huggingface".to_string()));

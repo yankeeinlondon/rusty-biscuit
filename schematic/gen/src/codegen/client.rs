@@ -30,7 +30,7 @@ use schematic_define::RestApi;
 /// ## Examples
 ///
 /// For an API with mixed response types:
-/// ```ignore
+/// ```text
 /// impl ElevenLabs {
 ///     // JSON responses
 ///     pub async fn request<T: serde::de::DeserializeOwned>(...) -> Result<T, SchematicError>
@@ -380,7 +380,7 @@ fn generate_empty_request_method(
 /// ## Examples
 ///
 /// For a Binary endpoint with id "CreateSpeech":
-/// ```ignore
+/// ```text
 /// pub async fn create_speech(&self, req: CreateSpeechRequest) -> Result<bytes::Bytes, SchematicError> {
 ///     self.request_bytes(req).await
 /// }

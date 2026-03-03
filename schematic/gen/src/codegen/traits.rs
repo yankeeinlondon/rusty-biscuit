@@ -18,7 +18,7 @@ use schematic_define::Endpoint;
 ///
 /// ## Generated Code
 ///
-/// ```ignore
+/// ```text
 /// /// Marker trait for paginated request types.
 /// ///
 /// /// Request types that implement this trait support pagination parameters
@@ -28,7 +28,7 @@ use schematic_define::Endpoint;
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// let tokens = generate_paginated_trait();
 /// // Use in shared.rs generation
 /// ```
@@ -41,7 +41,7 @@ pub fn generate_paginated_trait() -> TokenStream {
         ///
         /// ## Examples
         ///
-        /// ```ignore
+        /// ```text
         /// use schematic_schema::shared::Paginated;
         ///
         /// fn fetch_all_pages<R: Paginated>(request: R) -> Vec<R::Response>
@@ -73,7 +73,7 @@ pub fn generate_paginated_trait() -> TokenStream {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// let endpoint = Endpoint {
 ///     id: "ListItems".to_string(),
 ///     params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),

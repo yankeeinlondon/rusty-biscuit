@@ -80,7 +80,7 @@ fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream {
 /// ## Examples
 ///
 /// For a GET endpoint with path parameters:
-/// ```ignore
+/// ```text
 /// // Input endpoint:
 /// Endpoint {
 ///     id: "RetrieveModel",
@@ -272,7 +272,7 @@ fn generate_doc_comment_with_example(
     lines.push(String::new());
     lines.push(" ## Example".to_string());
     lines.push(String::new());
-    lines.push(" ```ignore".to_string());
+    lines.push(" ```text".to_string());
 
     // Build the module path for use statement
     let mod_path = module_path.unwrap_or("api");
@@ -460,7 +460,7 @@ fn generate_default_impl(
 /// Generates a `From<BodyType>` impl for body-only request structs.
 ///
 /// This allows ergonomic conversion from the body type to the request struct:
-/// ```ignore
+/// ```text
 /// let req: CreateCompletionRequest = body.into();
 /// ```
 ///
@@ -506,7 +506,7 @@ fn generate_from_body_impl(
 /// Generates `From<&str>` and `From<String>` impls for single-param no-body request structs.
 ///
 /// This allows ergonomic conversion from string types to the request struct:
-/// ```ignore
+/// ```text
 /// let req: RetrieveModelRequest = "gpt-4".into();
 /// let req = RetrieveModelRequest::from("gpt-4");
 /// ```
@@ -1181,7 +1181,7 @@ mod tests {
         );
         // Should be in ignore code block
         assert!(
-            code.contains("```ignore"),
+            code.contains("```text"),
             "Expected ignore code fence, got:\n{}",
             code
         );

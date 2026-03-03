@@ -36,7 +36,7 @@ pub fn generate_response_context() -> TokenStream {
         ///
         /// ## Examples
         ///
-        /// ```rust,ignore
+        /// ```text
         /// let variant = api.variant()
         ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
         ///         if ctx.status == 200 {
@@ -120,7 +120,7 @@ pub fn generate_endpoint_spec_trait() -> TokenStream {
         ///
         /// ## Examples
         ///
-        /// ```rust,ignore
+        /// ```text
         /// // Generated implementation for ListModelsRequest
         /// impl EndpointSpec for ListModelsRequest {
         ///     type Response = ListModelsResponse;
@@ -245,7 +245,7 @@ pub fn generate_pre_response_hook_type() -> TokenStream {
         ///
         /// ## Examples
         ///
-        /// ```rust,ignore
+        /// ```text
         /// // Unwrap nested data envelope
         /// let variant = api.variant()
         ///     .pre_response_json(|ctx, json| {

@@ -43,7 +43,7 @@ pub fn generate_request_parts_type() -> TokenStream {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// let error_tokens = generate_error_type();
 /// // Produces:
 /// // #[derive(Debug, thiserror::Error)]
@@ -69,7 +69,7 @@ pub fn generate_error_type() -> TokenStream {
         ///
         /// ## Error Handling Examples
         ///
-        /// ```rust,ignore
+        /// ```text
         /// match client.request::<Response>(req).await {
         ///     Ok(response) => { /* success */ }
         ///     Err(SchematicError::MissingCredential { env_vars }) => {

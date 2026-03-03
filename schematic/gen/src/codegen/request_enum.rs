@@ -32,7 +32,7 @@ pub fn generate_request_enum(api: &RestApi) -> TokenStream {
 /// ## Examples
 ///
 /// For an API with three endpoints:
-/// ```ignore
+/// ```text
 /// // Input API with endpoints: ListModels, RetrieveModel, DeleteModel
 ///
 /// // Generated enum:

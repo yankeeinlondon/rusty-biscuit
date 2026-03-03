@@ -37,7 +37,7 @@ use crate::errors::GeneratorError;
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// use std::path::Path;
 /// use schematic_define::openapi::ExportOptions;
 /// use schematic_definitions::openai::{define_openai_api, openapi_registry};

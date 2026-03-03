@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// use schematic_define::RestApi;
 /// use schematic_gen::codegen::ModuleDocBuilder;
 ///
@@ -177,7 +177,7 @@ impl<'a> ModuleDocBuilder<'a> {
         format!(
             r#"## Examples
 
-```ignore
+```text
 use schematic_schema::prelude::*;
 
 #[tokio::main]
@@ -191,7 +191,7 @@ async fn main() -> Result<(), SchematicError> {{
 
 ### Override Base URL
 
-```ignore
+```text
 use schematic_schema::prelude::*;
 
 let client = {}::with_base_url("{}");

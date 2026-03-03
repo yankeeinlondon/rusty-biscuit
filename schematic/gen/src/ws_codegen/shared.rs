@@ -294,6 +294,7 @@ fn generate_writer_command() -> TokenStream {
     quote! {
         /// Internal command sent to the writer task.
         #[derive(Debug)]
+        #[allow(dead_code)]
         pub(crate) enum WriterCommand {
             /// Send a text message.
             SendText(String),

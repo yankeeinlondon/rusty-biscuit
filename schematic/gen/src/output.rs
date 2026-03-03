@@ -234,7 +234,7 @@ fn generate_ws_shared_module() -> Result<(String, String), GeneratorError> {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// // Explicit module_path takes precedence
 /// let api = RestApi { name: "HuggingFaceHub".to_string(), module_path: Some("huggingface".to_string()), ... };
 /// assert_eq!(get_module_path(&api), "huggingface");
@@ -259,7 +259,7 @@ fn get_module_path(api: &RestApi) -> String {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// let api = RestApi { request_suffix: None, ... };
 /// assert_eq!(get_request_suffix(&api), "Request");
 ///
@@ -655,7 +655,7 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
                 format!("let response = client.{}().await?;", method_name)
             };
             format!(
-                r#"//! ```ignore
+                r#"//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -669,14 +669,14 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
             )
         } else {
             String::from(
-                r#"//! ```ignore
+                r#"//! ```text
 //! use schematic_schema::prelude::*;
 //! ```"#,
             )
         }
     } else {
         String::from(
-            r#"//! ```ignore
+            r#"//! ```text
 //! use schematic_schema::prelude::*;
 //! ```"#,
         )
@@ -697,7 +697,7 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
 //! environments using the [`variant()`]({module}::{api_name}::variant) builder
 //! or [`variant_with()`]({module}::{api_name}::variant_with) convenience method:
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //! use schematic_define::UpdateStrategy;
 //!
@@ -862,7 +862,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //! types. Response types are **not** re-exported here to avoid naming conflicts.
         //! Import them from specific API modules instead:
         //!
-        //! ```ignore
+        //! ```text
         //! use schematic_schema::openai::Model;
         //! use schematic_schema::anthropic::CreateMessageResponse;
         //! ```
@@ -884,7 +884,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //!
         //! ## Examples
         //!
-        //! ```ignore
+        //! ```text
         //! use schematic_schema::prelude::*;
         //!
         //! #[tokio::main]
@@ -1245,7 +1245,7 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
                 format!("let response = client.{}().await?;", method_name)
             };
             format!(
-                r#"//! ```ignore
+                r#"//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -1259,14 +1259,14 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
             )
         } else {
             String::from(
-                r#"//! ```ignore
+                r#"//! ```text
 //! use schematic_schema::prelude::*;
 //! ```"#,
             )
         }
     } else {
         String::from(
-            r#"//! ```ignore
+            r#"//! ```text
 //! use schematic_schema::prelude::*;
 //! ```"#,
         )
