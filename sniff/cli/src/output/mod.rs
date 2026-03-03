@@ -20,7 +20,7 @@ use sniff::SniffResult;
 
 use crate::args::DocsFilter;
 
-pub use filesystem::print_git_section;
+pub use filesystem::{print_git_section, print_hash_section};
 pub use programs::{print_programs_json, print_programs_markdown};
 pub use remote::{print_remote_json, print_remote_text};
 pub use services::{print_services_json, print_services_text};

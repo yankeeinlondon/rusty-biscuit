@@ -1528,6 +1528,182 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
     worktrees
 }
 
+/// Kind of change a file underwent in a commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeltaKind {
+    /// File was added.
+    Added,
+    /// File was modified.
+    Modified,
+    /// File was deleted.
+    Deleted,
+    /// File was renamed.
+    Renamed,
+    /// File was copied.
+    Copied,
+}
+
+impl std::fmt::Display for DeltaKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Added => write!(f, "added"),
+            Self::Modified => write!(f, "modified"),
+            Self::Deleted => write!(f, "deleted"),
+            Self::Renamed => write!(f, "renamed"),
+            Self::Copied => write!(f, "copied"),
+        }
+    }
+}
+
+impl DeltaKind {
+    /// Convert a git2 Delta status to a DeltaKind.
+    fn from_delta(delta: git2::Delta) -> Self {
+        match delta {
+            git2::Delta::Added => Self::Added,
+            git2::Delta::Deleted => Self::Deleted,
+            git2::Delta::Renamed => Self::Renamed,
+            git2::Delta::Copied => Self::Copied,
+            _ => Self::Modified,
+        }
+    }
+}
+
+/// Look up a single commit by full or abbreviated SHA.
+///
+/// Uses `repo.revparse_single()` to resolve abbreviated or full SHA strings,
+/// then peels to a commit and builds a `CommitInfo` with ref decorations.
+///
+/// Returns `None` if the SHA doesn't resolve to a valid commit.
+pub fn get_commit_by_sha(repo: &Repository, sha_prefix: &str) -> Option<CommitInfo> {
+    let obj = repo.revparse_single(sha_prefix).ok()?;
+    let commit = obj.peel_to_commit().ok()?;
+
+    let ref_decorations = collect_ref_decorations(repo);
+    let oid = commit.id();
+    let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+
+    let author = commit.author();
+    Some(CommitInfo {
+        sha: oid.to_string(),
+        message: commit.message().unwrap_or("").trim().to_string(),
+        author: author.name().unwrap_or("Unknown").to_string(),
+        timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
+        remotes: None,
+        refs,
+    })
+}
+
+/// Get the list of files changed by a specific commit.
+///
+/// Computes a diff between the commit's tree and its first parent's tree.
+/// For the initial commit (no parent), diffs against an empty tree.
+///
+/// Returns a list of `(relative_path, DeltaKind)` pairs.
+pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, DeltaKind)> {
+    let Ok(oid) = git2::Oid::from_str(full_sha) else {
+        return Vec::new();
+    };
+    let Ok(commit) = repo.find_commit(oid) else {
+        return Vec::new();
+    };
+    let Ok(tree) = commit.tree() else {
+        return Vec::new();
+    };
+
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .ok();
+
+    let Some(diff) = diff else {
+        return Vec::new();
+    };
+
+    diff.deltas()
+        .filter_map(|delta| {
+            let path = delta.new_file().path().unwrap_or(Path::new(""));
+            if path.as_os_str().is_empty() {
+                None
+            } else {
+                Some((path.to_path_buf(), DeltaKind::from_delta(delta.status())))
+            }
+        })
+        .collect()
+}
+
+/// Get recent commits that touch files under a specific path prefix.
+///
+/// Walks the commit history from HEAD, computes diffs for each commit,
+/// and includes commits where at least one changed file starts with `path_prefix`.
+///
+/// Ref decorations are collected once and reused for all matching commits.
+pub fn get_commits_for_path(
+    repo: &Repository,
+    path_prefix: &str,
+    count: usize,
+) -> Vec<CommitInfo> {
+    let mut commits = Vec::new();
+
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return commits;
+    };
+    if revwalk.push_head().is_err() {
+        return commits;
+    }
+
+    let ref_decorations = collect_ref_decorations(repo);
+
+    for oid_result in revwalk {
+        if commits.len() >= count {
+            break;
+        }
+        let Ok(oid) = oid_result else {
+            continue;
+        };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+        let Ok(tree) = commit.tree() else {
+            continue;
+        };
+
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+            continue;
+        };
+
+        let touches_path = diff.deltas().any(|delta| {
+            let new_path = delta
+                .new_file()
+                .path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let old_path = delta
+                .old_file()
+                .path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            new_path.starts_with(path_prefix) || old_path.starts_with(path_prefix)
+        });
+
+        if touches_path {
+            let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+            let author = commit.author();
+            commits.push(CommitInfo {
+                sha: oid.to_string(),
+                message: commit.message().unwrap_or("").trim().to_string(),
+                author: author.name().unwrap_or("Unknown").to_string(),
+                timestamp: DateTime::from_timestamp(commit.time().seconds(), 0)
+                    .unwrap_or_default(),
+                remotes: None,
+                refs,
+            });
+        }
+    }
+
+    commits
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

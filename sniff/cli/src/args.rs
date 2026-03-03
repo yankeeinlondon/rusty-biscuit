@@ -184,6 +184,14 @@ pub enum Commands {
         #[arg(short = 'h', long, default_value_t = DEFAULT_COMMIT_COUNT)]
         history: usize,
 
+        /// Show details for a specific commit by SHA
+        #[arg(long, value_name = "SHA", conflicts_with = "package")]
+        hash: Option<String>,
+
+        /// Filter to commits and changes within a package
+        #[arg(short, long, value_name = "PKG", conflicts_with = "hash")]
+        package: Option<String>,
+
         /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
         #[arg(value_name = "REMOTE")]
         remote: Option<String>,
@@ -450,6 +458,22 @@ impl Commands {
         }
     }
 
+    /// Get commit SHA if this is a git command with `--hash`.
+    pub fn git_hash(&self) -> Option<&str> {
+        match self {
+            Commands::Git { hash, .. } => hash.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Get package name if this is a git command with `--package`.
+    pub fn git_package(&self) -> Option<&str> {
+        match self {
+            Commands::Git { package, .. } => package.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Get docs filter flags if this is a docs command.
     pub fn docs_filter(&self) -> DocsFilter {
         match self {
@@ -523,6 +547,9 @@ Commands:
 
   Filesystem details:
     sniff git                        Show only git repository information
+    sniff git --hash HEAD            Show details for the latest commit
+    sniff git --hash abc1234         Show details for a specific commit
+    sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand
     sniff git https://github.com/... Inspect a remote by URL
@@ -882,6 +909,8 @@ mod tests {
         fn git_and_docs_accessors_work() {
             let git = Commands::Git {
                 history: 3,
+                hash: None,
+                package: None,
                 remote: Some("owner/repo".to_string()),
                 help: None,
             };

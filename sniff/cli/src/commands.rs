@@ -110,10 +110,38 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Handle `sniff git --hash <sha>` — drill into a single commit (early return)
+    if let Some(ref cmd) = cli.command
+        && let Some(sha) = cmd.git_hash()
+    {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let repo = git2::Repository::discover(dir)
+            .map_err(|e| format!("Not a git repository: {}", e))?;
+        let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
+            .ok_or_else(|| format!("Commit not found: {}", sha))?;
+        let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
+
+        if cli.json {
+            let json = serde_json::json!({
+                "commit": commit,
+                "files": files.iter().map(|(p, k)| serde_json::json!({
+                    "path": p,
+                    "kind": k,
+                })).collect::<Vec<_>>(),
+            });
+            println!("{}", serde_json::to_string_pretty(&json)?);
+        } else {
+            output::print_hash_section(&commit, &files, cli.verbose);
+        }
+        return Ok(());
+    }
+
     let mut config = SniffConfig::new();
 
-    if let Some(base) = base_dir {
-        config = config.base_dir(base);
+    if let Some(ref base) = base_dir {
+        config = config.base_dir(base.clone());
     }
 
     let deep_enabled = cli.deep;
@@ -170,6 +198,70 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut result = detect_with_config(config)?;
+
+    // Handle `sniff git --package <pkg>` — scope git view to a specific package
+    if let Some(ref cmd) = cli.command
+        && let Some(pkg_name) = cmd.git_package()
+    {
+        let path_prefix = resolve_package_path(&result, pkg_name)?;
+
+        if let Some(ref mut filesystem) = result.filesystem
+            && filesystem.git.is_some()
+        {
+            let dir = base_dir
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if let Ok(repo) = git2::Repository::discover(dir) {
+                let scoped_commits =
+                    sniff::filesystem::get_commits_for_path(&repo, &path_prefix, history_count);
+                if let Some(ref mut git) = filesystem.git {
+                    git.recent = scoped_commits;
+
+                    // Filter file_changes to the package path
+                    git.file_changes
+                        .retain(|f| f.path.to_string_lossy().starts_with(&path_prefix));
+
+                    // Filter dirty files
+                    git.status
+                        .dirty
+                        .retain(|f| f.filepath.to_string_lossy().starts_with(&path_prefix));
+
+                    // Filter untracked files
+                    git.status
+                        .untracked
+                        .retain(|f| f.filepath.to_string_lossy().starts_with(&path_prefix));
+
+                    // Update counts to match filtered lists
+                    git.status.staged_count = git
+                        .file_changes
+                        .iter()
+                        .filter(|f| {
+                            f.status == sniff::filesystem::git::FileStatus::Staged
+                                || f.status == sniff::filesystem::git::FileStatus::Both
+                        })
+                        .count();
+                    git.status.unstaged_count = git
+                        .file_changes
+                        .iter()
+                        .filter(|f| {
+                            f.status == sniff::filesystem::git::FileStatus::Modified
+                                || f.status == sniff::filesystem::git::FileStatus::Both
+                        })
+                        .count();
+                    git.status.untracked_count = git
+                        .file_changes
+                        .iter()
+                        .filter(|f| {
+                            f.status == sniff::filesystem::git::FileStatus::Untracked
+                        })
+                        .count();
+                    git.status.is_dirty = git.status.staged_count > 0
+                        || git.status.unstaged_count > 0
+                        || git.status.untracked_count > 0;
+                }
+            }
+        }
+    }
 
     // Enrich dependencies with latest versions when --deep is enabled.
     // Only for subcommands that display dependency info (repo, language, all).
@@ -449,6 +541,57 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
     }
 
     result
+}
+
+/// Resolve a package name to its path prefix for git filtering.
+///
+/// Tries exact match on `Package.name` first, then falls back to `Package.package_area`.
+/// Returns the relative path prefix (e.g., "homelab/server" or "homelab").
+fn resolve_package_path(
+    result: &SniffResult,
+    pkg_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let packages = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.packages.as_ref());
+
+    let Some(packages) = packages else {
+        return Err("No packages found in this repository".into());
+    };
+
+    let lower = pkg_name.to_lowercase();
+
+    // Try exact match on package name
+    if let Some(pkg) = packages.iter().find(|p| p.name.to_lowercase() == lower) {
+        return Ok(format!("{}/", pkg.relative));
+    }
+
+    // Try match on package_area
+    if let Some(pkg) = packages
+        .iter()
+        .find(|p| p.package_area.to_lowercase() == lower)
+    {
+        return Ok(format!("{}/", pkg.package_area));
+    }
+
+    // No match — list valid options
+    let mut names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+    names.sort();
+    names.dedup();
+
+    let mut areas: Vec<&str> = packages.iter().map(|p| p.package_area.as_str()).collect();
+    areas.sort();
+    areas.dedup();
+
+    Err(format!(
+        "Package '{}' not found.\n\nValid package names: {}\nValid package areas: {}",
+        pkg_name,
+        names.join(", "),
+        areas.join(", ")
+    )
+    .into())
 }
 
 #[cfg(test)]

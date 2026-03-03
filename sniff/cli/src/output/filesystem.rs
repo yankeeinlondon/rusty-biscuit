@@ -202,6 +202,121 @@ fn split_path(path: &str) -> (String, String) {
     }
 }
 
+/// Format a single commit as a styled one-liner.
+///
+/// Parses conventional commit format and includes SHA, timestamp, ref decorations,
+/// and optionally the author (when `verbose > 0`).
+fn format_commit_line(
+    commit: &sniff::filesystem::git::CommitInfo,
+    verbose: u8,
+) -> String {
+    let cc = ConventionalCommit::parse(&commit.message);
+    let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
+    let sha = commit.sha[0..7].to_string();
+    let date_prefix = if use_on { "<i>on</i> " } else { "" };
+    let refs_part = format_ref_decorations(&commit.refs);
+    let user_part = if verbose > 0 {
+        format!(
+            " <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>",
+            commit.author
+        )
+    } else {
+        String::new()
+    };
+
+    if let Some(ref op) = cc.operation {
+        let scope_part = cc
+            .scope
+            .as_ref()
+            .map(|s| format!("(<dim>{}</dim>)", s))
+            .unwrap_or_default();
+        format!(
+            "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
+            sha,
+            op,
+            scope_part,
+            time_str,
+            date_prefix,
+            date_str,
+            refs_part,
+            user_part,
+            cc.description
+        )
+    } else {
+        // Non-conventional commit
+        let first_line = commit.message.lines().next().unwrap_or("");
+        let truncated = if first_line.len() > 50 {
+            format!("{}...", &first_line[..47])
+        } else {
+            first_line.to_string()
+        };
+        format!(
+            "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
+            sha, truncated, date_prefix, date_str, refs_part, user_part,
+        )
+    }
+}
+
+/// Print detailed information for a single commit looked up by `--hash`.
+///
+/// Shows the commit as a one-liner followed by a list of files changed.
+pub fn print_hash_section(
+    commit: &sniff::filesystem::git::CommitInfo,
+    files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
+    verbose: u8,
+) {
+    use sniff::filesystem::git::DeltaKind;
+
+    let terminal = Terminal::default();
+
+    // === Commit Section ===
+    let status_title = Prose::new("<b><u>Commit</u></b>");
+    println!("\n{}\n", status_title.render(&terminal));
+
+    let commit_line = format_commit_line(commit, verbose);
+    let rendered = Prose::new(commit_line.as_str()).render(&terminal);
+    let list = UnorderedList::new(vec![rendered]);
+    println!("{}", list.render(&terminal));
+
+    // === Files Section ===
+    if files.is_empty() {
+        return;
+    }
+
+    let files_title = Prose::new("<b><u>Files changed</u></b>");
+    println!("{}\n", files_title.render(&terminal));
+
+    let file_items: Vec<String> = files
+        .iter()
+        .map(|(path, kind)| {
+            let path_str = path.display().to_string();
+            let (dir, name) = split_path(&path_str);
+            let dir_part = if dir.is_empty() {
+                String::new()
+            } else {
+                dir
+            };
+            match kind {
+                DeltaKind::Added => format!("<lime>{}: {}<b>{}</b></lime>", kind, dir_part, name),
+                DeltaKind::Modified => {
+                    format!("<yellow>{}: {}<b>{}</b></yellow>", kind, dir_part, name)
+                }
+                DeltaKind::Deleted => format!("<red>{}: {}<b>{}</b></red>", kind, dir_part, name),
+                DeltaKind::Renamed | DeltaKind::Copied => {
+                    format!("<cyan>{}: {}<b>{}</b></cyan>", kind, dir_part, name)
+                }
+            }
+        })
+        .collect();
+
+    let rendered_items: Vec<String> = file_items
+        .iter()
+        .map(|item| Prose::new(item.as_str()).render(&terminal))
+        .collect();
+    let list = UnorderedList::new(rendered_items);
+    println!("{}", list.render(&terminal));
+}
+
 /// Print git information with rich terminal formatting.
 ///
 /// Uses biscuit-terminal's Prose component for styled output with two sections:
@@ -224,52 +339,7 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
     for commit in commits.iter().rev() {
-        let cc = ConventionalCommit::parse(&commit.message);
-        let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
-        let sha = commit.sha[0..7].to_string();
-        let date_prefix = if use_on { "<i>on</i> " } else { "" };
-        let refs_part = format_ref_decorations(&commit.refs);
-        let user_part = if verbose > 0 {
-            format!(
-                " <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>",
-                commit.author
-            )
-        } else {
-            String::new()
-        };
-
-        let commit_line = if let Some(ref op) = cc.operation {
-            let scope_part = cc
-                .scope
-                .as_ref()
-                .map(|s| format!("(<dim>{}</dim>)", s))
-                .unwrap_or_default();
-            format!(
-                "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
-                sha,
-                op,
-                scope_part,
-                time_str,
-                date_prefix,
-                date_str,
-                refs_part,
-                user_part,
-                cc.description
-            )
-        } else {
-            // Non-conventional commit
-            let first_line = commit.message.lines().next().unwrap_or("");
-            let truncated = if first_line.len() > 50 {
-                format!("{}...", &first_line[..47])
-            } else {
-                first_line.to_string()
-            };
-            format!(
-                "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-                sha, truncated, date_prefix, date_str, refs_part, user_part,
-            )
-        };
-        status_items.push(commit_line);
+        status_items.push(format_commit_line(commit, verbose));
     }
 
     // File changes grouped by status
