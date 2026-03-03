@@ -640,10 +640,10 @@ fn fix_missing_name(topic: &str, skill_md: &PathBuf) -> Result<bool> {
 
     let new_content = if parsed.had_frontmatter {
         // Insert `name: {topic}` right after the opening `---`
-        if content.starts_with("---\r\n") {
-            format!("---\r\nname: {topic}\r\n{}", &content[5..])
-        } else if content.starts_with("---\n") {
-            format!("---\nname: {topic}\n{}", &content[4..])
+        if let Some(rest) = content.strip_prefix("---\r\n") {
+            format!("---\r\nname: {topic}\r\n{rest}")
+        } else if let Some(rest) = content.strip_prefix("---\n") {
+            format!("---\nname: {topic}\n{rest}")
         } else {
             return Ok(false);
         }
