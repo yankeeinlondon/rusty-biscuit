@@ -18,7 +18,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListNodesBasicRequest;
 ///
 /// let request = ListNodesBasicRequest::default()
@@ -54,7 +54,7 @@ impl crate::shared::EndpointSpec for ListNodesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetNodeBasicRequest;
 ///
 /// let request = GetNodeBasicRequest::new("node_value")
@@ -107,7 +107,7 @@ impl crate::shared::EndpointSpec for GetNodeBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetClusterBasicRequest;
 ///
 /// let request = GetClusterBasicRequest::default()
@@ -143,7 +143,7 @@ impl crate::shared::EndpointSpec for GetClusterBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListClientsBasicRequest;
 ///
 /// let request = ListClientsBasicRequest::default()
@@ -179,7 +179,7 @@ impl crate::shared::EndpointSpec for ListClientsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetClientBasicRequest;
 ///
 /// let request = GetClientBasicRequest::new("clientid_value")
@@ -234,7 +234,7 @@ impl crate::shared::EndpointSpec for GetClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DisconnectClientBasicRequest;
 ///
 /// let request = DisconnectClientBasicRequest::new("clientid_value")
@@ -289,7 +289,7 @@ impl crate::shared::EndpointSpec for DisconnectClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{SubscribeClientBasicRequest, SubscribeBody};
 ///
 /// let body = SubscribeBody {
@@ -349,7 +349,7 @@ impl crate::shared::EndpointSpec for SubscribeClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{UnsubscribeClientBasicRequest, SubscribeBody};
 ///
 /// let body = SubscribeBody {
@@ -409,7 +409,7 @@ impl crate::shared::EndpointSpec for UnsubscribeClientBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListSubscriptionsBasicRequest;
 ///
 /// let request = ListSubscriptionsBasicRequest::default()
@@ -445,7 +445,7 @@ impl crate::shared::EndpointSpec for ListSubscriptionsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{PublishBasicRequest, PublishBody};
 ///
 /// let body = PublishBody {
@@ -505,7 +505,7 @@ impl crate::shared::EndpointSpec for PublishBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{PublishBulkBasicRequest, PublishBatchBody};
 ///
 /// let body = PublishBatchBody {
@@ -565,7 +565,7 @@ impl crate::shared::EndpointSpec for PublishBulkBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListRulesBasicRequest;
 ///
 /// let request = ListRulesBasicRequest::default()
@@ -601,7 +601,7 @@ impl crate::shared::EndpointSpec for ListRulesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateRuleBasicRequest, CreateRuleBody};
 ///
 /// let body = CreateRuleBody {
@@ -661,7 +661,7 @@ impl crate::shared::EndpointSpec for CreateRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetRuleBasicRequest;
 ///
 /// let request = GetRuleBasicRequest::new("id_value")
@@ -714,7 +714,7 @@ impl crate::shared::EndpointSpec for GetRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{UpdateRuleBasicRequest, CreateRuleBody};
 ///
 /// let body = CreateRuleBody {
@@ -771,7 +771,7 @@ impl crate::shared::EndpointSpec for UpdateRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteRuleBasicRequest;
 ///
 /// let request = DeleteRuleBasicRequest::new("id_value")
@@ -824,7 +824,7 @@ impl crate::shared::EndpointSpec for DeleteRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{TestRuleBasicRequest, TestRuleBody};
 ///
 /// let body = TestRuleBody {
@@ -881,7 +881,7 @@ impl crate::shared::EndpointSpec for TestRuleBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthenticatorsBasicRequest;
 ///
 /// let request = ListAuthenticatorsBasicRequest::default()
@@ -917,7 +917,7 @@ impl crate::shared::EndpointSpec for ListAuthenticatorsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetAuthenticatorBasicRequest;
 ///
 /// let request = GetAuthenticatorBasicRequest::new("id_value")
@@ -970,7 +970,7 @@ impl crate::shared::EndpointSpec for GetAuthenticatorBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthUsersBasicRequest;
 ///
 /// let request = ListAuthUsersBasicRequest::new("id_value")
@@ -1023,7 +1023,7 @@ impl crate::shared::EndpointSpec for ListAuthUsersBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateAuthUserBasicRequest, CreateAuthUserBody};
 ///
 /// let body = CreateAuthUserBody {
@@ -1080,7 +1080,7 @@ impl crate::shared::EndpointSpec for CreateAuthUserBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteAuthUserBasicRequest;
 ///
 /// let request = DeleteAuthUserBasicRequest::new("id_value", "user_id_value")
@@ -1128,7 +1128,7 @@ impl crate::shared::EndpointSpec for DeleteAuthUserBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthzSourcesBasicRequest;
 ///
 /// let request = ListAuthzSourcesBasicRequest::default()
@@ -1164,7 +1164,7 @@ impl crate::shared::EndpointSpec for ListAuthzSourcesBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListListenersBasicRequest;
 ///
 /// let request = ListListenersBasicRequest::default()
@@ -1200,7 +1200,7 @@ impl crate::shared::EndpointSpec for ListListenersBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetListenerBasicRequest;
 ///
 /// let request = GetListenerBasicRequest::new("id_value")
@@ -1253,7 +1253,7 @@ impl crate::shared::EndpointSpec for GetListenerBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListMetricsBasicRequest;
 ///
 /// let request = ListMetricsBasicRequest::default()
@@ -1289,7 +1289,7 @@ impl crate::shared::EndpointSpec for ListMetricsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListStatsBasicRequest;
 ///
 /// let request = ListStatsBasicRequest::default()
@@ -1325,7 +1325,7 @@ impl crate::shared::EndpointSpec for ListStatsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetPrometheusBasicRequest;
 ///
 /// let request = GetPrometheusBasicRequest::default()
@@ -1361,7 +1361,7 @@ impl crate::shared::EndpointSpec for GetPrometheusBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListTopicsBasicRequest;
 ///
 /// let request = ListTopicsBasicRequest::default()
@@ -1397,7 +1397,7 @@ impl crate::shared::EndpointSpec for ListTopicsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListRetainedBasicRequest;
 ///
 /// let request = ListRetainedBasicRequest::default()
@@ -1433,7 +1433,7 @@ impl crate::shared::EndpointSpec for ListRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetRetainedBasicRequest;
 ///
 /// let request = GetRetainedBasicRequest::new("topic_value")
@@ -1486,7 +1486,7 @@ impl crate::shared::EndpointSpec for GetRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteRetainedBasicRequest;
 ///
 /// let request = DeleteRetainedBasicRequest::new("topic_value")
@@ -1539,7 +1539,7 @@ impl crate::shared::EndpointSpec for DeleteRetainedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAlarmsBasicRequest;
 ///
 /// let request = ListAlarmsBasicRequest::default()
@@ -1575,7 +1575,7 @@ impl crate::shared::EndpointSpec for ListAlarmsBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListBannedBasicRequest;
 ///
 /// let request = ListBannedBasicRequest::default()
@@ -1611,7 +1611,7 @@ impl crate::shared::EndpointSpec for ListBannedBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateBanBasicRequest, CreateBanBody};
 ///
 /// let body = CreateBanBody {
@@ -1671,7 +1671,7 @@ impl crate::shared::EndpointSpec for CreateBanBasicRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteBanBasicRequest;
 ///
 /// let request = DeleteBanBasicRequest::new("ban_type_value", "who_value")
@@ -2188,7 +2188,7 @@ impl EmqxBasic {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -2220,7 +2220,7 @@ impl EmqxBasic {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -2254,7 +2254,7 @@ impl EmqxBasic {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -2297,7 +2297,7 @@ impl EmqxBasic {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -2319,7 +2319,7 @@ impl EmqxBasic {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -2357,7 +2357,7 @@ impl EmqxBasic {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -2470,7 +2470,7 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -2497,7 +2497,7 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -2523,7 +2523,7 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())
@@ -2889,7 +2889,7 @@ impl EmqxBasic {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{LoginBearerRequest, LoginBody};
 ///
 /// let body = LoginBody {
@@ -2949,7 +2949,7 @@ impl crate::shared::EndpointSpec for LoginBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::LogoutBearerRequest;
 ///
 /// let request = LogoutBearerRequest::default()
@@ -2985,7 +2985,7 @@ impl crate::shared::EndpointSpec for LogoutBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListNodesBearerRequest;
 ///
 /// let request = ListNodesBearerRequest::default()
@@ -3021,7 +3021,7 @@ impl crate::shared::EndpointSpec for ListNodesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetNodeBearerRequest;
 ///
 /// let request = GetNodeBearerRequest::new("node_value")
@@ -3074,7 +3074,7 @@ impl crate::shared::EndpointSpec for GetNodeBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetClusterBearerRequest;
 ///
 /// let request = GetClusterBearerRequest::default()
@@ -3110,7 +3110,7 @@ impl crate::shared::EndpointSpec for GetClusterBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListClientsBearerRequest;
 ///
 /// let request = ListClientsBearerRequest::default()
@@ -3146,7 +3146,7 @@ impl crate::shared::EndpointSpec for ListClientsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetClientBearerRequest;
 ///
 /// let request = GetClientBearerRequest::new("clientid_value")
@@ -3201,7 +3201,7 @@ impl crate::shared::EndpointSpec for GetClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DisconnectClientBearerRequest;
 ///
 /// let request = DisconnectClientBearerRequest::new("clientid_value")
@@ -3256,7 +3256,7 @@ impl crate::shared::EndpointSpec for DisconnectClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{SubscribeClientBearerRequest, SubscribeBody};
 ///
 /// let body = SubscribeBody {
@@ -3316,7 +3316,7 @@ impl crate::shared::EndpointSpec for SubscribeClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{UnsubscribeClientBearerRequest, SubscribeBody};
 ///
 /// let body = SubscribeBody {
@@ -3376,7 +3376,7 @@ impl crate::shared::EndpointSpec for UnsubscribeClientBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListSubscriptionsBearerRequest;
 ///
 /// let request = ListSubscriptionsBearerRequest::default()
@@ -3412,7 +3412,7 @@ impl crate::shared::EndpointSpec for ListSubscriptionsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{PublishBearerRequest, PublishBody};
 ///
 /// let body = PublishBody {
@@ -3472,7 +3472,7 @@ impl crate::shared::EndpointSpec for PublishBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{PublishBulkBearerRequest, PublishBatchBody};
 ///
 /// let body = PublishBatchBody {
@@ -3532,7 +3532,7 @@ impl crate::shared::EndpointSpec for PublishBulkBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListRulesBearerRequest;
 ///
 /// let request = ListRulesBearerRequest::default()
@@ -3568,7 +3568,7 @@ impl crate::shared::EndpointSpec for ListRulesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateRuleBearerRequest, CreateRuleBody};
 ///
 /// let body = CreateRuleBody {
@@ -3628,7 +3628,7 @@ impl crate::shared::EndpointSpec for CreateRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetRuleBearerRequest;
 ///
 /// let request = GetRuleBearerRequest::new("id_value")
@@ -3681,7 +3681,7 @@ impl crate::shared::EndpointSpec for GetRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{UpdateRuleBearerRequest, CreateRuleBody};
 ///
 /// let body = CreateRuleBody {
@@ -3738,7 +3738,7 @@ impl crate::shared::EndpointSpec for UpdateRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteRuleBearerRequest;
 ///
 /// let request = DeleteRuleBearerRequest::new("id_value")
@@ -3791,7 +3791,7 @@ impl crate::shared::EndpointSpec for DeleteRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{TestRuleBearerRequest, TestRuleBody};
 ///
 /// let body = TestRuleBody {
@@ -3848,7 +3848,7 @@ impl crate::shared::EndpointSpec for TestRuleBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthenticatorsBearerRequest;
 ///
 /// let request = ListAuthenticatorsBearerRequest::default()
@@ -3884,7 +3884,7 @@ impl crate::shared::EndpointSpec for ListAuthenticatorsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetAuthenticatorBearerRequest;
 ///
 /// let request = GetAuthenticatorBearerRequest::new("id_value")
@@ -3937,7 +3937,7 @@ impl crate::shared::EndpointSpec for GetAuthenticatorBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthUsersBearerRequest;
 ///
 /// let request = ListAuthUsersBearerRequest::new("id_value")
@@ -3990,7 +3990,7 @@ impl crate::shared::EndpointSpec for ListAuthUsersBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateAuthUserBearerRequest, CreateAuthUserBody};
 ///
 /// let body = CreateAuthUserBody {
@@ -4047,7 +4047,7 @@ impl crate::shared::EndpointSpec for CreateAuthUserBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteAuthUserBearerRequest;
 ///
 /// let request = DeleteAuthUserBearerRequest::new("id_value", "user_id_value")
@@ -4095,7 +4095,7 @@ impl crate::shared::EndpointSpec for DeleteAuthUserBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAuthzSourcesBearerRequest;
 ///
 /// let request = ListAuthzSourcesBearerRequest::default()
@@ -4131,7 +4131,7 @@ impl crate::shared::EndpointSpec for ListAuthzSourcesBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListListenersBearerRequest;
 ///
 /// let request = ListListenersBearerRequest::default()
@@ -4167,7 +4167,7 @@ impl crate::shared::EndpointSpec for ListListenersBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetListenerBearerRequest;
 ///
 /// let request = GetListenerBearerRequest::new("id_value")
@@ -4220,7 +4220,7 @@ impl crate::shared::EndpointSpec for GetListenerBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListMetricsBearerRequest;
 ///
 /// let request = ListMetricsBearerRequest::default()
@@ -4256,7 +4256,7 @@ impl crate::shared::EndpointSpec for ListMetricsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListStatsBearerRequest;
 ///
 /// let request = ListStatsBearerRequest::default()
@@ -4292,7 +4292,7 @@ impl crate::shared::EndpointSpec for ListStatsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetPrometheusBearerRequest;
 ///
 /// let request = GetPrometheusBearerRequest::default()
@@ -4328,7 +4328,7 @@ impl crate::shared::EndpointSpec for GetPrometheusBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListTopicsBearerRequest;
 ///
 /// let request = ListTopicsBearerRequest::default()
@@ -4364,7 +4364,7 @@ impl crate::shared::EndpointSpec for ListTopicsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListRetainedBearerRequest;
 ///
 /// let request = ListRetainedBearerRequest::default()
@@ -4400,7 +4400,7 @@ impl crate::shared::EndpointSpec for ListRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::GetRetainedBearerRequest;
 ///
 /// let request = GetRetainedBearerRequest::new("topic_value")
@@ -4453,7 +4453,7 @@ impl crate::shared::EndpointSpec for GetRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteRetainedBearerRequest;
 ///
 /// let request = DeleteRetainedBearerRequest::new("topic_value")
@@ -4506,7 +4506,7 @@ impl crate::shared::EndpointSpec for DeleteRetainedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListAlarmsBearerRequest;
 ///
 /// let request = ListAlarmsBearerRequest::default()
@@ -4542,7 +4542,7 @@ impl crate::shared::EndpointSpec for ListAlarmsBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::ListBannedBearerRequest;
 ///
 /// let request = ListBannedBearerRequest::default()
@@ -4578,7 +4578,7 @@ impl crate::shared::EndpointSpec for ListBannedBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::{CreateBanBearerRequest, CreateBanBody};
 ///
 /// let body = CreateBanBody {
@@ -4638,7 +4638,7 @@ impl crate::shared::EndpointSpec for CreateBanBearerRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::emqx::DeleteBanBearerRequest;
 ///
 /// let request = DeleteBanBearerRequest::new("ban_type_value", "who_value")
@@ -5175,7 +5175,7 @@ impl EmqxBearer {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -5205,7 +5205,7 @@ impl EmqxBearer {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -5237,7 +5237,7 @@ impl EmqxBearer {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -5278,7 +5278,7 @@ impl EmqxBearer {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -5300,7 +5300,7 @@ impl EmqxBearer {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -5338,7 +5338,7 @@ impl EmqxBearer {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -5451,7 +5451,7 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -5478,7 +5478,7 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -5504,7 +5504,7 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

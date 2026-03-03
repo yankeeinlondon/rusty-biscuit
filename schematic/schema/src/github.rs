@@ -30,7 +30,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -44,7 +44,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = GitHub::with_base_url("https://staging.example.com/v1");
@@ -56,7 +56,7 @@ use crate::shared::{Paginated, RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetRepositoryRequest;
 ///
 /// let request = GetRepositoryRequest::new("owner_value", "repo_value")
@@ -104,7 +104,7 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetGitTreeRequest;
 ///
 /// let request = GetGitTreeRequest::new("owner_value", "repo_value", "tree_sha_value")
@@ -161,7 +161,7 @@ impl crate::shared::EndpointSpec for GetGitTreeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetGitTreeRecursiveRequest;
 ///
 /// let request = GetGitTreeRecursiveRequest::new("owner_value", "repo_value", "tree_sha_value")
@@ -243,7 +243,7 @@ impl crate::shared::EndpointSpec for GetGitTreeRecursiveRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetRepositoryContentRawRequest;
 ///
 /// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "path_value")
@@ -303,7 +303,7 @@ impl crate::shared::EndpointSpec for GetRepositoryContentRawRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
@@ -424,7 +424,7 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListPullRequestFilesRequest;
 ///
 /// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "pull_number_value")
@@ -518,7 +518,7 @@ impl crate::shared::EndpointSpec for ListPullRequestFilesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
@@ -639,7 +639,7 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetIssueRequest;
 ///
 /// let request = GetIssueRequest::new("owner_value", "repo_value", "issue_number_value")
@@ -696,7 +696,7 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "issue_number_value")
@@ -790,7 +790,7 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListIssueTimelineRequest;
 ///
 /// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "issue_number_value")
@@ -884,7 +884,7 @@ impl crate::shared::EndpointSpec for ListIssueTimelineRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("owner_value", "repo_value")
@@ -969,7 +969,7 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("owner_value", "repo_value")
@@ -1054,7 +1054,7 @@ impl crate::shared::EndpointSpec for ListReleasesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetTagReferenceRequest;
 ///
 /// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "tag_value")
@@ -1111,7 +1111,7 @@ impl crate::shared::EndpointSpec for GetTagReferenceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::GetAnnotatedTagRequest;
 ///
 /// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "tag_sha_value")
@@ -1168,7 +1168,7 @@ impl crate::shared::EndpointSpec for GetAnnotatedTagRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListWorkflowRunsRequest;
 ///
 /// let request = ListWorkflowRunsRequest::new("owner_value", "repo_value")
@@ -1289,7 +1289,7 @@ impl crate::shared::EndpointSpec for ListWorkflowRunsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::github::ListOrgReposRequest;
 ///
 /// let request = ListOrgReposRequest::new("org_value")
@@ -1690,7 +1690,7 @@ impl GitHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1725,7 +1725,7 @@ impl GitHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1762,7 +1762,7 @@ impl GitHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1808,7 +1808,7 @@ impl GitHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -1830,7 +1830,7 @@ impl GitHub {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -1868,7 +1868,7 @@ impl GitHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -1981,7 +1981,7 @@ impl<'a> GitHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -2008,7 +2008,7 @@ impl<'a> GitHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -2034,7 +2034,7 @@ impl<'a> GitHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

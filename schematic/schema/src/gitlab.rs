@@ -32,7 +32,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -46,7 +46,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = GitLab::with_base_url("https://staging.example.com/v1");
@@ -58,7 +58,7 @@ use crate::shared::{Paginated, RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListRepositoryTreeRequest;
 ///
 /// let request = ListRepositoryTreeRequest::new("id_value")
@@ -200,7 +200,7 @@ impl crate::shared::EndpointSpec for ListRepositoryTreeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetRepositoryFileRequest;
 ///
 /// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "git_ref_value")
@@ -258,7 +258,7 @@ impl crate::shared::EndpointSpec for GetRepositoryFileRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListMergeRequestsRequest;
 ///
 /// let request = ListMergeRequestsRequest::new("id_value")
@@ -372,7 +372,7 @@ impl crate::shared::EndpointSpec for ListMergeRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetMergeRequestRequest;
 ///
 /// let request = GetMergeRequestRequest::new("id_value", "merge_request_iid_value")
@@ -422,7 +422,7 @@ impl crate::shared::EndpointSpec for GetMergeRequestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListMergeRequestCommitsRequest;
 ///
 /// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value")
@@ -509,7 +509,7 @@ impl crate::shared::EndpointSpec for ListMergeRequestCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListMergeRequestChangesRequest;
 ///
 /// let request = ListMergeRequestChangesRequest::new("id_value", "merge_request_iid_value")
@@ -559,7 +559,7 @@ impl crate::shared::EndpointSpec for ListMergeRequestChangesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("id_value")
@@ -673,7 +673,7 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetIssueRequest;
 ///
 /// let request = GetIssueRequest::new("id_value", "issue_iid_value")
@@ -721,7 +721,7 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListIssueNotesRequest;
 ///
 /// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value")
@@ -806,7 +806,7 @@ impl crate::shared::EndpointSpec for ListIssueNotesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListIssueParticipantsRequest;
 ///
 /// let request = ListIssueParticipantsRequest::new("id_value", "issue_iid_value")
@@ -856,7 +856,7 @@ impl crate::shared::EndpointSpec for ListIssueParticipantsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("id_value")
@@ -956,7 +956,7 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetTagRequest;
 ///
 /// let request = GetTagRequest::new("id_value", "tag_name_value")
@@ -1004,7 +1004,7 @@ impl crate::shared::EndpointSpec for GetTagRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("id_value")
@@ -1104,7 +1104,7 @@ impl crate::shared::EndpointSpec for ListReleasesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetReleaseRequest;
 ///
 /// let request = GetReleaseRequest::new("id_value", "tag_name_value")
@@ -1152,7 +1152,7 @@ impl crate::shared::EndpointSpec for GetReleaseRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetLatestReleaseRequest;
 ///
 /// let request = GetLatestReleaseRequest::new("id_value")
@@ -1205,7 +1205,7 @@ impl crate::shared::EndpointSpec for GetLatestReleaseRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::GetProjectRequest;
 ///
 /// let request = GetProjectRequest::new("id_value")
@@ -1258,7 +1258,7 @@ impl crate::shared::EndpointSpec for GetProjectRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListProjectPipelinesRequest;
 ///
 /// let request = ListProjectPipelinesRequest::new("id_value")
@@ -1414,7 +1414,7 @@ impl crate::shared::EndpointSpec for ListProjectPipelinesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::gitlab::ListGroupProjectsRequest;
 ///
 /// let request = ListGroupProjectsRequest::new("id_value")
@@ -1869,7 +1869,7 @@ impl GitLab {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1908,7 +1908,7 @@ impl GitLab {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1949,7 +1949,7 @@ impl GitLab {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1999,7 +1999,7 @@ impl GitLab {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -2021,7 +2021,7 @@ impl GitLab {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -2059,7 +2059,7 @@ impl GitLab {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -2172,7 +2172,7 @@ impl<'a> GitLabVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -2199,7 +2199,7 @@ impl<'a> GitLabVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -2225,7 +2225,7 @@ impl<'a> GitLabVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

@@ -19,7 +19,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -33,7 +33,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = OpenAI::with_base_url("https://staging.example.com/v1");
@@ -45,7 +45,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::openai::ListModelsRequest;
 ///
 /// let request = ListModelsRequest::default()
@@ -81,7 +81,7 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::openai::RetrieveModelRequest;
 ///
 /// let request = RetrieveModelRequest::new("model_value")
@@ -134,7 +134,7 @@ impl crate::shared::EndpointSpec for RetrieveModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::openai::DeleteModelRequest;
 ///
 /// let request = DeleteModelRequest::new("model_value")
@@ -293,7 +293,7 @@ impl OpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -325,7 +325,7 @@ impl OpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -359,7 +359,7 @@ impl OpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -402,7 +402,7 @@ impl OpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -424,7 +424,7 @@ impl OpenAI {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -462,7 +462,7 @@ impl OpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -575,7 +575,7 @@ impl<'a> OpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -602,7 +602,7 @@ impl<'a> OpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -628,7 +628,7 @@ impl<'a> OpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

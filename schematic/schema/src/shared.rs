@@ -22,7 +22,7 @@ pub type RequestParts = (&'static str, String, Option<String>, Vec<(String, Stri
 ///
 /// ## Error Handling Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// match client.request::<Response>(req).await {
 ///     Ok(response) => { /* success */ }
 ///     Err(SchematicError::MissingCredential { env_vars }) => {
@@ -93,7 +93,7 @@ pub enum SchematicError {
 ///
 /// ## Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// let variant = api.variant()
 ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
 ///         if ctx.status == 200 {
@@ -161,7 +161,7 @@ impl ResponseContext {
 ///
 /// ## Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// // Generated implementation for ListModelsRequest
 /// impl EndpointSpec for ListModelsRequest {
 ///     type Response = ListModelsResponse;
@@ -187,7 +187,7 @@ pub trait EndpointSpec {
 ///
 /// ## Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// // Unwrap nested data envelope
 /// let variant = api.variant()
 ///     .pre_response_json(|ctx, json| {
@@ -309,7 +309,7 @@ impl Clone for VariantHooks {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::shared::Paginated;
 ///
 /// fn fetch_all_pages<R: Paginated>(request: R) -> Vec<R::Response>

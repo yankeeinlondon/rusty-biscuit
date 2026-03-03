@@ -29,7 +29,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -43,7 +43,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = UnfoldedCircleCoreRest::with_base_url("https://staging.example.com/v1");
@@ -55,7 +55,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::{LoginCoreRestRequest, LoginRequest};
 ///
 /// let body = LoginRequest {
@@ -115,7 +115,7 @@ impl crate::shared::EndpointSpec for LoginCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::LogoutCoreRestRequest;
 ///
 /// let request = LogoutCoreRestRequest::default()
@@ -151,7 +151,7 @@ impl crate::shared::EndpointSpec for LogoutCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 ///
 /// let request = GetSystemInfoCoreRestRequest::default()
@@ -187,7 +187,7 @@ impl crate::shared::EndpointSpec for GetSystemInfoCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::ExportBackupCoreRestRequest;
 ///
 /// let request = ExportBackupCoreRestRequest::default()
@@ -223,7 +223,7 @@ impl crate::shared::EndpointSpec for ExportBackupCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::RestoreBackupCoreRestRequest;
 ///
 /// let request = RestoreBackupCoreRestRequest::default()
@@ -259,7 +259,7 @@ impl crate::shared::EndpointSpec for RestoreBackupCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::UploadResourceCoreRestRequest;
 ///
 /// let request = UploadResourceCoreRestRequest::new("resource_type_value")
@@ -316,7 +316,7 @@ impl crate::shared::EndpointSpec for UploadResourceCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::GetResourceCoreRestRequest;
 ///
 /// let request = GetResourceCoreRestRequest::new("resource_type_value", "resource_id_value")
@@ -367,7 +367,7 @@ impl crate::shared::EndpointSpec for GetResourceCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::InstallCustomIntegrationCoreRestRequest;
 ///
 /// let request = InstallCustomIntegrationCoreRestRequest::default()
@@ -403,7 +403,7 @@ impl crate::shared::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::UploadCustomIrCodeSetCoreRestRequest;
 ///
 /// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value")
@@ -460,7 +460,7 @@ impl crate::shared::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::InstallCustomComponentCoreRestRequest;
 ///
 /// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value")
@@ -517,7 +517,7 @@ impl crate::shared::EndpointSpec for InstallCustomComponentCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::unfolded_circle_core_rest::QueryLogsTextCoreRestRequest;
 ///
 /// let request = QueryLogsTextCoreRestRequest::default()
@@ -758,7 +758,7 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -801,7 +801,7 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -846,7 +846,7 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -900,7 +900,7 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -922,7 +922,7 @@ impl UnfoldedCircleCoreRest {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -960,7 +960,7 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -1073,7 +1073,7 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -1100,7 +1100,7 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -1126,7 +1126,7 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

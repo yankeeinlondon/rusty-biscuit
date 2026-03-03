@@ -29,7 +29,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -43,7 +43,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Bitbucket::with_base_url("https://staging.example.com/v1");
@@ -55,7 +55,7 @@ use crate::shared::{Paginated, RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetRepositoryRequest;
 ///
 /// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value")
@@ -103,7 +103,7 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListDirectoryContentsRequest;
 ///
 /// let request = ListDirectoryContentsRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
@@ -202,7 +202,7 @@ impl crate::shared::EndpointSpec for ListDirectoryContentsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetFileContentRawRequest;
 ///
 /// let request = GetFileContentRawRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
@@ -264,7 +264,7 @@ impl crate::shared::EndpointSpec for GetFileContentRawRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value")
@@ -363,7 +363,7 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetPullRequestRequest;
 ///
 /// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value")
@@ -421,7 +421,7 @@ impl crate::shared::EndpointSpec for GetPullRequestRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListPullRequestCommentsRequest;
 ///
 /// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
@@ -516,7 +516,7 @@ impl crate::shared::EndpointSpec for ListPullRequestCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value")
@@ -603,7 +603,7 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetIssueRequest;
 ///
 /// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value")
@@ -660,7 +660,7 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
@@ -755,7 +755,7 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListIssueChangesRequest;
 ///
 /// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value")
@@ -850,7 +850,7 @@ impl crate::shared::EndpointSpec for ListIssueChangesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("workspace_value", "repo_slug_value")
@@ -937,7 +937,7 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetTagRequest;
 ///
 /// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value")
@@ -994,7 +994,7 @@ impl crate::shared::EndpointSpec for GetTagRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListDownloadsRequest;
 ///
 /// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value")
@@ -1081,7 +1081,7 @@ impl crate::shared::EndpointSpec for ListDownloadsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::GetDownloadRequest;
 ///
 /// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value")
@@ -1139,7 +1139,7 @@ impl crate::shared::EndpointSpec for GetDownloadRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::bitbucket::ListWorkspaceReposRequest;
 ///
 /// let request = ListWorkspaceReposRequest::new("workspace_value")
@@ -1488,7 +1488,7 @@ impl Bitbucket {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1522,7 +1522,7 @@ impl Bitbucket {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1558,7 +1558,7 @@ impl Bitbucket {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1603,7 +1603,7 @@ impl Bitbucket {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -1625,7 +1625,7 @@ impl Bitbucket {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -1663,7 +1663,7 @@ impl Bitbucket {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -1776,7 +1776,7 @@ impl<'a> BitbucketVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -1803,7 +1803,7 @@ impl<'a> BitbucketVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -1829,7 +1829,7 @@ impl<'a> BitbucketVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

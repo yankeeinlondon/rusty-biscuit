@@ -62,7 +62,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -76,7 +76,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = ElevenLabs::with_base_url("https://staging.example.com/v1");
@@ -88,7 +88,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreateSpeechRequest, CreateSpeechBody};
 ///
 /// let body = CreateSpeechBody {
@@ -148,7 +148,7 @@ impl crate::shared::EndpointSpec for CreateSpeechRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{StreamSpeechRequest, CreateSpeechBody};
 ///
 /// let body = CreateSpeechBody {
@@ -208,7 +208,7 @@ impl crate::shared::EndpointSpec for StreamSpeechRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreateSpeechWithTimestampsRequest, CreateSpeechBody};
 ///
 /// let body = CreateSpeechBody {
@@ -268,7 +268,7 @@ impl crate::shared::EndpointSpec for CreateSpeechWithTimestampsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{StreamSpeechWithTimestampsRequest, CreateSpeechBody};
 ///
 /// let body = CreateSpeechBody {
@@ -330,7 +330,7 @@ impl crate::shared::EndpointSpec for StreamSpeechWithTimestampsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListVoicesRequest;
 ///
 /// let request = ListVoicesRequest::default()
@@ -366,7 +366,7 @@ impl crate::shared::EndpointSpec for ListVoicesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetVoiceRequest;
 ///
 /// let request = GetVoiceRequest::new("voice_id_value")
@@ -421,7 +421,7 @@ impl crate::shared::EndpointSpec for GetVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::DeleteVoiceRequest;
 ///
 /// let request = DeleteVoiceRequest::new("voice_id_value")
@@ -476,7 +476,7 @@ impl crate::shared::EndpointSpec for DeleteVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetDefaultVoiceSettingsRequest;
 ///
 /// let request = GetDefaultVoiceSettingsRequest::default()
@@ -512,7 +512,7 @@ impl crate::shared::EndpointSpec for GetDefaultVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetVoiceSettingsRequest;
 ///
 /// let request = GetVoiceSettingsRequest::new("voice_id_value")
@@ -567,7 +567,7 @@ impl crate::shared::EndpointSpec for GetVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{UpdateVoiceSettingsRequest, VoiceSettings};
 ///
 /// let body = VoiceSettings {
@@ -627,7 +627,7 @@ impl crate::shared::EndpointSpec for UpdateVoiceSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetVoiceSampleAudioRequest;
 ///
 /// let request = GetVoiceSampleAudioRequest::new("voice_id_value", "sample_id_value")
@@ -677,7 +677,7 @@ impl crate::shared::EndpointSpec for GetVoiceSampleAudioRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::DeleteVoiceSampleRequest;
 ///
 /// let request = DeleteVoiceSampleRequest::new("voice_id_value", "sample_id_value")
@@ -725,7 +725,7 @@ impl crate::shared::EndpointSpec for DeleteVoiceSampleRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::AddVoiceSampleRequest;
 ///
 /// let request = AddVoiceSampleRequest::new("voice_id_value")
@@ -780,7 +780,7 @@ impl crate::shared::EndpointSpec for AddVoiceSampleRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListSharedVoicesRequest;
 ///
 /// let request = ListSharedVoicesRequest::default()
@@ -816,7 +816,7 @@ impl crate::shared::EndpointSpec for ListSharedVoicesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{AddSharedVoiceRequest, AddSharedVoiceBody};
 ///
 /// let body = AddSharedVoiceBody {
@@ -883,7 +883,7 @@ impl crate::shared::EndpointSpec for AddSharedVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreatePvcVoiceRequest, CreatePvcVoiceBody};
 ///
 /// let body = CreatePvcVoiceBody {
@@ -943,7 +943,7 @@ impl crate::shared::EndpointSpec for CreatePvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{UpdatePvcVoiceRequest, CreatePvcVoiceBody};
 ///
 /// let body = CreatePvcVoiceBody {
@@ -1003,7 +1003,7 @@ impl crate::shared::EndpointSpec for UpdatePvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{TrainPvcVoiceRequest, TrainPvcVoiceBody};
 ///
 /// let body = TrainPvcVoiceBody {
@@ -1063,7 +1063,7 @@ impl crate::shared::EndpointSpec for TrainPvcVoiceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreateSoundEffectRequest, CreateSoundEffectBody};
 ///
 /// let body = CreateSoundEffectBody {
@@ -1123,7 +1123,7 @@ impl crate::shared::EndpointSpec for CreateSoundEffectRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListModelsRequest;
 ///
 /// let request = ListModelsRequest::default()
@@ -1159,7 +1159,7 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::CreateSingleUseTokenRequest;
 ///
 /// let request = CreateSingleUseTokenRequest::new("token_type_value")
@@ -1216,7 +1216,7 @@ impl crate::shared::EndpointSpec for CreateSingleUseTokenRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetHistoryRequest;
 ///
 /// let request = GetHistoryRequest::default()
@@ -1252,7 +1252,7 @@ impl crate::shared::EndpointSpec for GetHistoryRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetHistoryItemRequest;
 ///
 /// let request = GetHistoryItemRequest::new("history_item_id_value")
@@ -1309,7 +1309,7 @@ impl crate::shared::EndpointSpec for GetHistoryItemRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::DeleteHistoryItemRequest;
 ///
 /// let request = DeleteHistoryItemRequest::new("history_item_id_value")
@@ -1366,7 +1366,7 @@ impl crate::shared::EndpointSpec for DeleteHistoryItemRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetHistoryItemAudioRequest;
 ///
 /// let request = GetHistoryItemAudioRequest::new("history_item_id_value")
@@ -1423,7 +1423,7 @@ impl crate::shared::EndpointSpec for GetHistoryItemAudioRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{DownloadHistoryItemsRequest, DownloadHistoryBody};
 ///
 /// let body = DownloadHistoryBody {
@@ -1483,7 +1483,7 @@ impl crate::shared::EndpointSpec for DownloadHistoryItemsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetUsageStatsRequest;
 ///
 /// let request = GetUsageStatsRequest::default()
@@ -1519,7 +1519,7 @@ impl crate::shared::EndpointSpec for GetUsageStatsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetUserRequest;
 ///
 /// let request = GetUserRequest::default()
@@ -1555,7 +1555,7 @@ impl crate::shared::EndpointSpec for GetUserRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetUserSubscriptionRequest;
 ///
 /// let request = GetUserSubscriptionRequest::default()
@@ -1591,7 +1591,7 @@ impl crate::shared::EndpointSpec for GetUserSubscriptionRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::GetResourceRequest;
 ///
 /// let request = GetResourceRequest::new("resource_id_value")
@@ -1648,7 +1648,7 @@ impl crate::shared::EndpointSpec for GetResourceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{ShareResourceRequest, ShareResourceBody};
 ///
 /// let body = ShareResourceBody {
@@ -1708,7 +1708,7 @@ impl crate::shared::EndpointSpec for ShareResourceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{UnshareResourceRequest, UnshareResourceBody};
 ///
 /// let body = UnshareResourceBody {
@@ -1768,7 +1768,7 @@ impl crate::shared::EndpointSpec for UnshareResourceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CopyResourceToWorkspaceRequest, CopyResourceBody};
 ///
 /// let body = CopyResourceBody {
@@ -1830,7 +1830,7 @@ impl crate::shared::EndpointSpec for CopyResourceToWorkspaceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListServiceAccountsRequest;
 ///
 /// let request = ListServiceAccountsRequest::default()
@@ -1866,7 +1866,7 @@ impl crate::shared::EndpointSpec for ListServiceAccountsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListServiceAccountApiKeysRequest;
 ///
 /// let request = ListServiceAccountApiKeysRequest::new("service_account_user_id_value")
@@ -1927,7 +1927,7 @@ impl crate::shared::EndpointSpec for ListServiceAccountApiKeysRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreateApiKeyRequest, CreateApiKeyBody};
 ///
 /// let body = CreateApiKeyBody {
@@ -1992,7 +1992,7 @@ impl crate::shared::EndpointSpec for CreateApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{UpdateApiKeyRequest, UpdateApiKeyBody};
 ///
 /// let body = UpdateApiKeyBody {
@@ -2062,7 +2062,7 @@ impl crate::shared::EndpointSpec for UpdateApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::DeleteApiKeyRequest;
 ///
 /// let request = DeleteApiKeyRequest::new("service_account_user_id_value", "api_key_id_value")
@@ -2116,7 +2116,7 @@ impl crate::shared::EndpointSpec for DeleteApiKeyRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::ListWebhooksRequest;
 ///
 /// let request = ListWebhooksRequest::default()
@@ -2152,7 +2152,7 @@ impl crate::shared::EndpointSpec for ListWebhooksRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{CreateWebhookRequest, CreateWebhookBody};
 ///
 /// let body = CreateWebhookBody {
@@ -2212,7 +2212,7 @@ impl crate::shared::EndpointSpec for CreateWebhookRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::{UpdateWebhookRequest, UpdateWebhookBody};
 ///
 /// let body = UpdateWebhookBody {
@@ -2272,7 +2272,7 @@ impl crate::shared::EndpointSpec for UpdateWebhookRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::elevenlabs::DeleteWebhookRequest;
 ///
 /// let request = DeleteWebhookRequest::new("webhook_id_value")
@@ -2870,7 +2870,7 @@ impl ElevenLabs {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -2908,7 +2908,7 @@ impl ElevenLabs {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -2948,7 +2948,7 @@ impl ElevenLabs {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -2997,7 +2997,7 @@ impl ElevenLabs {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -3019,7 +3019,7 @@ impl ElevenLabs {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -3057,7 +3057,7 @@ impl ElevenLabs {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -3170,7 +3170,7 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -3197,7 +3197,7 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -3223,7 +3223,7 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

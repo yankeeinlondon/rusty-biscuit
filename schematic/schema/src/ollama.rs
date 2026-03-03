@@ -18,7 +18,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{GenerateNativeRequest, GenerateBody};
 ///
 /// let body = GenerateBody {
@@ -78,7 +78,7 @@ impl crate::shared::EndpointSpec for GenerateNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{ChatNativeRequest, ChatBody};
 ///
 /// let body = ChatBody {
@@ -138,7 +138,7 @@ impl crate::shared::EndpointSpec for ChatNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{EmbeddingsNativeRequest, EmbeddingsBody};
 ///
 /// let body = EmbeddingsBody {
@@ -198,7 +198,7 @@ impl crate::shared::EndpointSpec for EmbeddingsNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::ListModelsNativeRequest;
 ///
 /// let request = ListModelsNativeRequest::default()
@@ -234,7 +234,7 @@ impl crate::shared::EndpointSpec for ListModelsNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{ShowModelNativeRequest, ShowModelBody};
 ///
 /// let body = ShowModelBody {
@@ -294,7 +294,7 @@ impl crate::shared::EndpointSpec for ShowModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{PullModelNativeRequest, PullModelBody};
 ///
 /// let body = PullModelBody {
@@ -354,7 +354,7 @@ impl crate::shared::EndpointSpec for PullModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{PushModelNativeRequest, PushModelBody};
 ///
 /// let body = PushModelBody {
@@ -414,7 +414,7 @@ impl crate::shared::EndpointSpec for PushModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{CopyModelNativeRequest, CopyModelBody};
 ///
 /// let body = CopyModelBody {
@@ -474,7 +474,7 @@ impl crate::shared::EndpointSpec for CopyModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{DeleteModelNativeRequest, DeleteModelBody};
 ///
 /// let body = DeleteModelBody {
@@ -534,7 +534,7 @@ impl crate::shared::EndpointSpec for DeleteModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{CreateModelNativeRequest, CreateModelBody};
 ///
 /// let body = CreateModelBody {
@@ -594,7 +594,7 @@ impl crate::shared::EndpointSpec for CreateModelNativeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::ListRunningModelsNativeRequest;
 ///
 /// let request = ListRunningModelsNativeRequest::default()
@@ -818,7 +818,7 @@ impl OllamaNative {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -844,7 +844,7 @@ impl OllamaNative {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -872,7 +872,7 @@ impl OllamaNative {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -909,7 +909,7 @@ impl OllamaNative {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -931,7 +931,7 @@ impl OllamaNative {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -969,7 +969,7 @@ impl OllamaNative {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -1082,7 +1082,7 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -1109,7 +1109,7 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -1135,7 +1135,7 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())
@@ -1472,7 +1472,7 @@ impl OllamaNative {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{ChatCompletionsOaiRequest, OpenAIChatCompletionRequest};
 ///
 /// let body = OpenAIChatCompletionRequest {
@@ -1532,7 +1532,7 @@ impl crate::shared::EndpointSpec for ChatCompletionsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{CompletionsOaiRequest, OpenAICompletionRequest};
 ///
 /// let body = OpenAICompletionRequest {
@@ -1592,7 +1592,7 @@ impl crate::shared::EndpointSpec for CompletionsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::{EmbeddingsOaiRequest, OpenAIEmbeddingRequest};
 ///
 /// let body = OpenAIEmbeddingRequest {
@@ -1652,7 +1652,7 @@ impl crate::shared::EndpointSpec for EmbeddingsOaiRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::ollama::ListModelsOaiRequest;
 ///
 /// let request = ListModelsOaiRequest::default()
@@ -1799,7 +1799,7 @@ impl OllamaOpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1825,7 +1825,7 @@ impl OllamaOpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1853,7 +1853,7 @@ impl OllamaOpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1890,7 +1890,7 @@ impl OllamaOpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -1912,7 +1912,7 @@ impl OllamaOpenAI {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -1950,7 +1950,7 @@ impl OllamaOpenAI {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -2063,7 +2063,7 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -2090,7 +2090,7 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -2116,7 +2116,7 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

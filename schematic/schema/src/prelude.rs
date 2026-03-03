@@ -6,7 +6,7 @@
 //! types. Response types are **not** re-exported here to avoid naming conflicts.
 //! Import them from specific API modules instead:
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::openai::Model;
 //! use schematic_schema::anthropic::CreateMessageResponse;
 //! ```
@@ -47,7 +47,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]

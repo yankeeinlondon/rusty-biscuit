@@ -22,7 +22,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -36,7 +36,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = LmStudio::with_base_url("https://staging.example.com/v1");
@@ -48,7 +48,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::{ChatRequest, ChatBody};
 ///
 /// let body = ChatBody {
@@ -108,7 +108,7 @@ impl crate::shared::EndpointSpec for ChatRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::ListModelsRequest;
 ///
 /// let request = ListModelsRequest::default()
@@ -144,7 +144,7 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::{LoadModelRequest, LoadModelBody};
 ///
 /// let body = LoadModelBody {
@@ -204,7 +204,7 @@ impl crate::shared::EndpointSpec for LoadModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::{UnloadModelRequest, UnloadModelBody};
 ///
 /// let body = UnloadModelBody {
@@ -264,7 +264,7 @@ impl crate::shared::EndpointSpec for UnloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::{DownloadModelRequest, DownloadModelBody};
 ///
 /// let body = DownloadModelBody {
@@ -324,7 +324,7 @@ impl crate::shared::EndpointSpec for DownloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::lmstudio::{GetDownloadStatusRequest, DownloadStatusBody};
 ///
 /// let body = DownloadStatusBody {
@@ -517,7 +517,7 @@ impl LmStudio {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -545,7 +545,7 @@ impl LmStudio {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -575,7 +575,7 @@ impl LmStudio {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -614,7 +614,7 @@ impl LmStudio {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -636,7 +636,7 @@ impl LmStudio {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -674,7 +674,7 @@ impl LmStudio {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -787,7 +787,7 @@ impl<'a> LmStudioVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -814,7 +814,7 @@ impl<'a> LmStudioVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -840,7 +840,7 @@ impl<'a> LmStudioVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

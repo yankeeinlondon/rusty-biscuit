@@ -46,7 +46,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -60,7 +60,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = HuggingFaceHub::with_base_url("https://staging.example.com/v1");
@@ -72,7 +72,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListModelsRequest;
 ///
 /// let request = ListModelsRequest::default()
@@ -108,7 +108,7 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetModelRequest;
 ///
 /// let request = GetModelRequest::new("repo_id_value")
@@ -161,7 +161,7 @@ impl crate::shared::EndpointSpec for GetModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListModelFilesRequest;
 ///
 /// let request = ListModelFilesRequest::new("repo_id_value", "revision_value")
@@ -209,7 +209,7 @@ impl crate::shared::EndpointSpec for ListModelFilesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetModelFileRequest;
 ///
 /// let request = GetModelFileRequest::new("repo_id_value", "revision_value", "path_value")
@@ -266,7 +266,7 @@ impl crate::shared::EndpointSpec for GetModelFileRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListModelCommitsRequest;
 ///
 /// let request = ListModelCommitsRequest::new("repo_id_value", "revision_value")
@@ -314,7 +314,7 @@ impl crate::shared::EndpointSpec for ListModelCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetModelReadmeRequest;
 ///
 /// let request = GetModelReadmeRequest::new("repo_id_value", "revision_value")
@@ -364,7 +364,7 @@ impl crate::shared::EndpointSpec for GetModelReadmeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListModelDiscussionsRequest;
 ///
 /// let request = ListModelDiscussionsRequest::new("repo_id_value")
@@ -417,7 +417,7 @@ impl crate::shared::EndpointSpec for ListModelDiscussionsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetModelCardRequest;
 ///
 /// let request = GetModelCardRequest::new("repo_id_value", "revision_value")
@@ -467,7 +467,7 @@ impl crate::shared::EndpointSpec for GetModelCardRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListDatasetsRequest;
 ///
 /// let request = ListDatasetsRequest::default()
@@ -503,7 +503,7 @@ impl crate::shared::EndpointSpec for ListDatasetsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetDatasetRequest;
 ///
 /// let request = GetDatasetRequest::new("repo_id_value")
@@ -556,7 +556,7 @@ impl crate::shared::EndpointSpec for GetDatasetRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListDatasetFilesRequest;
 ///
 /// let request = ListDatasetFilesRequest::new("repo_id_value", "revision_value")
@@ -604,7 +604,7 @@ impl crate::shared::EndpointSpec for ListDatasetFilesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetDatasetFileRequest;
 ///
 /// let request = GetDatasetFileRequest::new("repo_id_value", "revision_value", "path_value")
@@ -661,7 +661,7 @@ impl crate::shared::EndpointSpec for GetDatasetFileRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListDatasetCommitsRequest;
 ///
 /// let request = ListDatasetCommitsRequest::new("repo_id_value", "revision_value")
@@ -709,7 +709,7 @@ impl crate::shared::EndpointSpec for ListDatasetCommitsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetDatasetReadmeRequest;
 ///
 /// let request = GetDatasetReadmeRequest::new("repo_id_value", "revision_value")
@@ -759,7 +759,7 @@ impl crate::shared::EndpointSpec for GetDatasetReadmeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListSpacesRequest;
 ///
 /// let request = ListSpacesRequest::default()
@@ -795,7 +795,7 @@ impl crate::shared::EndpointSpec for ListSpacesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetSpaceRequest;
 ///
 /// let request = GetSpaceRequest::new("repo_id_value")
@@ -848,7 +848,7 @@ impl crate::shared::EndpointSpec for GetSpaceRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListSpaceFilesRequest;
 ///
 /// let request = ListSpaceFilesRequest::new("repo_id_value", "revision_value")
@@ -896,7 +896,7 @@ impl crate::shared::EndpointSpec for ListSpaceFilesRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetSpaceFileRequest;
 ///
 /// let request = GetSpaceFileRequest::new("repo_id_value", "revision_value", "path_value")
@@ -953,7 +953,7 @@ impl crate::shared::EndpointSpec for GetSpaceFileRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::{CreateRepoRequest, CreateRepoBody};
 ///
 /// let body = CreateRepoBody {
@@ -1013,7 +1013,7 @@ impl crate::shared::EndpointSpec for CreateRepoRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::{DeleteRepoRequest, DeleteRepoBody};
 ///
 /// let body = DeleteRepoBody {
@@ -1073,7 +1073,7 @@ impl crate::shared::EndpointSpec for DeleteRepoRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::{UpdateRepoSettingsRequest, UpdateRepoSettingsBody};
 ///
 /// let body = UpdateRepoSettingsBody {
@@ -1140,7 +1140,7 @@ impl crate::shared::EndpointSpec for UpdateRepoSettingsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::{MoveRepoRequest, MoveRepoBody};
 ///
 /// let body = MoveRepoBody {
@@ -1200,7 +1200,7 @@ impl crate::shared::EndpointSpec for MoveRepoRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::WhoAmIRequest;
 ///
 /// let request = WhoAmIRequest::default()
@@ -1236,7 +1236,7 @@ impl crate::shared::EndpointSpec for WhoAmIRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetUserRequest;
 ///
 /// let request = GetUserRequest::new("username_value")
@@ -1291,7 +1291,7 @@ impl crate::shared::EndpointSpec for GetUserRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::ListUserReposRequest;
 ///
 /// let request = ListUserReposRequest::new("username_value")
@@ -1346,7 +1346,7 @@ impl crate::shared::EndpointSpec for ListUserReposRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::huggingface::GetUserCollectionsRequest;
 ///
 /// let request = GetUserCollectionsRequest::new("username_value")
@@ -1766,7 +1766,7 @@ impl HuggingFaceHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1804,7 +1804,7 @@ impl HuggingFaceHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1844,7 +1844,7 @@ impl HuggingFaceHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1893,7 +1893,7 @@ impl HuggingFaceHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -1915,7 +1915,7 @@ impl HuggingFaceHub {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -1953,7 +1953,7 @@ impl HuggingFaceHub {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -2066,7 +2066,7 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -2093,7 +2093,7 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -2119,7 +2119,7 @@ impl<'a> HuggingFaceHubVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

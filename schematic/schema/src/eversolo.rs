@@ -38,7 +38,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -52,7 +52,7 @@
 //!
 //! ### Override Base URL
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Eversolo::with_base_url("http://192.168.1.50:9529");
@@ -64,7 +64,7 @@ use crate::shared::{RequestParts, SchematicError};
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::DeviceGetModelRequest;
 ///
 /// let request = DeviceGetModelRequest::default()
@@ -100,7 +100,7 @@ impl crate::shared::EndpointSpec for DeviceGetModelRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::RemoteSendKeyRequest;
 ///
 /// let request = RemoteSendKeyRequest::default()
@@ -165,7 +165,7 @@ impl crate::shared::EndpointSpec for RemoteSendKeyRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::RemoteInputTextRequest;
 ///
 /// let request = RemoteInputTextRequest::default()
@@ -230,7 +230,7 @@ impl crate::shared::EndpointSpec for RemoteInputTextRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicGetStateRequest;
 ///
 /// let request = MusicGetStateRequest::default()
@@ -266,7 +266,7 @@ impl crate::shared::EndpointSpec for MusicGetStateRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicPlayOrPauseRequest;
 ///
 /// let request = MusicPlayOrPauseRequest::default()
@@ -302,7 +302,7 @@ impl crate::shared::EndpointSpec for MusicPlayOrPauseRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicPlayNextRequest;
 ///
 /// let request = MusicPlayNextRequest::default()
@@ -338,7 +338,7 @@ impl crate::shared::EndpointSpec for MusicPlayNextRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicPlayLastRequest;
 ///
 /// let request = MusicPlayLastRequest::default()
@@ -374,7 +374,7 @@ impl crate::shared::EndpointSpec for MusicPlayLastRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicSeekToRequest;
 ///
 /// let request = MusicSeekToRequest::default()
@@ -439,7 +439,7 @@ impl crate::shared::EndpointSpec for MusicSeekToRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicGetInputOutputListRequest;
 ///
 /// let request = MusicGetInputOutputListRequest::default()
@@ -475,7 +475,7 @@ impl crate::shared::EndpointSpec for MusicGetInputOutputListRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicSetInputRequest;
 ///
 /// let request = MusicSetInputRequest::default()
@@ -540,7 +540,7 @@ impl crate::shared::EndpointSpec for MusicSetInputRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicSetOutputRequest;
 ///
 /// let request = MusicSetOutputRequest::default()
@@ -605,7 +605,7 @@ impl crate::shared::EndpointSpec for MusicSetOutputRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicSetVolumeRequest;
 ///
 /// let request = MusicSetVolumeRequest::default()
@@ -670,7 +670,7 @@ impl crate::shared::EndpointSpec for MusicSetVolumeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::MusicSetMuteRequest;
 ///
 /// let request = MusicSetMuteRequest::default()
@@ -735,7 +735,7 @@ impl crate::shared::EndpointSpec for MusicSetMuteRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::PowerGetOptionsRequest;
 ///
 /// let request = PowerGetOptionsRequest::default()
@@ -771,7 +771,7 @@ impl crate::shared::EndpointSpec for PowerGetOptionsRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::PowerSetOptionRequest;
 ///
 /// let request = PowerSetOptionRequest::default()
@@ -836,7 +836,7 @@ impl crate::shared::EndpointSpec for PowerSetOptionRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemGetScreenBrightnessRequest;
 ///
 /// let request = SystemGetScreenBrightnessRequest::default()
@@ -872,7 +872,7 @@ impl crate::shared::EndpointSpec for SystemGetScreenBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemSetScreenBrightnessRequest;
 ///
 /// let request = SystemSetScreenBrightnessRequest::default()
@@ -937,7 +937,7 @@ impl crate::shared::EndpointSpec for SystemSetScreenBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemGetKnobBrightnessRequest;
 ///
 /// let request = SystemGetKnobBrightnessRequest::default()
@@ -973,7 +973,7 @@ impl crate::shared::EndpointSpec for SystemGetKnobBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemSetKnobBrightnessRequest;
 ///
 /// let request = SystemSetKnobBrightnessRequest::default()
@@ -1038,7 +1038,7 @@ impl crate::shared::EndpointSpec for SystemSetKnobBrightnessRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemGetVuModeListRequest;
 ///
 /// let request = SystemGetVuModeListRequest::default()
@@ -1074,7 +1074,7 @@ impl crate::shared::EndpointSpec for SystemGetVuModeListRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemSetVuModeRequest;
 ///
 /// let request = SystemSetVuModeRequest::default()
@@ -1139,7 +1139,7 @@ impl crate::shared::EndpointSpec for SystemSetVuModeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemGetSpectrumModeListRequest;
 ///
 /// let request = SystemGetSpectrumModeListRequest::default()
@@ -1175,7 +1175,7 @@ impl crate::shared::EndpointSpec for SystemGetSpectrumModeListRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemSetSpectrumModeRequest;
 ///
 /// let request = SystemSetSpectrumModeRequest::default()
@@ -1240,7 +1240,7 @@ impl crate::shared::EndpointSpec for SystemSetSpectrumModeRequest {
 ///
 /// ## Example
 ///
-/// ```ignore
+/// ```text
 /// use schematic_schema::eversolo::SystemChangeVuDisplayRequest;
 ///
 /// let request = SystemChangeVuDisplayRequest::default()
@@ -1636,7 +1636,7 @@ impl Eversolo {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let client = Api::with_base_url("http://localhost:8080/v1");
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
@@ -1662,7 +1662,7 @@ impl Eversolo {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1690,7 +1690,7 @@ impl Eversolo {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let custom_client = reqwest::Client::builder()
     ///     .timeout(std::time::Duration::from_secs(60))
     ///     .build()
@@ -1727,7 +1727,7 @@ impl Eversolo {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::UpdateStrategy;
     ///
     /// let api = Api::new();
@@ -1749,7 +1749,7 @@ impl Eversolo {
     /// Creates a variant of this API client with different configuration.
     ///
     /// This is a convenience method equivalent to:
-    /// ```ignore
+    /// ```text
     /// api.variant()
     ///     .base_url(base_url)
     ///     .env_auth(env_auth)
@@ -1787,7 +1787,7 @@ impl Eversolo {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom_headers = Headers::default()
@@ -1900,7 +1900,7 @@ impl<'a> EversoloVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::{Headers, EnvMapping, EnvList};
     ///
     /// let custom = Headers::default()
@@ -1927,7 +1927,7 @@ impl<'a> EversoloVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// // Unwrap a { data: ... } envelope
     /// variant.pre_response_json(|ctx, json| {
     ///     Ok(json.get("data").cloned().unwrap_or(json))
@@ -1953,7 +1953,7 @@ impl<'a> EversoloVariantBuilder<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
     ///     response.data.retain(|m| !m.id.contains("deprecated"));
     ///     Ok(())

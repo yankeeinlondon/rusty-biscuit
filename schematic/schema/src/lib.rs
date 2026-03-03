@@ -40,7 +40,7 @@
 //!
 //! Use the prelude for convenient imports:
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
@@ -68,7 +68,7 @@
 //! environments using the [`variant()`](anthropic::Anthropic::variant) builder
 //! or [`variant_with()`](anthropic::Anthropic::variant_with) convenience method:
 //!
-//! ```ignore
+//! ```text
 //! use schematic_schema::prelude::*;
 //! use schematic_define::UpdateStrategy;
 //!
