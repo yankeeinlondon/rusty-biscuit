@@ -1349,13 +1349,13 @@ impl SonyReceiver {
                 .cloned()
                 .unwrap_or_default(),
             dns1: lookup.get("inet4.conf_dns1").cloned().unwrap_or_default(),
-            dns2: lookup.get("inet4.conf_dns2").and_then(|s| to_option(s)),
+            dns2: lookup.get("inet4.conf_dns2").and_then(to_option),
             ipv6_enabled: lookup
                 .get("inet6.enabled")
                 .map(|v| v == "on")
                 .unwrap_or(false),
-            wifi_ssid: lookup.get("ssid.name").and_then(|s| to_option(s)),
-            wifi_auth: lookup.get("ssid.auth").and_then(|s| to_option(s)),
+            wifi_ssid: lookup.get("ssid.name").and_then(to_option),
+            wifi_auth: lookup.get("ssid.auth").and_then(to_option),
         })
     }
 

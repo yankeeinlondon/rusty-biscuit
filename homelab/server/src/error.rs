@@ -3,7 +3,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use homelab::{arcam::ArcamError, eversolo::EversoloError, sony_receiver::SonyError};
+use homelab::{
+    arcam::ArcamError, eversolo::EversoloError, samsung_tv::SamsungTvError,
+    sony_receiver::SonyError,
+};
 use serde::Serialize;
 use std::fmt;
 use utoipa::ToSchema;
@@ -27,6 +30,8 @@ pub enum ServerError {
     Arcam(ArcamError),
     /// Eversolo music streamer error
     Eversolo(EversoloError),
+    /// Samsung Smart TV error
+    SamsungTv(SamsungTvError),
     /// Invalid volume level (must be 0-100)
     InvalidVolume(String),
     /// Request timeout
@@ -58,6 +63,7 @@ impl fmt::Display for ServerError {
             Self::Sony(e) => write!(f, "Sony receiver error: {e}"),
             Self::Arcam(e) => write!(f, "Arcam amplifier error: {e}"),
             Self::Eversolo(e) => write!(f, "Eversolo error: {e}"),
+            Self::SamsungTv(e) => write!(f, "Samsung TV error: {e}"),
             Self::InvalidVolume(msg) => write!(f, "Invalid volume: {msg}"),
             Self::Timeout => write!(f, "Request timed out"),
             Self::ConfigIo(msg) => write!(f, "Configuration I/O error: {msg}"),
@@ -73,6 +79,7 @@ impl std::error::Error for ServerError {
             Self::Sony(e) => Some(e),
             Self::Arcam(e) => Some(e),
             Self::Eversolo(e) => Some(e),
+            Self::SamsungTv(e) => Some(e),
             _ => None,
         }
     }
@@ -93,6 +100,12 @@ impl From<ArcamError> for ServerError {
 impl From<EversoloError> for ServerError {
     fn from(err: EversoloError) -> Self {
         Self::Eversolo(err)
+    }
+}
+
+impl From<SamsungTvError> for ServerError {
+    fn from(err: SamsungTvError) -> Self {
+        Self::SamsungTv(err)
     }
 }
 
@@ -127,6 +140,7 @@ impl IntoResponse for ServerError {
             ServerError::Sony(_) => (StatusCode::BAD_GATEWAY, "SONY_ERROR"),
             ServerError::Arcam(_) => (StatusCode::BAD_GATEWAY, "ARCAM_ERROR"),
             ServerError::Eversolo(_) => (StatusCode::BAD_GATEWAY, "EVERSOLO_ERROR"),
+            ServerError::SamsungTv(_) => (StatusCode::BAD_GATEWAY, "SAMSUNG_TV_ERROR"),
             ServerError::InvalidVolume(_) => (StatusCode::BAD_REQUEST, "INVALID_VOLUME"),
             ServerError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "TIMEOUT"),
             ServerError::ConfigIo(_) => (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_IO_ERROR"),

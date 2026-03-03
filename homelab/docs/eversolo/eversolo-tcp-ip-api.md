@@ -83,9 +83,9 @@ Key endpoints and message shapes from Zidoo's documentation that are directly us
 **Input/output enumeration & switching**
 
 - `GET /ZidooMusicControl/v2/getInputAndOutputList` returns:
-  - `inputData[]` items (name, tag, icons, sorted index)
-  - `outputData[]` items (name, tag, enable flag, icons)
-  - `outputInfo` with detailed format/support info (especially for HDMI-like outputs) [^12]
+    - `inputData[]` items (name, tag, icons, sorted index)
+    - `outputData[]` items (name, tag, enable flag, icons)
+    - `outputInfo` with detailed format/support info (especially for HDMI-like outputs) [^12]
 - `GET /ZidooMusicControl/v2/setInputList?tag=<inputTag>` both sets the input and returns the updated I/O state payload. [^13]
 - `GET /ZidooMusicControl/v2/setOutInputList?tag=<outputTag>` sets output and returns the updated I/O state payload. [^14]
 
@@ -111,17 +111,17 @@ Its API client:
 
 - Uses default port **9529** and a **1-second default update interval**, indicating that frequent polling is feasible on LAN in at least some setups. [^19]
 - Calls Zidoo-documented endpoints such as:
-  - `/ZidooMusicControl/v2/getState` (state)
-  - `/ZidooMusicControl/v2/getInputAndOutputList`
-  - `/ZidooMusicControl/v2/getPowerOption` [^18] [^9] [^12] [^10]
+    - `/ZidooMusicControl/v2/getState` (state)
+    - `/ZidooMusicControl/v2/getInputAndOutputList`
+    - `/ZidooMusicControl/v2/getPowerOption` [^18] [^9] [^12] [^10]
 - Also calls additional endpoints that are **not found in the crawlable Zidoo API pages** but are evidently functional in practice:
-  - `/ZidooMusicControl/v2/setDevicesVolume?volume=…` (absolute volume set)
-  - `/ZidooMusicControl/v2/setMuteVolume?isMute=0|1`
-  - `/ZidooMusicControl/v2/changVUDisplay?openType=…`
-  - `/SystemSettings/displaySettings/getScreenBrightness` and `setScreenBrightness?index=…`
-  - `/SystemSettings/displaySettings/getKnobBrightness` and `setKnobBrightness?index=…`
-  - `/SystemSettings/displaySettings/getVUModeList` and `setVUMode?index=…`
-  - `/SystemSettings/displaySettings/getSpPlayModeList` and `setSpPlayModeList?index=…` [^18] [^21]
+    - `/ZidooMusicControl/v2/setDevicesVolume?volume=…` (absolute volume set)
+    - `/ZidooMusicControl/v2/setMuteVolume?isMute=0|1`
+    - `/ZidooMusicControl/v2/changVUDisplay?openType=…`
+    - `/SystemSettings/displaySettings/getScreenBrightness` and `setScreenBrightness?index=…`
+    - `/SystemSettings/displaySettings/getKnobBrightness` and `setKnobBrightness?index=…`
+    - `/SystemSettings/displaySettings/getVUModeList` and `setVUMode?index=…`
+    - `/SystemSettings/displaySettings/getSpPlayModeList` and `setSpPlayModeList?index=…` [^18] [^21]
 
 Two particularly important implementation details from this integration:
 
@@ -134,9 +134,9 @@ The `mase1981/uc-intg-eversolo` integration (for Unfolded Circle Remote 2/3) pro
 
 - Confirms **HTTP API on port 9529**, "same local network," and recommends static IP/DHCP reservation; it also describes "periodic polling for state updates." [^20]
 - Its accompanying discovery analysis report (for DMP-A6 and DMP-A10, firmware v1.5.46) enumerates additional **SystemSettings** endpoints (brightness, display modes) and notes behavioral quirks:
-  - "Display Off/On Behavior": "Display Off just dims … instead of turning screen completely off" and recommends using remote keys `Key.Screen.OFF/ON` instead of brightness APIs.
-  - Model-specific "Knob brightness … doesn't work" on a model without hardware support.
-  - Output items that exist but are disabled unless hardware is connected (e.g., "USB DAC output … enable: false"). [^21] [^12]
+    - "Display Off/On Behavior": "Display Off just dims … instead of turning screen completely off" and recommends using remote keys `Key.Screen.OFF/ON` instead of brightness APIs.
+    - Model-specific "Knob brightness … doesn't work" on a model without hardware support.
+    - Output items that exist but are disabled unless hardware is connected (e.g., "USB DAC output … enable: false"). [^21] [^12]
 
 Although that discovery run did not include the DMP-A8, it is still valuable evidence that (a) API surface expands beyond Zidoo's published pages and (b) **feature gating is real**, so you should design around capability discovery at runtime. [^21] [^2] [^12]
 
@@ -176,10 +176,12 @@ The Unfolded Circle repo also includes learned IR codes (CSV) for common keys (p
 ### Content-type / JSON parsing quirks
 
 **Evidence:**
+
 - Zidoo's `sendkey` doc shows a `text/plain` response type even though the body is shaped like JSON (`{"status": 200}`). [^8]
 - The Home Assistant client explicitly parses JSON with aiohttp using `content_type=None`, bypassing content-type checks. [^18]
 
 **Mitigation:** Always parse responses leniently:
+
 - Accept JSON with wrong/missing content-type.
 - Accept empty `{}` bodies for "command" endpoints (many Zidoo endpoints show `{}` as success). [^10] [^16]
 - Use timeouts and retries for LAN flakiness rather than assuming server misbehavior.
@@ -187,23 +189,27 @@ The Unfolded Circle repo also includes learned IR codes (CSV) for common keys (p
 ### Output "enable" and tag normalization
 
 **Evidence:**
+
 - `getInputAndOutputList` returns `outputData[].enable` and tags such as `SPDIF`, `XLRRCA`, etc. [^12]
 - Community code strips `/` from tags and labels, implying some tags can contain `/` in practice (or at least defensively). [^18]
 
 **Mitigation:** Don't assume:
+
 - `enable` is strictly boolean vs integer (treat truthy/falsey).
 - tags are identifier-safe as file keys / entity IDs; normalize them for storage/display but retain the raw tag for API calls.
 
 ### "Absolute volume" vs "step volume" vs firmware settings
 
 **Evidence:**
+
 - `getState`'s `volumeData` includes `maxVolume` (example: 200) and `currenttVolume`, suggesting a device-native integer scale plus a displayed dB string. [^9]
 - Community integration uses both:
-  - Step-based volume via `sendkey?key=Key.VolumeUp|Down` and
-  - Absolute volume set via `/ZidooMusicControl/v2/setDevicesVolume?volume=…`. [^18] [^8]
+    - Step-based volume via `sendkey?key=Key.VolumeUp|Down` and
+    - Absolute volume set via `/ZidooMusicControl/v2/setDevicesVolume?volume=…`. [^18] [^8]
 - Firmware/UI options such as "volume passthrough mode" can make volume non-adjustable for outputs, and these features are firmware-gated (documented for DMP-A8 settings). [^24]
 
 **Mitigation:**
+
 - Always read `getState.volumeData` first; respect flags like `isVolumeEnable` where available. [^9]
 - Prefer absolute volume set when you need determinism, but clamp to `[minVolume, maxVolume]` from state and be prepared for certain outputs to reject changes. [^9] [^18]
 - Treat "output selection" and "volume set" as a coupled system: selecting a different output can change max volume, mute semantics, or whether volume control is enabled. [^12] [^24]
@@ -211,10 +217,12 @@ The Unfolded Circle repo also includes learned IR codes (CSV) for common keys (p
 ### Screen control is surprisingly non-trivial
 
 **Evidence:**
+
 - Community discovery reports that "Display Off" via brightness can behave like dimming, and recommends using `Key.Screen.OFF/ON` remote keys instead. [^21] [^8]
 - Home Assistant implements both brightness-based control (`setScreenBrightness?index=…`) and explicit key-based screen on/off. [^18] [^21]
 
 **Mitigation:** implement screen state and control with a two-layer approach:
+
 - Use `Key.Screen.OFF/ON` for "hard" screen toggle semantics.
 - Use brightness endpoints for dimming/UX polish only.
 - Don't assume there is a single canonical "screen is on" boolean; you may have to infer it (as Home Assistant does via `getPowerOption`). [^18] [^10]
@@ -222,11 +230,13 @@ The Unfolded Circle repo also includes learned IR codes (CSV) for common keys (p
 ### WOL timing, port uncertainty, and "don't spam"
 
 **Evidence:**
+
 - DMP-A8 manual and WOL guide: wired Ethernet required; same LAN; wait after sending; compatibility issues possible; don't send multiple times. [^4] [^5]
 - Zidoo WOL doc: broadcast `255.255.255.255`, port **9517**, use wired MAC. [^15] [^2]
 - Generic WOL references: magic packet structure (6x`0xFF` + 16xMAC) and Wireshark has a WOL protocol/dissector/filter. [^25] [^26]
 
 **Mitigation:**
+
 - Implement WOL as "send once -> wait (e.g., 30-90s) -> start HTTP probing with backoff."
 - Make the UDP port configurable (default candidates: 9517 per Zidoo doc; also common 9/7).
 - Packet-capture your phone app's WOL packet to confirm destination port and addressing on your network before you bake assumptions into code. [^5] [^15] [^26]
@@ -262,6 +272,7 @@ The Unfolded Circle repo also includes learned IR codes (CSV) for common keys (p
 
 **Mitigations:**
 Implement WOL with:
+
 - configurable UDP port (start with 9517 per Zidoo doc; optionally also try 9/7)
 - exponential backoff HTTP probing after sending
 - optional directed broadcast (e.g., `192.168.1.255`) instead of `255.255.255.255` if your router blocks limited broadcast
@@ -284,6 +295,7 @@ Implement WOL with:
 **Evidence:** Firmware notes mention A8-specific output-mode changes; community discovery shows disabled outputs that depend on hardware connection (USB DAC). [^7] [^21] [^12]
 
 **Mitigation:** Use capability discovery at runtime:
+
 - call `getModel` and record `firmware`
 - call `getInputAndOutputList` and drive UI/entities from returned `inputData/outputData`
 - treat output selection and volume constraints as dynamic per output. [^2] [^12] [^9]
@@ -293,11 +305,13 @@ Implement WOL with:
 **Evidence:** A DMP-A8 user reports HTTP GET works for power off, but the Unfolded Circle integration shows "unknown/not reachable." [^22]
 
 **Likely causes (hypotheses):**
+
 - integration assumes an endpoint path variant not present on that firmware (`/ControlCenter` vs `/ZidooControlCenter`) [^3] [^1] [^18]
 - JSON parsing differences (content-type / encoding) [^18] [^8]
 - polling too aggressive or timing-related during device power states [^19] [^5]
 
 **Mitigation:** In your own implementation, add:
+
 - fallback base-path probing at startup
 - a "health endpoint" (`getModel`) plus "core endpoint" (`getState`) test
 - configurable poll interval and timeouts
@@ -547,6 +561,7 @@ sudo tcpdump -i <iface> -s 0 -w eversolo_discovery_wol.pcap \
 - UDP/5353 is mDNS (zeroconf). (Not confirmed for Eversolo control discovery; include to observe.)
 
 In Wireshark:
+
 - Use display filter `wol` to find magic packets. [^26]
 - Use `ssdp` for SSDP. [^27]
 - Use `http && tcp.port == 9529` to focus on control. (HTTP dissector applies because it's plain HTTP, not TLS.) [^2]

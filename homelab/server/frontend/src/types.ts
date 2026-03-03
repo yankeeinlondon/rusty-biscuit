@@ -53,6 +53,29 @@ export const AUTO_SHUTDOWN_OPTIONS: Record<number, string> = {
   4: '2 hours',
 }
 
+export type ServiceKind = 'sony_receiver' | 'arcam_amp' | 'eversolo' | 'samsung_tv'
+
+export interface ServiceKindMeta {
+  kind: ServiceKind
+  label: string
+  description: string
+  defaultPort: number
+  apiPath: string
+}
+
+export const SERVICE_KINDS: ServiceKindMeta[] = [
+  { kind: 'sony_receiver', label: 'Sony Receiver', description: 'Sony ES audio receiver', defaultPort: 10000, apiPath: '/sony_receiver' },
+  { kind: 'arcam_amp', label: 'Arcam Amplifier', description: 'Arcam PA-series amplifier', defaultPort: 50000, apiPath: '/arcam_amp' },
+  { kind: 'eversolo', label: 'Eversolo Streamer', description: 'Eversolo DMP music streamer', defaultPort: 9529, apiPath: '/eversolo' },
+  { kind: 'samsung_tv', label: 'Samsung TV', description: 'Samsung Smart TV', defaultPort: 8001, apiPath: '/samsung_tv' },
+]
+
+export interface CreateDeviceRequest {
+  name: string
+  host: string
+  port?: number
+}
+
 export function statusToDotColor(status: DeviceStatus): DotColor {
   switch (status) {
     case 'active': return 'green'

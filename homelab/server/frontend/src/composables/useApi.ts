@@ -1,4 +1,4 @@
-import type { DeviceInfo, StatusResponse } from '~/types'
+import type { CreateDeviceRequest, DeviceInfo, StatusResponse } from '~/types'
 
 export function useApi() {
   async function getStatus(): Promise<StatusResponse> {
@@ -7,14 +7,18 @@ export function useApi() {
     return resp.json()
   }
 
-  async function getDevices(): Promise<{ sony: DeviceInfo[], arcam: DeviceInfo[] }> {
-    const [sonyResp, arcamResp] = await Promise.all([
+  async function getDevices(): Promise<{ sony: DeviceInfo[], arcam: DeviceInfo[], eversolo: DeviceInfo[], samsung_tv: DeviceInfo[] }> {
+    const [sonyResp, arcamResp, eversoloResp, samsungResp] = await Promise.all([
       fetch('/sony_receiver'),
       fetch('/arcam_amp'),
+      fetch('/eversolo'),
+      fetch('/samsung_tv'),
     ])
     const sony: DeviceInfo[] = sonyResp.ok ? await sonyResp.json() : []
     const arcam: DeviceInfo[] = arcamResp.ok ? await arcamResp.json() : []
-    return { sony, arcam }
+    const eversolo: DeviceInfo[] = eversoloResp.ok ? await eversoloResp.json() : []
+    const samsung_tv: DeviceInfo[] = samsungResp.ok ? await samsungResp.json() : []
+    return { sony, arcam, eversolo, samsung_tv }
   }
 
   function toggleSonyPower(device: string, active: boolean) {
@@ -59,9 +63,22 @@ export function useApi() {
     return resp.json()
   }
 
+  async function createDevice(apiPath: string, body: CreateDeviceRequest): Promise<void> {
+    const resp = await fetch(apiPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Request failed' }))
+      throw new Error(err.error || `HTTP ${resp.status}`)
+    }
+  }
+
   return {
     getStatus,
     getDevices,
+    createDevice,
     toggleSonyPower,
     setSonyInput,
     toggleArcamPower,

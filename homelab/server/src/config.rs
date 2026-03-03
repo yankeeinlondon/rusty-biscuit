@@ -7,8 +7,8 @@ use petname::Generator;
 
 // Re-export shared config types
 pub use homelab::config::{
-    ArcamAmpService, ConfigError, EversoloService, HomeyConfig, SonyReceiverService,
-    is_valid_device_name, parse_host_port,
+    ArcamAmpService, ConfigError, EversoloService, HomeyConfig, SamsungTvService,
+    SonyReceiverService, is_valid_device_name, parse_host_port,
 };
 
 /// Migrates environment variables to config if config is empty.
@@ -59,6 +59,24 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
         config
             .eversolo_devices
             .insert(name, EversoloService { host, port });
+        modified = true;
+    }
+
+    // Migrate SAMSUNG_TV if present and no TVs configured
+    if config.samsung_tvs.is_empty()
+        && let Ok(host) = std::env::var("SAMSUNG_TV")
+        && !host.is_empty()
+    {
+        let name = generate_petname();
+        let (host, rest_port) = parse_host_port(&host, 8001);
+        config.samsung_tvs.insert(
+            name,
+            SamsungTvService {
+                host,
+                rest_port,
+                ws_port: 8002,
+            },
+        );
         modified = true;
     }
 

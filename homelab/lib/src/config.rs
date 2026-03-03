@@ -26,6 +26,10 @@ pub struct HomeyConfig {
     /// Eversolo DMP-A8 music streamer configurations keyed by device name
     #[serde(default)]
     pub eversolo_devices: HashMap<String, EversoloService>,
+
+    /// Samsung Smart TV configurations keyed by device name
+    #[serde(default)]
+    pub samsung_tvs: HashMap<String, SamsungTvService>,
 }
 
 /// Configuration for a Sony ES receiver.
@@ -71,6 +75,29 @@ pub struct EversoloService {
 
 fn default_eversolo_port() -> u16 {
     9529
+}
+
+/// Configuration for a Samsung Smart TV.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SamsungTvService {
+    /// Hostname or IP address of the TV
+    pub host: String,
+
+    /// REST API port number (default: 8001)
+    #[serde(default = "default_samsung_rest_port")]
+    pub rest_port: u16,
+
+    /// WebSocket API port number (default: 8002)
+    #[serde(default = "default_samsung_ws_port")]
+    pub ws_port: u16,
+}
+
+fn default_samsung_rest_port() -> u16 {
+    8001
+}
+
+fn default_samsung_ws_port() -> u16 {
+    8002
 }
 
 /// Configuration errors.

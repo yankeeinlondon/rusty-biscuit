@@ -8,6 +8,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AddServiceFab: typeof import('./components/AddServiceFab.vue')['default']
+    AddServiceModal: typeof import('./components/AddServiceModal.vue')['default']
     ArcamBadges: typeof import('./components/ArcamBadges.vue')['default']
     AutoShutdownPopover: typeof import('./components/AutoShutdownPopover.vue')['default']
     BadgeRow: typeof import('./components/BadgeRow.vue')['default']

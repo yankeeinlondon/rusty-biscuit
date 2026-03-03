@@ -18,7 +18,7 @@ import type { ServerResponse } from 'node:http'
 /** Build proxy config that silently returns 502 when backend is down. */
 function proxyConfig() {
   const target = 'http://localhost:3000'
-  const paths = ['/status', '/health', '/sony_receiver', '/arcam_amp', '/arcam', '/explore']
+  const paths = ['/status', '/health', '/sony_receiver', '/arcam_amp', '/arcam', '/eversolo', '/explore']
 
   function onProxyError(_err: Error, _req: unknown, res: ServerResponse) {
     res.writeHead(502, { 'Content-Type': 'application/json' })

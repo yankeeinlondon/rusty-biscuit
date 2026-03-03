@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::config::{ArcamAmpService, EversoloService, SonyReceiverService, is_valid_device_name};
+use crate::config::{
+    ArcamAmpService, EversoloService, SamsungTvService, SonyReceiverService, is_valid_device_name,
+};
 use crate::error::{ErrorResponse, ServerError};
 use crate::state::AppState;
 
@@ -735,5 +737,252 @@ pub(crate) async fn rename_eversolo_device(
         name: new_name,
         host: service.host,
         port: service.port,
+    }))
+}
+
+// --- Samsung TV CRUD ---
+
+/// Request body for creating/updating a Samsung TV
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct SamsungTvRequest {
+    /// Hostname or IP address
+    pub host: String,
+    /// REST API port number
+    #[serde(default = "default_samsung_rest_port")]
+    #[schema(default = 8001)]
+    pub rest_port: u16,
+    /// WebSocket API port number
+    #[serde(default = "default_samsung_ws_port")]
+    #[schema(default = 8002)]
+    pub ws_port: u16,
+}
+
+fn default_samsung_rest_port() -> u16 {
+    8001
+}
+
+fn default_samsung_ws_port() -> u16 {
+    8002
+}
+
+/// Response for a Samsung TV
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SamsungTvResponse {
+    /// Device name
+    pub name: String,
+    /// Hostname or IP address
+    pub host: String,
+    /// REST API port number
+    pub rest_port: u16,
+    /// WebSocket API port number
+    pub ws_port: u16,
+}
+
+/// Create all Samsung TV CRUD routes
+pub fn samsung_tv_crud_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_samsung_tvs, create_samsung_tv))
+        .routes(routes!(update_samsung_tv, delete_samsung_tv))
+        .routes(routes!(rename_samsung_tv))
+}
+
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "samsung_tv",
+    responses(
+        (status = 200, description = "List of Samsung TVs", body = Vec<SamsungTvResponse>),
+    )
+)]
+pub(crate) async fn list_samsung_tvs(State(state): State<AppState>) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let tvs: Vec<SamsungTvResponse> = config
+        .samsung_tvs
+        .iter()
+        .map(|(name, service)| SamsungTvResponse {
+            name: name.clone(),
+            host: service.host.clone(),
+            rest_port: service.rest_port,
+            ws_port: service.ws_port,
+        })
+        .collect();
+
+    Json(tvs)
+}
+
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "samsung_tv",
+    request_body = inline(CreateDeviceRequest),
+    responses(
+        (status = 201, description = "Samsung TV created", body = SamsungTvResponse),
+        (status = 400, description = "Invalid device name or host", body = ErrorResponse),
+        (status = 409, description = "Device already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn create_samsung_tv(
+    State(state): State<AppState>,
+    Json(req): Json<CreateDeviceRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    if !is_valid_device_name(&req.name) {
+        return Err(ServerError::InvalidDeviceName(req.name));
+    }
+
+    {
+        let config = state.config.read().await;
+        if config.samsung_tvs.contains_key(&req.name) {
+            return Err(ServerError::DeviceExists(req.name));
+        }
+    }
+
+    if req.host.is_empty() {
+        return Err(ServerError::InvalidHost("empty host".to_string()));
+    }
+
+    let service = SamsungTvService {
+        host: req.host.clone(),
+        rest_port: req.port.unwrap_or(8001),
+        ws_port: 8002,
+    };
+
+    state
+        .add_samsung_tv(req.name.clone(), service.clone())
+        .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(SamsungTvResponse {
+            name: req.name,
+            host: service.host,
+            rest_port: service.rest_port,
+            ws_port: service.ws_port,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{name}",
+    tag = "samsung_tv",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    request_body = SamsungTvRequest,
+    responses(
+        (status = 200, description = "Samsung TV updated", body = SamsungTvResponse),
+        (status = 400, description = "Invalid host", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn update_samsung_tv(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<SamsungTvRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    {
+        let config = state.config.read().await;
+        if !config.samsung_tvs.contains_key(&name) {
+            return Err(ServerError::DeviceNotFound(name));
+        }
+    }
+
+    if req.host.is_empty() {
+        return Err(ServerError::InvalidHost("empty host".to_string()));
+    }
+
+    let service = SamsungTvService {
+        host: req.host.clone(),
+        rest_port: req.rest_port,
+        ws_port: req.ws_port,
+    };
+
+    state.add_samsung_tv(name.clone(), service.clone()).await?;
+
+    Ok(Json(SamsungTvResponse {
+        name,
+        host: service.host,
+        rest_port: service.rest_port,
+        ws_port: service.ws_port,
+    }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/{name}",
+    tag = "samsung_tv",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 204, description = "Samsung TV deleted"),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn delete_samsung_tv(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let removed = state.remove_samsung_tv(&name).await?;
+
+    if removed {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ServerError::DeviceNotFound(name))
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/{name}",
+    tag = "samsung_tv",
+    params(
+        ("name" = String, Path, description = "Current device name")
+    ),
+    request_body(content = String, description = "New device name (plain text)", content_type = "text/plain"),
+    responses(
+        (status = 200, description = "Samsung TV renamed", body = SamsungTvResponse),
+        (status = 400, description = "Invalid new device name", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 409, description = "New device name already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn rename_samsung_tv(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, ServerError> {
+    let new_name = String::from_utf8_lossy(&body).trim().to_string();
+
+    if !crate::config::is_valid_device_name(&new_name) {
+        return Err(ServerError::InvalidDeviceName(new_name));
+    }
+
+    {
+        let config = state.config.read().await;
+        if config.samsung_tvs.contains_key(&new_name) {
+            return Err(ServerError::DeviceExists(new_name));
+        }
+    }
+
+    let service = {
+        let config = state.config.read().await;
+        match config.samsung_tvs.get(&name) {
+            Some(s) => s.clone(),
+            None => return Err(ServerError::DeviceNotFound(name)),
+        }
+    };
+
+    state.rename_samsung_tv(&name, new_name.clone()).await?;
+
+    Ok(Json(SamsungTvResponse {
+        name: new_name,
+        host: service.host,
+        rest_port: service.rest_port,
+        ws_port: service.ws_port,
     }))
 }

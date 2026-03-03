@@ -34,6 +34,7 @@ use state::AppState;
         (name = "sony_receiver", description = "Sony ES receiver management and control"),
         (name = "arcam_amp", description = "Arcam amplifier management and control"),
         (name = "eversolo", description = "Eversolo DMP-A8 music streamer management and control"),
+        (name = "samsung_tv", description = "Samsung Smart TV management and control"),
     )
 )]
 struct ApiDoc;
@@ -58,6 +59,11 @@ pub fn build_router(state: AppState) -> Router {
             "/eversolo",
             handlers::crud::eversolo_crud_routes()
                 .merge(handlers::eversolo::routes_with_name()),
+        )
+        .nest(
+            "/samsung_tv",
+            handlers::crud::samsung_tv_crud_routes()
+                .merge(handlers::samsung_tv::routes_with_name()),
         )
         .split_for_parts();
 
@@ -320,10 +326,10 @@ fn build_category_uri_map(
 
     // Phase 2: fill gaps with known logical URIs
     for n in native {
-        if !map.contains_key(&n.category) {
-            if let Some(uri) = category_to_logical_uri(&n.category) {
-                map.insert(n.category.clone(), uri.to_string());
-            }
+        if !map.contains_key(&n.category)
+            && let Some(uri) = category_to_logical_uri(&n.category)
+        {
+            map.insert(n.category.clone(), uri.to_string());
         }
     }
 
@@ -373,19 +379,16 @@ pub(crate) fn match_uri_to_category(
     }
 
     // Phase 2: HDMI port matching (e.g. extInput:hdmi?port=2)
-    if base_lower == "hdmi" {
-        if let Some(port) = query
+    if base_lower == "hdmi"
+        && let Some(port) = query
             .split('&')
             .find_map(|p| p.strip_prefix("port="))
             .and_then(|p| p.parse::<u32>().ok())
-        {
-            if let Some(matched) = native
-                .iter()
-                .find(|n| extract_hdmi_port(&n.hdmi_assign) == Some(port))
-            {
-                return Some(matched.category.clone());
-            }
-        }
+        && let Some(matched) = native
+            .iter()
+            .find(|n| extract_hdmi_port(&n.hdmi_assign) == Some(port))
+    {
+        return Some(matched.category.clone());
     }
 
     // Phase 3: known URI-to-category mapping (fallback for empty icons)
@@ -1095,10 +1098,10 @@ async fn get_cached_or_fresh_arcam(state: &AppState) -> DeviceStatusJson {
 
         // Update polling interval based on Auto Shutdown setting
         // This is a best-effort update - we don't want to block on this
-        if let Some(ref detail) = fresh.detail {
-            if let Some(auto_shutdown) = detail.get("auto_shutdown").and_then(|v| v.as_u64()) {
-                state.update_arcam_poll_interval(auto_shutdown as u8).await;
-            }
+        if let Some(ref detail) = fresh.detail
+            && let Some(auto_shutdown) = detail.get("auto_shutdown").and_then(|v| v.as_u64())
+        {
+            state.update_arcam_poll_interval(auto_shutdown as u8).await;
         }
 
         fresh

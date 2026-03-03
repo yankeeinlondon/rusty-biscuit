@@ -164,7 +164,7 @@ impl Eversolo {
         let value = if muted { 1 } else { 0 };
         Ok(self
             .client
-            .request::<StatusResponse>(MusicSetMuteRequest::new().with_isMute(value))
+            .request::<StatusResponse>(MusicSetMuteRequest::new().with_is_mute(value))
             .await?)
     }
 
@@ -309,7 +309,7 @@ impl Eversolo {
         Ok(self
             .client
             .request::<StatusResponse>(
-                SystemChangeVuDisplayRequest::new().with_openType(open_type),
+                SystemChangeVuDisplayRequest::new().with_open_type(open_type),
             )
             .await?)
     }

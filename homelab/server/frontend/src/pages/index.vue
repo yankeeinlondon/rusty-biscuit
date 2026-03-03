@@ -78,6 +78,9 @@ const arcamHostHtml = computed(() => {
   return `${arcamDeviceInfo.value.host}<span class="port">:${arcamDeviceInfo.value.port}</span>`
 })
 
+// Add-service modal
+const showAddModal = ref(false)
+
 // Popover refs
 const sonyPopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
 const arcamPopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
@@ -194,6 +197,12 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
     </InfoPopover>
 
     <FrostOverlay :visible="isUnreachable" />
+    <AddServiceFab @click="showAddModal = true" />
+    <AddServiceModal
+      :visible="showAddModal"
+      @close="showAddModal = false"
+      @created="showAddModal = false"
+    />
   </div>
 </template>
 

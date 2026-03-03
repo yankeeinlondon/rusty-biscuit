@@ -3,7 +3,9 @@
 //! Provides both single-device (legacy ENV-based) and multi-device (config-based)
 //! state management.
 
-use crate::config::{ArcamAmpService, EversoloService, HomeyConfig, SonyReceiverService};
+use crate::config::{
+    ArcamAmpService, EversoloService, HomeyConfig, SamsungTvService, SonyReceiverService,
+};
 use homelab::{network::Host, sony_receiver::SonyReceiver};
 use std::{
     collections::HashMap, sync::Arc, sync::atomic::AtomicBool, time::Duration, time::Instant,
@@ -38,6 +40,8 @@ pub struct AppState {
     pub arcam_hosts: Arc<RwLock<HashMap<String, ArcamAmpService>>>,
     /// Multi-device: Eversolo devices keyed by name (connections created per-request)
     pub eversolo_devices: Arc<RwLock<HashMap<String, EversoloService>>>,
+    /// Multi-device: Samsung TVs keyed by name (connections created per-request)
+    pub samsung_tvs: Arc<RwLock<HashMap<String, SamsungTvService>>>,
     /// Configuration state (for CRUD operations)
     pub config: Arc<RwLock<HomeyConfig>>,
     /// Path to config file (for saving changes)
@@ -98,6 +102,7 @@ impl AppState {
             sony_receivers: Arc::new(RwLock::new(HashMap::new())),
             arcam_hosts: Arc::new(RwLock::new(HashMap::new())),
             eversolo_devices: Arc::new(RwLock::new(HashMap::new())),
+            samsung_tvs: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(HomeyConfig::new())),
             config_path: None,
             arcam_model: Arc::new(RwLock::new(None)),
@@ -118,6 +123,7 @@ impl AppState {
         let mut sony_receivers = HashMap::new();
         let mut arcam_hosts = HashMap::new();
         let mut eversolo_devices = HashMap::new();
+        let mut samsung_tvs = HashMap::new();
 
         // Build Sony receiver clients from config
         for (name, service) in &config.sony_receivers {
@@ -134,6 +140,11 @@ impl AppState {
         // Store Eversolo configs (connections created per-request)
         for (name, service) in &config.eversolo_devices {
             eversolo_devices.insert(name.clone(), service.clone());
+        }
+
+        // Store Samsung TV configs (connections created per-request)
+        for (name, service) in &config.samsung_tvs {
+            samsung_tvs.insert(name.clone(), service.clone());
         }
 
         // Legacy fields: use first device if available
@@ -153,6 +164,7 @@ impl AppState {
             sony_receivers: Arc::new(RwLock::new(sony_receivers)),
             arcam_hosts: Arc::new(RwLock::new(arcam_hosts)),
             eversolo_devices: Arc::new(RwLock::new(eversolo_devices)),
+            samsung_tvs: Arc::new(RwLock::new(samsung_tvs)),
             config: Arc::new(RwLock::new(config)),
             config_path,
             arcam_model: Arc::new(RwLock::new(None)),
@@ -448,6 +460,108 @@ impl AppState {
             let mut devices = self.eversolo_devices.write().await;
             devices.remove(old_name);
             devices.insert(new_name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(true)
+    }
+
+    /// Gets a Samsung TV by name.
+    ///
+    /// ## Returns
+    ///
+    /// `Some((host, rest_port, ws_port))` if found, `None` if not configured.
+    pub async fn get_samsung_tv(&self, name: &str) -> Option<(String, u16, u16)> {
+        let tvs = self.samsung_tvs.read().await;
+        tvs.get(name)
+            .map(|s| (s.host.clone(), s.rest_port, s.ws_port))
+    }
+
+    /// Adds or updates a Samsung TV and saves config.
+    pub async fn add_samsung_tv(
+        &self,
+        name: String,
+        service: SamsungTvService,
+    ) -> Result<(), crate::config::ConfigError> {
+        if service.host.is_empty() {
+            return Err(crate::config::ConfigError::InvalidHost(
+                "empty host".to_string(),
+            ));
+        }
+
+        let mut config = self.config.read().await.clone();
+        config
+            .samsung_tvs
+            .insert(name.clone(), service.clone());
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        {
+            let mut tvs = self.samsung_tvs.write().await;
+            tvs.insert(name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(())
+    }
+
+    /// Removes a Samsung TV and saves config.
+    pub async fn remove_samsung_tv(
+        &self,
+        name: &str,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+        let removed = config.samsung_tvs.remove(name).is_some();
+
+        if removed {
+            if let Some(path) = &self.config_path {
+                config.save_to(path)?;
+            }
+            {
+                let mut tvs = self.samsung_tvs.write().await;
+                tvs.remove(name);
+            }
+            {
+                let mut cfg = self.config.write().await;
+                *cfg = config;
+            }
+        }
+
+        Ok(removed)
+    }
+
+    /// Renames a Samsung TV and saves config.
+    pub async fn rename_samsung_tv(
+        &self,
+        old_name: &str,
+        new_name: String,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+
+        let service = match config.samsung_tvs.remove(old_name) {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        config
+            .samsung_tvs
+            .insert(new_name.clone(), service.clone());
+
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        {
+            let mut tvs = self.samsung_tvs.write().await;
+            tvs.remove(old_name);
+            tvs.insert(new_name, service);
         }
         {
             let mut cfg = self.config.write().await;

@@ -10,6 +10,10 @@ use color_eyre::eyre::WrapErr;
 use homelab::arcam::{Arcam, ArcamResponse};
 use homelab::config::{HomeyConfig, parse_host_port};
 use homelab::eversolo::{Eversolo, DEFAULT_PORT as EVERSOLO_DEFAULT_PORT};
+use homelab::samsung_tv::{
+    SamsungTv, DEFAULT_REST_PORT as SAMSUNG_DEFAULT_REST_PORT,
+    DEFAULT_WS_PORT as SAMSUNG_DEFAULT_WS_PORT,
+};
 use homelab::network::Host;
 use homelab::sony_receiver::{
     GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
@@ -121,6 +125,20 @@ enum Commands {
 
         #[command(subcommand)]
         action: EversoloAction,
+    },
+
+    /// Samsung Smart TV control
+    Samsung {
+        /// Device name from ~/homey.json
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Samsung TV host IP or DNS name (overrides config)
+        #[arg(long, env = "SAMSUNG_TV")]
+        host: Option<String>,
+
+        #[command(subcommand)]
+        action: SamsungAction,
     },
 
     /// Sony STR-ZA/DN series receiver control
@@ -324,6 +342,53 @@ enum EversoloRemoteAction {
     Text {
         /// Text to input
         text: String,
+    },
+}
+
+// =============================================================================
+//                            SAMSUNG ACTIONS
+// =============================================================================
+
+#[derive(Subcommand)]
+enum SamsungAction {
+    /// Device information and logs
+    #[command(subcommand)]
+    Device(SamsungDeviceAction),
+    /// App management
+    #[command(subcommand)]
+    App(SamsungAppAction),
+    /// Remote control key commands
+    #[command(subcommand)]
+    Remote(SamsungRemoteAction),
+}
+
+#[derive(Subcommand)]
+enum SamsungDeviceAction {
+    /// Get device info (model, firmware, network)
+    Info,
+    /// Get server logs
+    Logs,
+}
+
+#[derive(Subcommand)]
+enum SamsungAppAction {
+    /// Launch an application
+    Launch {
+        /// Launch by app ID
+        #[arg(long)]
+        id: Option<String>,
+        /// Launch by app name
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SamsungRemoteAction {
+    /// Send a remote control key (e.g., KEY_VOLUP, KEY_POWER, KEY_HOME)
+    SendKey {
+        /// Key name
+        key: String,
     },
 }
 
@@ -697,6 +762,9 @@ async fn run() -> Result<()> {
         Commands::Arcam { action, name, host } => handle_arcam(name, host, action, json).await,
         Commands::Eversolo { action, name, host } => {
             handle_eversolo(name, host, action, json).await
+        }
+        Commands::Samsung { action, name, host } => {
+            handle_samsung(name, host, action, json).await
         }
         Commands::Sony {
             action,
@@ -1616,6 +1684,195 @@ fn resolve_eversolo(
     let available = device_names(&config.eversolo_devices);
     Err(color_eyre::eyre::eyre!(
         "Host required: use --host <IP>, --name <device>, or set EVERSOLO env var.{}",
+        available
+    ))
+}
+
+// =============================================================================
+//                            SAMSUNG HANDLER
+// =============================================================================
+
+async fn handle_samsung(
+    name: Option<String>,
+    host: Option<String>,
+    action: SamsungAction,
+    json: bool,
+) -> Result<()> {
+    let (resolved_host, source) = resolve_samsung(host, name)?;
+    let (host_str, rest_port) =
+        parse_host_port(&resolved_host, SAMSUNG_DEFAULT_REST_PORT);
+    let tv = SamsungTv::new(&host_str, rest_port, SAMSUNG_DEFAULT_WS_PORT);
+    let suffix = device_suffix(&host_str, rest_port, &source);
+    let err_ctx = format!("Samsung TV at {host_str}:{rest_port}");
+
+    match action {
+        SamsungAction::Device(a) => handle_samsung_device(&tv, a, json, &suffix).await,
+        SamsungAction::App(a) => handle_samsung_app(&tv, a, json, &suffix).await,
+        SamsungAction::Remote(a) => handle_samsung_remote(&tv, a, json, &suffix).await,
+    }
+    .wrap_err(err_ctx)
+}
+
+async fn handle_samsung_device(
+    tv: &SamsungTv,
+    action: SamsungDeviceAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        SamsungDeviceAction::Info => {
+            let info = tv.get_device_info().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                let name = info.name.as_deref().unwrap_or("Samsung TV");
+                println!("{}", styled(format!("<b>{name}</b> {suffix}")));
+                let mut table =
+                    Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
+                if let Some(ref id) = info.id {
+                    table.add_row(vec!["ID".into(), id.as_str().into()]);
+                }
+                if let Some(ref device) = info.device {
+                    if let Some(ref model) = device.model {
+                        table.add_row(vec!["Model".into(), model.as_str().into()]);
+                    }
+                    if let Some(ref model_name) = device.model_name {
+                        table.add_row(vec!["Model Name".into(), model_name.as_str().into()]);
+                    }
+                    if let Some(ref os) = device.os {
+                        table.add_row(vec!["OS".into(), os.as_str().into()]);
+                    }
+                    if let Some(ref resolution) = device.resolution {
+                        table.add_row(vec!["Resolution".into(), resolution.as_str().into()]);
+                    }
+                    if let Some(ref net_type) = device.network_type {
+                        table.add_row(vec!["Network".into(), net_type.as_str().into()]);
+                    }
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+        SamsungDeviceAction::Logs => {
+            let logs = tv.get_server_logs().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"logs": logs}))?);
+            } else {
+                println!("{}", styled(format!("<b>Server Logs</b> {suffix}")));
+                println!("{logs}");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_samsung_app(
+    tv: &SamsungTv,
+    action: SamsungAppAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        SamsungAppAction::Launch { id, name } => {
+            match (id, name) {
+                (Some(app_id), _) => {
+                    tv.launch_app_by_id(&app_id).await?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({"launched_by": "id", "app_id": app_id}))?
+                        );
+                    } else {
+                        println!(
+                            "{}",
+                            styled(format!("Launched app <b>{app_id}</b> {suffix}"))
+                        );
+                    }
+                }
+                (None, Some(app_name)) => {
+                    tv.launch_app_by_name(&app_name).await?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({"launched_by": "name", "app_name": app_name}))?
+                        );
+                    } else {
+                        println!(
+                            "{}",
+                            styled(format!("Launched app <b>{app_name}</b> {suffix}"))
+                        );
+                    }
+                }
+                (None, None) => {
+                    return Err(color_eyre::eyre::eyre!(
+                        "Either --id or --name is required for app launch"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_samsung_remote(
+    tv: &SamsungTv,
+    action: SamsungRemoteAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        SamsungRemoteAction::SendKey { key } => {
+            tv.send_key(&key).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"key": key}))?
+                );
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("Sent key <b>{key}</b> {suffix}"))
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolves the Samsung TV host from --host, --name, or config auto-select.
+fn resolve_samsung(
+    host: Option<String>,
+    name: Option<String>,
+) -> Result<(String, DeviceSource)> {
+    // 1. Explicit --host flag (or SAMSUNG_TV env)
+    if let Some(h) = host {
+        return Ok((h, DeviceSource::Flag));
+    }
+
+    let config = HomeyConfig::load().unwrap_or_default();
+
+    // 2. --name lookup
+    if let Some(ref n) = name {
+        if let Some(service) = config.samsung_tvs.get(n) {
+            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
+        }
+        let available = device_names(&config.samsung_tvs);
+        return Err(color_eyre::eyre::eyre!(
+            "Samsung TV '{}' not found in config.{}",
+            n,
+            available
+        ));
+    }
+
+    // 3. Auto-select if only one device
+    if config.samsung_tvs.len() == 1 {
+        let (dev_name, service) = config.samsung_tvs.iter().next().unwrap();
+        return Ok((service.host.clone(), DeviceSource::Auto(dev_name.clone())));
+    }
+
+    // 4. Error with available devices
+    let available = device_names(&config.samsung_tvs);
+    Err(color_eyre::eyre::eyre!(
+        "Host required: use --host <IP>, --name <device>, or set SAMSUNG_TV env var.{}",
         available
     ))
 }
