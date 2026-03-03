@@ -5,16 +5,16 @@
 //!
 //! ## Examples
 //!
-//! ```rust,ignore
+//! ```rust
 //! use biscuit_file::Json5;
 //!
-//! // Parse from file
-//! let json5 = Json5::new("config.json5")?;
+//! let json5 = Json5::from_str(r#"{ name: "example", version: "1.0" }"#)?;
 //!
 //! // Convert to other formats
 //! let json = json5.as_json()?;
 //! let yaml = json5.as_yaml()?;
 //! let toml = json5.as_toml()?;
+//! # Ok::<(), biscuit_file::Json5Error>(())
 //! ```
 
 mod format;

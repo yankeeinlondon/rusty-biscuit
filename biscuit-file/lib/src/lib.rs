@@ -31,33 +31,40 @@
 //!
 //! ### TOML Conversion
 //!
-//! ```rust,ignore
+//! ```rust
 //! use biscuit_file::Toml;
 //!
-//! let toml = Toml::new("config.toml")?;
+//! let toml = Toml::from_str(r#"
+//! [package]
+//! name = "example"
+//! version = "1.0"
+//! "#)?;
 //! let json = toml.as_json()?;
 //! let yaml = toml.as_yaml()?;
+//! # Ok::<(), biscuit_file::TomlError>(())
 //! ```
 //!
 //! ### YAML Conversion
 //!
-//! ```rust,ignore
+//! ```rust
 //! use biscuit_file::Yaml;
 //!
-//! let yaml = Yaml::new("config.yaml")?;
+//! let yaml = Yaml::from_str("name: example\nversion: '1.0'")?;
 //! let json = yaml.as_json()?;
 //! let toml = yaml.as_toml()?;
+//! # Ok::<(), biscuit_file::YamlError>(())
 //! ```
 //!
 //! ### PDF Extraction
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use biscuit_file::Pdf;
 //!
 //! let pdf = Pdf::new("document.pdf")?;
 //! let text = pdf.as_text()?;
 //! let markdown = pdf.as_markdown(Default::default())?;
 //! let toc = pdf.toc()?;
+//! # Ok::<(), biscuit_file::PdfError>(())
 //! ```
 
 mod detect;

@@ -15,15 +15,15 @@
 //!
 //! ## Examples
 //!
-//! ```rust,ignore
+//! ```rust
 //! use biscuit_file::Yaml;
 //!
-//! // Parse from file
-//! let yaml = Yaml::new("config.yaml")?;
+//! let yaml = Yaml::from_str("name: example\nversion: '1.0'")?;
 //!
 //! // Convert to other formats
 //! let json = yaml.as_json()?;
 //! let toml = yaml.as_toml()?;
+//! # Ok::<(), biscuit_file::YamlError>(())
 //! ```
 
 mod types;

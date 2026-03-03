@@ -59,11 +59,12 @@ pub enum Json5Error {
 ///
 /// ## Examples
 ///
-/// ```rust,ignore
+/// ```rust
 /// use biscuit_file::Json5;
 ///
 /// let j = Json5::from_str(r#"{ key: "value", /* comment */ }"#)?;
 /// let json = j.as_json()?;
+/// # Ok::<(), biscuit_file::Json5Error>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct Json5 {

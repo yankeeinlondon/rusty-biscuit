@@ -13,10 +13,9 @@
 //!
 //! ## Examples
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use biscuit_file::Pdf;
 //!
-//! // Parse from file
 //! let pdf = Pdf::new("document.pdf")?;
 //!
 //! // Extract text
@@ -27,6 +26,7 @@
 //!
 //! // Extract table of contents
 //! let toc = pdf.toc()?;
+//! # Ok::<(), biscuit_file::PdfError>(())
 //! ```
 
 mod types;

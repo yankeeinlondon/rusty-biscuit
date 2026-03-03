@@ -5,18 +5,22 @@
 //!
 //! ## Examples
 //!
-//! ```rust,ignore
+//! ```rust
 //! use biscuit_file::Toml;
 //!
-//! // Parse from file
-//! let toml = Toml::new("config.toml")?;
+//! let toml = Toml::from_str(r#"
+//! [package]
+//! name = "example"
+//! version = "1.0"
+//! "#)?;
 //!
 //! // Convert to other formats
 //! let json = toml.as_json()?;
 //! let yaml = toml.as_yaml()?;
 //!
 //! // Validate
-//! let report = toml.validate()?;
+//! let report = toml.validate();
+//! # Ok::<(), biscuit_file::TomlError>(())
 //! ```
 
 mod types;
