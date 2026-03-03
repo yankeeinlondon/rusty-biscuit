@@ -49,6 +49,7 @@ sniff = { path = "../../sniff/lib"}
 
 [dev-dependencies]
 proptest = "1"
+serde_yaml_ng = "0.10"
 serial_test = "3"
 tempfile = "3.15"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

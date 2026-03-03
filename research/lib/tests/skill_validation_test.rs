@@ -740,10 +740,10 @@ fn test_frontmatter_serialization_roundtrip() {
     };
 
     // Serialize to YAML
-    let yaml = serde_yaml::to_string(&original).unwrap();
+    let yaml = serde_yaml_ng::to_string(&original).unwrap();
 
     // Deserialize back
-    let deserialized: SkillFrontmatter = serde_yaml::from_str(&yaml).unwrap();
+    let deserialized: SkillFrontmatter = serde_yaml_ng::from_str(&yaml).unwrap();
 
     assert_eq!(original.name, deserialized.name);
     assert_eq!(original.description, deserialized.description);
