@@ -159,7 +159,7 @@ impl OpenApiSource {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::openapi::OpenApiSource;
     ///
     /// let doc: openapiv3::OpenAPI = /* ... */;

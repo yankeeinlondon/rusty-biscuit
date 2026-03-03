@@ -15,7 +15,7 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```text
 //! use schematic_define::openapi::{OpenApiImport, OpenApiSource};
 //!
 //! let source = OpenApiSource::yaml(r#"
@@ -72,7 +72,7 @@ pub const MAX_COMPONENT_COUNT: usize = 5000;
 ///
 /// Basic import with defaults:
 ///
-/// ```ignore
+/// ```text
 /// use schematic_define::openapi::{OpenApiImport, OpenApiSource};
 ///
 /// let source = OpenApiSource::yaml("...");
@@ -81,7 +81,7 @@ pub const MAX_COMPONENT_COUNT: usize = 5000;
 ///
 /// Import with custom configuration:
 ///
-/// ```ignore
+/// ```text
 /// use schematic_define::openapi::{OpenApiImport, OpenApiSource};
 ///
 /// let result = OpenApiImport::new(source)

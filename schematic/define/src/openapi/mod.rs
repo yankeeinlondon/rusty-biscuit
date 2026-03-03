@@ -52,7 +52,7 @@
 //!
 //! ### Export to OpenAPI
 //!
-//! ```ignore
+//! ```text
 //! use schematic_define::openapi::{export, ExportOptions, ExportFormat, serialize};
 //! use schematic_definitions::openai::{define_openai_api, openapi_registry};
 //!

@@ -20,7 +20,7 @@ use crate::models::TypeRef;
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```text
 /// use schematic_define::openapi::import::RefResolver;
 ///
 /// let resolver = RefResolver::new(&doc);
@@ -43,7 +43,7 @@ impl<'a> RefResolver<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// use schematic_define::openapi::import::RefResolver;
     ///
     /// let resolver = RefResolver::new(&openapi_doc);
@@ -71,7 +71,7 @@ impl<'a> RefResolver<'a> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```text
     /// let schema_ref = ReferenceOr::Reference { reference: "#/components/schemas/Pet".to_string() };
     /// let schema = resolver.resolve_schema(&schema_ref)?;
     /// ```

@@ -106,7 +106,7 @@
 //! Request body types in API definitions should follow the builder pattern
 //! for ergonomic construction:
 //!
-//! ```ignore
+//! ```text
 //! // Core constructor with required fields
 //! CreateMessageBody::new("claude-sonnet-4-5-20250514", messages, 1024)
 //!     .with_system("You are a helpful assistant")

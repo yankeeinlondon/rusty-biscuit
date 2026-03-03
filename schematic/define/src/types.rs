@@ -398,7 +398,7 @@ pub struct Endpoint {
     /// taking precedence for matching keys (case-insensitive comparison).
     ///
     /// Example for Anthropic beta endpoints:
-    /// ```ignore
+    /// ```text
     /// headers: vec![("anthropic-beta".to_string(), "message-batches-2024-09-24".to_string())]
     /// ```
     pub headers: Vec<(String, String)>,

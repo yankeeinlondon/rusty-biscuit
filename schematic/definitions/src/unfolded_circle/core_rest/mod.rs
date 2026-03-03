@@ -10,7 +10,7 @@
 //! with `Headers::use_basic_auth()` and keep `AuthStrategy::BearerToken` as
 //! the default constructor path.
 //!
-//! ```ignore
+//! ```text
 //! use schematic_define::Headers;
 //! use schematic_schema::unfolded_circle_core_rest::UnfoldedCircleCoreRest;
 //!

@@ -30,7 +30,7 @@
 //!
 //! Use the builder pattern to set pagination:
 //!
-//! ```ignore
+//! ```text
 //! let request = ListPullRequestsRequest::new("workspace", "repo")
 //!     .with_page(2)
 //!     .with_pagelen(100);
