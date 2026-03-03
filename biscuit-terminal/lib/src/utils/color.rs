@@ -236,9 +236,9 @@ pub enum BasicColor {
 
 const ESC: &str = "\x1b[";
 /// resets foreground color to the default
-const DEFAULT_FOREGROUND: &str = "\x1b[39";
+const DEFAULT_FOREGROUND: &str = "\x1b[39m";
 /// resets background color to the default
-const DEFAULT_BACKGROUND: &str = "\x1b[49";
+const DEFAULT_BACKGROUND: &str = "\x1b[49m";
 
 static BASIC_COLOR_LOOKUP: LazyLock<HashMap<BasicColor, (&'static str, &'static str)>> =
     LazyLock::new(|| {
@@ -277,8 +277,8 @@ impl BasicColor {
     fn start(self, pos: FgBg) -> String {
         let codes = BASIC_COLOR_LOOKUP.get(&self).unwrap();
         match pos {
-            FgBg::Foreground => format!("{}{}", ESC, codes.0),
-            FgBg::Background => format!("{}{}", ESC, codes.1),
+            FgBg::Foreground => format!("{}{}m", ESC, codes.0),
+            FgBg::Background => format!("{}{}m", ESC, codes.1),
         }
     }
     /// returns the escape-code to END the color coding
@@ -1138,11 +1138,12 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
 /// Convert to RGB for terminal rendering:
 ///
 /// ```
-/// use biscuit_terminal::utils::color::{Tailwind, RgbColor};
+/// use biscuit_terminal::utils::color::{Color, Tailwind};
 ///
-/// let color = Tailwind::Emerald600;
-/// let rgb = color.to_rgb();
-/// println!("R: {}, G: {}, B: {}", rgb.r, rgb.g, rgb.b);
+/// let color = Color::Tailwind(Tailwind::Emerald600);
+/// if let Some((r, g, b)) = color.to_rgb() {
+///     println!("R: {}, G: {}, B: {}", r, g, b);
+/// }
 /// ```
 ///
 /// ## Notes
