@@ -140,10 +140,10 @@ fn is_rust_panic_macro(node: Node, source: &str) -> bool {
     }
 
     // Get the macro name from the "macro" field
-    if let Some(macro_node) = node.child_by_field_name("macro") {
-        if let Ok(text) = macro_node.utf8_text(source.as_bytes()) {
-            return RUST_TERMINAL_MACROS.contains(&text);
-        }
+    if let Some(macro_node) = node.child_by_field_name("macro")
+        && let Ok(text) = macro_node.utf8_text(source.as_bytes())
+    {
+        return RUST_TERMINAL_MACROS.contains(&text);
     }
 
     false
@@ -156,10 +156,10 @@ fn is_rust_exit_call(node: Node, source: &str) -> bool {
     }
 
     // Get the function being called
-    if let Some(func_node) = node.child_by_field_name("function") {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return RUST_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child_by_field_name("function")
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return RUST_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
@@ -171,10 +171,10 @@ fn is_go_panic_call(node: Node, source: &str) -> bool {
         return false;
     }
 
-    if let Some(func_node) = node.child_by_field_name("function") {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return GO_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child_by_field_name("function")
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return GO_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
@@ -186,10 +186,10 @@ fn is_c_exit_call(node: Node, source: &str) -> bool {
         return false;
     }
 
-    if let Some(func_node) = node.child_by_field_name("function") {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return C_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child_by_field_name("function")
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return C_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
@@ -202,10 +202,10 @@ fn is_swift_fatal_error(node: Node, source: &str) -> bool {
     }
 
     // Swift uses the first child for function name, not a field
-    if let Some(func_node) = node.child(0) {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return SWIFT_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child(0)
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return SWIFT_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
@@ -224,10 +224,10 @@ fn is_perl_die_call(node: Node, source: &str) -> bool {
     }
 
     // Get function name (usually the first child)
-    if let Some(func_node) = node.child(0) {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return PERL_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child(0)
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return PERL_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
@@ -240,10 +240,10 @@ fn is_lua_error_call(node: Node, source: &str) -> bool {
     }
 
     // Get function name
-    if let Some(func_node) = node.child(0) {
-        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
-            return LUA_TERMINAL_FUNCTIONS.contains(&text);
-        }
+    if let Some(func_node) = node.child(0)
+        && let Ok(text) = func_node.utf8_text(source.as_bytes())
+    {
+        return LUA_TERMINAL_FUNCTIONS.contains(&text);
     }
 
     false
