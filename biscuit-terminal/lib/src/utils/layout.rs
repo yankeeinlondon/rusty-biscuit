@@ -127,7 +127,7 @@ pub enum Alignment {
 /// Margins are resolved to character counts at render time:
 ///
 /// ```
-/// use biscuit_terminal::utils::layout::Layout;
+/// use biscuit_terminal::utils::layout::{Layout, Margin};
 ///
 /// assert_eq!(Layout::resolve_margin(&Margin::Chars(4), 80), 4);
 /// assert_eq!(Layout::resolve_margin(&Margin::Percent(10.0), 100), 10);
@@ -201,17 +201,18 @@ impl Margin {
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
+/// use biscuit_terminal::components::renderable::Renderable;
 /// use biscuit_terminal::utils::layout::{Layout, RowFill};
 ///
 /// // Create prose with auto row fill (default behavior)
 /// let prose = Prose::new("Hello, world!");
 /// let layout = prose.layout().clone();
-/// assert_eq!(layout.row_fill, RowFill::Auto);
+/// assert_eq!(layout.row_fill_strategy, RowFill::Auto);
 ///
 /// // Explicitly set to always fill
 /// let prose = Prose::new("Styled content")
 ///     .with_layout(Layout {
-///         row_fill: RowFill::Fill,
+///         row_fill_strategy: RowFill::Fill,
 ///         ..Layout::default()
 ///     });
 /// ```
@@ -221,7 +222,7 @@ impl Margin {
 ///
 /// // Use RowFill::Exact with margins for precise control
 /// let layout = Layout {
-///     row_fill: RowFill::Exact,
+///     row_fill_strategy: RowFill::Exact,
 ///     left_margin: Margin::Chars(5),
 ///     right_margin: Margin::Chars(5),
 ///     ..Layout::default()
