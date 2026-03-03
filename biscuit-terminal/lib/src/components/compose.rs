@@ -5,6 +5,7 @@ use crate::components::{
     list::{OrderedList, UnorderedList},
     prose::Prose,
     renderable::{Renderable, RenderableContent},
+    section::{HeadingLevel, Section},
     table::table::Table,
 };
 use crate::terminal::Terminal;
@@ -43,8 +44,8 @@ use crate::utils::layout::Layout;
 ///
 /// // Using From implementations for ergonomic creation
 /// let text: Compose = "Hello, ".into();
-/// let prose: Compose = Prose::new("{{bold}}bold text{{reset}}").into();
-/// let combined = Compose::new(vec![text.into(), prose.into()]);
+/// let prose = Prose::new("{{bold}}bold text{{reset}}");
+/// let combined = Compose::new(vec![text.into(), RenderableContent::from(prose)]);
 /// ```
 ///
 /// ```
@@ -182,6 +183,23 @@ impl Compose {
     /// Adds a [`Table`] component.
     pub fn add_table(&mut self, content: Table) -> &mut Self {
         self.parts.push(RenderableContent::from(content));
+        self
+    }
+
+    /// Adds a heading as a [`Section`] component.
+    ///
+    /// The `level` parameter maps to heading levels 1-6 (h1-h6).
+    pub fn add_heading<T: Into<String>>(&mut self, title: T, level: u8) -> &mut Self {
+        let heading_level = match level {
+            1 => HeadingLevel::h1,
+            2 => HeadingLevel::h2,
+            3 => HeadingLevel::h3,
+            4 => HeadingLevel::h4,
+            5 => HeadingLevel::h5,
+            _ => HeadingLevel::h6,
+        };
+        let section = Section::new(heading_level, title);
+        self.parts.push(RenderableContent::from(section));
         self
     }
 }

@@ -109,6 +109,15 @@ pub trait Renderable: std::fmt::Debug + Any {
         self
     }
 
+    /// Replace the entire layout on this component.
+    fn with_layout(mut self, layout: Layout) -> Self
+    where
+        Self: Sized,
+    {
+        *self.layout_mut() = layout;
+        self
+    }
+
     /// Whether this component is block-level (occupies the full width).
     ///
     /// Block-level components are treated differently during composition;
@@ -218,7 +227,7 @@ pub trait Renderable: std::fmt::Debug + Any {
 /// use biscuit_terminal::components::renderable::RenderableContent;
 ///
 /// let string_content = RenderableContent::String("hello".to_string());
-/// let text = string_content.as_str();
+/// let text = string_content.as_text();
 /// assert_eq!(text, "hello");
 /// ```
 #[derive(Debug)]
