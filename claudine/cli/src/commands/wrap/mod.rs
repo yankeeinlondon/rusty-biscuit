@@ -1,6 +1,7 @@
 pub(crate) mod env;
 mod exec;
 pub(crate) mod profile;
+pub(crate) mod repo_home;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
@@ -55,6 +56,10 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub sandbox: bool,
 
+    /// Restrict to repo-scoped skills/commands by setting HOME=/dev/null.
+    #[arg(long)]
+    pub repo: bool,
+
     /// Arguments forwarded to the wrapped provider CLI.
     #[arg(
         value_name = "ARGS",
@@ -97,6 +102,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
     let non_interactive_requested = args.non_interactive || extracted.non_interactive;
+    let repo_requested = args.repo || extracted.repo;
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
@@ -167,12 +173,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
 
     let env_plan = env::build_child_env(
         profile,
+        provider,
         &args.include,
         yolo_enabled,
         !non_interactive_requested,
         &raw_agent_params,
         &cwd,
         &env_overrides,
+        repo_requested,
     )?;
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
@@ -183,6 +191,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             profile,
             &binary_path,
             &child_args,
+            repo_requested,
             &env_plan,
             child_cwd,
             &term,
@@ -196,6 +205,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             profile,
             yolo_enabled,
             non_interactive_requested,
+            repo_requested,
             &child_args,
             &env_plan,
             &term,
@@ -206,6 +216,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             crate::output::removed_env_info_message(&env_plan.removed, &term)
         {
             log::message(&info_message);
+        }
+        if repo_requested {
+            log::message(&crate::output::repo_flag_info_message(
+                &term,
+                env_plan.shadow_home_path.as_deref(),
+            ));
         }
         for warning in &env_plan.warnings {
             log::message(&crate::output::post_env_warning_message(warning, &term));
@@ -279,6 +295,7 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
 struct ExtractedWrapperFlags {
     yolo: bool,
     non_interactive: bool,
+    repo: bool,
 }
 
 fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWrapperFlags {
@@ -290,6 +307,10 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
         }
         "-n" | "--non-interactive" | "--ni" => {
             extracted.non_interactive = true;
+            false
+        }
+        "--repo" => {
+            extracted.repo = true;
             false
         }
         _ => true,
@@ -339,6 +360,7 @@ mod tests {
                 candidates: vec!["claudine-cli".to_string()],
             }),
             warnings: Vec::new(),
+            shadow_home_path: None,
         };
 
         let rendered = crate::output::package_name_display(&env_plan).unwrap();
@@ -360,6 +382,7 @@ mod tests {
                 candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],
             }),
             warnings: Vec::new(),
+            shadow_home_path: None,
         };
 
         assert!(crate::output::package_name_display(&env_plan).is_none());

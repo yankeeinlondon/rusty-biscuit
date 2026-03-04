@@ -53,3 +53,10 @@ pub static EXCEPTIONS: LazyLock<String> = LazyLock::new(|| {
         .render_optimistic(None)
         .to_string()
 });
+
+
+pub static REPO_FLAG: LazyLock<String> = LazyLock::new(|| {
+    Prose::new("<bg-gray-800><bold><green-100><bold> --repo </bold></green-100></bold></bg-gray-800>")
+        .render_optimistic(None)
+        .to_string()
+});

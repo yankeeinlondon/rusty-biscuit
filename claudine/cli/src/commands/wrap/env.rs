@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::{Package, detect_repo};
+use sniff::filesystem::repo::{detect_repo, Package};
 
 use super::profile::WrapperProfile;
+use super::repo_home;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct EnvPlan {
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) removed: Vec<String>,
@@ -17,6 +19,7 @@ pub(crate) struct EnvPlan {
     pub(crate) package_context: Option<PackageContext>,
     pub(crate) repo_root: Option<PathBuf>,
     pub(crate) warnings: Vec<String>,
+    pub(crate) shadow_home_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,14 +29,17 @@ pub(crate) struct PackageContext {
     pub(crate) candidates: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_child_env(
     profile: &dyn WrapperProfile,
+    provider: claudine::events::Provider,
     include: &[String],
     yolo: bool,
     interactive: bool,
     agent_params: &[String],
     cwd: &Path,
     env_overrides: &[(String, String)],
+    repo: bool,
 ) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
@@ -79,6 +85,25 @@ pub(crate) fn build_child_env(
         set_added_env(&mut env, &mut added, key, value.clone());
     }
 
+    let mut shadow_home_path = None;
+
+    // When --repo is used, set up shadow HOME to restrict to repo-scoped resources
+    if repo {
+        match repo_home::build_repo_home_env(provider) {
+            Ok((shadow_env, shadow_path)) => {
+                for (key, value) in shadow_env {
+                    env.insert(key, value);
+                }
+                shadow_home_path = shadow_path;
+            }
+            Err(e) => {
+                warnings.push(format!("failed to create shadow HOME: {}", e));
+                // Fall back to original behavior
+                set_added_env(&mut env, &mut added, "HOME", "/dev/null".to_string());
+            }
+        }
+    }
+
     let mut package_context = None;
     let mut repo_root = None;
     match resolve_monorepo_package_context(cwd) {
@@ -113,6 +138,7 @@ pub(crate) fn build_child_env(
         package_context,
         repo_root,
         warnings,
+        shadow_home_path,
     })
 }
 

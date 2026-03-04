@@ -748,6 +748,34 @@ impl Provider {
             },
         })
     }
+
+    /// Returns the agent offset directory name for this provider.
+    ///
+    /// This is used to create shadow HOME directories for repo-scoped mode,
+    /// where the agent's config is isolated to repo-specific resources.
+    ///
+    /// | Provider   | Agent Offset |
+    /// |-----------|--------------|
+    /// | Claude    | `.claude`   |
+    /// | Codex     | `.codex`    |
+    /// | Gemini    | `.gemini`    |
+    /// | Goose     | `.goose`    |
+    /// | KimiCode  | `.kimi`     |
+    /// | OpenCode  | `.opencode` |
+    /// | QwenCode  | `.qwen`     |
+    /// | RooCode   | `.roo`      |
+    pub fn agent_offset(&self) -> &'static str {
+        match self {
+            Provider::Claude => ".claude",
+            Provider::Codex => ".codex",
+            Provider::Gemini => ".gemini",
+            Provider::Goose => ".goose",
+            Provider::KimiCode => ".kimi",
+            Provider::OpenCode => ".opencode",
+            Provider::QwenCode => ".qwen",
+            Provider::RooCode => ".roo",
+        }
+    }
 }
 
 fn normalize_provider_input(input: &str) -> String {
@@ -1218,6 +1246,18 @@ mod tests {
         assert_eq!(Provider::OpenCode.sniff_ai_cli(), AiCli::Opencode);
         assert_eq!(Provider::QwenCode.sniff_ai_cli(), AiCli::QwenCli);
         assert_eq!(Provider::RooCode.sniff_ai_cli(), AiCli::Roo);
+    }
+
+    #[test]
+    fn agent_offset_returns_correct_directories() {
+        assert_eq!(Provider::Claude.agent_offset(), ".claude");
+        assert_eq!(Provider::Codex.agent_offset(), ".codex");
+        assert_eq!(Provider::Gemini.agent_offset(), ".gemini");
+        assert_eq!(Provider::Goose.agent_offset(), ".goose");
+        assert_eq!(Provider::KimiCode.agent_offset(), ".kimi");
+        assert_eq!(Provider::OpenCode.agent_offset(), ".opencode");
+        assert_eq!(Provider::QwenCode.agent_offset(), ".qwen");
+        assert_eq!(Provider::RooCode.agent_offset(), ".roo");
     }
 
     #[test]

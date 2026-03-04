@@ -3,33 +3,41 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{NON_INTERACTIVE, YOLO};
+use claudine::badges::{NON_INTERACTIVE, REPO_FLAG, YOLO};
 use std::path::Path;
 
 use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::log;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn log_wrapper_summary(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive_requested: bool,
+    repo_requested: bool,
     child_args: &[String],
     env_plan: &EnvPlan,
     term: &Terminal,
     verbose: u8,
 ) {
     // Header always includes: Claudine ▸ ProviderName [badges]
-    let mut header_parts: Vec<String> = vec![
-        Prose::new(format!(
-            "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
-            profile.provider()
-        ))
-        .render(term),
-    ];
+    let mut header_parts: Vec<String> = vec![Prose::new(format!(
+        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
+        profile.provider()
+    ))
+    .render(term)];
 
     if yolo_requested {
         header_parts.push(YOLO.to_string());
+    }
+
+    if non_interactive_requested {
+        header_parts.push(NON_INTERACTIVE.to_string());
+    }
+
+    if repo_requested {
+        header_parts.push(REPO_FLAG.to_string());
     }
 
     if non_interactive_requested {
@@ -96,17 +104,19 @@ pub(crate) fn log_dry_run(
     profile: &dyn WrapperProfile,
     binary_path: &Path,
     child_args: &[String],
+    repo_requested: bool,
     env_plan: &EnvPlan,
     child_cwd: &Path,
     term: &Terminal,
 ) {
-    log::message(
-        &Prose::new(format!(
-            "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
-            profile.provider()
-        ))
-        .render(term),
+    let mut header = format!(
+        "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
+        profile.provider()
     );
+    if repo_requested {
+        header.push_str(&format!(" {}", &*REPO_FLAG.to_string()));
+    }
+    log::message(&Prose::new(header).render(term));
 
     // Working directory
     log::message(
@@ -178,6 +188,28 @@ pub(crate) fn opencode_non_interactive_model_hint() -> String {
      non-interactive mode. You can specify with the --model switch or set either OPENCODE_MODEL \
      or MODEL environment variables."
         .to_string()
+}
+
+pub(crate) fn repo_flag_info_message(
+    term: &Terminal,
+    shadow_home: Option<&std::path::Path>,
+) -> String {
+    let shadow_msg = if let Some(path) = shadow_home {
+        format!(
+            " A shadow HOME has been created at <blue>{}</blue> to preserve authentication.",
+            path.display()
+        )
+    } else {
+        String::new()
+    };
+
+    Prose::new(format!(
+        "- <blue><bold>Info:</bold></blue> the {} was used; this constrains skills, commands, and subagent definitions to those in the repo.{}",
+        &*claudine::badges::REPO_FLAG,
+        shadow_msg
+    ))
+    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
+    .render(term)
 }
 
 pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) -> Option<String> {
