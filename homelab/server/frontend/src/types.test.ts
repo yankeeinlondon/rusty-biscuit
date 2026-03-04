@@ -10,8 +10,8 @@ describe('statusToDotColor', () => {
     expect(statusToDotColor('standby')).toBe('amber')
   })
 
-  it('maps error to red', () => {
-    expect(statusToDotColor('error')).toBe('red')
+  it('maps off to grey', () => {
+    expect(statusToDotColor('off')).toBe('grey')
   })
 
   it('maps not_configured to grey', () => {
