@@ -86,9 +86,20 @@ pub fn build_router(state: AppState) -> Router {
 // --- Index Page ---
 
 /// Device status for a single device (serializable for the `/status` endpoint).
+///
+/// ## Power States
+///
+/// | Status           | Label      | Dot   | Meaning                                       |
+/// |------------------|------------|-------|-----------------------------------------------|
+/// | `"active"`       | Active     | green | Powered on and usable                         |
+/// | `"standby"`      | Standby    | amber | Low-power mode, reachable on the network      |
+/// | `"off"`          | Off        | grey  | Unreachable on the network (truly off)         |
+/// | `"not_configured"` | —       | grey  | No device configured                           |
+///
+/// The old `"error"` status is **not used**. Unreachable devices report `"off"`.
 #[derive(Serialize, Clone)]
 pub struct DeviceStatusJson {
-    /// Semantic status: `"active"`, `"standby"`, `"error"`, `"not_configured"`
+    /// Semantic status: `"active"`, `"standby"`, `"off"`, `"not_configured"`
     status: &'static str,
     label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,18 +222,18 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                 }
             }
             Ok(Err(e)) => {
-                tracing::warn!(error = %e, "Sony power status error");
+                tracing::trace!(error = %e, "Sony probe unreachable");
                 DeviceStatusJson {
-                    status: "error",
-                    label: format!("Error: {e}"),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
             Err(_) => {
-                tracing::warn!("Sony power status timeout");
+                tracing::trace!("Sony probe timeout");
                 DeviceStatusJson {
-                    status: "error",
-                    label: "Timeout".to_string(),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
@@ -235,19 +246,32 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
 /// Returns `None` if no Eversolo devices are configured.
 /// Calls `get_state()` to determine reachability and playback state.
 async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
-    let devices = state.eversolo_devices.read().await;
-    let (name, service) = devices.iter().next()?;
-    let eversolo = Eversolo::new(service.host.clone(), service.port);
-    let _ = name; // used only for iteration
+    let (name, needs_mac) = {
+        let devices = state.eversolo_devices.read().await;
+        let (name, service) = devices.iter().next()?;
+        (name.clone(), service.mac_address.is_none())
+    };
 
-    Some(
-        match timeout(state.request_timeout, eversolo.get_state()).await {
+    let (host, port) = {
+        let devices = state.eversolo_devices.read().await;
+        let service = devices.get(&name)?;
+        (service.host.clone(), service.port)
+    };
+
+    let eversolo = Eversolo::new(host, port);
+
+    let result = match timeout(state.request_timeout, eversolo.get_state()).await {
             Ok(Ok(resp)) => {
-                let label = match resp.state {
-                    1 => "Playing",
-                    2 => "Paused",
-                    _ => "Active",
+                // Determine power state from playback state:
+                //   state 1 (Playing) or 2 (Paused) → Active
+                //   anything else (idle, screen off)  → Standby
+                let is_active = resp.state == 1 || resp.state == 2;
+                let (status, label) = if is_active {
+                    ("active", if resp.state == 1 { "Playing" } else { "Paused" })
+                } else {
+                    ("standby", "Standby")
                 };
+
                 let mut detail = serde_json::Map::new();
                 if let Some(vol) = &resp.volume_data {
                     detail.insert("volume".into(), json!(vol.current_volume));
@@ -262,8 +286,33 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
                         detail.insert("artist".into(), json!(artist));
                     }
                 }
+
+                // Auto-detect MAC address if not yet stored
+                if needs_mac {
+                    if let Ok(model_info) = eversolo.get_model().await {
+                        if !model_info.net_mac.is_empty() {
+                            let mac = model_info.net_mac.clone();
+                            let name = name.clone();
+                            let state = state.clone();
+                            tokio::spawn(async move {
+                                let mut devices = state.eversolo_devices.write().await;
+                                if let Some(service) = devices.get_mut(&name) {
+                                    service.mac_address = Some(mac);
+                                }
+                                let mut config = state.config.write().await;
+                                if let Some(service) = config.eversolo_devices.get_mut(&name) {
+                                    service.mac_address = devices.get(&name).and_then(|s| s.mac_address.clone());
+                                }
+                                if let Some(path) = &state.config_path {
+                                    let _ = config.save_to(path);
+                                }
+                            });
+                        }
+                    }
+                }
+
                 DeviceStatusJson {
-                    status: "active",
+                    status,
                     label: label.to_string(),
                     detail: if detail.is_empty() {
                         None
@@ -273,23 +322,35 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
                 }
             }
             Ok(Err(e)) => {
-                tracing::warn!(error = %e, "Eversolo probe error");
+                tracing::trace!(error = %e, "Eversolo probe unreachable");
                 DeviceStatusJson {
-                    status: "error",
-                    label: "Unreachable".to_string(),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
             Err(_) => {
-                tracing::warn!("Eversolo probe timeout");
+                tracing::trace!("Eversolo probe timeout");
                 DeviceStatusJson {
-                    status: "error",
-                    label: "Timeout".to_string(),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
-        },
-    )
+        };
+
+    // Log state changes at INFO, steady-state at TRACE
+    {
+        let mut last = state.eversolo_last_status.write().await;
+        if last.as_deref() != Some(result.status) {
+            tracing::info!(status = result.status, "Eversolo status changed");
+            *last = Some(result.status.to_string());
+        } else {
+            tracing::trace!(status = result.status, "Eversolo status unchanged");
+        }
+    }
+
+    Some(result)
 }
 
 /// Probe the first configured Samsung TV and return its status.
@@ -297,12 +358,19 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
 /// Returns `None` if no Samsung TVs are configured.
 /// Calls `get_device_info()` to determine reachability.
 async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
-    let tvs = state.samsung_tvs.read().await;
-    let (_name, service) = tvs.iter().next()?;
-    let tv = SamsungTv::new(service.host.clone(), service.rest_port, service.ws_port);
+    let (tv_name, needs_mac) = {
+        let tvs = state.samsung_tvs.read().await;
+        let (name, service) = tvs.iter().next()?;
+        (name.clone(), service.mac_address.is_none())
+    };
 
-    Some(
-        match timeout(state.request_timeout, tv.get_device_info()).await {
+    let tv = {
+        let tvs = state.samsung_tvs.read().await;
+        let service = tvs.get(&tv_name)?;
+        SamsungTv::new(service.host.clone(), service.rest_port, service.ws_port)
+    };
+
+    let result = match timeout(state.request_timeout, tv.get_device_info()).await {
             Ok(Ok(info)) => {
                 let mut detail = serde_json::Map::new();
                 if let Some(name) = &info.name {
@@ -312,10 +380,31 @@ async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
                     if let Some(model) = &device.model_name {
                         detail.insert("model".into(), json!(model));
                     }
+                    // Auto-detect MAC address if not yet stored
+                    if needs_mac {
+                        if let Some(mac) = device.extra.get("wifiMac").and_then(|v| v.as_str()) {
+                            let mac = mac.to_string();
+                            let name = tv_name.clone();
+                            let state = state.clone();
+                            tokio::spawn(async move {
+                                let mut tvs = state.samsung_tvs.write().await;
+                                if let Some(service) = tvs.get_mut(&name) {
+                                    service.mac_address = Some(mac);
+                                }
+                                let mut config = state.config.write().await;
+                                if let Some(service) = config.samsung_tvs.get_mut(&name) {
+                                    service.mac_address = tvs.get(&name).and_then(|s| s.mac_address.clone());
+                                }
+                                if let Some(path) = &state.config_path {
+                                    let _ = config.save_to(path);
+                                }
+                            });
+                        }
+                    }
                 }
                 DeviceStatusJson {
                     status: "active",
-                    label: "On".to_string(),
+                    label: "Active".to_string(),
                     detail: if detail.is_empty() {
                         None
                     } else {
@@ -324,23 +413,35 @@ async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
                 }
             }
             Ok(Err(e)) => {
-                tracing::warn!(error = %e, "Samsung TV probe error");
+                tracing::trace!(error = %e, "Samsung TV probe unreachable");
                 DeviceStatusJson {
-                    status: "error",
-                    label: "Unreachable".to_string(),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
             Err(_) => {
-                tracing::warn!("Samsung TV probe timeout");
+                tracing::trace!("Samsung TV probe timeout");
                 DeviceStatusJson {
-                    status: "error",
-                    label: "Timeout".to_string(),
+                    status: "off",
+                    label: "Off".to_string(),
                     detail: None,
                 }
             }
-        },
-    )
+        };
+
+    // Log state changes at INFO, steady-state at TRACE
+    {
+        let mut last = state.samsung_last_status.write().await;
+        if last.as_deref() != Some(result.status) {
+            tracing::info!(status = result.status, "Samsung TV status changed");
+            *last = Some(result.status.to_string());
+        } else {
+            tracing::trace!(status = result.status, "Samsung TV status unchanged");
+        }
+    }
+
+    Some(result)
 }
 
 /// Formats a source name for display.
@@ -511,15 +612,16 @@ pub(crate) fn match_uri_to_category(
     }
 
     // Phase 3: known URI-to-category mapping (fallback for empty icons)
+    // Sony uses both short ("bd") and hyphenated compound ("bd-dvd") URI bases.
     let mapped_category = match base {
         "game" => "GAME",
         "mediaBox" => "STB",
-        "bd" => "BD",
-        "sat" | "sat_catv" => "SAT",
+        "bd" | "bd-dvd" | "bd_dvd" => "BD",
+        "sat" | "sat_catv" | "sat-catv" => "SAT",
         "video" => "VIDEO",
         "aux" => "AUX",
         "tv" => "TV",
-        "cd" | "sacd_cd" => "CD",
+        "cd" | "sacd_cd" | "sacd-cd" => "CD",
         _ => return None,
     };
     // Only return if the category exists in native inputs
@@ -802,6 +904,19 @@ mod format_tests {
         );
         assert_eq!(
             match_uri_to_category("extInput:sacd_cd", Some(&inputs)),
+            Some("CD".to_string())
+        );
+        // Hyphenated compound URI bases (Sony uses these in practice)
+        assert_eq!(
+            match_uri_to_category("extInput:bd-dvd", Some(&inputs)),
+            Some("BD".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:sat-catv", Some(&inputs)),
+            Some("SAT".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:sacd-cd", Some(&inputs)),
             Some("CD".to_string())
         );
         // Unknown URI still returns None
@@ -1163,18 +1278,18 @@ async fn probe_arcam(state: &AppState) -> DeviceStatusJson {
                     }
                 }
                 Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "Arcam power error");
+                    tracing::trace!(error = %e, "Arcam probe unreachable");
                     DeviceStatusJson {
-                        status: "error",
-                        label: format!("Error: {e}"),
+                        status: "off",
+                        label: "Off".to_string(),
                         detail: None,
                     }
                 }
                 Err(_) => {
-                    tracing::warn!("Arcam power timeout");
+                    tracing::trace!("Arcam probe timeout");
                     DeviceStatusJson {
-                        status: "error",
-                        label: "Timeout".to_string(),
+                        status: "off",
+                        label: "Off".to_string(),
                         detail: None,
                     }
                 }

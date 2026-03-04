@@ -35,6 +35,7 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(set_brightness_by_name))
         .routes(routes!(get_display_modes_by_name))
         .routes(routes!(set_display_mode_by_name))
+        .routes(routes!(wake_by_name))
 }
 
 // --- Request DTOs ---
@@ -495,6 +496,39 @@ pub(crate) async fn set_display_mode_by_name(
         }
     };
     Ok(Json(serde_json::to_value(resp).unwrap()))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{name}/wake",
+    tag = "eversolo",
+    params(("name" = String, Path, description = "Device name")),
+    responses(
+        (status = 200, description = "Wake-on-LAN packet sent"),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 400, description = "No MAC address configured", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn wake_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let mac = {
+        let devices = state.eversolo_devices.read().await;
+        let service = devices
+            .get(&name)
+            .ok_or_else(|| ServerError::DeviceNotFound(name.clone()))?;
+        service
+            .mac_address
+            .clone()
+            .ok_or_else(|| ServerError::InvalidParameter("no MAC address configured".to_string()))?
+    };
+
+    // Eversolo uses port 9517 for WoL
+    homelab::wol::send_magic_packet(&mac, "255.255.255.255", 9517)
+        .map_err(|e| ServerError::InvalidParameter(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({"wol_sent": true, "mac": mac})))
 }
 
 // --- Helpers ---

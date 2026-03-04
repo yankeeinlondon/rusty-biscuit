@@ -60,6 +60,10 @@ pub struct AppState {
     pub sony_last_power_status: Arc<RwLock<Option<String>>>,
     /// Last known Arcam power state (for change-only INFO logging)
     pub arcam_last_power_state: Arc<RwLock<Option<bool>>>,
+    /// Last known Eversolo status string (for change-only INFO logging)
+    pub eversolo_last_status: Arc<RwLock<Option<String>>>,
+    /// Last known Samsung TV status string (for change-only INFO logging)
+    pub samsung_last_status: Arc<RwLock<Option<String>>>,
 }
 
 /// Configuration errors
@@ -112,6 +116,8 @@ impl AppState {
             arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
             sony_last_power_status: Arc::new(RwLock::new(None)),
             arcam_last_power_state: Arc::new(RwLock::new(None)),
+            eversolo_last_status: Arc::new(RwLock::new(None)),
+            samsung_last_status: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -174,6 +180,8 @@ impl AppState {
             arcam_poll_interval_secs: Arc::new(RwLock::new(60)), // Default 1 minute
             sony_last_power_status: Arc::new(RwLock::new(None)),
             arcam_last_power_state: Arc::new(RwLock::new(None)),
+            eversolo_last_status: Arc::new(RwLock::new(None)),
+            samsung_last_status: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -773,6 +781,7 @@ mod tests {
             EversoloService {
                 host: "192.168.1.50".to_string(),
                 port: 9529,
+                mac_address: None,
             },
         );
 

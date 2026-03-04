@@ -22,6 +22,7 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(get_logs_by_name))
         .routes(routes!(launch_app_by_name))
         .routes(routes!(send_key_by_name))
+        .routes(routes!(wake_by_name))
 }
 
 // --- Request DTOs ---
@@ -142,6 +143,39 @@ pub(crate) async fn send_key_by_name(
     let tv = create_samsung_by_name(&state, &name).await?;
     with_timeout(state.request_timeout, tv.send_key(&req.key)).await?;
     Ok(Json(serde_json::json!({"key": req.key})))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{name}/wake",
+    tag = "samsung_tv",
+    params(("name" = String, Path, description = "Device name")),
+    responses(
+        (status = 200, description = "Wake-on-LAN packet sent"),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 400, description = "No MAC address configured", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn wake_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let mac = {
+        let tvs = state.samsung_tvs.read().await;
+        let service = tvs
+            .get(&name)
+            .ok_or_else(|| ServerError::DeviceNotFound(name.clone()))?;
+        service
+            .mac_address
+            .clone()
+            .ok_or_else(|| ServerError::InvalidParameter("no MAC address configured".to_string()))?
+    };
+
+    // Standard WoL port 9
+    homelab::wol::send_magic_packet(&mac, "255.255.255.255", 9)
+        .map_err(|e| ServerError::InvalidParameter(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({"wol_sent": true, "mac": mac})))
 }
 
 // --- Helpers ---

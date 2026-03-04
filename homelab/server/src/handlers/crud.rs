@@ -602,6 +602,7 @@ pub(crate) async fn create_eversolo_device(
     let service = EversoloService {
         host: req.host.clone(),
         port: req.port.unwrap_or(9529),
+        mac_address: None,
     };
 
     state
@@ -652,6 +653,7 @@ pub(crate) async fn update_eversolo_device(
     let service = EversoloService {
         host: req.host.clone(),
         port: req.port,
+        mac_address: None,
     };
 
     state.add_eversolo(name.clone(), service.clone()).await?;
@@ -772,6 +774,8 @@ pub struct SamsungTvResponse {
     pub name: String,
     /// Hostname or IP address
     pub host: String,
+    /// Primary port (REST API) — used by the frontend as `DeviceInfo.port`
+    pub port: u16,
     /// REST API port number
     pub rest_port: u16,
     /// WebSocket API port number
@@ -802,6 +806,7 @@ pub(crate) async fn list_samsung_tvs(State(state): State<AppState>) -> impl Into
         .map(|(name, service)| SamsungTvResponse {
             name: name.clone(),
             host: service.host.clone(),
+            port: service.rest_port,
             rest_port: service.rest_port,
             ws_port: service.ws_port,
         })
@@ -845,6 +850,7 @@ pub(crate) async fn create_samsung_tv(
         host: req.host.clone(),
         rest_port: req.port.unwrap_or(8001),
         ws_port: 8002,
+        mac_address: None,
     };
 
     state
@@ -856,6 +862,7 @@ pub(crate) async fn create_samsung_tv(
         Json(SamsungTvResponse {
             name: req.name,
             host: service.host,
+            port: service.rest_port,
             rest_port: service.rest_port,
             ws_port: service.ws_port,
         }),
@@ -897,6 +904,7 @@ pub(crate) async fn update_samsung_tv(
         host: req.host.clone(),
         rest_port: req.rest_port,
         ws_port: req.ws_port,
+        mac_address: None,
     };
 
     state.add_samsung_tv(name.clone(), service.clone()).await?;
@@ -904,6 +912,7 @@ pub(crate) async fn update_samsung_tv(
     Ok(Json(SamsungTvResponse {
         name,
         host: service.host,
+        port: service.rest_port,
         rest_port: service.rest_port,
         ws_port: service.ws_port,
     }))
@@ -982,6 +991,7 @@ pub(crate) async fn rename_samsung_tv(
     Ok(Json(SamsungTvResponse {
         name: new_name,
         host: service.host,
+        port: service.rest_port,
         rest_port: service.rest_port,
         ws_port: service.ws_port,
     }))

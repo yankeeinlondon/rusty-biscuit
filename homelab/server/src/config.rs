@@ -58,7 +58,7 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
         let (host, port) = parse_host_port(&host, 9529);
         config
             .eversolo_devices
-            .insert(name, EversoloService { host, port });
+            .insert(name, EversoloService { host, port, mac_address: None });
         modified = true;
     }
 
@@ -75,6 +75,7 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
                 host,
                 rest_port,
                 ws_port: 8002,
+                mac_address: None,
             },
         );
         modified = true;
@@ -271,6 +272,7 @@ mod tests {
             EversoloService {
                 host: "10.0.0.1".to_string(),
                 port: 9529,
+                mac_address: None,
             },
         );
 
