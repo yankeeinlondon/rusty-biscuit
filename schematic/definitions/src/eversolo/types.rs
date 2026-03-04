@@ -25,13 +25,23 @@ pub struct GetModelResponse {
     pub status: i32,
     pub model: String,
     pub ip: String,
+    /// Wired MAC address.
+    ///
+    /// The API uses snake_case `net_mac` rather than camelCase for this field.
+    #[serde(rename = "net_mac")]
     pub net_mac: String,
+    /// Wi-Fi MAC address.
+    ///
+    /// The API uses `wif_mac` (missing the 'i' — a known Zidoo-lineage typo).
+    #[serde(rename = "wif_mac", alias = "wifi_mac")]
     pub wifi_mac: String,
     pub firmware: String,
     /// Android base version reported by firmware.
     ///
-    /// This field may be absent on older firmware builds.
+    /// This field may be absent on older firmware builds. The API uses
+    /// all-lowercase `androidversion` rather than camelCase.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "androidversion")]
     pub android_version: Option<String>,
     /// Whether the device supports remote boot/wake behavior.
     ///
@@ -134,6 +144,12 @@ pub struct InputOutputListResponse {
     /// Unstructured output info that varies by model/output type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_info: Option<serde_json::Value>,
+    /// Index into `input_data` of the currently selected input source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_index: Option<i32>,
+    /// Index into `output_data` of the currently selected output port.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_index: Option<i32>,
 }
 
 /// An available audio input.
@@ -192,9 +208,13 @@ pub struct PowerOption {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrightnessResponse {
-    pub status: i32,
-    /// Current brightness level index, typically in the range `0..=max`.
-    pub index: i32,
+    /// Status code (200 = success). May be absent on some firmware versions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<i32>,
+    /// Current brightness level, typically in the range `0..=max`.
+    ///
+    /// The API returns this as `currentValue`.
+    pub current_value: i32,
     /// Maximum brightness.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<i32>,
@@ -214,9 +234,14 @@ pub struct DisplayModeListResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplayMode {
-    pub name: String,
+    /// Display name (the API uses `title`, not `name`).
+    pub title: String,
+    /// Mode tag identifier used for selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
     /// Mode index accepted by `setVUMode` / `setSpPlayModeList`.
-    pub index: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i32>,
 }
 
 #[cfg(test)]
@@ -236,13 +261,15 @@ mod tests {
             "status": 200,
             "model": "DMP-A8",
             "ip": "192.168.1.50",
-            "netMac": "AA:BB:CC:DD:EE:FF",
-            "wifiMac": "11:22:33:44:55:66",
+            "net_mac": "AA:BB:CC:DD:EE:FF",
+            "wif_mac": "11:22:33:44:55:66",
             "firmware": "2.3.20"
         }"#;
         let resp: GetModelResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.model, "DMP-A8");
         assert_eq!(resp.ip, "192.168.1.50");
+        assert_eq!(resp.net_mac, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(resp.wifi_mac, "11:22:33:44:55:66");
         assert!(resp.android_version.is_none());
     }
 
@@ -322,6 +349,30 @@ mod tests {
         assert_eq!(resp.input_data.len(), 1);
         assert_eq!(resp.output_data.len(), 1);
         assert!(resp.output_data[0].enable);
+        assert_eq!(resp.input_index, None);
+        assert_eq!(resp.output_index, None);
+    }
+
+    #[test]
+    fn input_output_list_with_selection_indices() {
+        let json = r#"{
+            "status": 200,
+            "inputData": [
+                {"name": "Internal player", "tag": "local", "sortedIndex": 0},
+                {"name": "USB", "tag": "usb", "sortedIndex": 1}
+            ],
+            "inputIndex": 0,
+            "outputData": [
+                {"name": "XLR/RCA", "tag": "xlrrca", "enable": true, "sortedIndex": 0},
+                {"name": "HDMI", "tag": "hdmi", "enable": true, "sortedIndex": 1}
+            ],
+            "outputIndex": 1
+        }"#;
+        let resp: InputOutputListResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.input_index, Some(0));
+        assert_eq!(resp.output_index, Some(1));
+        assert_eq!(resp.input_data[0].tag, "local");
+        assert_eq!(resp.output_data[1].tag, "hdmi");
     }
 
     #[test]
@@ -340,10 +391,20 @@ mod tests {
 
     #[test]
     fn brightness_response_deserialization() {
-        let json = r#"{"status": 200, "index": 5, "max": 10}"#;
+        let json = r#"{"status": 200, "currentValue": 5, "max": 10}"#;
         let resp: BrightnessResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.index, 5);
+        assert_eq!(resp.current_value, 5);
+        assert_eq!(resp.status, Some(200));
         assert_eq!(resp.max, Some(10));
+    }
+
+    #[test]
+    fn brightness_response_without_status() {
+        let json = r#"{"currentValue": 80}"#;
+        let resp: BrightnessResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.current_value, 80);
+        assert_eq!(resp.status, None);
+        assert_eq!(resp.max, None);
     }
 
     #[test]
@@ -351,14 +412,77 @@ mod tests {
         let json = r#"{
             "status": 200,
             "data": [
-                {"name": "Classic VU", "index": 0},
-                {"name": "Modern VU", "index": 1}
+                {"title": "Classic VU", "tag": "vu_classic", "index": 0},
+                {"title": "Modern VU", "tag": "vu_modern", "index": 1}
             ],
             "currentIndex": 0
         }"#;
         let resp: DisplayModeListResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].title, "Classic VU");
+        assert_eq!(resp.data[0].tag, Some("vu_classic".to_string()));
+        assert_eq!(resp.data[0].index, Some(0));
         assert_eq!(resp.current_index, Some(0));
+    }
+
+    #[test]
+    fn display_mode_minimal_fields() {
+        let json = r#"{"title": "Spectrum 1"}"#;
+        let mode: DisplayMode = serde_json::from_str(json).unwrap();
+        assert_eq!(mode.title, "Spectrum 1");
+        assert_eq!(mode.tag, None);
+        assert_eq!(mode.index, None);
+    }
+
+    #[test]
+    fn get_model_response_full_zidoo_payload() {
+        // Real response includes many extra fields; serde should ignore them.
+        let json = r#"{
+            "status": 200,
+            "model": "DMP-A8",
+            "disModel": "DMP-A8",
+            "deviceName": "DMP-A8",
+            "ip": "192.168.20.45",
+            "net_mac": "AA:BB:CC:DD:EE:FF",
+            "dType": 0,
+            "duuid": "AA:BB:CC:DD:EE:FF",
+            "firmware": "v2.3.20",
+            "ram": " 8.0G",
+            "flash": " 64.0G",
+            "androidversion": "11",
+            "wif_mac": "11:22:33:44:55:66",
+            "language": "en",
+            "ableRemoteBoot": true,
+            "ableRemoteShutdown": true,
+            "ableRemoteReboot": true,
+            "ableRemoteSleep": false,
+            "ableMusicService": true,
+            "hasEqSetting": true,
+            "appcode": 7878
+        }"#;
+        let resp: GetModelResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.model, "DMP-A8");
+        assert_eq!(resp.net_mac, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(resp.wifi_mac, "11:22:33:44:55:66");
+        assert_eq!(resp.firmware, "v2.3.20");
+        assert_eq!(resp.android_version, Some("11".to_string()));
+        assert_eq!(resp.able_remote_boot, Some(true));
+        assert_eq!(resp.has_eq_setting, Some(true));
+    }
+
+    #[test]
+    fn get_model_wifi_mac_alias() {
+        // Some firmware may use "wifi_mac" instead of the typo "wif_mac"
+        let json = r#"{
+            "status": 200,
+            "model": "DMP-A8",
+            "ip": "192.168.1.50",
+            "net_mac": "AA:BB:CC:DD:EE:FF",
+            "wifi_mac": "11:22:33:44:55:66",
+            "firmware": "2.3.20"
+        }"#;
+        let resp: GetModelResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.wifi_mac, "11:22:33:44:55:66");
     }
 
     #[test]
