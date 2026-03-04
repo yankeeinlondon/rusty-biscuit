@@ -71,6 +71,10 @@ pub struct EversoloService {
     /// Port number (default: 9529)
     #[serde(default = "default_eversolo_port")]
     pub port: u16,
+
+    /// MAC address for Wake-on-LAN (auto-detected from device info)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<String>,
 }
 
 fn default_eversolo_port() -> u16 {
@@ -90,6 +94,10 @@ pub struct SamsungTvService {
     /// WebSocket API port number (default: 8002)
     #[serde(default = "default_samsung_ws_port")]
     pub ws_port: u16,
+
+    /// MAC address for Wake-on-LAN (auto-detected from device info)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<String>,
 }
 
 fn default_samsung_rest_port() -> u16 {
@@ -318,6 +326,7 @@ mod tests {
             EversoloService {
                 host: "192.168.1.50".to_string(),
                 port: 9529,
+                mac_address: None,
             },
         );
 
