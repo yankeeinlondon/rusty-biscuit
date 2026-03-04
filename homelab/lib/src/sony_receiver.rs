@@ -718,6 +718,8 @@ impl SonyReceiver {
         // its own connection, preventing one client from blocking others.
         let client = Client::builder()
             .pool_max_idle_per_host(0)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("failed to build HTTP client");
 

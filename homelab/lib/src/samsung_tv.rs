@@ -63,12 +63,20 @@ pub struct SamsungTv {
 
 impl SamsungTv {
     /// Creates a new Samsung TV client.
+    ///
+    /// The REST client uses a 5-second connect timeout and 10-second request
+    /// timeout to avoid long waits when the TV is unreachable.
     pub fn new(host: impl Into<String>, rest_port: u16, ws_port: u16) -> Self {
         let host = host.into();
         let rest_base = format!("http://{}:{}", host, rest_port);
         let ws_base = format!("wss://{}:{}", host, ws_port);
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            rest_client: RestClient::with_base_url(rest_base),
+            rest_client: RestClient::with_client_and_base_url(http_client, rest_base),
             ws_client: SamsungSmartTvRemoteWs::with_base_url(ws_base),
             host,
             rest_port,

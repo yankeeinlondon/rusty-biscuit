@@ -40,11 +40,18 @@ pub struct Eversolo {
 
 impl Eversolo {
     /// Creates a new Eversolo client.
+    ///
+    /// Uses a 5-second connect timeout and 10-second request timeout.
     pub fn new(host: impl Into<String>, port: u16) -> Self {
         let host = host.into();
         let base_url = format!("http://{}:{}", host, port);
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: EversoloClient::with_base_url(base_url),
+            client: EversoloClient::with_client_and_base_url(http_client, base_url),
             host,
             port,
         }

@@ -5,8 +5,15 @@ use thiserror::Error;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
+
+/// TCP connect timeout for Arcam amplifier connections.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 use crate::network::Host;
+
+/// Default TCP port for Arcam PA240/PA410/PA720 IP control.
+pub const DEFAULT_PORT: u16 = 50000;
 
 /// Errors that can occur when communicating with the Arcam PA240/PA410/PA720.
 #[derive(Debug, Error)]
@@ -96,12 +103,13 @@ fn hex_dump(bytes: &[u8]) -> String {
 
 /// Send a raw command frame and read the response.
 ///
+/// `addr` should be a `host:port` string (e.g. `"192.168.1.50:50000"`).
 /// `cmd_bytes` should be the complete PA240/PA410/PA720 command frame.
 /// Returns the raw response bytes on success.
-async fn send_raw(ip_addr: &str, cmd_bytes: &[u8]) -> Result<Vec<u8>, ArcamError> {
-    // Arcam PA240/PA410/PA720 IP control default port is 50000
-    let addr = format!("{}:50000", ip_addr);
-    let mut sock = TcpStream::connect(addr).await?;
+async fn send_raw(addr: &str, cmd_bytes: &[u8]) -> Result<Vec<u8>, ArcamError> {
+    let mut sock = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timed out"))??;
     sock.write_all(cmd_bytes).await?;
 
     // Read up to some reasonable max (answers are short)
@@ -140,8 +148,8 @@ fn parse_response(raw: Vec<u8>) -> Result<ArcamResponse, ArcamError> {
 }
 
 /// Send a command and parse the response, returning an error for non-zero answer codes.
-async fn send_command(ip_addr: &str, cmd_bytes: &[u8]) -> Result<ArcamResponse, ArcamError> {
-    let raw = send_raw(ip_addr, cmd_bytes).await?;
+async fn send_command(addr: &str, cmd_bytes: &[u8]) -> Result<ArcamResponse, ArcamError> {
+    let raw = send_raw(addr, cmd_bytes).await?;
     let resp = parse_response(raw)?;
 
     match resp.answer_code {
@@ -160,54 +168,54 @@ async fn send_command(ip_addr: &str, cmd_bytes: &[u8]) -> Result<ArcamResponse, 
 /// Request the current power state.
 ///
 /// Returns `Ok(true)` if ON, `Ok(false)` if standby/off.
-async fn request_power_state(ip_addr: &str) -> Result<bool, ArcamError> {
+async fn request_power_state(addr: &str) -> Result<bool, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip_addr, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     // Data[0]: 0x00 = standby, 0x01 = on
     Ok(resp.data.first().copied() == Some(0x01))
 }
 
 /// Power ON the amplifier.
-async fn power_on(ip_addr: &str) -> Result<(), ArcamError> {
+async fn power_on(addr: &str) -> Result<(), ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0x01(On) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0x01, 0x0D];
-    send_command(ip_addr, &cmd).await?;
+    send_command(addr, &cmd).await?;
     Ok(())
 }
 
 /// Power OFF (standby) the amplifier.
-async fn power_off(ip_addr: &str) -> Result<(), ArcamError> {
+async fn power_off(addr: &str) -> Result<(), ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0x00(Standby) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0x00, 0x0D];
-    send_command(ip_addr, &cmd).await?;
+    send_command(addr, &cmd).await?;
     Ok(())
 }
 
 /// Query whether mute is active.
 ///
 /// Returns `Ok(true)` if muted, `Ok(false)` if un-muted.
-async fn get_mute_status(ip: &str) -> Result<bool, ArcamError> {
+async fn get_mute_status(addr: &str) -> Result<bool, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     // Data[0]: 0x00 = muted, 0x01 = unmuted
     Ok(resp.data.first().copied() == Some(0x00))
 }
 
 /// Mute the amplifier (speaker outputs).
-async fn mute_on(ip: &str) -> Result<(), ArcamError> {
+async fn mute_on(addr: &str) -> Result<(), ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0x00(Mute) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0x00, 0x0D];
-    send_command(ip, &cmd).await?;
+    send_command(addr, &cmd).await?;
     Ok(())
 }
 
 /// Unmute the amplifier.
-async fn mute_off(ip: &str) -> Result<(), ArcamError> {
+async fn mute_off(addr: &str) -> Result<(), ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0x01(Unmute) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0x01, 0x0D];
-    send_command(ip, &cmd).await?;
+    send_command(addr, &cmd).await?;
     Ok(())
 }
 
@@ -217,20 +225,20 @@ async fn mute_off(ip: &str) -> Result<(), ArcamError> {
 /// (`0`=Stereo, `1`=Bridged, `2`=Dual Mono) but real-world testing
 /// shows the firmware returns 1-indexed values:
 /// `1`=Stereo, `2`=Bridged, `3`=Dual Mono.
-async fn get_amplifier_mode(ip: &str) -> Result<u8, ArcamError> {
+async fn get_amplifier_mode(addr: &str) -> Result<u8, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x61(AmpMode) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x61, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(resp.data.first().copied().unwrap_or(0))
 }
 
 /// Send a heartbeat to check connectivity and reset the EuP standby timer.
 ///
 /// Returns `true` if the amplifier responds with "Alive".
-async fn heartbeat(ip: &str) -> Result<bool, ArcamError> {
+async fn heartbeat(addr: &str) -> Result<bool, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x25(Heartbeat) Dl=0x01 Data=0xF0(Ping) CR
     let cmd = [0x21, 0x01, 0x25, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     // Data[0]: 0x00 = alive
     Ok(resp.data.first().copied() == Some(0x00))
 }
@@ -238,10 +246,10 @@ async fn heartbeat(ip: &str) -> Result<bool, ArcamError> {
 /// Query the system model name (e.g. "PA240", "PA720", "PA410").
 ///
 /// Returns the model as a trimmed ASCII string (max 10 characters).
-async fn get_system_model(ip: &str) -> Result<String, ArcamError> {
+async fn get_system_model(addr: &str) -> Result<String, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x5E(SystemModel) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x5E, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(String::from_utf8_lossy(&resp.data).trim().to_string())
 }
 
@@ -254,10 +262,10 @@ async fn get_system_model(ip: &str) -> Result<String, ArcamError> {
 /// - `0x03` = 1 hour
 /// - `0x04` = 2 hours
 /// - `0x05` = 4 hours
-async fn get_auto_shutdown(ip: &str) -> Result<u8, ArcamError> {
+async fn get_auto_shutdown(addr: &str) -> Result<u8, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x58(AutoShutdown) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x58, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(resp.data.first().copied().unwrap_or(0))
 }
 
@@ -271,7 +279,7 @@ async fn get_auto_shutdown(ip: &str) -> Result<u8, ArcamError> {
 /// - `0x04` = 2 hours
 ///
 /// Note: 4 hours (0x05) is not recommended as it may exceed network timeout.
-async fn set_auto_shutdown(ip: &str, value: u8) -> Result<u8, ArcamError> {
+async fn set_auto_shutdown(addr: &str, value: u8) -> Result<u8, ArcamError> {
     if value > 0x04 {
         return Err(ArcamError::InvalidParameter(format!(
             "Invalid auto-shutdown value: {}. Valid values: 0x00-0x04",
@@ -280,17 +288,17 @@ async fn set_auto_shutdown(ip: &str, value: u8) -> Result<u8, ArcamError> {
     }
     // Frame: ! Zone=0x01 Cc=0x58(AutoShutdown) Dl=0x01 Data=value CR
     let cmd = [0x21, 0x01, 0x58, 0x01, value, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(resp.data.first().copied().unwrap_or(0))
 }
 
 /// Query the timeout counter (seconds remaining until auto-standby).
 ///
 /// Returns seconds remaining as a big-endian u16 (range 0–14400).
-async fn get_timeout_counter(ip: &str) -> Result<u16, ArcamError> {
+async fn get_timeout_counter(addr: &str) -> Result<u16, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x55(TimeoutCounter) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x55, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     let hi = resp.data.first().copied().unwrap_or(0);
     let lo = resp.data.get(1).copied().unwrap_or(0);
     Ok(u16::from_be_bytes([hi, lo]))
@@ -300,10 +308,10 @@ async fn get_timeout_counter(ip: &str) -> Result<u16, ArcamError> {
 ///
 /// Sensor: 0xF0 = sensor 1, 0xF1 = sensor 2
 /// Returns temperature in degrees Celsius.
-async fn get_lifter_temperature(ip: &str, sensor: u8) -> Result<u8, ArcamError> {
+async fn get_lifter_temperature(addr: &str, sensor: u8) -> Result<u8, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x56(LifterTemp) Dl=0x01 Data=sensor CR
     let cmd = [0x21, 0x01, 0x56, 0x01, sensor, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     // Response: [sensor_id, temperature]
     Ok(resp.data.get(1).copied().unwrap_or(0))
 }
@@ -312,26 +320,26 @@ async fn get_lifter_temperature(ip: &str, sensor: u8) -> Result<u8, ArcamError> 
 ///
 /// Sensor: 0xF0 = sensor 1, 0xF1 = sensor 2
 /// Returns temperature in degrees Celsius.
-async fn get_output_temperature(ip: &str, sensor: u8) -> Result<u8, ArcamError> {
+async fn get_output_temperature(addr: &str, sensor: u8) -> Result<u8, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x57(OutputTemp) Dl=0x01 Data=sensor CR
     let cmd = [0x21, 0x01, 0x57, 0x01, sensor, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     // Response: [sensor_id, temperature]
     Ok(resp.data.get(1).copied().unwrap_or(0))
 }
 
 /// Query friendly name (PA720/PA240 only).
-async fn get_friendly_name(ip: &str) -> Result<String, ArcamError> {
+async fn get_friendly_name(addr: &str) -> Result<String, ArcamError> {
     // Frame: ! Zone=0x01 Cc=0x53(FriendlyName) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x53, 0x01, 0xF0, 0x0D];
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(String::from_utf8_lossy(&resp.data).trim().to_string())
 }
 
 /// Set friendly name (PA720/PA240 only).
 ///
 /// Name must be uppercase A-Z, digits 0-9, and space only. Max 10 characters.
-async fn set_friendly_name(ip: &str, name: &str) -> Result<String, ArcamError> {
+async fn set_friendly_name(addr: &str, name: &str) -> Result<String, ArcamError> {
     let name_bytes = name.as_bytes();
     if name_bytes.len() > 10 {
         return Err(ArcamError::InvalidDataLength(
@@ -341,7 +349,7 @@ async fn set_friendly_name(ip: &str, name: &str) -> Result<String, ArcamError> {
     let mut cmd = vec![0x21, 0x01, 0x53, name_bytes.len() as u8];
     cmd.extend_from_slice(name_bytes);
     cmd.push(0x0D);
-    let resp = send_command(ip, &cmd).await?;
+    let resp = send_command(addr, &cmd).await?;
     Ok(String::from_utf8_lossy(&resp.data).trim().to_string())
 }
 
@@ -353,11 +361,10 @@ async fn set_friendly_name(ip: &str, name: &str) -> Result<String, ArcamError> {
 /// System Model, Amplifier Mode**.
 ///
 /// *PA720/PA240 only. **PA240 only.
-async fn get_system_status(ip: &str) -> Result<ArcamSystemStatus, ArcamError> {
-    use tokio::time::timeout;
-
-    let addr = format!("{}:50000", ip);
-    let mut sock = TcpStream::connect(addr).await?;
+async fn get_system_status(addr: &str) -> Result<ArcamSystemStatus, ArcamError> {
+    let mut sock = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connection timed out"))??;
 
     // Send System Status command: ! Zone=0x01 Cc=0x5D Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x5D, 0x01, 0xF0, 0x0D];
@@ -471,13 +478,13 @@ pub fn auto_shutdown_seconds(value: u8) -> u32 {
 /// This leverages the [Arcam Serial over IP API](https://www.arcam.co.uk/ugc/tor/PA240/Custom%20Installation%20Notes/RS232_PA720_PA240_PA410_SH305E_3.pdf).
 pub struct Arcam {
     host: Host,
+    port: u16,
 }
 
 impl Arcam {
-    /// Create a new Arcam struct with a "host" (IP address
-    /// or DNS name).)
-    pub fn new(host: Host) -> Self {
-        Arcam { host }
+    /// Create a new Arcam struct with a host and port.
+    pub fn new(host: Host, port: u16) -> Self {
+        Arcam { host, port }
     }
 
     /// Send a signal to the Arcam amplifier to turn the
@@ -628,29 +635,30 @@ impl Arcam {
     }
 
     fn host_addr(&self) -> String {
+        let port = self.port;
         match &self.host {
-            Host::V4(addr) => addr.to_string(),
-            Host::V6(addr) => format!("[{addr}]"),
-            Host::Dns(name) => name.clone(),
+            Host::V4(addr) => format!("{addr}:{port}"),
+            Host::V6(addr) => format!("[{addr}]:{port}"),
+            Host::Dns(name) => format!("{name}:{port}"),
         }
     }
 }
 
 impl From<Host> for Arcam {
     fn from(host: Host) -> Self {
-        Self::new(host)
+        Self::new(host, DEFAULT_PORT)
     }
 }
 
 impl From<Ipv4Addr> for Arcam {
     fn from(host: Ipv4Addr) -> Self {
-        Self::new(Host::V4(host))
+        Self::new(Host::V4(host), DEFAULT_PORT)
     }
 }
 
 impl From<std::net::Ipv6Addr> for Arcam {
     fn from(host: std::net::Ipv6Addr) -> Self {
-        Self::new(Host::V6(host))
+        Self::new(Host::V6(host), DEFAULT_PORT)
     }
 }
 
@@ -663,12 +671,12 @@ impl From<String> for Arcam {
 impl From<&str> for Arcam {
     fn from(host: &str) -> Self {
         if let Ok(ipv4) = host.parse::<Ipv4Addr>() {
-            return Self::new(Host::V4(ipv4));
+            return Self::new(Host::V4(ipv4), DEFAULT_PORT);
         }
         if let Ok(ipv6) = host.parse::<std::net::Ipv6Addr>() {
-            return Self::new(Host::V6(ipv6));
+            return Self::new(Host::V6(ipv6), DEFAULT_PORT);
         }
-        Self::new(Host::Dns(host.to_string()))
+        Self::new(Host::Dns(host.to_string()), DEFAULT_PORT)
     }
 }
 
