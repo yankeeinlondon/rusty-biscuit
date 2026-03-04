@@ -288,27 +288,26 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
                 }
 
                 // Auto-detect MAC address if not yet stored
-                if needs_mac {
-                    if let Ok(model_info) = eversolo.get_model().await {
-                        if !model_info.net_mac.is_empty() {
-                            let mac = model_info.net_mac.clone();
-                            let name = name.clone();
-                            let state = state.clone();
-                            tokio::spawn(async move {
-                                let mut devices = state.eversolo_devices.write().await;
-                                if let Some(service) = devices.get_mut(&name) {
-                                    service.mac_address = Some(mac);
-                                }
-                                let mut config = state.config.write().await;
-                                if let Some(service) = config.eversolo_devices.get_mut(&name) {
-                                    service.mac_address = devices.get(&name).and_then(|s| s.mac_address.clone());
-                                }
-                                if let Some(path) = &state.config_path {
-                                    let _ = config.save_to(path);
-                                }
-                            });
+                if needs_mac
+                    && let Ok(model_info) = eversolo.get_model().await
+                    && !model_info.net_mac.is_empty()
+                {
+                    let mac = model_info.net_mac.clone();
+                    let name = name.clone();
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let mut devices = state.eversolo_devices.write().await;
+                        if let Some(service) = devices.get_mut(&name) {
+                            service.mac_address = Some(mac);
                         }
-                    }
+                        let mut config = state.config.write().await;
+                        if let Some(service) = config.eversolo_devices.get_mut(&name) {
+                            service.mac_address = devices.get(&name).and_then(|s| s.mac_address.clone());
+                        }
+                        if let Some(path) = &state.config_path {
+                            let _ = config.save_to(path);
+                        }
+                    });
                 }
 
                 DeviceStatusJson {
@@ -381,25 +380,25 @@ async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
                         detail.insert("model".into(), json!(model));
                     }
                     // Auto-detect MAC address if not yet stored
-                    if needs_mac {
-                        if let Some(mac) = device.extra.get("wifiMac").and_then(|v| v.as_str()) {
-                            let mac = mac.to_string();
-                            let name = tv_name.clone();
-                            let state = state.clone();
-                            tokio::spawn(async move {
-                                let mut tvs = state.samsung_tvs.write().await;
-                                if let Some(service) = tvs.get_mut(&name) {
-                                    service.mac_address = Some(mac);
-                                }
-                                let mut config = state.config.write().await;
-                                if let Some(service) = config.samsung_tvs.get_mut(&name) {
-                                    service.mac_address = tvs.get(&name).and_then(|s| s.mac_address.clone());
-                                }
-                                if let Some(path) = &state.config_path {
-                                    let _ = config.save_to(path);
-                                }
-                            });
-                        }
+                    if needs_mac
+                        && let Some(mac) = device.extra.get("wifiMac").and_then(|v| v.as_str())
+                    {
+                        let mac = mac.to_string();
+                        let name = tv_name.clone();
+                        let state = state.clone();
+                        tokio::spawn(async move {
+                            let mut tvs = state.samsung_tvs.write().await;
+                            if let Some(service) = tvs.get_mut(&name) {
+                                service.mac_address = Some(mac);
+                            }
+                            let mut config = state.config.write().await;
+                            if let Some(service) = config.samsung_tvs.get_mut(&name) {
+                                service.mac_address = tvs.get(&name).and_then(|s| s.mac_address.clone());
+                            }
+                            if let Some(path) = &state.config_path {
+                                let _ = config.save_to(path);
+                            }
+                        });
                     }
                 }
                 DeviceStatusJson {
