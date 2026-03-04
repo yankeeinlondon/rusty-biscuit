@@ -284,6 +284,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let deps = cli.command.as_ref().is_some_and(|c| c.deps());
     let packages = cli.command.as_ref().is_some_and(|c| c.packages());
+    let package = cli.command.as_ref().is_some_and(|c| c.package());
+    let package_area = cli.command.as_ref().is_some_and(|c| c.package_area());
     let ui = cli.command.as_ref().is_some_and(|c| c.ui());
     let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
 
@@ -303,8 +305,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             &docs_filter,
             deps,
             packages,
+            package,
+            package_area,
             ui,
             repo_filter,
+            base_dir.as_deref(),
         );
     }
 

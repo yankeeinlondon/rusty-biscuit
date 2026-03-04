@@ -209,6 +209,12 @@ pub enum Commands {
         /// Output only package names as a comma-separated list
         #[arg(long)]
         packages: bool,
+        /// Output the package name for the current directory
+        #[arg(long)]
+        package: bool,
+        /// Output the package area for the current directory
+        #[arg(long)]
+        package_area: bool,
         /// Use visual (Mermaid) rendering for --deps instead of text
         #[arg(long)]
         ui: bool,
@@ -435,6 +441,22 @@ impl Commands {
     /// Check if this is a repo command with `--packages` flag.
     pub fn packages(&self) -> bool {
         matches!(self, Commands::Repo { packages: true, .. })
+    }
+
+    /// Check if this is a repo command with `--package` flag.
+    pub fn package(&self) -> bool {
+        matches!(self, Commands::Repo { package: true, .. })
+    }
+
+    /// Check if this is a repo command with `--package-area` flag.
+    pub fn package_area(&self) -> bool {
+        matches!(
+            self,
+            Commands::Repo {
+                package_area: true,
+                ..
+            }
+        )
     }
 
     /// Check if this is a repo command with `--ui` flag.
@@ -820,6 +842,8 @@ mod tests {
                 Commands::Repo {
                     deps: false,
                     packages: false,
+                    package: false,
+                    package_area: false,
                     ui: false,
                     filter: None,
                 }
@@ -895,12 +919,16 @@ mod tests {
             let cmd = Commands::Repo {
                 deps: true,
                 packages: true,
+                package: true,
+                package_area: true,
                 ui: true,
                 filter: Some("biscuit".to_string()),
             };
 
             assert!(cmd.deps());
             assert!(cmd.packages());
+            assert!(cmd.package());
+            assert!(cmd.package_area());
             assert!(cmd.ui());
             assert_eq!(cmd.repo_filter(), Some("biscuit"));
         }

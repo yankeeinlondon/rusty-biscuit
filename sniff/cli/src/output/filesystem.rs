@@ -1,6 +1,6 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -823,6 +823,51 @@ pub fn print_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str
             eprintln!("- the \"--packages\" switch is only intended to be used in a monorepo");
         }
     }
+}
+
+/// Print the package name for the given directory, or exit 1 if not in a package.
+///
+/// With `verbose >= 1`, appends the package root directory on the same line.
+pub fn print_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, verbose: u8) {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    if let Some(pkg) = repo.and_then(|r| r.package_for_dir(&dir)) {
+        if verbose > 0 {
+            let terminal = Terminal::default();
+            let line = format!(
+                "{} (<i>located in</i> <blue>{}</blue>)",
+                pkg.name,
+                pkg.relative
+            );
+            print!("{}", Prose::new(&line).display(&terminal));
+        } else {
+            println!("{}", pkg.name);
+        }
+    } else {
+        println!();
+        std::process::exit(1);
+    }
+}
+
+/// Print the package area for the given directory, or exit 1 if not in a package area.
+pub fn print_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
+        println!("{}", area);
+    } else {
+        println!();
+        std::process::exit(1);
+    }
+}
+
+/// Resolve the effective directory from `--base` or fall back to CWD.
+fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
+    base_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
 pub fn print_repo_section(

@@ -30,7 +30,8 @@ pub use topics::print_topics_table;
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
     print_docs_section, print_filesystem_section, print_language_section, print_repo_deps_text,
-    print_repo_deps_visual, print_repo_packages, print_repo_section,
+    print_repo_deps_visual, print_repo_package, print_repo_package_area, print_repo_packages,
+    print_repo_section,
 };
 pub(crate) use hardware::{
     print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
@@ -247,8 +248,11 @@ pub fn print_text(
     docs_filter: &DocsFilter,
     deps: bool,
     packages: bool,
+    package: bool,
+    package_area: bool,
     ui: bool,
     repo_filter: Option<&str>,
+    base_dir: Option<&std::path::Path>,
 ) {
     // Get repo root for relative paths
     let repo_root = result
@@ -327,7 +331,11 @@ pub fn print_text(
             }
         }
         OutputFilter::Repo => {
-            if packages {
+            if package {
+                print_repo_package(result, base_dir, verbose);
+            } else if package_area {
+                print_repo_package_area(result, base_dir);
+            } else if packages {
                 print_repo_packages(result, repo_filter);
             } else if let Some(ref filesystem) = result.filesystem
                 && let Some(ref repo) = filesystem.repo

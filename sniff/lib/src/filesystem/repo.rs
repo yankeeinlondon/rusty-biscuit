@@ -180,6 +180,63 @@ pub struct Package {
     pub is_excluded: bool,
 }
 
+impl RepoInfo {
+    /// Find the package whose directory tree contains `dir`.
+    ///
+    /// Returns `None` when `dir` is not inside any package.
+    pub fn package_for_dir(&self, dir: &Path) -> Option<&Package> {
+        let packages = self.packages.as_ref()?;
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+
+        packages.iter().find(|pkg| {
+            let pkg_path =
+                std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
+            dir.starts_with(&pkg_path)
+        })
+    }
+
+    /// Find the package area that contains `dir`.
+    ///
+    /// First checks if `dir` is inside a specific package, then falls back to
+    /// checking whether it sits anywhere within a package area directory.
+    /// Returns `None` when `dir` is outside every known package area.
+    pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
+        let packages = self.packages.as_ref()?;
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+
+        // Check if inside a specific package first
+        if let Some(pkg) = packages.iter().find(|pkg| {
+            let pkg_path =
+                std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
+            dir.starts_with(&pkg_path)
+        }) {
+            return Some(&pkg.package_area);
+        }
+
+        // Fall back to checking package area directories
+        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        let areas: HashSet<&str> = packages
+            .iter()
+            .map(|p| p.package_area.as_str())
+            .filter(|a| *a != "root")
+            .collect();
+
+        for area in &areas {
+            let area_path = root.join(area);
+            if dir.starts_with(&area_path) {
+                // Return a reference with the right lifetime by finding the
+                // original &str in the packages vec
+                return packages
+                    .iter()
+                    .find(|p| p.package_area == *area)
+                    .map(|p| p.package_area.as_str());
+            }
+        }
+
+        None
+    }
+}
+
 /// Deprecated type alias for backward compatibility.
 #[deprecated(note = "Use `Package` instead")]
 pub type PackageLocation = Package;
