@@ -564,15 +564,14 @@ pub(crate) async fn set_auto_shutdown_by_name(
 // --- Helpers ---
 
 async fn create_arcam_by_name(state: &AppState, name: &str) -> Result<Arcam, ServerError> {
-    let (host_str, _port) = state
+    let (host_str, port) = state
         .get_arcam_host(name)
         .await
         .ok_or_else(|| ServerError::DeviceNotFound(name.to_string()))?;
 
-    // Note: Arcam port is hardcoded to 50000 in the library
     let host =
         homelab::network::parse_host(&host_str).map_err(|e| ServerError::InvalidHost(e.0))?;
-    Ok(Arcam::new(host))
+    Ok(Arcam::new(host, port))
 }
 
 async fn with_timeout<T, E>(
