@@ -10,12 +10,30 @@ just -f homelab/justfile install
 cargo install --path homelab/cli
 ```
 
-## Environment Variables
+## Host Resolution
+
+### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
 | `SONY_RECEIVER` | Sony receiver IP or DNS name |
 | `ARCAM_AMP` | Arcam amplifier IP or DNS name |
+| `EVERSOLO` | Eversolo Streamer IP or DNS name |
+| `SAMSUNG_TV` | Samsung Smart TV's IP or DNS name |
+
+### Resolving the Hostname
+
+When using the CLI, we will resolve both a _host_ and _port_ for the server. For the host we resolve in the following way:
+
+- if user uses the `--host <host>` flag then we use that
+- after that we'll look for the ENV variable
+- then we look in the **homey** config file located at `~/homey.json`
+
+### Resolving a Port
+
+This is far _less_ important as the _default port_ for any given service will 99% of the time not be changed but we do want to allow for it.
+
+- a user can always use the `--port <port>` or `--ws-port <ws-port>` switches to set a different port address
 
 ## Commands
 
@@ -127,9 +145,10 @@ homey sony native hdmi-config       # HDMI config (CEC, eARC, signal formats, so
 
 | Flag | Applies To | Description |
 |------|-----------|-------------|
-| `--host <IP>` | `arcam`, `sony` | Override device host (also set via env vars above) |
-| `--name <device>` | `arcam`, `sony` | Select device from `~/homey.json` config |
-| `--port <PORT>` | `sony` | Override receiver port (default: 10000) |
+| `--host <IP>` | all devices | Override device host (also set via env vars above) |
+| `--name <device>` | all devices | Select device from `~/homey.json` config |
+| `--port <PORT>` | all devices | Override device port |
+| `--ws-port <PORT>` | `samsung` | Override WebSocket port (default: 8002) |
 
 ## Shell Completions
 

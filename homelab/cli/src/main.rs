@@ -7,9 +7,9 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use color_eyre::Result;
 use color_eyre::eyre::WrapErr;
-use homelab::arcam::{Arcam, ArcamResponse};
+use homelab::arcam::{Arcam, ArcamResponse, DEFAULT_PORT as ARCAM_DEFAULT_PORT};
 use homelab::config::{HomeyConfig, parse_host_port};
-use homelab::eversolo::{Eversolo, DEFAULT_PORT as EVERSOLO_DEFAULT_PORT};
+use homelab::eversolo::{Eversolo, InputOutputListResponse, DEFAULT_PORT as EVERSOLO_DEFAULT_PORT};
 use homelab::samsung_tv::{
     SamsungTv, DEFAULT_REST_PORT as SAMSUNG_DEFAULT_REST_PORT,
     DEFAULT_WS_PORT as SAMSUNG_DEFAULT_WS_PORT,
@@ -61,6 +61,53 @@ fn opt_str(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("N/A")
 }
 
+/// Applies a cell style: bold+yellow for active, dim for disabled, plain otherwise.
+fn cell(text: &str, active: bool, enabled: bool) -> TableCellContent {
+    if active {
+        TableCellContent::Text(format!("\x1b[1;33m{text}\x1b[0m"))
+    } else if !enabled {
+        TableCellContent::Text(format!("\x1b[2m{text}\x1b[0m"))
+    } else {
+        TableCellContent::Text(text.to_string())
+    }
+}
+
+/// Prints the audio routing tables with active input/output highlighted.
+fn print_routing_tables(io: &InputOutputListResponse, suffix: &str) {
+    println!(
+        "{}",
+        styled(format!("<b>Eversolo Audio Routing</b> {suffix}"))
+    );
+
+    let mut input_table = Table::new().with_columns(vec![
+        TableColumn::new("Input").with_min_width(15),
+        TableColumn::new("Tag"),
+    ]);
+    for (i, item) in io.input_data.iter().enumerate() {
+        let active = io.input_index == Some(i as i32);
+        input_table.add_row(vec![
+            cell(&item.name, active, true),
+            cell(&item.tag, active, true),
+        ]);
+    }
+    print!("\n{}", input_table.display(&Terminal::default()));
+
+    let mut output_table = Table::new().with_columns(vec![
+        TableColumn::new("Output").with_min_width(15),
+        TableColumn::new("Tag"),
+        TableColumn::new("Enabled"),
+    ]);
+    for (i, item) in io.output_data.iter().enumerate() {
+        let active = io.output_index == Some(i as i32);
+        output_table.add_row(vec![
+            cell(&item.name, active, item.enable),
+            cell(&item.tag, active, item.enable),
+            cell(on_off(item.enable), active, item.enable),
+        ]);
+    }
+    print!("{}", output_table.display(&Terminal::default()));
+}
+
 const COMPLETIONS_HELP: &str = r#"
 SHELL COMPLETIONS
 
@@ -105,6 +152,10 @@ enum Commands {
         #[arg(long, env = "ARCAM_AMP")]
         host: Option<String>,
 
+        /// Arcam amplifier port (default: 50000)
+        #[arg(long)]
+        port: Option<u16>,
+
         #[command(subcommand)]
         action: ArcamAction,
     },
@@ -123,6 +174,10 @@ enum Commands {
         #[arg(long, env = "EVERSOLO")]
         host: Option<String>,
 
+        /// Eversolo port (default: 9529)
+        #[arg(long)]
+        port: Option<u16>,
+
         #[command(subcommand)]
         action: EversoloAction,
     },
@@ -136,6 +191,14 @@ enum Commands {
         /// Samsung TV host IP or DNS name (overrides config)
         #[arg(long, env = "SAMSUNG_TV")]
         host: Option<String>,
+
+        /// Samsung TV REST API port (default: 8001)
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// Samsung TV WebSocket port (default: 8002)
+        #[arg(long)]
+        ws_port: Option<u16>,
 
         #[command(subcommand)]
         action: SamsungAction,
@@ -152,8 +215,8 @@ enum Commands {
         host: Option<String>,
 
         /// Sony receiver port (default: 10000)
-        #[arg(long, default_value = "10000")]
-        port: u16,
+        #[arg(long)]
+        port: Option<u16>,
 
         #[command(subcommand)]
         action: SonyAction,
@@ -759,13 +822,25 @@ async fn run() -> Result<()> {
             print!("{}", COMPLETIONS_HELP.trim_start());
             Ok(())
         }
-        Commands::Arcam { action, name, host } => handle_arcam(name, host, action, json).await,
-        Commands::Eversolo { action, name, host } => {
-            handle_eversolo(name, host, action, json).await
-        }
-        Commands::Samsung { action, name, host } => {
-            handle_samsung(name, host, action, json).await
-        }
+        Commands::Arcam {
+            action,
+            name,
+            host,
+            port,
+        } => handle_arcam(name, host, port, action, json).await,
+        Commands::Eversolo {
+            action,
+            name,
+            host,
+            port,
+        } => handle_eversolo(name, host, port, action, json).await,
+        Commands::Samsung {
+            action,
+            name,
+            host,
+            port,
+            ws_port,
+        } => handle_samsung(name, host, port, ws_port, action, json).await,
         Commands::Sony {
             action,
             name,
@@ -782,13 +857,14 @@ async fn run() -> Result<()> {
 async fn handle_arcam(
     name: Option<String>,
     host: Option<String>,
+    port: Option<u16>,
     action: ArcamAction,
     json: bool,
 ) -> Result<()> {
-    let (resolved_host, source) = resolve_arcam(host, name)?;
-    let arcam = Arcam::from(resolved_host.as_str());
-    let suffix = device_suffix(&resolved_host, 50000, &source);
-    let err_ctx = format!("Arcam Amp at {resolved_host}:50000");
+    let (resolved_host, resolved_port, source) = resolve_arcam(host, port, name)?;
+    let arcam = Arcam::new(parse_host(&resolved_host), resolved_port);
+    let suffix = device_suffix(&resolved_host, resolved_port, &source);
+    let err_ctx = format!("Arcam Amp at {resolved_host}:{resolved_port}");
 
     run_arcam_action(&arcam, action, json, &suffix)
         .await
@@ -1040,20 +1116,27 @@ async fn run_arcam_action(
     Ok(())
 }
 
-/// Resolves the Arcam host from --host, --name, or config auto-select.
+/// Resolves the Arcam host and port from --host, --port, --name, or config auto-select.
 ///
-/// Returns `(host, source)`. The host is just the hostname/IP — never includes port
-/// since the Arcam protocol always uses port 50000.
+/// Returns `(host, port, source)`.
 ///
-/// Priority:
+/// Port priority: `--port` flag > inline port in `--host` > config port > `ARCAM_DEFAULT_PORT`
+///
+/// Host priority:
 /// 1. `--host` (explicit override, including from `ARCAM_AMP` env)
 /// 2. `--name` (config lookup by device name)
 /// 3. Single device in config (auto-select when only one exists)
 /// 4. Error with helpful message
-fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, DeviceSource)> {
+fn resolve_arcam(
+    host: Option<String>,
+    port: Option<u16>,
+    name: Option<String>,
+) -> Result<(String, u16, DeviceSource)> {
     // 1. Explicit --host flag (or ARCAM_AMP env)
     if let Some(h) = host {
-        return Ok((h, DeviceSource::Flag));
+        let (host_str, inline_port) = parse_host_port(&h, ARCAM_DEFAULT_PORT);
+        let resolved_port = port.unwrap_or(inline_port);
+        return Ok((host_str, resolved_port, DeviceSource::Flag));
     }
 
     // Load config for --name and auto-select
@@ -1062,7 +1145,8 @@ fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, 
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.arcam_amps.get(n) {
-            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
+            let resolved_port = port.unwrap_or(service.port);
+            return Ok((service.host.clone(), resolved_port, DeviceSource::Name(n.clone())));
         }
         let available = device_names(&config.arcam_amps);
         return Err(color_eyre::eyre::eyre!(
@@ -1075,7 +1159,12 @@ fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, 
     // 3. Auto-select if only one device
     if config.arcam_amps.len() == 1 {
         let (dev_name, service) = config.arcam_amps.iter().next().unwrap();
-        return Ok((service.host.clone(), DeviceSource::Auto(dev_name.clone())));
+        let resolved_port = port.unwrap_or(service.port);
+        return Ok((
+            service.host.clone(),
+            resolved_port,
+            DeviceSource::Auto(dev_name.clone()),
+        ));
     }
 
     // 4. Error with available devices
@@ -1093,11 +1182,11 @@ fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, 
 async fn handle_eversolo(
     name: Option<String>,
     host: Option<String>,
+    port: Option<u16>,
     action: EversoloAction,
     json: bool,
 ) -> Result<()> {
-    let (resolved_host, source) = resolve_eversolo(host, name)?;
-    let (host_str, port) = parse_host_port(&resolved_host, EVERSOLO_DEFAULT_PORT);
+    let (host_str, port, source) = resolve_eversolo(host, port, name)?;
     let eversolo = Eversolo::new(&host_str, port);
     let suffix = device_suffix(&host_str, port, &source);
     let err_ctx = format!("Eversolo at {host_str}:{port}");
@@ -1327,60 +1416,31 @@ async fn handle_eversolo_audio(
             if json {
                 println!("{}", serde_json::to_string_pretty(&io)?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("<b>Eversolo Audio Routing</b> {suffix}"))
-                );
-                let mut input_table = Table::new().with_columns(vec![
-                    TableColumn::new("Input"),
-                    TableColumn::new("Tag"),
-                ]);
-                for item in &io.input_data {
-                    input_table.add_row(vec![item.name.as_str().into(), item.tag.as_str().into()]);
-                }
-                print!("\n{}", input_table.display(&Terminal::default()));
-
-                let mut output_table = Table::new().with_columns(vec![
-                    TableColumn::new("Output"),
-                    TableColumn::new("Tag"),
-                    TableColumn::new("Enabled"),
-                ]);
-                for item in &io.output_data {
-                    output_table.add_row(vec![
-                        item.name.as_str().into(),
-                        item.tag.as_str().into(),
-                        on_off(item.enable).into(),
-                    ]);
-                }
-                print!("{}", output_table.display(&Terminal::default()));
+                print_routing_tables(&io, suffix);
             }
         }
         EversoloAudioAction::SetInput { tag } => {
-            eversolo.set_input(&tag).await?;
+            let io = eversolo.set_input(&tag).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"input": tag}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&io)?);
             } else {
                 println!(
                     "{}",
                     styled(format!("Set input to <b>{tag}</b> {suffix}"))
                 );
+                print_routing_tables(&io, suffix);
             }
         }
         EversoloAudioAction::SetOutput { tag } => {
-            eversolo.set_output(&tag).await?;
+            let io = eversolo.set_output(&tag).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"output": tag}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&io)?);
             } else {
                 println!(
                     "{}",
                     styled(format!("Set output to <b>{tag}</b> {suffix}"))
                 );
+                print_routing_tables(&io, suffix);
             }
         }
     }
@@ -1658,13 +1718,19 @@ fn format_ms(ms: i64) -> String {
 }
 
 /// Resolves the Eversolo host from --host, --name, or config auto-select.
+/// Resolves the Eversolo host and port from --host, --name, or config auto-select.
+///
+/// Returns `(host, port, source)`.
 fn resolve_eversolo(
     host: Option<String>,
+    port: Option<u16>,
     name: Option<String>,
-) -> Result<(String, DeviceSource)> {
+) -> Result<(String, u16, DeviceSource)> {
     // 1. Explicit --host flag (or EVERSOLO env)
     if let Some(h) = host {
-        return Ok((h, DeviceSource::Flag));
+        let (host_str, inline_port) = parse_host_port(&h, EVERSOLO_DEFAULT_PORT);
+        let resolved_port = port.unwrap_or(inline_port);
+        return Ok((host_str, resolved_port, DeviceSource::Flag));
     }
 
     let config = HomeyConfig::load().unwrap_or_default();
@@ -1672,7 +1738,8 @@ fn resolve_eversolo(
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.eversolo_devices.get(n) {
-            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
+            let resolved_port = port.unwrap_or(service.port);
+            return Ok((service.host.clone(), resolved_port, DeviceSource::Name(n.clone())));
         }
         let available = device_names(&config.eversolo_devices);
         return Err(color_eyre::eyre::eyre!(
@@ -1685,7 +1752,8 @@ fn resolve_eversolo(
     // 3. Auto-select if only one device
     if config.eversolo_devices.len() == 1 {
         let (dev_name, service) = config.eversolo_devices.iter().next().unwrap();
-        return Ok((service.host.clone(), DeviceSource::Auto(dev_name.clone())));
+        let resolved_port = port.unwrap_or(service.port);
+        return Ok((service.host.clone(), resolved_port, DeviceSource::Auto(dev_name.clone())));
     }
 
     // 4. Error with available devices
@@ -1703,13 +1771,13 @@ fn resolve_eversolo(
 async fn handle_samsung(
     name: Option<String>,
     host: Option<String>,
+    port: Option<u16>,
+    ws_port: Option<u16>,
     action: SamsungAction,
     json: bool,
 ) -> Result<()> {
-    let (resolved_host, source) = resolve_samsung(host, name)?;
-    let (host_str, rest_port) =
-        parse_host_port(&resolved_host, SAMSUNG_DEFAULT_REST_PORT);
-    let tv = SamsungTv::new(&host_str, rest_port, SAMSUNG_DEFAULT_WS_PORT);
+    let (host_str, rest_port, ws_port, source) = resolve_samsung(host, port, ws_port, name)?;
+    let tv = SamsungTv::new(&host_str, rest_port, ws_port);
     let suffix = device_suffix(&host_str, rest_port, &source);
     let err_ctx = format!("Samsung TV at {host_str}:{rest_port}");
 
@@ -1846,14 +1914,23 @@ async fn handle_samsung_remote(
     Ok(())
 }
 
-/// Resolves the Samsung TV host from --host, --name, or config auto-select.
+/// Resolves the Samsung TV host and ports from --host, --port, --ws-port, --name, or config.
+///
+/// Returns `(host, rest_port, ws_port, source)`.
+///
+/// Port priority: `--port`/`--ws-port` flags > inline port in `--host` > config > defaults
 fn resolve_samsung(
     host: Option<String>,
+    port: Option<u16>,
+    ws_port: Option<u16>,
     name: Option<String>,
-) -> Result<(String, DeviceSource)> {
+) -> Result<(String, u16, u16, DeviceSource)> {
     // 1. Explicit --host flag (or SAMSUNG_TV env)
     if let Some(h) = host {
-        return Ok((h, DeviceSource::Flag));
+        let (host_str, inline_port) = parse_host_port(&h, SAMSUNG_DEFAULT_REST_PORT);
+        let resolved_port = port.unwrap_or(inline_port);
+        let resolved_ws = ws_port.unwrap_or(SAMSUNG_DEFAULT_WS_PORT);
+        return Ok((host_str, resolved_port, resolved_ws, DeviceSource::Flag));
     }
 
     let config = HomeyConfig::load().unwrap_or_default();
@@ -1861,7 +1938,14 @@ fn resolve_samsung(
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.samsung_tvs.get(n) {
-            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
+            let resolved_port = port.unwrap_or(service.rest_port);
+            let resolved_ws = ws_port.unwrap_or(service.ws_port);
+            return Ok((
+                service.host.clone(),
+                resolved_port,
+                resolved_ws,
+                DeviceSource::Name(n.clone()),
+            ));
         }
         let available = device_names(&config.samsung_tvs);
         return Err(color_eyre::eyre::eyre!(
@@ -1874,7 +1958,14 @@ fn resolve_samsung(
     // 3. Auto-select if only one device
     if config.samsung_tvs.len() == 1 {
         let (dev_name, service) = config.samsung_tvs.iter().next().unwrap();
-        return Ok((service.host.clone(), DeviceSource::Auto(dev_name.clone())));
+        let resolved_port = port.unwrap_or(service.rest_port);
+        let resolved_ws = ws_port.unwrap_or(service.ws_port);
+        return Ok((
+            service.host.clone(),
+            resolved_port,
+            resolved_ws,
+            DeviceSource::Auto(dev_name.clone()),
+        ));
     }
 
     // 4. Error with available devices
@@ -1908,7 +1999,7 @@ fn render_settings_table(settings: &[GenericSettingResult]) {
 async fn handle_sony(
     name: Option<String>,
     host: Option<String>,
-    port: u16,
+    port: Option<u16>,
     action: SonyAction,
     json: bool,
 ) -> Result<()> {
@@ -1928,16 +2019,22 @@ async fn handle_sony(
     .wrap_err(err_ctx)
 }
 
-/// Resolves the Sony host/port from --host, --name, or config auto-select.
+/// Default Sony receiver port (matches config default).
+const SONY_DEFAULT_PORT: u16 = 10000;
+
+/// Resolves the Sony host/port from --host, --port, --name, or config auto-select.
+///
+/// Port priority: `--port` flag > inline port in `--host` > config port > `SONY_DEFAULT_PORT`
 fn resolve_sony(
     host: Option<String>,
-    port: u16,
+    port: Option<u16>,
     name: Option<String>,
 ) -> Result<(String, u16, DeviceSource)> {
     // 1. Explicit --host flag (or SONY_RECEIVER env)
     if let Some(h) = host {
-        let (parsed_host, parsed_port) = parse_host_port(&h, port);
-        return Ok((parsed_host, parsed_port, DeviceSource::Flag));
+        let (parsed_host, inline_port) = parse_host_port(&h, SONY_DEFAULT_PORT);
+        let resolved_port = port.unwrap_or(inline_port);
+        return Ok((parsed_host, resolved_port, DeviceSource::Flag));
     }
 
     // Load config for --name and auto-select
@@ -1946,9 +2043,10 @@ fn resolve_sony(
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.sony_receivers.get(n) {
+            let resolved_port = port.unwrap_or(service.port);
             return Ok((
                 service.host.clone(),
-                service.port,
+                resolved_port,
                 DeviceSource::Name(n.clone()),
             ));
         }
@@ -1963,9 +2061,10 @@ fn resolve_sony(
     // 3. Auto-select if only one device
     if config.sony_receivers.len() == 1 {
         let (dev_name, service) = config.sony_receivers.iter().next().unwrap();
+        let resolved_port = port.unwrap_or(service.port);
         return Ok((
             service.host.clone(),
-            service.port,
+            resolved_port,
             DeviceSource::Auto(dev_name.clone()),
         ));
     }

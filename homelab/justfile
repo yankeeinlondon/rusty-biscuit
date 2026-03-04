@@ -254,6 +254,23 @@ commit:
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff git 2>/dev/null || exit 0
 
+# stages all files in package area and then commits and pushes
+cp:
+    @echo ""
+    @echo "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo ""
+    @git add *
+    @echo ""
+    @echo "Files have been added"
+    @echo ""
+    @just commit
+    @echo ""
+    @git push
+    @echo ""
+    @just play select-4
+    @echo "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo
+
 refresh-skill:
     @clear
     @echo "Refreshing {{BOLD}}Homelab{{RESET}} skill"
