@@ -6,16 +6,44 @@ Home automation control for AV equipment over the local network.
 
 | Package | Binary | Description |
 |---------|--------|-------------|
-| `homelab` (lib) | — | Core library: Arcam amplifier + Sony ES receiver control |
-| `homelab-cli` (cli) | `homey` | CLI for controlling AV devices from the terminal |
-| `homelab-server` (server) | `homelab-server` | REST API server (Axum) for AV device control |
+| `homelab` | — | Core library: Arcam amplifier + Sony ES receiver control |
+| `homelab-cli` | `homey` | CLI for controlling AV devices from the terminal |
+| `homelab-server` | `homelab-server` | REST API server (Axum) for AV device control |
 
-## Supported Devices
+## Supported AV Devices
+
+- **Arcam Amplifiers** (_supports PA240, PA410, PA720 though focus has been on PA240_)
+    - Discrete on/off endpoints
+    - Provides a _heartbeat_ service which can keep the Arcam from deep sleep (making it inaccessible)
+- **Sony AZ7000ES AV Receiver** (_likely to work on other AZ models_)
+    - Discrete on/off endpoints
+    - Enumerates input sources (factory and user defined)
+    - Allows selection of discrete input source
+    - Allows for discrete mute on/off
+    - 
+- **Samsung SmartTV** (_S95C is focus_)
+    - Discrete off, Wake on LAN for on
+    - 
+- **Eversolo Streamer** (_A8 is focus_)
+    - Allows enumeration of input sources
+    - Allows setting discrete input source
+    - Discrete power off
+    - Uses WOL packet for power on
+    - 
+
+
+## Supported Homelab Services (future)
+
+- MQTT Subscriber
+- Ping Monitor
+- 
 
 ### Arcam
+
 - PA240, PA410, PA720 amplifiers (binary protocol over TCP port 50000)
 
 ### Sony
+
 - STR-ES, STR-DA, STR-ZA, STR-DN series receivers (JSON-RPC over HTTP port 10000)
 - Native Web API (port 80) for zone status and settings
 

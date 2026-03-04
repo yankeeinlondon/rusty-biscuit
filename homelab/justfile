@@ -150,7 +150,6 @@ lint:
     @just lint-frontend
 
 install *args="":
-    @just build-frontend
     @echo ""
     @echo "{{BOLD}}Building Homelab Library{{RESET}}"
     @cargo build -p homelab --release  || ( playa effect error-2 2>/dev/null && exit 1 )
@@ -197,7 +196,7 @@ install-server:
 build-frontend:
     @echo ""
     @echo "{{BOLD}}Building Frontend SPA{{RESET}}"
-    @cd server/frontend && pnpm install --frozen-lockfile 2>/dev/null || pnpm install && pnpm build
+    @cd ./server/frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install) && pnpm build
     @echo ""
 
 # run frontend dev server (Vite on :5173 with proxy to :3000)
