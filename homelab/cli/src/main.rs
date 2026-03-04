@@ -1452,7 +1452,7 @@ async fn handle_eversolo_display(
                     "{}",
                     styled(format!(
                         "Screen brightness: <b>{}</b>{max_str} {suffix}",
-                        resp.index
+                        resp.current_value
                     ))
                 );
             }
@@ -1486,7 +1486,7 @@ async fn handle_eversolo_display(
                     "{}",
                     styled(format!(
                         "Knob brightness: <b>{}</b>{max_str} {suffix}",
-                        resp.index
+                        resp.current_value
                     ))
                 );
             }
@@ -1520,10 +1520,14 @@ async fn handle_eversolo_display(
                     TableColumn::new("Index"),
                     TableColumn::new("Name"),
                 ]);
-                for mode in &resp.data {
+                for (i, mode) in resp.data.iter().enumerate() {
+                    let idx = mode
+                        .index
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| i.to_string());
                     table.add_row(vec![
-                        mode.index.to_string().as_str().into(),
-                        mode.name.as_str().into(),
+                        idx.as_str().into(),
+                        mode.title.as_str().into(),
                     ]);
                 }
                 if let Some(current) = resp.current_index {
@@ -1562,10 +1566,14 @@ async fn handle_eversolo_display(
                     TableColumn::new("Index"),
                     TableColumn::new("Name"),
                 ]);
-                for mode in &resp.data {
+                for (i, mode) in resp.data.iter().enumerate() {
+                    let idx = mode
+                        .index
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| i.to_string());
                     table.add_row(vec![
-                        mode.index.to_string().as_str().into(),
-                        mode.name.as_str().into(),
+                        idx.as_str().into(),
+                        mode.title.as_str().into(),
                     ]);
                 }
                 if let Some(current) = resp.current_index {
