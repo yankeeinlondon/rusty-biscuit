@@ -117,6 +117,43 @@ impl clap::builder::TypedValueParser for EffectNameParser {
     }
 }
 
+/// Value parser that suggests common volume levels for shell completion
+/// while accepting any valid f32 in range.
+#[derive(Clone)]
+struct VolumeParser;
+
+impl clap::builder::TypedValueParser for VolumeParser {
+    type Value = f32;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let s = value
+            .to_str()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        s.parse::<f32>()
+            .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = [
+            ("0.25", "25% volume"),
+            ("0.5", "50% volume"),
+            ("0.75", "75% volume"),
+            ("1", "100% volume"),
+            ("1.25", "125% volume"),
+            ("1.5", "150% volume"),
+            ("2", "200% volume"),
+        ]
+        .into_iter()
+        .map(|(val, help)| PossibleValue::new(val).help(help));
+        Some(Box::new(values))
+    }
+}
+
 /// Playback options shared between play and effect commands
 #[derive(Parser, Clone)]
 struct PlaybackOptions {
@@ -149,7 +186,7 @@ struct PlaybackOptions {
     speed: Option<f32>,
 
     /// Custom volume level (0.0 to 2.0)
-    #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"])]
+    #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"], value_parser = VolumeParser)]
     volume: Option<f32>,
 
     /// Force host player playback (skip native decoder)

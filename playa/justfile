@@ -163,16 +163,22 @@ lint:
     @echo
     @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
 
-# Lint (and fix) both the library and CLI
-lint-fix:
+_fix_lint_ai:
+
+_fix_lint_autofix:
     @echo
     @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
     @echo
-    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
+    @just lint --fix || ( just _speak "The {{CLI_NAME}} has failing lints which couldn't be fixed automatically. Will try fixing with AI." && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" &&  _speak "There are lint errors in (())" && just _fix_lint_ai)
+
+# Lint (and fix) both the library and CLI
+fix-lint:
     @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
     @echo
-    cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+    @just lint || ( just _speak "The {{LIB_NAME}} has failing lints; will try to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && just _fix_lint_autofix )
+    @echo
+
 
 _lint_fix_library ERR_FILE:
     @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
@@ -254,6 +260,23 @@ install *args="":
     echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
     echo
     playa effect drop-4 2>/dev/null || true
+
+# stages all files in package area and then commits and pushes
+cp:
+    @echo ""
+    @echo "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo ""
+    @git add .
+    @echo ""
+    @echo "Files have been added"
+    @echo ""
+    @just commit
+    @echo ""
+    @git push
+    @echo ""
+    @just play select-4
+    @echo "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo
 
 # Validate the source code without doing a full build
 check:

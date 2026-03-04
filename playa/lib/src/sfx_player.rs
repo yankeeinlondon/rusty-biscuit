@@ -145,6 +145,11 @@ mod macos {
     const DEVICE_NAME_SELECTOR: u32 =
         ((b'l' as u32) << 24) | ((b'n' as u32) << 16) | ((b'a' as u32) << 8) | (b'm' as u32);
 
+    // kAudioDevicePropertyDeviceUID = 'uid ' (returns CFStringRef)
+    // Unique persistent identifier for a CoreAudio device.
+    const DEVICE_UID_SELECTOR: u32 =
+        ((b'u' as u32) << 24) | ((b'i' as u32) << 16) | ((b'd' as u32) << 8) | (b' ' as u32);
+
     // CoreFoundation FFI for CFStringRef → String conversion.
     // Using inline declarations to avoid a `core-foundation-sys` dependency.
     type CFStringRef = *const std::ffi::c_void;
@@ -170,6 +175,11 @@ mod macos {
     ///
     /// Returns `Ok(Some(device))` when the system sound device differs and a
     /// matching cpal device was found.
+    ///
+    /// Uses CoreAudio device UID for disambiguation when multiple sub-devices
+    /// share the same name (e.g., two "LG UltraFine Display Audio" entries).
+    /// Determines which same-name occurrence to pick by checking UIDs of all
+    /// CoreAudio devices with the target name.
     pub fn find_system_sound_device() -> Result<Option<rodio::Device>, Box<dyn std::error::Error>> {
         let system_device_id = get_audio_device(SYSTEM_OUTPUT_DEVICE_SELECTOR)?;
         let default_device_id = get_audio_device(kAudioHardwarePropertyDefaultOutputDevice)?;
@@ -179,18 +189,51 @@ mod macos {
             return Ok(None);
         }
 
-        // Devices differ - find the system sound device by name.
+        // Devices differ — find the correct cpal device by UID-based index.
         let system_name =
             get_device_name(system_device_id).ok_or("failed to get system sound device name")?;
+        let system_uid =
+            get_device_uid(system_device_id).ok_or("failed to get system sound device UID")?;
 
+        // Enumerate all CoreAudio devices and find which output-capable
+        // device with the target name has the matching UID. Track its
+        // position among same-name output devices.
+        let all_ids = get_all_device_ids()?;
+        let mut same_name_index: Option<usize> = None;
+        let mut counter = 0usize;
+
+        for &ca_id in &all_ids {
+            if !has_output_streams(ca_id) {
+                continue;
+            }
+            if get_device_name(ca_id).as_deref() != Some(&system_name) {
+                continue;
+            }
+            if get_device_uid(ca_id).as_deref() == Some(&system_uid) {
+                same_name_index = Some(counter);
+                break;
+            }
+            counter += 1;
+        }
+
+        let target_index = match same_name_index {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+
+        // Now pick the nth cpal device with the matching name.
         let host = rodio::cpal::default_host();
         let devices = rodio::cpal::traits::HostTrait::output_devices(&host)?;
+        let mut name_counter = 0usize;
 
         for device in devices {
             if let Ok(desc) = device.description()
                 && desc.name() == system_name
             {
-                return Ok(Some(device));
+                if name_counter == target_index {
+                    return Ok(Some(device));
+                }
+                name_counter += 1;
             }
         }
 
@@ -230,14 +273,89 @@ mod macos {
         }
     }
 
+    /// Get all CoreAudio device IDs.
+    fn get_all_device_ids() -> Result<Vec<AudioObjectID>, String> {
+        unsafe {
+            let address = AudioObjectPropertyAddress {
+                mSelector: coreaudio_sys::kAudioHardwarePropertyDevices,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain,
+            };
+
+            // Query size using AudioObjectGetPropertyDataSize.
+            let mut data_size: u32 = 0;
+            let status = coreaudio_sys::AudioObjectGetPropertyDataSize(
+                kAudioObjectSystemObject,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut data_size,
+            );
+            if status != 0 {
+                return Err(format!(
+                    "CoreAudio error querying device list size: OSStatus {status}"
+                ));
+            }
+
+            let count = data_size as usize / mem::size_of::<AudioObjectID>();
+            let mut device_ids = vec![0u32; count];
+
+            let status = AudioObjectGetPropertyData(
+                kAudioObjectSystemObject,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut data_size,
+                device_ids.as_mut_ptr() as *mut _,
+            );
+            if status != 0 {
+                return Err(format!(
+                    "CoreAudio error fetching device list: OSStatus {status}"
+                ));
+            }
+
+            Ok(device_ids)
+        }
+    }
+
+    /// Check whether a CoreAudio device has output streams.
+    fn has_output_streams(device_id: AudioObjectID) -> bool {
+        unsafe {
+            let address = AudioObjectPropertyAddress {
+                mSelector: coreaudio_sys::kAudioDevicePropertyStreams,
+                mScope: coreaudio_sys::kAudioObjectPropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain,
+            };
+            let mut data_size: u32 = 0;
+            let status = coreaudio_sys::AudioObjectGetPropertyDataSize(
+                device_id,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut data_size,
+            );
+            status == 0 && data_size > 0
+        }
+    }
+
+    /// Get the unique persistent UID of a CoreAudio device.
+    fn get_device_uid(device_id: AudioObjectID) -> Option<String> {
+        get_device_cfstring_property(device_id, DEVICE_UID_SELECTOR)
+    }
+
     /// Get the human-readable name of a CoreAudio device.
     fn get_device_name(device_id: AudioObjectID) -> Option<String> {
+        get_device_cfstring_property(device_id, DEVICE_NAME_SELECTOR)
+    }
+
+    /// Query a CFStringRef property from a CoreAudio device.
+    fn get_device_cfstring_property(device_id: AudioObjectID, selector: u32) -> Option<String> {
         unsafe {
-            let mut name: CFStringRef = std::ptr::null();
+            let mut value: CFStringRef = std::ptr::null();
             let mut data_size = mem::size_of::<CFStringRef>() as u32;
 
             let address = AudioObjectPropertyAddress {
-                mSelector: DEVICE_NAME_SELECTOR,
+                mSelector: selector,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain,
             };
@@ -248,15 +366,15 @@ mod macos {
                 0,
                 std::ptr::null(),
                 &mut data_size,
-                &mut name as *mut _ as *mut _,
+                &mut value as *mut _ as *mut _,
             );
 
-            if status != 0 || name.is_null() {
+            if status != 0 || value.is_null() {
                 return None;
             }
 
-            let result = cfstring_to_string(name);
-            CFRelease(name);
+            let result = cfstring_to_string(value);
+            CFRelease(value);
             result
         }
     }
@@ -301,6 +419,12 @@ mod macos {
         }
 
         #[test]
+        fn device_uid_selector_is_correct() {
+            // 'uid ' = 0x75696420
+            assert_eq!(DEVICE_UID_SELECTOR, 0x7569_6420);
+        }
+
+        #[test]
         #[ignore = "requires real audio device"]
         fn can_query_system_sound_device() {
             let result = get_audio_device(SYSTEM_OUTPUT_DEVICE_SELECTOR);
@@ -317,6 +441,16 @@ mod macos {
             assert!(name.is_some(), "should get device name");
             let name = name.unwrap();
             assert!(!name.is_empty(), "device name should not be empty");
+        }
+
+        #[test]
+        #[ignore = "requires real audio device"]
+        fn can_get_device_uid() {
+            let device_id = get_audio_device(SYSTEM_OUTPUT_DEVICE_SELECTOR).unwrap();
+            let uid = get_device_uid(device_id);
+            assert!(uid.is_some(), "should get device UID");
+            let uid = uid.unwrap();
+            assert!(!uid.is_empty(), "device UID should not be empty");
         }
 
         #[test]
