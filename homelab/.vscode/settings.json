@@ -11,5 +11,6 @@
         "sendkey",
         "Tizen",
         "Zidoo"
-    ]
+    ],
+    "svgPreview.autoOpen": false
 }

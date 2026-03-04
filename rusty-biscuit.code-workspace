@@ -149,6 +149,7 @@
             "worktree",
             "worktrees",
             "ZENMUX"
-        ]
+        ],
+        "svgPreview.autoOpen": false
     }
 }
