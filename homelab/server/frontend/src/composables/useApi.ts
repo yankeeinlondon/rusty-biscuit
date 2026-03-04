@@ -63,6 +63,34 @@ export function useApi() {
     return resp.json()
   }
 
+  function sendEversoloPower(device: string, tag: string) {
+    fetch(`/eversolo/${encodeURIComponent(device)}/power`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag }),
+    }).catch(() => {})
+  }
+
+  function sendSamsungKey(device: string, key: string) {
+    fetch(`/samsung_tv/${encodeURIComponent(device)}/remote/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    }).catch(() => {})
+  }
+
+  function wakeEversolo(device: string) {
+    fetch(`/eversolo/${encodeURIComponent(device)}/wake`, {
+      method: 'PUT',
+    }).catch(() => {})
+  }
+
+  function wakeSamsung(device: string) {
+    fetch(`/samsung_tv/${encodeURIComponent(device)}/wake`, {
+      method: 'PUT',
+    }).catch(() => {})
+  }
+
   async function createDevice(apiPath: string, body: CreateDeviceRequest): Promise<void> {
     const resp = await fetch(apiPath, {
       method: 'POST',
@@ -85,5 +113,9 @@ export function useApi() {
     getAutoShutdown,
     setAutoShutdown,
     getTimeout,
+    sendEversoloPower,
+    sendSamsungKey,
+    wakeEversolo,
+    wakeSamsung,
   }
 }

@@ -8,13 +8,15 @@ const popoverRef = ref<HTMLElement | null>(null)
 let showTimer: ReturnType<typeof setTimeout> | undefined
 let hideTimer: ReturnType<typeof setTimeout> | undefined
 const created = Date.now()
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
 
 function startShow() {
+  if (!canHover) return
   if (Date.now() - created < 100) return
   clearTimeout(hideTimer)
   showTimer = setTimeout(() => {
     try { popoverRef.value?.showPopover() } catch {}
-  }, 1000)
+  }, 300)
 }
 
 function startHide() {

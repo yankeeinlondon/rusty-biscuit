@@ -1,5 +1,12 @@
-export type DeviceStatus = 'active' | 'standby' | 'error' | 'not_configured'
-export type DotColor = 'green' | 'amber' | 'red' | 'grey'
+/**
+ * Device power states:
+ * - `active`  — powered on and usable (green dot)
+ * - `standby` — low-power mode, reachable on network (amber dot)
+ * - `off`     — unreachable on network, truly off (grey dot)
+ * - `not_configured` — no device configured (grey dot)
+ */
+export type DeviceStatus = 'active' | 'standby' | 'off' | 'not_configured'
+export type DotColor = 'green' | 'amber' | 'grey'
 
 export interface SonySource {
   category: string
@@ -42,6 +49,11 @@ export interface EversoloDetail {
   artist?: string
 }
 
+export interface SamsungDetail {
+  name?: string
+  model?: string
+}
+
 export interface StatusResponse {
   sony: DeviceStatusJson
   arcam: DeviceStatusJson
@@ -71,13 +83,14 @@ export interface ServiceKindMeta {
   description: string
   defaultPort: number
   apiPath: string
+  fixedPort?: boolean
 }
 
 export const SERVICE_KINDS: ServiceKindMeta[] = [
   { kind: 'sony_receiver', label: 'Sony Receiver', description: 'Sony ES audio receiver', defaultPort: 10000, apiPath: '/sony_receiver' },
   { kind: 'arcam_amp', label: 'Arcam Amplifier', description: 'Arcam PA-series amplifier', defaultPort: 50000, apiPath: '/arcam_amp' },
-  { kind: 'eversolo', label: 'Eversolo Streamer', description: 'Eversolo DMP music streamer', defaultPort: 9529, apiPath: '/eversolo' },
-  { kind: 'samsung_tv', label: 'Samsung TV', description: 'Samsung Smart TV', defaultPort: 8001, apiPath: '/samsung_tv' },
+  { kind: 'eversolo', label: 'Eversolo Streamer', description: 'Eversolo DMP music streamer', defaultPort: 9529, apiPath: '/eversolo', fixedPort: true },
+  { kind: 'samsung_tv', label: 'Samsung TV', description: 'Samsung Smart TV', defaultPort: 8001, apiPath: '/samsung_tv', fixedPort: true },
 ]
 
 export interface CreateDeviceRequest {
@@ -90,7 +103,6 @@ export function statusToDotColor(status: DeviceStatus): DotColor {
   switch (status) {
     case 'active': return 'green'
     case 'standby': return 'amber'
-    case 'error': return 'red'
     default: return 'grey'
   }
 }

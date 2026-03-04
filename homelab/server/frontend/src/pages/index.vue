@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ArcamActiveDetail, ArcamStandbyDetail, SonyDetail } from '~/types'
+import type { ArcamActiveDetail, ArcamStandbyDetail, EversoloDetail, SamsungDetail, SonyDetail } from '~/types'
 import { statusToDotColor } from '~/types'
 import { useDeviceControl } from '~/composables/useDeviceControl'
 import InfoPopoverVue from '~/components/InfoPopover.vue'
@@ -20,6 +20,8 @@ const {
   arcamPowerLock,
   toggleSonyPower,
   toggleArcamPower,
+  toggleEversoloPower,
+  toggleSamsungPower,
   selectSonySource,
   setAutoShutdown,
   refreshDevices,
@@ -54,6 +56,16 @@ const arcamActiveDetail = computed(() =>
 
 const arcamStandbyDetail = computed(() =>
   arcamStatus.value.status === 'standby' ? arcamDetail.value as ArcamStandbyDetail : undefined,
+)
+
+// Eversolo detail typed
+const eversoloDetail = computed(() =>
+  eversoloStatus.value?.detail as EversoloDetail | undefined,
+)
+
+// Samsung detail typed
+const samsungDetail = computed(() =>
+  samsungTvStatus.value?.detail as SamsungDetail | undefined,
 )
 
 // Sorted sources: Media Box and Game pinned first, then alphabetical
@@ -95,6 +107,11 @@ const samsungDotColor = computed(() =>
 
 // Add-service modal
 const showAddModal = ref(false)
+
+// Force full-page navigation to the Scalar API docs (bypass SPA routing)
+function navigateToExplore() {
+  window.location.href = '/explore'
+}
 
 // Popover refs
 const sonyPopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
@@ -176,7 +193,23 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
       :label="eversoloStatus?.label ?? 'Loading...'"
       :host="`${device.host}<span class='port'>:${device.port}</span>`"
       :dot-color="eversoloDotColor"
-    />
+      @power-toggle="toggleEversoloPower()"
+    >
+      <template #instruments>
+        <VolumeBar
+          v-if="eversoloDetail?.volume !== undefined"
+          :volume="eversoloDetail.volume"
+          :max-volume="eversoloDetail.max_volume ?? 100"
+          :muted="eversoloDetail.muted ?? false"
+        />
+      </template>
+      <template #extra>
+        <div v-if="eversoloDetail?.title" class="track-info">
+          <span class="track-title">{{ eversoloDetail.title }}</span>
+          <span v-if="eversoloDetail.artist" class="track-artist">{{ eversoloDetail.artist }}</span>
+        </div>
+      </template>
+    </DeviceCard>
 
     <!-- Samsung TVs -->
     <DeviceCard
@@ -186,10 +219,15 @@ const arcamModePopover = ref<InstanceType<typeof InfoPopoverVue> | null>(null)
       :label="samsungTvStatus?.label ?? 'Loading...'"
       :host="`${device.host}<span class='port'>:${device.port}</span>`"
       :dot-color="samsungDotColor"
-    />
+      @power-toggle="toggleSamsungPower()"
+    >
+      <template v-if="samsungDetail?.model" #instruments>
+        <span class="device-model">{{ samsungDetail.model }}</span>
+      </template>
+    </DeviceCard>
 
     <p class="explore">
-      Try interacting with the API by using the <a href="/explore">explore</a> UI.
+      Try interacting with the API by using the <a href="/explore" @click.prevent="navigateToExplore">explore</a> UI.
     </p>
 
     <!-- Popovers -->
@@ -300,6 +338,26 @@ h1 {
 @keyframes pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
+}
+
+.track-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--c-popover-border);
+}
+
+.track-title {
+  color: var(--c-text);
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.track-artist {
+  color: var(--c-text-muted);
+  font-size: 0.8em;
 }
 
 .explore {

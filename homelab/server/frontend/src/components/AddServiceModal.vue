@@ -145,7 +145,7 @@ function onBackdropClick(e: MouseEvent) {
               >
             </label>
 
-            <label class="field">
+            <label v-if="!selectedKind!.fixedPort" class="field">
               <span class="field-label">Port</span>
               <input
                 v-model.number="port"

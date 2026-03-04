@@ -231,6 +231,34 @@ export function useDeviceControl() {
     api.setAutoShutdown(value)
   }
 
+  function toggleEversoloPower() {
+    if (!eversoloStatus.value || eversoloStatus.value.status === 'not_configured') return
+    const device = eversoloDevices.value[0]?.name
+    if (!device) return
+
+    if (eversoloStatus.value.status === 'active') {
+      eversoloStatus.value = { status: 'standby', label: 'Shutting down...' }
+      api.sendEversoloPower(device, 'poweroff')
+    } else if (eversoloStatus.value.status === 'off' || eversoloStatus.value.status === 'standby') {
+      eversoloStatus.value = { status: 'standby', label: 'Waking...' }
+      api.wakeEversolo(device)
+    }
+  }
+
+  function toggleSamsungPower() {
+    if (!samsungTvStatus.value || samsungTvStatus.value.status === 'not_configured') return
+    const device = samsungDevices.value[0]?.name
+    if (!device) return
+
+    if (samsungTvStatus.value.status === 'active') {
+      samsungTvStatus.value = { status: 'standby', label: 'Standby' }
+      api.sendSamsungKey(device, 'KEY_POWER')
+    } else if (samsungTvStatus.value.status === 'off' || samsungTvStatus.value.status === 'standby') {
+      samsungTvStatus.value = { status: 'standby', label: 'Waking...' }
+      api.wakeSamsung(device)
+    }
+  }
+
   async function refreshDevices() {
     try {
       const devices = await api.getDevices()
@@ -285,6 +313,8 @@ export function useDeviceControl() {
     // Actions
     toggleSonyPower,
     toggleArcamPower,
+    toggleEversoloPower,
+    toggleSamsungPower,
     selectSonySource,
     setAutoShutdown,
     refreshDevices,
