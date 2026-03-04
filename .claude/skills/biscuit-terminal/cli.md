@@ -19,6 +19,10 @@ cargo install --path biscuit-terminal/cli
 | `bt` | Terminal inspection (default) |
 | `bt image` | Render inline images |
 | `bt prose` | Render styled prose text |
+| `bt quote` | Block quote with left border |
+| `bt list` | Bulleted list with hanging indents |
+| `bt columns` | Two-column text layout |
+| `bt dir` | Directory tree with icons and gitignore awareness |
 | `bt flowchart` | Flowchart diagrams |
 | `bt quadrant` | Quadrant charts |
 | `bt pie-chart` | Pie charts |
@@ -28,7 +32,6 @@ cargo install --path biscuit-terminal/cli
 | `bt timeline` | Timeline diagrams |
 | `bt state-diagram` | State machine diagrams |
 | `bt erd` | Entity relationship diagrams |
-| `bt columns` | Two-column text layout |
 
 All diagram commands support:
 - `--example` / `-e`: Render example with command shown
@@ -36,6 +39,7 @@ All diagram commands support:
 - `--inverse`: Solid background with inverted colors
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON (for scripting)
+- `--meta`: Output rendering metadata to stderr (filename, cache hit, file size, render time)
 
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 
@@ -127,6 +131,77 @@ Options:
 - `--gap`: Gap between columns in characters (default: 3)
 - `--left`: Left column width (e.g., `20`, `20ch`, `40%`)
 
+## Quote Command
+
+Render styled text in a block quote with a left border:
+
+```bash
+bt quote "To be or not to be"
+bt quote --attribution "Shakespeare" "To be or not to be"
+bt quote "<bold>Important:</bold> This is <red>critical</red> information"
+bt quote --attribution "Albert Einstein" "<i>Imagination is more important than knowledge.</i>"
+```
+
+Options:
+- `--attribution`: Attribution (author/source) displayed below the quote
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
+
+## List Command
+
+Render a bulleted list with hanging indents:
+
+```bash
+bt list "First item" "Second item" "Third item"
+bt list --bullet "- " "Item one" "Item two"
+bt list --bullet "→ " "Step one" "Step two" "Step three"
+bt list --no-hanging-indent "Item without hanging indent on wrap"
+```
+
+Options:
+- `-b`/`--bullet`: Custom bullet string (default: `"• "`)
+- `--no-hanging-indent`: Disable hanging indent on wrapped lines
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+
+## Directory Tree Command
+
+Display a filesystem tree with Nerd Font icons and gitignore-aware dimming:
+
+```bash
+bt dir                              # Current directory
+bt dir /path/to/project             # Specific path
+bt dir --depth 2                    # Limit recursion depth
+bt dir --filter ".rs"               # Filter by extension
+bt dir -f ".rs" -f ".toml"          # Multiple filters
+bt dir src --depth 3 --filter ".rs" # Combined
+```
+
+File metrics:
+
+```bash
+bt dir --size                       # Show file sizes (human-readable)
+bt dir --tokens                     # Show estimated LLM token counts
+bt dir --modified                   # Show absolute modification timestamps
+bt dir --updated                    # Show relative times ("2 days ago")
+bt dir --size --tokens --modified   # Combine metrics
+```
+
+Options:
+- `-d`/`--depth`: Maximum recursion depth
+- `-f`/`--filter`: Filter pattern (repeatable, e.g., `.rs`, `.toml`)
+- `--skip-root`: Hide the root directory header line
+- `--size`: Show human-readable file sizes
+- `--tokens`: Show estimated LLM token counts
+- `--modified`: Show absolute modification timestamps
+- `--updated`: Show relative modification times
+- `--margin-left` (alias `--ml`): Left margin in characters
+
 ## Prose Command
 
 Render styled prose text with inline tokens:
@@ -140,17 +215,24 @@ bt prose "{{red}}Error:{{reset}} Something went wrong"
 bt prose "<b>Bold</b> and <i>italic</i> text"
 bt prose "<a href='https://example.com'>Click here</a>"
 
-# With margins
-bt prose --left-margin 4 "Indented content"
-bt prose -l 2 -r 2 "With margins on both sides"
-
-# Disable word wrapping
+# With margins and alignment
+bt prose --margin-left 4 "Indented content"
+bt prose --ml 2 --mr 2 "With margins on both sides"
+bt prose --alignment center "Centered text"
 bt prose --no-wrap "Long line that should not wrap"
 ```
 
+Options:
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
+- `--no-wrap`: Disable word wrapping
+
 Supported tokens:
 - **Atomic**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
-- **Block**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`
+- **Block**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
 
 ## Content Analysis
 

@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (12+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), Mermaid diagram rendering (10 diagram types), OS/font detection, escape code analysis, and styled output. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for all terminal rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), Mermaid diagram rendering (10 diagram types), OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for all terminal rendering.
 ---
 
 # biscuit-terminal
@@ -37,14 +37,15 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
-| [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn |
+| [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn, FileSystem, Progress, InlineContent |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | 10 diagram types via mmdc CLI |
+| [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
 | [Detection Functions](./discovery.md) | App, color, underline, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
-| [Styling](./styling.md) | Terminal-aware styling, Prose component |
-| [bt Command](./cli.md) | CLI tool for inspection, diagrams, and columns |
+| [Styling](./styling.md) | Terminal-aware styling, Prose component, TextBlock |
+| [bt Command](./cli.md) | CLI tool: 16 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
 
@@ -89,24 +90,33 @@ let fg = match Terminal::color_mode() {
 | Kitty | Kitty | Yes | Yes |
 | iTerm2 | ITerm | Yes | Yes |
 | Ghostty | Kitty | Yes | Yes |
-| Alacritty | - | Yes | Yes |
 | Konsole | Kitty | Yes | Yes |
+| Warp | Kitty | Yes | Yes |
+| Wast | Kitty | No | No |
+| Alacritty | - | Yes | Yes |
+| Apple Terminal | - | No | Yes |
+| GNOME Terminal | - | Yes | Yes |
+| Foot | - | Yes | Yes |
+| Contour | - | Yes | Yes |
 | VS Code | - | Yes | Yes |
 
-## bt CLI Commands
+## bt CLI Commands (16 commands)
 
 ```bash
 # Terminal inspection
 bt                              # Pretty-printed capabilities
 bt --json                       # JSON output for scripting
 
-# Styled text
+# Styled text and layout
 bt prose "Hello {{bold}}world{{reset}}!"
 bt prose "<red>Error</red>: message"
-
-# Two-column layout
-bt columns "Left column" "Right column"
+bt quote --attribution "Shakespeare" "To be or not to be"
+bt list "First item" "Second item" "Third item"
 bt columns --gap 6 --left 40% "Title" "Description"
+
+# Filesystem
+bt dir src --depth 2 --filter ".rs"
+bt dir --size --tokens --modified
 
 # Diagrams (10 types)
 bt flowchart "A --> B --> C"
@@ -120,7 +130,7 @@ bt state-diagram "[*] --> Idle" "Idle --> Running"
 bt erd "Customer ||--o{ Order : places"
 ```
 
-Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`
+Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`, `--meta`
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 
 ## Module Structure
@@ -137,6 +147,7 @@ biscuit_terminal/
 │   ├── clipboard.rs      # OSC52 clipboard
 │   ├── locale.rs         # Locale, character encoding
 │   ├── mode_2027.rs      # Grapheme cluster support
+│   ├── cursor_position.rs # Cursor position queries
 │   └── eval.rs           # Escape analysis
 ├── components/           # Rendering
 │   ├── renderable.rs     # Renderable trait + RenderableContent
@@ -145,21 +156,25 @@ biscuit_terminal/
 │   ├── block_quote.rs    # BlockQuote with attribution
 │   ├── prose.rs          # Styled text with tokens
 │   ├── text_block.rs     # Uniform block styling
+│   ├── inline_content.rs # Inline concatenation without newlines
 │   ├── list.rs           # OrderedList, UnorderedList
 │   ├── table/            # Table with box-drawing borders
 │   ├── two_column.rs     # TwoColumn side-by-side layout
 │   ├── todo.rs           # Todo with states (Open, InProgress, etc.)
+│   ├── progress.rs       # Progress indicator rendering
+│   ├── filesystem.rs     # File/directory tree rendering
 │   ├── terminal_image.rs # Image (Kitty/iTerm2 protocols)
 │   ├── image_options.rs  # Policy options/helpers (app-enforced)
 │   ├── mermaid.rs        # Diagram rendering
 │   └── mermaid_cache.rs  # Content-hashed diagram cache
 └── utils/
     ├── layout.rs         # Layout, Margin, WordWrap, Alignment
-    ├── color.rs          # Color, BasicColor, WebColor, Tailwind
+    ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
     ├── styling.rs        # Stylist trait, FontWeight, Style
     ├── escape_codes.rs   # ANSI escape code generation
     ├── block_constraint.rs # Visual width, line splitting
     ├── word_wrap.rs      # Word wrapping strategies
+    ├── text.rs           # Content length calculation (escape-aware)
     ├── truncate.rs       # Text truncation
     └── multiplex.rs      # Multiplexing detection
 ```

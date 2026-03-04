@@ -115,12 +115,22 @@ HTML-like tags that auto-reset. Same names as atomic tokens, with short aliases:
 
 #### Color Blocks
 
+Foreground colors:
 ```
 <red>basic color</red>
 <bright-red>bright variant</bright-red>
 <alice-blue>web/CSS color</alice-blue>
 <purple-500>Tailwind color</purple-500>
 <rgb 255,0,0>RGB color</rgb>
+```
+
+Background colors (prefix with `bg-`):
+```
+<bg-red>red background</bg-red>
+<bg-blue>blue background</bg-blue>
+<bg-coral>web/CSS background</bg-coral>
+<bg-red-800>Tailwind background</bg-red-800>
+<bg-rgb 255,128,0>RGB background</bg-rgb>
 ```
 
 #### Hyperlinks
@@ -277,5 +287,6 @@ fn colored_output(msg: &str) {
 
 ## Related
 
+- [Color System](./color-system.md) - Full color type hierarchy (BasicColor, RgbColor, WebColor, Tailwind)
 - [Escape Codes](./escape-codes.md) - Stripping and analyzing escape codes
 - [Terminal Struct](./terminal-struct.md) - Capability detection

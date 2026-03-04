@@ -24,6 +24,9 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `TwoColumn` | `two_column.rs` | Yes | Side-by-side columns (supports inline images) |
 | `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
 | `Todo` | `todo.rs` | No | Task item with state (Open, InProgress, Completed, Blocked, Cancelled) |
+| `Progress` | `progress.rs` | No | Progress indicator rendering |
+| `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
+| `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
 | `TerminalImage` | `terminal_image.rs` | Yes | Inline images via Kitty/iTerm2 protocols |
 
 ## Compose
@@ -152,6 +155,28 @@ let outer = UnorderedList::from(vec![
     RenderableContent::String("Top item".into()),
     RenderableContent::Component(Arc::new(inner)),
 ]);
+```
+
+## Progress
+
+Progress indicator rendering component.
+
+```rust
+use biscuit_terminal::components::progress::Progress;
+```
+
+## FileSystem
+
+File/directory tree rendering with Nerd Font icons and gitignore-aware dimming. Used by `bt dir`.
+
+Supports optional file metrics: file sizes, estimated LLM token counts, modification timestamps (absolute and relative).
+
+## InlineContent
+
+Inline concatenation of items without newlines. Useful for composing multiple elements on a single line.
+
+```rust
+use biscuit_terminal::components::inline_content::InlineContent;
 ```
 
 ## Prose and TextBlock
