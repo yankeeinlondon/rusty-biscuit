@@ -1,6 +1,6 @@
 # biscuit-terminal-cli
 
-A CLI tool (`bt`) for inspecting terminal capabilities, rendering images, and generating Mermaid diagrams.
+A CLI tool (`bt`) for inspecting terminal capabilities, rendering images, styled text, directory trees, and generating Mermaid diagrams.
 
 ## Installation
 
@@ -33,6 +33,7 @@ just -f biscuit-terminal/justfile install
 | `bt quote` | Block quote with left border |
 | `bt list` | Bulleted list with hanging indents |
 | `bt columns` | Two-column text layout |
+| `bt dir` | Directory tree with icons and gitignore awareness |
 
 ## Usage
 
@@ -154,6 +155,43 @@ bt columns --margin-left 2 --margin-right 2 --alignment center "Left" "Right"
 Options:
 - `--gap`: Gap between columns in characters (default: 3)
 - `--left`: Left column width (e.g., `20`, `20ch`, `40%`)
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
+
+### Directory Tree
+
+Display a filesystem tree with Nerd Font icons and gitignore-aware dimming:
+
+```bash
+bt dir                              # Current directory
+bt dir /path/to/project             # Specific path
+bt dir --depth 2                    # Limit recursion depth
+bt dir --filter ".rs"               # Filter by extension
+bt dir -f ".rs" -f ".toml"          # Multiple filters
+bt dir src --depth 3 --filter ".rs" # Combined
+```
+
+File metrics:
+
+```bash
+bt dir --size                       # Show file sizes (human-readable)
+bt dir --tokens                     # Show estimated LLM token counts
+bt dir --modified                   # Show absolute modification timestamps
+bt dir --updated                    # Show relative times ("2 days ago")
+bt dir --size --tokens --modified   # Combine metrics
+```
+
+Options:
+- `-d`/`--depth`: Maximum recursion depth
+- `-f`/`--filter`: Filter pattern (repeatable, e.g., `.rs`, `.toml`)
+- `--skip-root`: Hide the root directory header line
+- `--size`: Show human-readable file sizes
+- `--tokens`: Show estimated LLM token counts
+- `--modified`: Show absolute modification timestamps
+- `--updated`: Show relative modification times
 - `--margin-left` (alias `--ml`): Left margin in characters
 - `--margin-right` (alias `--mr`): Right margin in characters
 - `--margin-top` (alias `--mt`): Top margin in blank lines
@@ -369,6 +407,7 @@ All diagram commands support:
 - `--inverse`: Solid background with inverted colors
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON for scripting
+- `--meta`: Output rendering metadata to stderr (filename, cache hit, file size, render time)
 
 ### Shell Completions
 
@@ -456,6 +495,9 @@ bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
 
 # Render an ERD
 bt erd "Customer ||--o{ Order : places"
+
+# Display a directory tree
+bt dir src --depth 2 --filter ".rs"
 
 # Analyze escape code output
 echo -e "\x1b[32mGreen\x1b[0m" | xargs bt

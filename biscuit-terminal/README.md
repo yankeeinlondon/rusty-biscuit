@@ -7,10 +7,13 @@
       <h2>biscuit-terminal</h2>
       <p>This shared library provides support for working with the terminal:</p>
       <ul>
-        <li>terminal <b>metadata</b> (<i>color support, character width and height, light/dark themed, etc.</i>)</li>
-        <li>OSC8 Links</li>
+        <li>terminal <b>metadata</b> (<i>13+ terminal emulators, color depth, light/dark mode, dimensions, font, OS</i>)</li>
+        <li>OSC8 links, OSC52 clipboard, and OSC10/11/12 color queries</li>
         <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
-        <li>smart rendering utilities to write to the terminal in style</li>
+        <li>inline image rendering via Kitty/iTerm2 protocols with graceful fallback</li>
+        <li>Mermaid diagram rendering (10 diagram types) via mmdc CLI</li>
+        <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>
+        <li>composable rendering components: Prose, Table, List, Section, FileSystem, TwoColumn, and more</li>
       </ul>
     </td>
   </tr>
@@ -140,6 +143,8 @@ The following renderable _components_ are provided in this library:
 - `Todo`
 - `Progress`
 - `TerminalImage`
+- `FileSystem`
+- `InlineContent`
 
 In the following sections we'll cover each in more detail.
 
@@ -159,8 +164,8 @@ The `TextBlock` struct is a block of text which the caller wants to have styled 
 ```rust
 let heading = TextBlock::new("This is my heading")
     .using_bold_text()
-    .with_foreground_color(Color::Basic(BasicColor::Blue))
-    .with_background_color(Color::WebColor(WebColor::HoneyDew))
+    .with_foreground_color(Color::BasicColor(BasicColor::Blue))
+    .with_background_color(Color::Web(WebColor::HoneyDew))
     .with_underline(UnderliningRequest::Dotted);
 ```
 
@@ -179,4 +184,6 @@ Both list structs are represented by a 1:M _elements_ where the elements are any
 
 ## The `bt` CLI
 
-While this package is mainly about providing terminal capabilities to other libraries, it does also come with a CLI which can be used to inspect the terminal.
+While this package is mainly about providing terminal capabilities to other libraries, it also includes a CLI (`bt`) for terminal inspection, styled text rendering, directory trees, and Mermaid diagram generation. It supports 16 commands including `image`, `prose`, `quote`, `list`, `columns`, `dir`, `flowchart`, `quadrant`, `pie-chart`, `git-graph`, `bar-chart`, `line-chart`, `timeline`, `state-diagram`, and `erd`.
+
+See [`cli/README.md`](./cli/README.md) for full documentation.

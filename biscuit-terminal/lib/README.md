@@ -29,16 +29,16 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 
 ## Capabilities
 
-- **Terminal App Detection**: Recognize 12+ terminal emulators with capability profiles
+- **Terminal App Detection**: Recognize 13+ terminal emulators with capability profiles
 - **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
 - **Mermaid Diagrams**: Render diagrams to terminal using mmdc CLI with viuer
 - **OS Detection**: Identify operating system and Linux distribution
 - **Repo Detection**: Detect git repo root and monorepo status via `sniff`
 - **Font Detection**: Extract font name and size from terminal config files
-- **Color Support**: Query color depth, mode (light/dark), and background color
+- **Color Support**: Query color depth, mode (light/dark), and background color; render with BasicColor, RGB, 148 CSS WebColors, or full Tailwind palettes
 - **Escape Code Analysis**: Calculate visual line widths, detect escape codes
 - **Clipboard**: OSC52 clipboard support for compatible terminals
-- **Styled Output**: Composable rendering components (Prose, Table, List)
+- **Styled Output**: Composable rendering components (Prose, Table, List, Section, FileSystem, TwoColumn, and more)
 
 ## Quick Start
 
@@ -78,13 +78,23 @@ fn main() {
 - `components::list` - List rendering
 - `components::block_quote` - Block quote rendering
 - `components::compose` - Component composition utilities
+- `components::filesystem` - File/directory tree rendering
 - `components::image_options` - Image rendering configuration
+- `components::inline_content` - Inline concatenation of items without newlines
 - `components::progress` - Progress indicator rendering
 - `components::renderable` - Renderable trait for components
 - `components::section` - Section rendering
 - `components::text_block` - Text block rendering
 - `components::todo` - Todo item rendering
 - `components::two_column` - Two-column layout rendering
+- `utils::color` - Color types (BasicColor, RgbColor, HdrColor, WebColor, Tailwind)
+- `utils::styling` - Stylist trait, FontWeight, Style
+- `utils::layout` - Layout, Margin, WordWrap, Alignment
+- `utils::escape_codes` - ANSI escape code generation
+- `utils::block_constraint` - Visual width and line splitting
+- `utils::word_wrap` - Word wrapping strategies
+- `utils::text` - Content length calculation (escape-aware)
+- `utils::multiplex` - Multiplexing detection
 
 ## Terminal Images (TerminalImage)
 
@@ -144,7 +154,7 @@ let options = TerminalImageOptions::builder()
     .allow_remote(false)
     .build();
 
-assert!(options.validate_file_size(1_024));
+assert!(options.is_size_allowed(1_024));
 ```
 
 ### Image rendering architecture
@@ -454,6 +464,97 @@ assert_eq!(line_widths("\x1b_Gf=100,a=T,t=d,c=10,m=0;AAAA\x1b\\text"), vec![4]);
 assert!(has_escape_codes("\x1b[1mBold\x1b[0m"));
 assert!(!has_escape_codes("plain text"));
 ```
+
+## Color System
+
+The library provides a layered color system through the `utils::color` module, supporting everything from basic 16-color ANSI to full Tailwind CSS palettes. All color types implement the `TermColor` trait for foreground (`fg`) and background (`bg`) rendering.
+
+### Color Types
+
+| Type | Description | Escape Encoding |
+|------|-------------|-----------------|
+| `BasicColor` | 16 standard ANSI colors (8 normal + 8 bright) | `\x1b[31m` … `\x1b[97m` |
+| `RgbColor` | Arbitrary 24-bit RGB with a `BasicColor` fallback | `\x1b[38;2;r;g;bm` |
+| `HdrColor` | RGB + OKLCH perceptual values (lightness, chroma, hue) | `\x1b[38;2;r;g;bm` |
+| `WebColor` | 148 CSS named colors (e.g., `Coral`, `MidnightBlue`) | 24-bit RGB via lookup table |
+| `Tailwind` | Full Tailwind CSS v4 palette (22 families × 11 shades + specials) | 24-bit RGB via generated `HdrColor` |
+
+The unified `Color` enum wraps all of the above plus `DefaultForeground`, `DefaultBackground`, and `Reset`.
+
+### BasicColor
+
+The 16 standard ANSI colors supported by virtually all terminals:
+
+```rust
+use biscuit_terminal::utils::color::{BasicColor, TermColor};
+
+// Foreground
+let red_text = BasicColor::Red.fg("error");
+// Background
+let highlighted = BasicColor::Yellow.bg("warning");
+// Bright variants for higher contrast
+let bright = BasicColor::BrightGreen.fg("success");
+```
+
+### RgbColor
+
+True 24-bit color with an automatic fallback for terminals that lack truecolor support:
+
+```rust
+use biscuit_terminal::utils::color::{BasicColor, RgbColor, TermColor};
+
+let brand_color = RgbColor::new(99, 102, 241, BasicColor::Blue);
+let styled = brand_color.fg("Indigo text");
+```
+
+When rendered through the `RenderableWrapper` wrappers (used by components), color depth is detected automatically:
+
+- **TrueColor** terminals → 24-bit `\x1b[38;2;r;g;bm`
+- **Enhanced** (256-color) terminals → nearest 6×6×6 cube index `\x1b[38;5;nm`
+- **Basic** terminals → the `BasicColor` fallback
+
+### WebColor
+
+All 148 CSS Color Module Level 4 named colors, each backed by an `RgbColor` lookup:
+
+```rust
+use biscuit_terminal::utils::color::{WebColor, TermColor};
+
+let coral = WebColor::Coral.fg("warm text");
+let navy = WebColor::Navy.bg("dark background");
+```
+
+### Tailwind
+
+The complete Tailwind CSS v4 palette — 22 color families (Red, Orange, Amber, Yellow, Lime, Green, Emerald, Teal, Cyan, Sky, Blue, Indigo, Violet, Purple, Fuchsia, Pink, Rose, Slate, Gray, Zinc, Neutral, Stone), each with shades from 50 (lightest) to 950 (darkest), plus `Black`, `White`, `Inherit`, `Current`, and `Transparent`:
+
+```rust
+use biscuit_terminal::utils::color::{Tailwind, Color};
+
+let primary = Tailwind::Blue500;
+let bg = Tailwind::Slate50;
+
+// Convert to RGB
+let color = Color::Tailwind(Tailwind::Emerald600);
+if let Some((r, g, b)) = color.to_rgb() {
+    println!("RGB: ({r}, {g}, {b})");
+}
+
+// Access hex and CSS values (generated from Tailwind v4 data)
+assert_eq!(Tailwind::Red500.hex(), Some("#ef4444"));
+assert_eq!(Tailwind::Transparent.css_var(), "transparent");
+```
+
+Each `Tailwind` variant stores an `HdrColor` with both RGB and OKLCH (perceptual lightness, chroma, hue) values, making it suitable for accessible contrast calculations.
+
+### Shade Guide
+
+| Range | Usage |
+|-------|-------|
+| 50–200 | Light backgrounds, subtle highlights |
+| 300–500 | Primary interactive elements |
+| 600–700 | Active states, emphasis |
+| 800–950 | Dark backgrounds, heavy text |
 
 ## Clipboard (OSC52)
 
