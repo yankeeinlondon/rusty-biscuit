@@ -299,174 +299,19 @@ commit:
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff git 2>/dev/null || exit 0
 
-
-# Update docs and then update the skill for the Schematic package
-skill-schematic:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Schematic{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
+# stages all files in package area and then commits and pushes
+cp:
     @echo ""
-    @echo "Schematic Skill has been rebuilt"
+    @echo "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files across the {{RED}}rusty-biscuit{{RESET}} monorepo."
     @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Schematic package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the darkmatter package
-skill-darkmatter:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Darkmatter{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-darkmatter.md)"\'
+    @git add . ||
     @echo ""
-    @echo "Darkmatter Skill has been rebuilt"
+    @echo "Files have been added"
     @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The darkmatter package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the Sniff package
-skill-sniff:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Sniff{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
+    @just commit
     @echo ""
-    @echo "Sniff skill has been rebuilt"
+    @git push
     @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Sniff package has synced it's documents for drift and updated the skill tree."; \
-    fi
-# Update docs and then update the skill for the Playa package
-skill-playa:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Playa{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-playa.md)"\'
-    @echo ""
-    @echo "The Playa skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        @so-you-say "The playa package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the Queue package
-skill-queue:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Queue{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-queue.md)"\'
-    @echo ""
-    @echo "The Queue skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Queue package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the biscuit-speak package
-skill-biscuit-speaks:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-speaks{{RESET}} Package"
-    @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-speaks.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}biscuit-speaks{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The biscuit-speaks package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the biscuit-hash package
-skill-biscuit-hash:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-hash{{RESET}} Package"
-    @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-hash.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}biscuit-hash{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The biscuit-hash package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the biscuit-terminal package
-skill-biscuit-terminal:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-terminal{{RESET}} Package"
-    @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-terminal.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}biscuit-terminal{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The biscuit-terminal package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the tree-huger package
-skill-tree-hugger:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-
-# Update docs and then update the skill for the Research package
-skill-research:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}research{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The research package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the so-you-say package
-skill-so-you-say:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}so-you-say{{RESET}} package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-so-you-say.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}so-you-say{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The so-you-say package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the unchained-ai package
-skill-unchained-ai:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}unchained-ai{{RESET}} package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-unchained-ai.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}unchained-ai{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v unchained-ai >/dev/null 2>&1; then \
-        unchained-ai "The unchained-ai package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# Update docs and then update the skill for the claudine package
-skill-claudine:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}claudine{{RESET}} package"
-    @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-claudine.md)"\'
-    @echo ""
-    @echo "The {{BOLD}}claudine{{RESET}} skill has been rebuilt"
-    @echo ""
-    @if command -v claudine >/dev/null 2>&1; then \
-        claudine "The claudine package has synced it's documents for drift and updated the skill tree."; \
-    fi
-
-# fix package documentation drift, refresh skill files, and review CLAUDE.md
-drift AREA *args="":
+    @just play select-4
+    @echo "All committed files from {{BOLD}}rusty-biscuit{{RESET}} monorepo have now been pushed to remote."
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}{{AREA}}{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- package-level DOCS defaults are configured in each package justfile"
-    @echo "- export {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
-    @echo "- extra document paths can be passed as drift args"
-    @echo
-    @cargo run --manifest-path scripts/Cargo.toml --bin drift -- {{AREA}} {{args}}
-    @_speak "the drift recipe for the {{AREA}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
