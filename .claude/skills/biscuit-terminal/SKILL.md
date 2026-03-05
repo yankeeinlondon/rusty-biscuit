@@ -98,7 +98,9 @@ let fg = match Terminal::color_mode() {
 | GNOME Terminal | - | Yes | Yes |
 | Foot | - | Yes | Yes |
 | Contour | - | Yes | Yes |
-| VS Code | - | Yes | Yes |
+| VS Code | Kitty* | Yes | Yes |
+
+\* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
 
 ## bt CLI Commands (16 commands)
 

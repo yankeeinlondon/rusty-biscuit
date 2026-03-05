@@ -10,6 +10,7 @@ pub use crate::components::mermaid::{
     print_fallback_code_block,
 };
 pub use crate::components::mermaid_cache::{MermaidCache, MermaidCacheKey};
+pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
 pub use crate::components::renderable::{Renderable, RenderableContent};
 pub use crate::components::section::{HeadingLevel, Section};
