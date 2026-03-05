@@ -138,11 +138,11 @@
 //!
 //! let rest_api = define_samsung_smart_tv_api();
 //! assert_eq!(rest_api.name, "SamsungSmartTv");
-//! assert_eq!(rest_api.endpoints.len(), 4);
+//! assert_eq!(rest_api.endpoints.len(), 7);
 //!
 //! let ws_api = define_samsung_smart_tv_remote_ws_api();
 //! assert_eq!(ws_api.name, "SamsungSmartTvRemote");
-//! assert_eq!(ws_api.endpoints.len(), 1);
+//! assert_eq!(ws_api.endpoints.len(), 2);
 //! ```
 
 pub mod anthropic;

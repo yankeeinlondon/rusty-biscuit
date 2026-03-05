@@ -58,7 +58,65 @@ pub struct SamsungDeviceInfo {
     #[serde(rename = "TokenAuthSupport", skip_serializing_if = "Option::is_none")]
     pub token_auth_support: Option<String>,
 
+    /// Whether the TV supports Frame/Art Mode (`"true"` or `"false"`).
+    #[serde(rename = "FrameTVSupport", skip_serializing_if = "Option::is_none")]
+    pub frame_tv_support: Option<String>,
+
+    /// TV's own IP address on the local network.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+
+    /// Wi-Fi MAC address (useful for Wake-on-LAN).
+    #[serde(rename = "wifiMac", skip_serializing_if = "Option::is_none")]
+    pub wifi_mac: Option<String>,
+
+    /// Firmware version string.
+    #[serde(rename = "firmwareVersion", skip_serializing_if = "Option::is_none")]
+    pub firmware_version: Option<String>,
+
+    /// Device manufacturer name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manufacturer: Option<String>,
+
+    /// Country/region code.
+    #[serde(rename = "countryCode", skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+
+    /// Unique device identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duid: Option<String>,
+
     /// Firmware-variable fields not covered by typed members.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Response from the app status endpoint (`GET /api/v2/applications/{app_id}`).
+///
+/// Returns running state, version, and other metadata for a specific app.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SamsungAppStatusResponse {
+    /// Whether the app is currently visible on screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+
+    /// Whether the app is currently running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running: Option<bool>,
+
+    /// App version string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+
+    /// App display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// App package ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// Additional app metadata not covered by typed fields.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -110,10 +168,8 @@ mod tests {
         assert_eq!(resp.extra.get("uri").and_then(|v| v.as_str()), Some("http://192.168.1.1:8001/api/v2/"));
 
         let device = resp.device.as_ref().unwrap();
-        assert_eq!(
-            device.extra.get("wifiMac").and_then(|v| v.as_str()),
-            Some("AA:BB:CC:DD:EE:FF")
-        );
+        // wifiMac is now a typed field
+        assert_eq!(device.wifi_mac.as_deref(), Some("AA:BB:CC:DD:EE:FF"));
         assert_eq!(
             device.extra.get("type").and_then(|v| v.as_str()),
             Some("Samsung SmartTV")
@@ -142,6 +198,13 @@ mod tests {
                 network_type: None,
                 resolution: None,
                 token_auth_support: None,
+                frame_tv_support: None,
+                ip: None,
+                wifi_mac: None,
+                firmware_version: None,
+                manufacturer: None,
+                country_code: None,
+                duid: None,
                 extra: BTreeMap::new(),
             }),
             extra: BTreeMap::new(),
@@ -150,5 +213,48 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let restored: SamsungDeviceInfoResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn device_info_promotes_frame_tv_support() {
+        let json = r#"{
+            "device": {
+                "FrameTVSupport": "true",
+                "ip": "192.168.1.42",
+                "firmwareVersion": "T-KTMDEUC-1300.3",
+                "manufacturer": "Samsung",
+                "countryCode": "US",
+                "duid": "uuid:12345678-1234-1234-1234-123456789012"
+            }
+        }"#;
+
+        let resp: SamsungDeviceInfoResponse = serde_json::from_str(json).unwrap();
+        let device = resp.device.as_ref().unwrap();
+        assert_eq!(device.frame_tv_support.as_deref(), Some("true"));
+        assert_eq!(device.ip.as_deref(), Some("192.168.1.42"));
+        assert_eq!(device.firmware_version.as_deref(), Some("T-KTMDEUC-1300.3"));
+        assert_eq!(device.manufacturer.as_deref(), Some("Samsung"));
+        assert_eq!(device.country_code.as_deref(), Some("US"));
+        assert_eq!(device.duid.as_deref(), Some("uuid:12345678-1234-1234-1234-123456789012"));
+    }
+
+    #[test]
+    fn app_status_response_deserializes() {
+        let json = r#"{
+            "visible": true,
+            "running": true,
+            "version": "3.0.0",
+            "name": "YouTube",
+            "id": "111299001912",
+            "extra_field": "value"
+        }"#;
+
+        let resp: SamsungAppStatusResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.visible, Some(true));
+        assert_eq!(resp.running, Some(true));
+        assert_eq!(resp.version.as_deref(), Some("3.0.0"));
+        assert_eq!(resp.name.as_deref(), Some("YouTube"));
+        assert_eq!(resp.id.as_deref(), Some("111299001912"));
+        assert_eq!(resp.extra.get("extra_field").and_then(|v| v.as_str()), Some("value"));
     }
 }

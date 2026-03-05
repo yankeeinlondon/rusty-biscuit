@@ -51,6 +51,7 @@ pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
         .register::<SamsungDeviceInfoResponse>("SamsungDeviceInfoResponse")
         .register::<SamsungDeviceInfo>("SamsungDeviceInfo")
+        .register::<SamsungAppStatusResponse>("SamsungAppStatusResponse")
 }
 
 /// Creates the Samsung Smart TV REST API definition.
@@ -67,7 +68,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 ///
 /// let api = define_samsung_smart_tv_api();
 /// assert_eq!(api.name, "SamsungSmartTv");
-/// assert_eq!(api.endpoints.len(), 4);
+/// assert_eq!(api.endpoints.len(), 7);
 /// ```
 #[must_use]
 pub fn define_samsung_smart_tv_api() -> RestApi {
@@ -145,6 +146,42 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             headers: vec![],
             params: None,
         },
+        Endpoint {
+            id: "GetAppStatus".to_string(),
+            method: RestMethod::Get,
+            path: "/api/v2/applications/{app_id}".to_string(),
+            description: "Get the running status and metadata of a specific application. \
+                Returns visibility, running state, version, and name."
+                .to_string(),
+            request: None,
+            response: ApiResponse::json_type("SamsungAppStatusResponse"),
+            headers: vec![],
+            params: None,
+        },
+        Endpoint {
+            id: "CloseApp".to_string(),
+            method: RestMethod::Delete,
+            path: "/api/v2/applications/{app_id}".to_string(),
+            description: "Close a running application by its ID. Sends a DELETE to the \
+                application endpoint, which requests the TV terminate the app."
+                .to_string(),
+            request: None,
+            response: ApiResponse::Empty,
+            headers: vec![],
+            params: None,
+        },
+        Endpoint {
+            id: "InstallApp".to_string(),
+            method: RestMethod::Put,
+            path: "/api/v2/applications/{app_id}".to_string(),
+            description: "Install (or reinstall) an application by its ID. The TV downloads \
+                and installs the app from the Samsung app store."
+                .to_string(),
+            request: None,
+            response: ApiResponse::Empty,
+            headers: vec![],
+            params: None,
+        },
     ]
 }
 
@@ -158,7 +195,8 @@ mod tests {
         let registry = openapi_registry();
         assert!(registry.get("SamsungDeviceInfoResponse").is_some());
         assert!(registry.get("SamsungDeviceInfo").is_some());
-        assert_eq!(registry.len(), 2);
+        assert!(registry.get("SamsungAppStatusResponse").is_some());
+        assert_eq!(registry.len(), 3);
     }
 
     #[test]
@@ -188,9 +226,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_four_endpoints() {
+    fn api_has_seven_endpoints() {
         let api = define_samsung_smart_tv_api();
-        assert_eq!(api.endpoints.len(), 4);
+        assert_eq!(api.endpoints.len(), 7);
     }
 
     #[test]
@@ -242,6 +280,45 @@ mod tests {
             .expect("LaunchApplicationByName endpoint must exist");
         assert_eq!(ep.method, RestMethod::Post);
         assert_eq!(ep.path, "/ws/apps/{app_name}");
+        assert!(matches!(ep.response, ApiResponse::Empty));
+    }
+
+    #[test]
+    fn get_app_status_endpoint() {
+        let api = define_samsung_smart_tv_api();
+        let ep = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetAppStatus")
+            .expect("GetAppStatus endpoint must exist");
+        assert_eq!(ep.method, RestMethod::Get);
+        assert_eq!(ep.path, "/api/v2/applications/{app_id}");
+        assert!(matches!(ep.response, ApiResponse::Json { .. }));
+    }
+
+    #[test]
+    fn close_app_endpoint() {
+        let api = define_samsung_smart_tv_api();
+        let ep = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "CloseApp")
+            .expect("CloseApp endpoint must exist");
+        assert_eq!(ep.method, RestMethod::Delete);
+        assert_eq!(ep.path, "/api/v2/applications/{app_id}");
+        assert!(matches!(ep.response, ApiResponse::Empty));
+    }
+
+    #[test]
+    fn install_app_endpoint() {
+        let api = define_samsung_smart_tv_api();
+        let ep = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "InstallApp")
+            .expect("InstallApp endpoint must exist");
+        assert_eq!(ep.method, RestMethod::Put);
+        assert_eq!(ep.path, "/api/v2/applications/{app_id}");
         assert!(matches!(ep.response, ApiResponse::Empty));
     }
 

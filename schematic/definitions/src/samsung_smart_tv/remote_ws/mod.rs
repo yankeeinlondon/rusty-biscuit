@@ -26,7 +26,7 @@ use schematic_define::{AuthStrategy, Schema};
 ///
 /// let api = define_samsung_smart_tv_remote_ws_api();
 /// assert_eq!(api.name, "SamsungSmartTvRemote");
-/// assert_eq!(api.endpoints.len(), 1);
+/// assert_eq!(api.endpoints.len(), 2);
 /// ```
 #[must_use]
 pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
@@ -76,9 +76,71 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
                     .to_string(),
             ),
         },
+        MessageSchema {
+            name: "AppLaunchCommand".to_string(),
+            direction: MessageDirection::Client,
+            schema: Schema::new("SamsungAppLaunchCommand"),
+            description: Some(
+                "Launch an application via `ms.channel.emit` with optional deep-link \
+                 metadata. Supports both `DEEP_LINK` and `NATIVE_LAUNCH` action types."
+                    .to_string(),
+            ),
+        },
+        MessageSchema {
+            name: "InstalledAppsCommand".to_string(),
+            direction: MessageDirection::Client,
+            schema: Schema::new("SamsungInstalledAppsCommand"),
+            description: Some(
+                "Request the list of installed applications via `ms.channel.emit`. \
+                 The TV responds with an `ed.installedApp.get` event containing the app list."
+                    .to_string(),
+            ),
+        },
     ];
 
-    let endpoints = vec![WebSocketEndpoint {
+    let art_mode_messages = vec![
+        MessageSchema {
+            name: "ArtModeCommand".to_string(),
+            direction: MessageDirection::Client,
+            schema: Schema::new("SamsungArtModeCommand"),
+            description: Some(
+                "Art Mode command sent via `ms.channel.emit` with double-encoded \
+                 data payload. Supports brightness, artwork selection, and mode control."
+                    .to_string(),
+            ),
+        },
+        MessageSchema {
+            name: "ArtModeEvent".to_string(),
+            direction: MessageDirection::Server,
+            schema: Schema::new("SamsungArtModeEvent"),
+            description: Some(
+                "Art Mode response event. The `data` field contains a double-encoded \
+                 JSON string that must be parsed separately."
+                    .to_string(),
+            ),
+        },
+        MessageSchema {
+            name: "ChannelConnectEvent".to_string(),
+            direction: MessageDirection::Server,
+            schema: Schema::new("SamsungRemoteConnectEvent"),
+            description: Some(
+                "Emitted when the Art Mode channel is successfully connected."
+                    .to_string(),
+            ),
+        },
+        MessageSchema {
+            name: "ChannelEnvelope".to_string(),
+            direction: MessageDirection::Bidirectional,
+            schema: Schema::new("SamsungRemoteEnvelope"),
+            description: Some(
+                "Generic envelope with deferred payload for the Art Mode channel."
+                    .to_string(),
+            ),
+        },
+    ];
+
+    let endpoints = vec![
+        WebSocketEndpoint {
         id: "RemoteControl".to_string(),
         path: "/api/v2/channels/samsung.remote.control".to_string(),
         description: "Samsung remote control channel for key transport and lifecycle events. \
@@ -107,7 +169,37 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
         lifecycle: ConnectionLifecycle::default(),
         messages,
         runtime: None,
-    }];
+    },
+        WebSocketEndpoint {
+            id: "ArtMode".to_string(),
+            path: "/api/v2/channels/com.samsung.art-app".to_string(),
+            description: "Samsung Art Mode (Frame TV) channel for artwork management, \
+                brightness control, and Art Mode on/off. Uses double-encoded JSON in \
+                the `data` field of `ms.channel.emit` messages."
+                .to_string(),
+            connection_params: vec![
+                ConnectionParam {
+                    name: "name".to_string(),
+                    param_type: ParamType::String,
+                    required: true,
+                    description: Some(
+                        "Base64-encoded client name for the Art Mode channel".to_string(),
+                    ),
+                },
+                ConnectionParam {
+                    name: "token".to_string(),
+                    param_type: ParamType::String,
+                    required: false,
+                    description: Some(
+                        "Previously approved token to bypass on-TV approval prompt".to_string(),
+                    ),
+                },
+            ],
+            lifecycle: ConnectionLifecycle::default(),
+            messages: art_mode_messages,
+            runtime: None,
+        },
+    ];
 
     WebSocketApi {
         name: "SamsungSmartTvRemote".to_string(),
@@ -152,13 +244,18 @@ mod tests {
     }
 
     #[test]
-    fn ws_api_has_one_endpoint() {
+    fn ws_api_has_two_endpoints() {
         let api = define_samsung_smart_tv_remote_ws_api();
-        assert_eq!(api.endpoints.len(), 1);
+        assert_eq!(api.endpoints.len(), 2);
         assert_eq!(api.endpoints[0].id, "RemoteControl");
         assert_eq!(
             api.endpoints[0].path,
             "/api/v2/channels/samsung.remote.control"
+        );
+        assert_eq!(api.endpoints[1].id, "ArtMode");
+        assert_eq!(
+            api.endpoints[1].path,
+            "/api/v2/channels/com.samsung.art-app"
         );
     }
 
@@ -186,16 +283,34 @@ mod tests {
     }
 
     #[test]
-    fn remote_control_has_five_messages() {
+    fn remote_control_has_seven_messages() {
         let api = define_samsung_smart_tv_remote_ws_api();
         let ep = &api.endpoints[0];
-        assert_eq!(ep.messages.len(), 5);
+        assert_eq!(ep.messages.len(), 7);
 
         let names: Vec<&str> = ep.messages.iter().map(|m| m.name.as_str()).collect();
         assert!(names.contains(&"RemoteControlCommand"));
         assert!(names.contains(&"ChannelConnectEvent"));
         assert!(names.contains(&"ChannelUnauthorizedEvent"));
         assert!(names.contains(&"ChannelErrorEvent"));
+        assert!(names.contains(&"ChannelEnvelope"));
+        assert!(names.contains(&"AppLaunchCommand"));
+        assert!(names.contains(&"InstalledAppsCommand"));
+    }
+
+    #[test]
+    fn art_mode_endpoint_metadata() {
+        let api = define_samsung_smart_tv_remote_ws_api();
+        let ep = &api.endpoints[1];
+        assert_eq!(ep.id, "ArtMode");
+        assert_eq!(ep.path, "/api/v2/channels/com.samsung.art-app");
+        assert_eq!(ep.connection_params.len(), 2);
+        assert_eq!(ep.messages.len(), 4);
+
+        let names: Vec<&str> = ep.messages.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"ArtModeCommand"));
+        assert!(names.contains(&"ArtModeEvent"));
+        assert!(names.contains(&"ChannelConnectEvent"));
         assert!(names.contains(&"ChannelEnvelope"));
     }
 
