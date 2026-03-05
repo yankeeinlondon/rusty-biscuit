@@ -1,5 +1,6 @@
 set dotenv-load
 set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
@@ -40,8 +41,10 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
-play effect:
-    @playa effect {{effect}} --background > /dev/null 2>&1 || exit 0
+# play a sound effect if `playa` CLI is installed (never errors)
+_play effect background="":
+    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+
 
 _notify message title=PACKAGE:
     #!/usr/bin/env bash
@@ -152,15 +155,15 @@ lint:
 install *args="":
     @echo ""
     @echo "{{BOLD}}Building Homelab Library{{RESET}}"
-    @cargo build -p homelab --release  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo build -p homelab --release  || ( just _play error-2 --background && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
     @echo
-    @cargo install --path ./cli {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --path ./cli {{args}}  || ( just _play error-2 --background && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
     @echo ""
-    @just play drop-4
+    @just _play drop-4
 
 check:
     @echo ""
@@ -187,7 +190,7 @@ install-server:
     @just build-frontend
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
-    @cargo install --path ./server  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
     @echo ""

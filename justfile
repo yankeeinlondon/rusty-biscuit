@@ -32,6 +32,10 @@ _notify message title="Rusty Biscuit":
         notify-send '{{message}}'
     fi
 
+# play a sound effect if `playa` CLI is installed (never errors)
+_play effect background="":
+    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+
 # start Claude Code CLI in yolo mode
 cc *args="":
     @claudine claude --yolo {{args}}

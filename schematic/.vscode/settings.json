@@ -8,6 +8,7 @@
         "keepalive",
         "lmstudio",
         "Nagle",
+        "osascript",
         "rustls",
         "SSDP",
         "Tizen",

@@ -40,6 +40,10 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
+# play a sound effect if `playa` CLI is installed (never errors)
+_play effect background="":
+    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+
 _sound_effect effect="drop4":
     @playa effect "{{effect}}" --background 2>/dev/null || exit 0
 
