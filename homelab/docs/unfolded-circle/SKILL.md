@@ -1,6 +1,6 @@
 ---
 name: unfolded-circle-remote
-description: Deep knowledge base for working with and developing the Unfolded Circle Remote's TCP/IP Integrations.
+description: Deep knowledge base for working with and developing the Unfolded Circle Remote's TCP/IP Integrations, the "Core API", and the "Dock API".
 ---
 # Unfolded Circle Remote Two/3
 
@@ -46,3 +46,9 @@ Integration libraries for Python, NodeJS, and Rust are made available:
 - [Python API Wrapper for UC Integration API](https://github.com/unfoldedcircle/integration-python-library)
 - [NodeJS API Wrapper for UC Integration API](https://github.com/unfoldedcircle/integration-node-library)
 - [`api-model-rs` crate for Rust](./api-model-rs.md)
+
+## API Clients in Schematic
+
+Because we plan on working with the Unfolded Circle ecosystem a lot we have defined strongly typed API clients in Schematic.
+
+- Read [API Clients in Schematic](./api-clients.md) for details on all of the resources in the **rusty-biscuit** monorepo's **Schematic** packages can help when working with any of the Unfolded Circle APIs.
