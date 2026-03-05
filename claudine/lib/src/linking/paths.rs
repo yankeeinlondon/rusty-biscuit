@@ -30,10 +30,16 @@ pub struct ProviderPaths {
     pub user_commands: Option<PathBuf>,
     /// Repo-level command directory, if Markdown command linking is supported.
     pub repo_commands: Option<PathBuf>,
+    /// User-level agent directory, if Markdown agent linking is supported.
+    pub user_agents: Option<PathBuf>,
+    /// Repo-level agent directory, if Markdown agent linking is supported.
+    pub repo_agents: Option<PathBuf>,
     /// Additional skill roots this provider reads from.
     pub skill_also_reads_from: Vec<PathBuf>,
     /// Additional command roots this provider reads from.
     pub command_also_reads_from: Vec<PathBuf>,
+    /// Additional agent roots this provider reads from.
+    pub agent_also_reads_from: Vec<PathBuf>,
 }
 
 /// Provider paths for all supported providers, derived from capabilities metadata.
@@ -85,6 +91,11 @@ impl ProviderSkillPaths {
             home_dir,
             repo_root,
         );
+        let (user_agents, repo_agents) = Self::markdown_link_paths(
+            caps.support_for(LinkableResource::Agent),
+            home_dir,
+            repo_root,
+        );
 
         ProviderPaths {
             provider,
@@ -92,8 +103,11 @@ impl ProviderSkillPaths {
             repo_skills,
             user_commands,
             repo_commands,
+            user_agents,
+            repo_agents,
             skill_also_reads_from: caps.skills.also_reads_from.clone(),
             command_also_reads_from: caps.commands.also_reads_from.clone(),
+            agent_also_reads_from: caps.agents.also_reads_from.clone(),
         }
     }
 
@@ -203,6 +217,21 @@ impl ProviderSkillPaths {
             .collect()
     }
 
+    /// Return provider names and agent paths for the given scope.
+    pub fn agents_for_scope(&self, scope: ResourceScope) -> Vec<(Provider, &PathBuf)> {
+        ALL_PROVIDERS
+            .iter()
+            .filter_map(|provider| {
+                let paths = self.providers.get(provider)?;
+                let dir = match scope {
+                    ResourceScope::User => paths.user_agents.as_ref(),
+                    ResourceScope::Repo => paths.repo_agents.as_ref(),
+                }?;
+                Some((*provider, dir))
+            })
+            .collect()
+    }
+
     /// Resolve the target directory for a provider/resource in a scope.
     pub fn target_dir(
         &self,
@@ -216,6 +245,8 @@ impl ProviderSkillPaths {
             (LinkableResource::Skill, ResourceScope::Repo) => paths.repo_skills.clone(),
             (LinkableResource::Command, ResourceScope::User) => paths.user_commands.clone(),
             (LinkableResource::Command, ResourceScope::Repo) => paths.repo_commands.clone(),
+            (LinkableResource::Agent, ResourceScope::User) => paths.user_agents.clone(),
+            (LinkableResource::Agent, ResourceScope::Repo) => paths.repo_agents.clone(),
             _ => None,
         }
     }
@@ -265,7 +296,8 @@ impl ProviderSkillPaths {
         let raw = match resource {
             LinkableResource::Skill => &paths.skill_also_reads_from,
             LinkableResource::Command => &paths.command_also_reads_from,
-            LinkableResource::Agent | LinkableResource::Script => return vec![],
+            LinkableResource::Agent => &paths.agent_also_reads_from,
+            LinkableResource::Script => return vec![],
         };
 
         self.resolve_also_reads(raw, scope)
@@ -418,14 +450,25 @@ mod tests {
     }
 
     #[test]
-    fn target_dir_returns_none_for_unsupported_resource() {
+    fn agents_for_scope_contains_markdown_providers() {
+        let paths = ProviderSkillPaths::new();
+        let agents = paths.agents_for_scope(ResourceScope::User);
+        let providers: Vec<Provider> = agents.iter().map(|(p, _)| *p).collect();
+
+        // Claude agents are Markdown.
+        assert!(providers.contains(&Provider::Claude));
+    }
+
+    #[test]
+    fn target_dir_resolves_agent_paths() {
         let paths = ProviderSkillPaths::new();
         let target = paths.target_dir(
             Provider::Claude,
             LinkableResource::Agent,
             ResourceScope::User,
         );
-        assert!(target.is_none());
+        assert!(target.is_some());
+        assert!(target.unwrap().ends_with(".claude/agents"));
     }
 
     #[test]

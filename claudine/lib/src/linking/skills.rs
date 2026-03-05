@@ -10,95 +10,12 @@ use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::compatibility::parse_markdown_document;
+use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
 
-/// Parsed skill filter with optional negation and exact-match modes.
-///
-/// ## Syntax
-///
-/// | Input      | Pattern  | Negated | Exact |
-/// |------------|----------|---------|-------|
-/// | `rust`     | `rust`   | false   | false |
-/// | `rust!`    | `rust`   | false   | true  |
-/// | `-rust`    | `rust`   | true    | false |
-/// | `!rust`    | `rust`   | true    | false |
-/// | `-rust!`   | `rust`   | true    | true  |
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SkillFilter {
-    /// Lowercased pattern (prefix/suffix markers stripped).
-    pub pattern: String,
-    /// Whether this is a negation filter (prefixed with `!` or `-`).
-    pub negated: bool,
-    /// Whether this requires an exact name match (suffixed with `!`).
-    pub exact: bool,
-}
-
-impl SkillFilter {
-    /// Parse a raw filter string into a `SkillFilter`.
-    ///
-    /// Returns `None` if the pattern is empty after stripping markers.
-    pub fn parse(raw: &str) -> Option<Self> {
-        let mut s = raw.trim();
-        let negated = if s.starts_with('!') || s.starts_with('-') {
-            s = &s[1..];
-            true
-        } else {
-            false
-        };
-        let exact = if s.ends_with('!') {
-            s = &s[..s.len() - 1];
-            true
-        } else {
-            false
-        };
-        let pattern = s.to_lowercase();
-        if pattern.is_empty() {
-            return None;
-        }
-        Some(Self {
-            pattern,
-            negated,
-            exact,
-        })
-    }
-
-    /// Parse a slice of raw filter strings, discarding any that are empty.
-    pub fn parse_all(raw: &[String]) -> Vec<Self> {
-        raw.iter().filter_map(|s| Self::parse(s)).collect()
-    }
-
-    /// Test whether this filter matches the given skill name.
-    pub fn matches(&self, name: &str) -> bool {
-        let lower = name.to_lowercase();
-        if self.exact {
-            lower == self.pattern
-        } else {
-            lower.contains(&self.pattern)
-        }
-    }
-
-    /// Decide whether a skill name should be retained given a set of filters.
-    ///
-    /// - Negation always wins: if any negative filter matches, the name is excluded.
-    /// - If positive filters exist, at least one must match.
-    /// - If only negative filters exist, everything not excluded is kept.
-    pub fn retain(filters: &[Self], name: &str) -> bool {
-        // Check negations first — they always win
-        for f in filters {
-            if f.negated && f.matches(name) {
-                return false;
-            }
-        }
-        // Check positive filters
-        let has_positive = filters.iter().any(|f| !f.negated);
-        if has_positive {
-            filters.iter().any(|f| !f.negated && f.matches(name))
-        } else {
-            true
-        }
-    }
-}
+/// Backward-compatible alias for `ResourceFilter`.
+pub type SkillFilter = ResourceFilter;
 
 /// Scope classification for a discovered skill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -747,8 +664,11 @@ mod tests {
             repo_skills: None,
             user_commands: None,
             repo_commands: None,
+            user_agents: None,
+            repo_agents: None,
             skill_also_reads_from: vec![],
             command_also_reads_from: vec![],
+            agent_also_reads_from: vec![],
         }
     }
 
@@ -766,8 +686,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/skills")),
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
 
@@ -994,8 +917,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/skills")),
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         providers.insert(
@@ -1006,8 +932,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/.gemini/skills")),
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
 
@@ -1259,8 +1188,11 @@ mod tests {
                 repo_skills: Some(tmp.path().join("repo/skills")),
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         providers.insert(
@@ -1271,8 +1203,11 @@ mod tests {
                 repo_skills: None,
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![tmp.path().join("user/.claude/skills")],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         let paths =

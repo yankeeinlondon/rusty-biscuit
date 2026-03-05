@@ -1,10 +1,13 @@
+pub mod agents;
 mod canonical;
 mod capabilities;
+pub mod commands;
 mod compatibility;
 mod conflict;
 mod detector;
 mod discovery;
 mod execution;
+mod filter;
 mod hashing;
 pub mod model;
 mod paths;
@@ -30,6 +33,15 @@ pub use discovery::DiscoveredSkill;
 pub use execution::{ApplySummary, analyze_resource_links, apply_fixable_resources};
 pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
+pub use agents::{
+    AgentDirectoryDiagnostic, AgentException, AgentExceptionType, AgentFixSummary, AgentInfo,
+    AgentScope, AgentsReport, fix_missing_agents, list_agents,
+};
+pub use commands::{
+    CommandDirectoryDiagnostic, CommandException, CommandExceptionType, CommandFixSummary,
+    CommandInfo, CommandScope, CommandsReport, fix_missing_commands, list_commands,
+};
+pub use filter::ResourceFilter;
 pub use skills::{
     ExceptionType, SkillDirectoryDiagnostic, SkillException, SkillFilter, SkillFixSummary,
     SkillInfo, SkillScope, SkillsReport, fix_missing_skills, list_skills,
@@ -260,7 +272,8 @@ fn report_category_level_symlinks(
     let roots: Vec<(crate::events::Provider, &std::path::PathBuf)> = match resource {
         LinkableResource::Skill => provider_paths.for_scope(scope),
         LinkableResource::Command => provider_paths.commands_for_scope(scope),
-        LinkableResource::Agent | LinkableResource::Script => vec![],
+        LinkableResource::Agent => provider_paths.agents_for_scope(scope),
+        LinkableResource::Script => vec![],
     };
 
     let resource_label = match resource {
@@ -302,8 +315,11 @@ mod tests {
             repo_skills: None,
             user_commands: None,
             repo_commands: None,
+            user_agents: None,
+            repo_agents: None,
             skill_also_reads_from: vec![],
             command_also_reads_from: vec![],
+            agent_also_reads_from: vec![],
         }
     }
 
@@ -321,8 +337,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/.claude/skills")),
                 user_commands: Some(base.join("claude/commands")),
                 repo_commands: Some(base.join("repo/.claude/commands")),
+                user_agents: Some(base.join("claude/agents")),
+                repo_agents: Some(base.join("repo/.claude/agents")),
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         providers.insert(
@@ -333,8 +352,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/.codex/skills")),
                 user_commands: Some(base.join("codex/commands")),
                 repo_commands: Some(base.join("repo/.codex/commands")),
+                user_agents: Some(base.join("codex/agents")),
+                repo_agents: Some(base.join("repo/.codex/agents")),
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         providers.insert(
@@ -345,8 +367,11 @@ mod tests {
                 repo_skills: Some(base.join("repo/.gemini/skills")),
                 user_commands: None,
                 repo_commands: None,
+                user_agents: Some(base.join("gemini/agents")),
+                repo_agents: Some(base.join("repo/.gemini/agents")),
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
         providers.insert(
@@ -357,12 +382,15 @@ mod tests {
                 repo_skills: Some(base.join("repo/.opencode/skills")),
                 user_commands: Some(base.join("opencode/commands")),
                 repo_commands: Some(base.join("repo/.opencode/commands")),
+                user_agents: Some(base.join("opencode/agents")),
+                repo_agents: Some(base.join("repo/.opencode/agents")),
                 skill_also_reads_from: if opencode_reads_from_claude {
                     vec![base.join("claude/skills")]
                 } else {
                     vec![]
                 },
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
 
