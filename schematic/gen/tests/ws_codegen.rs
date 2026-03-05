@@ -375,7 +375,7 @@ fn full_assembly_produces_valid_rust_for_all_apis() {
 #[test]
 fn samsung_remote_has_no_correlation() {
     let plan = lower_to_plan(&define_samsung_smart_tv_remote_ws_api()).unwrap();
-    assert_eq!(plan.endpoints.len(), 1);
+    assert_eq!(plan.endpoints.len(), 2);
     for ep in &plan.endpoints {
         assert!(
             matches!(
