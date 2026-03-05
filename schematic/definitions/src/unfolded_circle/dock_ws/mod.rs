@@ -1,4 +1,18 @@
 //! Unfolded Circle Dock WebSocket API definition.
+//!
+//! ## Authentication Flow
+//!
+//! The Dock uses post-connect token authentication:
+//!
+//! 1. Connect to `ws://dock.local/`
+//! 2. Server sends `auth_required` (`DockWsAuthRequired`)
+//! 3. Client sends `auth` (`DockWsAuthMessage`) with `token` field
+//! 4. Server responds with `authentication` (`DockWsAuthenticationMessage`)
+//!
+//! ## Envelope Differences from Core WS
+//!
+//! The Dock API uses `type` (not `kind`) as the envelope discriminator field.
+//! In Rust types this is mapped to `type_name` with `#[serde(rename = "type")]`.
 
 mod types;
 

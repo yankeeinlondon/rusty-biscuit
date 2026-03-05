@@ -1,4 +1,37 @@
 //! Unfolded Circle Core WebSocket API definition.
+//!
+//! ## Message Dispatch
+//!
+//! Route incoming messages by inspecting the `msg` field on an envelope:
+//!
+//! ```rust,ignore
+//! use schematic_definitions::unfolded_circle::core_ws::*;
+//!
+//! fn handle(envelope: CoreWsResponseEnvelope) -> Result<(), Box<dyn std::error::Error>> {
+//!     match &envelope.msg {
+//!         CoreWsMessageName::Known(CoreWsKnownMessage::SystemInfo) => {
+//!             // parse msg_data into your payload type
+//!             let info: serde_json::Value = envelope.parse_payload()?;
+//!             println!("system info: {info:?}");
+//!         }
+//!         CoreWsMessageName::Known(CoreWsKnownMessage::Pong) => {
+//!             println!("keepalive ok");
+//!         }
+//!         CoreWsMessageName::Other(name) => {
+//!             println!("unhandled message: {name}");
+//!         }
+//!         _ => {}
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Authentication Flow
+//!
+//! 1. Connect to WebSocket endpoint (e.g. `ws://remote.local/ws`)
+//! 2. Server sends `auth_required` (`CoreWsAuthRequired`)
+//! 3. Client sends `auth` (`CoreWsAuthMessage`) with API key in `msg_data`
+//! 4. Server responds with `authentication` (`CoreWsAuthenticationMessage`)
 
 mod types;
 

@@ -1,4 +1,35 @@
 //! Unfolded Circle Integration WebSocket API definition.
+//!
+//! ## Message Dispatch
+//!
+//! Route incoming requests from the remote by inspecting the `msg` field:
+//!
+//! ```rust,ignore
+//! use schematic_definitions::unfolded_circle::integration_ws::*;
+//!
+//! fn handle(envelope: IntegrationWsRequestEnvelope) -> Result<(), Box<dyn std::error::Error>> {
+//!     match &envelope.msg {
+//!         IntegrationWsMessageName::Known(IntegrationWsKnownMessage::EntityCommand) => {
+//!             let cmd: serde_json::Value = envelope.parse_payload()?;
+//!             // handle entity command from the remote
+//!         }
+//!         IntegrationWsMessageName::Known(IntegrationWsKnownMessage::GetAvailableEntities) => {
+//!             // respond with available entities
+//!         }
+//!         _ => {}
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Integration Driver Required Messages
+//!
+//! Drivers must handle these requests from the remote:
+//! `get_driver_version`, `get_device_state`, `get_available_entities`,
+//! `subscribe_events`, `get_entity_states`, `entity_command`
+//!
+//! Drivers must emit these events:
+//! `entity_change`, `device_state`
 
 mod types;
 

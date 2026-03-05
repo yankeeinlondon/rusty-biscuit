@@ -29,13 +29,13 @@ pub struct ApiResponseMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SystemInfo {
     /// Friendly name of the device model.
-    pub model_name: Option<String>,
+    pub model_name: String,
     /// Full model number (for example `ucr2`, `ucr3-##`).
-    pub model_number: Option<String>,
+    pub model_number: String,
     /// Hardware serial number.
-    pub serial_number: Option<String>,
+    pub serial_number: String,
     /// Hardware revision identifier.
-    pub hw_revision: Option<String>,
+    pub hw_revision: String,
 }
 
 /// Single uploaded/listed resource item.
@@ -45,9 +45,9 @@ pub struct ResourceItem {
     ///
     /// Serialized as `type` in API payloads.
     #[serde(rename = "type")]
-    pub type_name: Option<String>,
+    pub type_name: String,
     /// Resource identifier.
-    pub id: Option<String>,
+    pub id: String,
     /// Size in bytes.
     pub size: Option<u32>,
 }
@@ -112,11 +112,11 @@ pub struct IntegrationDriverInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CodeSetUploadResult {
     /// Total number of processed CSV rows.
-    pub processed: Option<u32>,
+    pub processed: u32,
     /// Number of newly added rows.
-    pub added: Option<u32>,
+    pub added: u32,
     /// Number of updated IR code rows.
-    pub updated: Option<u32>,
+    pub updated: u32,
 }
 
 /// Backup restore report item type.
@@ -179,3 +179,147 @@ pub struct CustomInstall {
 
 /// Backup restore report list.
 pub type BackupRestoreReportItems = Vec<BackupRestoreReportItem>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Enum serialization tests ---
+
+    #[test]
+    fn integration_driver_type_serializes_to_uppercase() {
+        assert_eq!(serde_json::to_string(&IntegrationDriverType::Local).unwrap(), r#""LOCAL""#);
+        assert_eq!(serde_json::to_string(&IntegrationDriverType::Custom).unwrap(), r#""CUSTOM""#);
+        assert_eq!(
+            serde_json::to_string(&IntegrationDriverType::External).unwrap(),
+            r#""EXTERNAL""#
+        );
+    }
+
+    #[test]
+    fn driver_state_serializes_to_screaming_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&DriverState::NotConfigured).unwrap(),
+            r#""NOT_CONFIGURED""#
+        );
+        assert_eq!(serde_json::to_string(&DriverState::Active).unwrap(), r#""ACTIVE""#);
+        assert_eq!(serde_json::to_string(&DriverState::Idle).unwrap(), r#""IDLE""#);
+        assert_eq!(serde_json::to_string(&DriverState::Connecting).unwrap(), r#""CONNECTING""#);
+        assert_eq!(
+            serde_json::to_string(&DriverState::Reconnecting).unwrap(),
+            r#""RECONNECTING""#
+        );
+        assert_eq!(serde_json::to_string(&DriverState::Error).unwrap(), r#""ERROR""#);
+    }
+
+    #[test]
+    fn backup_restore_item_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Db).unwrap(), r#""db""#);
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::IntegrationDriver).unwrap(),
+            r#""integration_driver""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Integration).unwrap(),
+            r#""integration""#
+        );
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Activity).unwrap(), r#""activity""#);
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Macro).unwrap(), r#""macro""#);
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Remote).unwrap(), r#""remote""#);
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Profile).unwrap(), r#""profile""#);
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Dock).unwrap(), r#""dock""#);
+        assert_eq!(serde_json::to_string(&BackupRestoreItem::Resource).unwrap(), r#""resource""#);
+    }
+
+    #[test]
+    fn custom_component_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&CustomComponent::Ui).unwrap(), r#""ui""#);
+        assert_eq!(
+            serde_json::to_string(&CustomComponent::WebConfigurator).unwrap(),
+            r#""web_configurator""#
+        );
+    }
+
+    // --- Roundtrip tests ---
+
+    #[test]
+    fn system_info_roundtrip() {
+        let info = SystemInfo {
+            model_name: "Remote Two".into(),
+            model_number: "ucr2".into(),
+            serial_number: "SN-12345".into(),
+            hw_revision: "rev3".into(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let parsed: SystemInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info, parsed);
+    }
+
+    #[test]
+    fn code_set_upload_result_roundtrip() {
+        let result = CodeSetUploadResult {
+            processed: 100,
+            added: 80,
+            updated: 20,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: CodeSetUploadResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, parsed);
+    }
+
+    #[test]
+    fn resource_item_roundtrip_with_serde_rename() {
+        let item = ResourceItem {
+            type_name: "icon".into(),
+            id: "res-001".into(),
+            size: Some(4096),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains(r#""type":"#));
+        assert!(!json.contains(r#""type_name""#));
+        let parsed: ResourceItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(item, parsed);
+    }
+
+    #[test]
+    fn login_request_roundtrip() {
+        let req = LoginRequest {
+            username: "admin".into(),
+            password: "secret".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: LoginRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+    }
+
+    #[test]
+    fn api_response_message_roundtrip() {
+        let msg = ApiResponseMessage {
+            status: Some("ok".into()),
+            message: Some("Success".into()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ApiResponseMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, parsed);
+    }
+
+    #[test]
+    fn integration_driver_info_roundtrip() {
+        let mut name = LanguageText::new();
+        name.insert("en".into(), "Test Driver".into());
+        let info = IntegrationDriverInfo {
+            driver_id: "drv-001".into(),
+            name,
+            driver_type: IntegrationDriverType::Custom,
+            version: "1.0.0".into(),
+            enabled: true,
+            developer_name: Some("Tester".into()),
+            driver_url: None,
+            icon: None,
+            driver_state: Some(DriverState::Active),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let parsed: IntegrationDriverInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info, parsed);
+    }
+}
