@@ -31,7 +31,14 @@ fi
 echo "Running doctests for changed crates: ${!packages[*]}"
 
 for pkg in "${!packages[@]}"; do
-    if ! cargo test --doc -p "$pkg" 2>&1; then
+    output=$(cargo test --doc -p "$pkg" 2>&1)
+    status=$?
+    if echo "$output" | grep -q "no library targets found"; then
+        echo "Skipping $pkg (no library target)"
+        continue
+    fi
+    if [[ $status -ne 0 ]]; then
+        echo "$output"
         echo ""
         echo "ERROR: doctests failed for $pkg"
         echo "Fix the doc examples before committing."

@@ -40,10 +40,6 @@ pub(crate) fn log_wrapper_summary(
         header_parts.push(REPO_FLAG.to_string());
     }
 
-    if non_interactive_requested {
-        header_parts.push(NON_INTERACTIVE.to_string());
-    }
-
     if let Some(package_name) = package_name_display(env_plan) {
         header_parts.push(
             Prose::new(format!(
