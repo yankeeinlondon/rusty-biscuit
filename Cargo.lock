@@ -6966,6 +6966,7 @@ dependencies = [
  "git2",
  "hyperpolyglot",
  "ignore",
+ "libc",
  "metal",
  "proptest",
  "rayon",
