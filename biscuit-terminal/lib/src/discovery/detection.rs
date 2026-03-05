@@ -20,6 +20,7 @@ pub enum ImageSupport {
     /// - Ghostty
     /// - Konsole
     /// - wast
+    /// - VS Code (built-in terminal)
     Kitty,
     /// one of the earlier image formats but slowly being phased out,
     /// even it's originator iTERM2 now supports the Kitty protocol.

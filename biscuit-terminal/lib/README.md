@@ -388,9 +388,11 @@ The library detects these terminal emulators:
 | Konsole | Kitty | Yes | Yes |
 | Foot | None | Yes | Yes |
 | Contour | None | Yes | Yes |
-| VS Code | None | Yes | Yes |
+| VS Code | Kitty* | Yes | Yes |
 | Warp | Kitty | Yes | Yes |
 | Wast | Kitty | No | No |
+
+\* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
 
 ## OS Detection
 
