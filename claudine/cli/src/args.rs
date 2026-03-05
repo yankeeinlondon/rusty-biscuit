@@ -35,6 +35,10 @@ pub(crate) enum Commands {
     Actions(commands::actions::ActionsArgs),
     /// List available skills and their scopes.
     Skills(commands::skills::SkillsArgs),
+    /// List available agent definitions and their scopes.
+    Agents(commands::agents::AgentsArgs),
+    /// List available slash commands and their scopes.
+    Slash(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers,
     /// Remove Claudine hooks from all agents.

@@ -145,8 +145,11 @@ mod tests {
             repo_skills: None,
             user_commands: None,
             repo_commands: None,
+            user_agents: None,
+            repo_agents: None,
             skill_also_reads_from: vec![],
             command_also_reads_from: vec![],
+            agent_also_reads_from: vec![],
         }
     }
 
@@ -164,8 +167,11 @@ mod tests {
                 repo_skills: None,
                 user_commands: None,
                 repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
                 skill_also_reads_from: vec![],
                 command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
             },
         );
 

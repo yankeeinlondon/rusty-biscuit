@@ -1,5 +1,6 @@
 pub mod about;
 pub mod actions;
+pub mod agents;
 pub mod completions;
 pub mod dry_run;
 pub mod handle;
@@ -8,6 +9,7 @@ pub mod init;
 pub mod link;
 pub mod providers;
 pub mod skills;
+pub mod slash_commands;
 pub mod sync;
 pub mod uninstall;
 pub mod wrap;
