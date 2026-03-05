@@ -95,6 +95,10 @@ pub struct SamsungTvService {
     #[serde(default = "default_samsung_ws_port")]
     pub ws_port: u16,
 
+    /// Use HTTPS for REST API (self-signed cert accepted)
+    #[serde(default)]
+    pub use_https: bool,
+
     /// MAC address for Wake-on-LAN (auto-detected from device info)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<String>,

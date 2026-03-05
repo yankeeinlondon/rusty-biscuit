@@ -12,33 +12,37 @@ One of the most powerful universal remotes on the market in 2026 is the Unfolded
 
 The **Core** API's allow for interaction with the Unfolded Circle Remote's services. It is **not** to extend it's capabilities but to be able to remotely interact with the service.
 
-Read the [Core API Deep Dive](./core-api.md) for architecture overview, functionality, code examples (in Rust), and key gotcha's and how to work around them.
+For architecture overview, functionality, code examples (in Rust), and key gotcha's and how to work around them read:
+
+- [Core API Deep Dive](./core-api.md) 
+
+If all you want are the API documents:
 
 - Official docs
     - UCR REST Core-API ( [API Docs](https://unfoldedcircle.github.io/core-api/rest/), [YAML definition](https://github.com/unfoldedcircle/core-api/tree/main/core-api/rest) )
     - UCR WS Core-API ( [API Docs](https://unfoldedcircle.github.io/core-api/ws/), [YAML definition](https://github.com/unfoldedcircle/core-api/tree/main/core-api/websocket) )
 
-The websocket API provides all the utility/functionality of the REST API but adds event subscriptions with asynchronous notifications.
+> **Note:** The websocket API provides all the utility/functionality of the REST API but adds event subscriptions with asynchronous notifications.
 
 ### Dock APIs
 
-The **Dock** API's allow you to directly communicate with the charging dock(s) and take full control of it's features.
+The **Dock** API's allow you to directly communicate with the charging dock(s), which also serve as IR blasters:
 
-- Dock AsyncAPI ( [API Docs](https://unfoldedcircle.github.io/core-api/dock/), [YAML definition](https://github.com/unfoldedcircle/core-api/tree/main/dock-api) )
+- [Dock API Deep Dive](./dock-api.md)
 
 ### Integration APIs
 
-The Unfolded Circle WebSocket Integration-API allows writing device integration drivers for the Unfolded Circle Remotes.
+The Unfolded Circle WebSocket Integration-API allows writing device integration drivers for the Unfolded Circle Remotes. These drivers can be external hosted or loaded directly on the remote. In both cases they must support serving up an Websocket interface so that the remote can connect to it.
 
-The API specification is defined with AsyncAPI in YAML format. The WebSocket communication is using text messages with JSON payload.
-
-- Integration AsyncAPI ( [API Docs](https://unfoldedcircle.github.io/core-api/integration/), [YAML definition](https://unfoldedcircle.github.io/core-api/integration/) )
+- For details on the Integration API, including Rust code examples, architecture overview and comparison and more, read: [Deep Dive on Integration Drivers](./integrations.md).
+- If you just want the API specification -- which is defined with AsyncAPI:
+    - Integration AsyncAPI ( [API Docs](https://unfoldedcircle.github.io/core-api/integration/), [YAML definition](https://unfoldedcircle.github.io/core-api/integration/) )
 - [AsyncAPI Studio](https://studio.asyncapi.com/) is an online tool to help you create integrations for the Unfolded Circle remote.
 
 ## Integration Libraries
 
-Integration libraries for Python and NodeJS are made available:
+Integration libraries for Python, NodeJS, and Rust are made available:
 
 - [Python API Wrapper for UC Integration API](https://github.com/unfoldedcircle/integration-python-library)
 - [NodeJS API Wrapper for UC Integration API](https://github.com/unfoldedcircle/integration-node-library)
-
+- [`api-model-rs` crate for Rust](./api-model-rs.md)

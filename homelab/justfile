@@ -271,10 +271,15 @@ cp:
     @echo "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
     @echo
 
-refresh-skill:
+skill-homelab:
     @clear
     @echo "Refreshing {{BOLD}}Homelab{{RESET}} skill"
-    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-homelab.md)"\'
+    @claudine --yolo -p \'"$(cat docs/skills-homelab.md)"\'
+
+# build the unfolded-circle skill and deploy in this repo as well as User scope
+skill-unfolded-circle:
+
+
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":

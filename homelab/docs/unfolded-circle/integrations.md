@@ -785,7 +785,7 @@ fn handle_get_entity_states(
 
 ## Rust Implementation Guide
 
-The `api-model-rs` crate from Unfolded Circle provides type definitions for the Integration API, making it easier to build integration drivers in Rust. This section provides practical guidance for implementing a complete integration driver.
+The [`api-model-rs` crate](./api-model-rs.md) from Unfolded Circle provides type definitions for the Integration API, making it easier to build integration drivers in Rust. This section provides practical guidance for implementing a complete integration driver.
 
 ### Project Setup
 

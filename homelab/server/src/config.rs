@@ -75,6 +75,7 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
                 host,
                 rest_port,
                 ws_port: 8002,
+                use_https: false,
                 mac_address: None,
             },
         );

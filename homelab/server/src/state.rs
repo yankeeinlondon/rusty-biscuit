@@ -481,11 +481,11 @@ impl AppState {
     ///
     /// ## Returns
     ///
-    /// `Some((host, rest_port, ws_port))` if found, `None` if not configured.
-    pub async fn get_samsung_tv(&self, name: &str) -> Option<(String, u16, u16)> {
+    /// `Some((host, rest_port, ws_port, use_https))` if found, `None` if not configured.
+    pub async fn get_samsung_tv(&self, name: &str) -> Option<(String, u16, u16, bool)> {
         let tvs = self.samsung_tvs.read().await;
         tvs.get(name)
-            .map(|s| (s.host.clone(), s.rest_port, s.ws_port))
+            .map(|s| (s.host.clone(), s.rest_port, s.ws_port, s.use_https))
     }
 
     /// Adds or updates a Samsung TV and saves config.

@@ -200,6 +200,10 @@ enum Commands {
         #[arg(long)]
         ws_port: Option<u16>,
 
+        /// Use HTTPS for REST API (self-signed cert accepted)
+        #[arg(long)]
+        https: bool,
+
         #[command(subcommand)]
         action: SamsungAction,
     },
@@ -423,6 +427,15 @@ enum SamsungAction {
     /// Remote control key commands
     #[command(subcommand)]
     Remote(SamsungRemoteAction),
+    /// Art Mode control (Frame TV)
+    #[command(subcommand)]
+    Art(SamsungArtAction),
+    /// Discover Samsung TVs on the local network via SSDP
+    Discover {
+        /// Discovery timeout in seconds
+        #[arg(long, default_value = "3")]
+        timeout: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -444,6 +457,31 @@ enum SamsungAppAction {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Get running status of an application
+    Status {
+        /// Application ID
+        id: String,
+    },
+    /// Close a running application
+    Close {
+        /// Application ID
+        id: String,
+    },
+    /// Install an application
+    Install {
+        /// Application ID
+        id: String,
+    },
+    /// Launch an application via WebSocket (supports deep-link)
+    LaunchWs {
+        /// Application ID
+        id: String,
+        /// Deep-link metadata tag (URL)
+        #[arg(long)]
+        meta_tag: Option<String>,
+    },
+    /// Request list of installed applications
+    List,
 }
 
 #[derive(Subcommand)]
@@ -452,6 +490,32 @@ enum SamsungRemoteAction {
     SendKey {
         /// Key name
         key: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SamsungArtAction {
+    /// Get Art Mode status (on/off)
+    Status,
+    /// Enable Art Mode
+    On,
+    /// Disable Art Mode
+    Off,
+    /// Get currently displayed artwork
+    Current,
+    /// List available artwork
+    List,
+    /// Select artwork to display
+    Select {
+        /// Artwork content ID
+        content_id: String,
+    },
+    /// Get Art Mode brightness
+    Brightness,
+    /// Set Art Mode brightness
+    SetBrightness {
+        /// Brightness level (0-100)
+        level: u8,
     },
 }
 
@@ -840,7 +904,8 @@ async fn run() -> Result<()> {
             host,
             port,
             ws_port,
-        } => handle_samsung(name, host, port, ws_port, action, json).await,
+            https,
+        } => handle_samsung(name, host, port, ws_port, https, action, json).await,
         Commands::Sony {
             action,
             name,
@@ -1773,11 +1838,13 @@ async fn handle_samsung(
     host: Option<String>,
     port: Option<u16>,
     ws_port: Option<u16>,
+    https: bool,
     action: SamsungAction,
     json: bool,
 ) -> Result<()> {
-    let (host_str, rest_port, ws_port, source) = resolve_samsung(host, port, ws_port, name)?;
-    let tv = SamsungTv::new(&host_str, rest_port, ws_port);
+    let (host_str, rest_port, ws_port, use_https, source) =
+        resolve_samsung(host, port, ws_port, https, name)?;
+    let tv = SamsungTv::with_https(&host_str, rest_port, ws_port, use_https);
     let suffix = device_suffix(&host_str, rest_port, &source);
     let err_ctx = format!("Samsung TV at {host_str}:{rest_port}");
 
@@ -1785,6 +1852,10 @@ async fn handle_samsung(
         SamsungAction::Device(a) => handle_samsung_device(&tv, a, json, &suffix).await,
         SamsungAction::App(a) => handle_samsung_app(&tv, a, json, &suffix).await,
         SamsungAction::Remote(a) => handle_samsung_remote(&tv, a, json, &suffix).await,
+        SamsungAction::Art(a) => handle_samsung_art(&tv, a, json, &suffix).await,
+        SamsungAction::Discover { timeout } => {
+            return handle_samsung_discover(timeout, json).await;
+        }
     }
     .wrap_err(err_ctx)
 }
@@ -1823,6 +1894,18 @@ async fn handle_samsung_device(
                     }
                     if let Some(ref net_type) = device.network_type {
                         table.add_row(vec!["Network".into(), net_type.as_str().into()]);
+                    }
+                    if let Some(ref fw) = device.firmware_version {
+                        table.add_row(vec!["Firmware".into(), fw.as_str().into()]);
+                    }
+                    if let Some(ref ip) = device.ip {
+                        table.add_row(vec!["IP".into(), ip.as_str().into()]);
+                    }
+                    if let Some(ref mac) = device.wifi_mac {
+                        table.add_row(vec!["WiFi MAC".into(), mac.as_str().into()]);
+                    }
+                    if let Some(ref ftv) = device.frame_tv_support {
+                        table.add_row(vec!["Frame TV".into(), ftv.as_str().into()]);
                     }
                 }
                 print!("\n{}", table.display(&Terminal::default()));
@@ -1885,6 +1968,62 @@ async fn handle_samsung_app(
                 }
             }
         }
+        SamsungAppAction::Status { id } => {
+            let status = tv.get_app_status(&id).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!("{}", styled(format!("<b>App Status</b> {suffix}")));
+                let mut table =
+                    Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
+                table.add_row(vec!["App ID".into(), id.as_str().into()]);
+                if let Some(name) = &status.name {
+                    table.add_row(vec!["Name".into(), name.as_str().into()]);
+                }
+                if let Some(running) = status.running {
+                    table.add_row(vec!["Running".into(), running.to_string().into()]);
+                }
+                if let Some(visible) = status.visible {
+                    table.add_row(vec!["Visible".into(), visible.to_string().into()]);
+                }
+                if let Some(version) = &status.version {
+                    table.add_row(vec!["Version".into(), version.as_str().into()]);
+                }
+                print!("\n{}", table.display(&Terminal::default()));
+            }
+        }
+        SamsungAppAction::Close { id } => {
+            tv.close_app(&id).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"closed": true, "app_id": id}))?);
+            } else {
+                println!("{}", styled(format!("Closed app <b>{id}</b> {suffix}")));
+            }
+        }
+        SamsungAppAction::Install { id } => {
+            tv.install_app(&id).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"install_initiated": true, "app_id": id}))?);
+            } else {
+                println!("{}", styled(format!("Install initiated for <b>{id}</b> {suffix}")));
+            }
+        }
+        SamsungAppAction::LaunchWs { id, meta_tag } => {
+            tv.launch_app_ws(&id, meta_tag.as_deref()).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"launched_ws": true, "app_id": id}))?);
+            } else {
+                println!("{}", styled(format!("Launched app <b>{id}</b> via WebSocket {suffix}")));
+            }
+        }
+        SamsungAppAction::List => {
+            tv.request_installed_apps().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+            } else {
+                println!("{}", styled(format!("Installed apps request sent {suffix}")));
+            }
+        }
     }
     Ok(())
 }
@@ -1914,23 +2053,144 @@ async fn handle_samsung_remote(
     Ok(())
 }
 
-/// Resolves the Samsung TV host and ports from --host, --port, --ws-port, --name, or config.
+async fn handle_samsung_art(
+    tv: &SamsungTv,
+    action: SamsungArtAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    match action {
+        SamsungArtAction::Status => {
+            tv.get_art_mode_status().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+            } else {
+                println!("{}", styled(format!("Art Mode status request sent {suffix}")));
+            }
+        }
+        SamsungArtAction::On => {
+            tv.set_art_mode(true).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"art_mode": true}))?);
+            } else {
+                println!("{}", styled(format!("Art Mode set to <b>on</b> {suffix}")));
+            }
+        }
+        SamsungArtAction::Off => {
+            tv.set_art_mode(false).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"art_mode": false}))?);
+            } else {
+                println!("{}", styled(format!("Art Mode set to <b>off</b> {suffix}")));
+            }
+        }
+        SamsungArtAction::Current => {
+            tv.get_current_artwork().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+            } else {
+                println!("{}", styled(format!("Current artwork request sent {suffix}")));
+            }
+        }
+        SamsungArtAction::List => {
+            tv.get_artwork_list().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+            } else {
+                println!("{}", styled(format!("Artwork list request sent {suffix}")));
+            }
+        }
+        SamsungArtAction::Select { content_id } => {
+            tv.select_artwork(&content_id).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"selected": true, "content_id": content_id}))?);
+            } else {
+                println!("{}", styled(format!("Selected artwork <b>{content_id}</b> {suffix}")));
+            }
+        }
+        SamsungArtAction::Brightness => {
+            tv.get_art_brightness().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+            } else {
+                println!("{}", styled(format!("Brightness request sent {suffix}")));
+            }
+        }
+        SamsungArtAction::SetBrightness { level } => {
+            tv.set_art_brightness(level).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&json!({"brightness": level}))?);
+            } else {
+                println!("{}", styled(format!("Art Mode brightness set to <b>{level}</b> {suffix}")));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_samsung_discover(timeout_secs: u64, json: bool) -> Result<()> {
+    let tvs = homelab::samsung_tv_discovery::discover(timeout_secs)?;
+    if json {
+        let items: Vec<serde_json::Value> = tvs
+            .iter()
+            .map(|tv| {
+                serde_json::json!({
+                    "host": tv.host,
+                    "location": tv.location,
+                    "server": tv.server,
+                    "usn": tv.usn,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items)?);
+    } else if tvs.is_empty() {
+        println!(
+            "{}",
+            styled("No Samsung TVs found on the network".to_string())
+        );
+    } else {
+        println!(
+            "{}",
+            styled(format!(
+                "<b>Discovered {} Samsung TV(s)</b>",
+                tvs.len()
+            ))
+        );
+        let mut table = Table::new().with_columns(vec![
+            TableColumn::new("Host"),
+            TableColumn::new("Server"),
+            TableColumn::new("Location"),
+        ]);
+        for tv in &tvs {
+            table.add_row(vec![
+                tv.host.as_str().into(),
+                tv.server.as_deref().unwrap_or("-").into(),
+                tv.location.as_str().into(),
+            ]);
+        }
+        print!("\n{}", table.display(&Terminal::default()));
+    }
+    Ok(())
+}
+
+/// Resolves the Samsung TV host, ports, and HTTPS from flags, config, or defaults.
 ///
-/// Returns `(host, rest_port, ws_port, source)`.
+/// Returns `(host, rest_port, ws_port, use_https, source)`.
 ///
 /// Port priority: `--port`/`--ws-port` flags > inline port in `--host` > config > defaults
 fn resolve_samsung(
     host: Option<String>,
     port: Option<u16>,
     ws_port: Option<u16>,
+    https_flag: bool,
     name: Option<String>,
-) -> Result<(String, u16, u16, DeviceSource)> {
+) -> Result<(String, u16, u16, bool, DeviceSource)> {
     // 1. Explicit --host flag (or SAMSUNG_TV env)
     if let Some(h) = host {
         let (host_str, inline_port) = parse_host_port(&h, SAMSUNG_DEFAULT_REST_PORT);
         let resolved_port = port.unwrap_or(inline_port);
         let resolved_ws = ws_port.unwrap_or(SAMSUNG_DEFAULT_WS_PORT);
-        return Ok((host_str, resolved_port, resolved_ws, DeviceSource::Flag));
+        return Ok((host_str, resolved_port, resolved_ws, https_flag, DeviceSource::Flag));
     }
 
     let config = HomeyConfig::load().unwrap_or_default();
@@ -1940,10 +2200,12 @@ fn resolve_samsung(
         if let Some(service) = config.samsung_tvs.get(n) {
             let resolved_port = port.unwrap_or(service.rest_port);
             let resolved_ws = ws_port.unwrap_or(service.ws_port);
+            let use_https = https_flag || service.use_https;
             return Ok((
                 service.host.clone(),
                 resolved_port,
                 resolved_ws,
+                use_https,
                 DeviceSource::Name(n.clone()),
             ));
         }
@@ -1960,10 +2222,12 @@ fn resolve_samsung(
         let (dev_name, service) = config.samsung_tvs.iter().next().unwrap();
         let resolved_port = port.unwrap_or(service.rest_port);
         let resolved_ws = ws_port.unwrap_or(service.ws_port);
+        let use_https = https_flag || service.use_https;
         return Ok((
             service.host.clone(),
             resolved_port,
             resolved_ws,
+            use_https,
             DeviceSource::Auto(dev_name.clone()),
         ));
     }

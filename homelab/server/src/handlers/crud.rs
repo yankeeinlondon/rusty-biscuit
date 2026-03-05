@@ -850,6 +850,7 @@ pub(crate) async fn create_samsung_tv(
         host: req.host.clone(),
         rest_port: req.port.unwrap_or(8001),
         ws_port: 8002,
+        use_https: false,
         mac_address: None,
     };
 
@@ -904,6 +905,7 @@ pub(crate) async fn update_samsung_tv(
         host: req.host.clone(),
         rest_port: req.rest_port,
         ws_port: req.ws_port,
+        use_https: false,
         mac_address: None,
     };
 
