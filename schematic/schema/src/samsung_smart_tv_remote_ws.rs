@@ -9,6 +9,7 @@
 //! ## Endpoints
 //!
 //! - `RemoteControl` (`/api/v2/channels/samsung.remote.control`): Samsung remote control channel for key transport and lifecycle events. First connection may trigger an on-TV approval prompt; approved sessions provide a token for subsequent reconnects.
+//! - `ArtMode` (`/api/v2/channels/com.samsung.art-app`): Samsung Art Mode (Frame TV) channel for artwork management, brightness control, and Art Mode on/off. Uses double-encoded JSON in the `data` field of `ms.channel.emit` messages.
 //!
 //! ## Authentication
 //!
@@ -27,6 +28,14 @@ pub struct RemoteControlConnectionParams {
     ///Base64-encoded client name used by Samsung remote channel
     pub name: String,
     ///Previously approved remote token to bypass repeated on-TV prompts
+    pub token: Option<String>,
+}
+///Typed query parameters for the ArtMode websocket endpoint.
+#[derive(Debug, Clone)]
+pub struct ArtModeConnectionParams {
+    ///Base64-encoded client name for the Art Mode channel
+    pub name: String,
+    ///Previously approved token to bypass on-TV approval prompt
     pub token: Option<String>,
 }
 ///Samsung Smart TV remote-control websocket API (S95C-focused)
@@ -99,6 +108,49 @@ impl SamsungSmartTvRemoteWs {
             .build()
             .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
         RemoteControlClient::connect(url, options, header_pairs).await
+    }
+    ///Connect to the ArtMode endpoint.
+    pub async fn connect_art_mode(
+        &self,
+        params: ArtModeConnectionParams,
+        options: super::ws_shared::WsClientOptions,
+    ) -> Result<ArtModeClient, super::ws_shared::WsError> {
+        let mut path = "/api/v2/channels/com.samsung.art-app".to_string();
+        let mut query_pairs: Vec<(String, String)> = Vec::new();
+        query_pairs.push(("name".to_string(), params.name.to_string()));
+        if let Some(value) = params.token.as_ref() {
+            query_pairs.push(("token".to_string(), value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let query = query_pairs
+                .into_iter()
+                .map(|(k, v)| {
+                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push('&');
+            } else {
+                path.push('?');
+            }
+            path.push_str(&query);
+        }
+        if path.contains('{') {
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
+        }
+        let url = format!("{}{}", self.base_url, path);
+        let header_pairs = self
+            .headers
+            .clone()
+            .build()
+            .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
+        ArtModeClient::connect(url, options, header_pairs).await
     }
 }
 impl Default for SamsungSmartTvRemoteWs {
@@ -208,6 +260,220 @@ impl RemoteControlClient {
                     );
                     tokio::time::sleep(delay).await;
                     match RemoteControlClient::dial(
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
+                    {
+                        Ok(stream) => {
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            stream
+                        }
+                        Err(err) => {
+                            let _ = event_tx.send(Err(err)).await;
+                            reconnect_attempt = reconnect_attempt.saturating_add(1);
+                            continue;
+                        }
+                    }
+                };
+                let (mut write, mut read) = stream.split();
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Ready);
+                loop {
+                    tokio::select! {
+                        cmd = writer_rx.recv() => { match cmd {
+                        Some(super::ws_shared::WriterCommand::SendText(text)) => { if
+                        write.send(Message::Text(text.into())). await .is_err() { break;
+                        } } Some(super::ws_shared::WriterCommand::SendBinary(data)) => {
+                        if write.send(Message::Binary(data.into())). await .is_err() {
+                        break; } } Some(super::ws_shared::WriterCommand::Close) => {
+                        manual_close = true; let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Closing); let _ =
+                        write.close(). await; break; } None => { manual_close = true; let
+                        _ = state_tx.send(super::ws_shared::WsConnectionState::Closing);
+                        let _ = write.close(). await; break; } } } msg_result = read
+                        .next() => { match msg_result { Some(Ok(Message::Text(text))) =>
+                        { match serde_json::from_str:: < serde_json::Value > (text
+                        .as_ref()) { Ok(value) => { let _ = event_tx.send(Ok(value)).
+                        await; } Err(e) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Binary(data))) => { match
+                        serde_json::from_slice:: < serde_json::Value > (data.as_ref()) {
+                        Ok(value) => { let _ = event_tx.send(Ok(value)). await; } Err(e)
+                        => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Serde(e))). await; } } }
+                        Some(Ok(Message::Close(_))) => break, Some(Ok(Message::Ping(_)))
+                        | Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
+                        Some(Err(e)) => { let _ = event_tx
+                        .send(Err(super::ws_shared::WsError::Transport(e))). await;
+                        break; } None => break, } }
+                    }
+                }
+                if manual_close {
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                    break;
+                }
+                let _ = state_tx.send(super::ws_shared::WsConnectionState::Disconnected);
+                active_stream = None;
+            }
+        });
+        let transport = super::ws_shared::WsTransportHandle {
+            writer_tx,
+            state_rx,
+            supervisor_handle,
+            next_id,
+            pending,
+        };
+        Ok(Self { transport, event_rx })
+    }
+    /// Send a fire-and-forget message.
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.send_typed(&message).await
+    }
+    /// Send a strongly-typed message payload.
+    pub async fn send_typed<M: super::ws_shared::WsEncode + ?Sized>(
+        &self,
+        message: &M,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let text = super::ws_shared::WsEncode::ws_encode(message)?;
+        self.transport
+            .writer_tx
+            .send(super::ws_shared::WriterCommand::SendText(text))
+            .await
+            .map_err(|_| super::ws_shared::WsError::Disconnected)
+    }
+    /// Receive the next inbound event.
+    pub async fn next_event(
+        &mut self,
+    ) -> Option<Result<serde_json::Value, super::ws_shared::WsError>> {
+        self.event_rx.recv().await
+    }
+    /// Returns a stream of inbound events.
+    pub fn events(
+        self,
+    ) -> tokio_stream::wrappers::ReceiverStream<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    > {
+        tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
+    }
+    /// Initiate a graceful close.
+    pub async fn close(&self) -> Result<(), super::ws_shared::WsError> {
+        self.transport
+            .writer_tx
+            .send(super::ws_shared::WriterCommand::Close)
+            .await
+            .map_err(|_| super::ws_shared::WsError::Disconnected)
+    }
+    /// Returns the current connection state.
+    pub fn state(&self) -> super::ws_shared::WsConnectionState {
+        self.transport.state()
+    }
+}
+///Client for the ArtMode endpoint.
+pub struct ArtModeClient {
+    transport: super::ws_shared::WsTransportHandle,
+    event_rx: tokio::sync::mpsc::Receiver<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    >,
+}
+impl ArtModeClient {
+    async fn dial(
+        url: &str,
+        options: &super::ws_shared::WsClientOptions,
+        header_pairs: &[(String, String)],
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        super::ws_shared::WsError,
+    > {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = url.to_string().into_client_request()?;
+        for (name, value) in header_pairs {
+            if let (Ok(hdr_name), Ok(hdr_value)) = (
+                name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
+                value
+                    .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
+            ) {
+                request.headers_mut().insert(hdr_name, hdr_value);
+            }
+        }
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config.clone(),
+            options.disable_nagle,
+        );
+        let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
+            .await
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
+        Ok(ws_stream)
+    }
+    /// Connect to the endpoint.
+    pub(crate) async fn connect(
+        url: String,
+        _options: super::ws_shared::WsClientOptions,
+        header_pairs: Vec<(String, String)>,
+    ) -> Result<Self, super::ws_shared::WsError> {
+        let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
+        let _receive_timeout = _options.receive_timeout;
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
+            _options.outbound_capacity,
+        );
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
+        let (state_tx, state_rx) = tokio::sync::watch::channel(
+            super::ws_shared::WsConnectionState::Connecting,
+        );
+        let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let pending: std::sync::Arc<
+            tokio::sync::Mutex<
+                std::collections::HashMap<
+                    u64,
+                    tokio::sync::oneshot::Sender<serde_json::Value>,
+                >,
+            >,
+        > = std::sync::Arc::new(
+            tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        );
+        let url_for_supervisor = url.clone();
+        let header_pairs_for_supervisor = header_pairs.clone();
+        let options_for_supervisor = _options.clone();
+        let supervisor_handle = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
+            use tokio_tungstenite::tungstenite::Message;
+            let mut active_stream = Some(ws_stream);
+            let reconnect_policy = options_for_supervisor.reconnect.clone();
+            let mut reconnect_attempt: u32 = 0;
+            let mut manual_close = false;
+            loop {
+                let stream = if let Some(stream) = active_stream.take() {
+                    reconnect_attempt = 0;
+                    stream
+                } else {
+                    let Some(policy) = reconnect_policy.as_ref() else {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    };
+                    if let Some(max_attempts) = policy.max_attempts
+                        && reconnect_attempt >= max_attempts
+                    {
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
+                        break;
+                    }
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
+                    tokio::time::sleep(delay).await;
+                    match ArtModeClient::dial(
                             &url_for_supervisor,
                             &options_for_supervisor,
                             &header_pairs_for_supervisor,

@@ -10,13 +10,20 @@
 //!
 //! ## Features
 //!
+//! **DELETE**:
+//! - `CloseApp` - Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
+//!
 //! **GET**:
 //! - `GetDeviceInfo` - Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation.
 //! - `GetServerLogs` - Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled.
+//! - `GetAppStatus` - Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.
 //!
 //! **POST**:
 //! - `LaunchApplicationById` - Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName.
 //! - `LaunchApplicationByName` - Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.
+//!
+//! **PUT**:
+//! - `InstallApp` - Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
 //!
 //! ## Examples
 //!
@@ -222,6 +229,165 @@ impl crate::shared::EndpointSpec for LaunchApplicationByNameRequest {
     type Response = ();
     const ENDPOINT_ID: &'static str = "LaunchApplicationByName";
 }
+/// Request for `GetAppStatus` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::samsung_smart_tv::GetAppStatusRequest;
+///
+/// let request = GetAppStatusRequest::new("app_id_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetAppStatusRequest {
+    /// Path parameter: app_id
+    pub app_id: String,
+}
+impl GetAppStatusRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(app_id: impl Into<String>) -> Self {
+        Self { app_id: app_id.into() }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!("/api/v2/applications/{}", self.app_id);
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for GetAppStatusRequest {
+    fn from(param: &str) -> Self {
+        Self { app_id: param.to_string() }
+    }
+}
+impl From<String> for GetAppStatusRequest {
+    fn from(param: String) -> Self {
+        Self { app_id: param }
+    }
+}
+impl crate::shared::EndpointSpec for GetAppStatusRequest {
+    type Response = SamsungAppStatusResponse;
+    const ENDPOINT_ID: &'static str = "GetAppStatus";
+}
+/// Request for `CloseApp` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::samsung_smart_tv::CloseAppRequest;
+///
+/// let request = CloseAppRequest::new("app_id_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CloseAppRequest {
+    /// Path parameter: app_id
+    pub app_id: String,
+}
+impl CloseAppRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(app_id: impl Into<String>) -> Self {
+        Self { app_id: app_id.into() }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!("/api/v2/applications/{}", self.app_id);
+        Ok(("DELETE", path, None, vec![]))
+    }
+}
+impl From<&str> for CloseAppRequest {
+    fn from(param: &str) -> Self {
+        Self { app_id: param.to_string() }
+    }
+}
+impl From<String> for CloseAppRequest {
+    fn from(param: String) -> Self {
+        Self { app_id: param }
+    }
+}
+impl crate::shared::EndpointSpec for CloseAppRequest {
+    type Response = ();
+    const ENDPOINT_ID: &'static str = "CloseApp";
+}
+/// Request for `InstallApp` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::samsung_smart_tv::InstallAppRequest;
+///
+/// let request = InstallAppRequest::new("app_id_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstallAppRequest {
+    /// Path parameter: app_id
+    pub app_id: String,
+}
+impl InstallAppRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(app_id: impl Into<String>) -> Self {
+        Self { app_id: app_id.into() }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!("/api/v2/applications/{}", self.app_id);
+        Ok(("PUT", path, None, vec![]))
+    }
+}
+impl From<&str> for InstallAppRequest {
+    fn from(param: &str) -> Self {
+        Self { app_id: param.to_string() }
+    }
+}
+impl From<String> for InstallAppRequest {
+    fn from(param: String) -> Self {
+        Self { app_id: param }
+    }
+}
+impl crate::shared::EndpointSpec for InstallAppRequest {
+    type Response = ();
+    const ENDPOINT_ID: &'static str = "InstallApp";
+}
 /// Request enum for SamsungSmartTv API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -234,6 +400,12 @@ pub enum SamsungSmartTvRequest {
     LaunchApplicationById(LaunchApplicationByIdRequest),
     /// Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.
     LaunchApplicationByName(LaunchApplicationByNameRequest),
+    /// Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.
+    GetAppStatus(GetAppStatusRequest),
+    /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
+    CloseApp(CloseAppRequest),
+    /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
+    InstallApp(InstallAppRequest),
 }
 impl SamsungSmartTvRequest {
     /// Converts the request into (method, path, body, headers) parts.
@@ -250,6 +422,9 @@ impl SamsungSmartTvRequest {
             Self::GetServerLogs(req) => req.into_parts(),
             Self::LaunchApplicationById(req) => req.into_parts(),
             Self::LaunchApplicationByName(req) => req.into_parts(),
+            Self::GetAppStatus(req) => req.into_parts(),
+            Self::CloseApp(req) => req.into_parts(),
+            Self::InstallApp(req) => req.into_parts(),
         }
     }
     /// Returns the endpoint identifier for this request.
@@ -269,6 +444,15 @@ impl SamsungSmartTvRequest {
             }
             Self::LaunchApplicationByName(_) => {
                 <LaunchApplicationByNameRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetAppStatus(_) => {
+                <GetAppStatusRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CloseApp(_) => {
+                <CloseAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::InstallApp(_) => {
+                <InstallAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
         }
     }
@@ -291,6 +475,21 @@ impl From<LaunchApplicationByIdRequest> for SamsungSmartTvRequest {
 impl From<LaunchApplicationByNameRequest> for SamsungSmartTvRequest {
     fn from(req: LaunchApplicationByNameRequest) -> Self {
         Self::LaunchApplicationByName(req)
+    }
+}
+impl From<GetAppStatusRequest> for SamsungSmartTvRequest {
+    fn from(req: GetAppStatusRequest) -> Self {
+        Self::GetAppStatus(req)
+    }
+}
+impl From<CloseAppRequest> for SamsungSmartTvRequest {
+    fn from(req: CloseAppRequest) -> Self {
+        Self::CloseApp(req)
+    }
+}
+impl From<InstallAppRequest> for SamsungSmartTvRequest {
+    fn from(req: InstallAppRequest) -> Self {
+        Self::InstallApp(req)
     }
 }
 /// Samsung Smart TV LAN API (S95C-focused modern Tizen subset) client.
@@ -942,6 +1141,26 @@ impl SamsungSmartTv {
     pub async fn launch_application_by_name(
         &self,
         request: LaunchApplicationByNameRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `CloseApp` endpoint.
+    ///
+    /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn close_app(
+        &self,
+        request: CloseAppRequest,
+    ) -> Result<(), SchematicError> {
+        self.request_empty(request).await
+    }
+    /// Convenience method for the `InstallApp` endpoint.
+    ///
+    /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
+    #[must_use = "this returns a Future that must be awaited"]
+    pub async fn install_app(
+        &self,
+        request: InstallAppRequest,
     ) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
