@@ -127,6 +127,7 @@ The table structure maps `(Provider, SimplifiedTier)` -> `Option<model_id>`:
 | Roo Code      | *(n/a)*                 | *(n/a)*                 | *(n/a)*                  |
 
 Notes:
+
 - Entries marked `--` mean the CLI supports the model property but has no model at that tier (Codex has no "fast" model in the traditional sense).
 - Entries marked *(n/a)* mean the CLI does not support the `model` property on agents/commands at all. The model property is dropped during conversion.
 - Entries marked *(user-configured)* mean the CLI supports arbitrary providers and the default must come from user configuration.
