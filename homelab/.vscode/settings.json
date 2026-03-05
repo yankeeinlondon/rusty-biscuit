@@ -4,6 +4,7 @@
         "DLNA",
         "firewalling",
         "hchris",
+        "highspeed",
         "inputtext",
         "intg",
         "OLED",
@@ -12,6 +13,7 @@
         "sendkey",
         "Tizen",
         "unfoldedcircle",
+        "ZENMUX",
         "Zidoo"
     ],
     "svgPreview.autoOpen": false

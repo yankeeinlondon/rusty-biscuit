@@ -222,7 +222,7 @@ test-frontend:
     @echo ""
     @echo "Testing Frontend"
     @echo ""
-    @cd server/frontend && pnpm test
+    @cd ./server/frontend && pnpm test
 
 # typecheck frontend
 typecheck-frontend:
@@ -278,8 +278,14 @@ skill-homelab:
 
 # build the unfolded-circle skill and deploy in this repo as well as User scope
 skill-unfolded-circle:
-
-
+    @echo
+    @echo "Publishing skill for {{BOLD}}unfolded-circle{{RESET}} locally to {{BLUE}}repo{{RESET}}"
+    @echo
+    @mkdir -p "../.claude/skills/unfolded-circle"
+    @cp -r ./docs/unfolded-circle ../.claude/skills
+    @echo
+    @echo "Skill published to {{BOLD}}rusty-biscuit{{RESET}} monorepo"
+    @echo
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
