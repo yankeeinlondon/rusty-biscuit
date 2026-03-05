@@ -31,8 +31,8 @@ fi
 echo "Running doctests for changed crates: ${!packages[*]}"
 
 for pkg in "${!packages[@]}"; do
-    output=$(cargo test --doc -p "$pkg" 2>&1)
-    status=$?
+    output=$(cargo test --doc -p "$pkg" 2>&1) || status=$?
+    status=${status:-0}
     if echo "$output" | grep -q "no library targets found"; then
         echo "Skipping $pkg (no library target)"
         continue
