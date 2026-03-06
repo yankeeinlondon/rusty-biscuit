@@ -160,17 +160,27 @@ The reporting is broken down into the following sections:
 6. Exceptions
 
    - This area is only shown if there **are** exceptions (either `AgentException` entries or `AgentDirectoryDiagnostic` entries)
-   - Exceptions are grouped **by provider**, not by scope
-   - Each provider gets a header line showing the provider name, user agent path, and repo agent path:
-     `<b>{provider} [ user:</b> ~/{user_path}<b>, repo:</b> <magenta>{repo_path}</magenta> ]`
-   - Within each provider, exceptions are further grouped by `ExceptionType`:
+   - The exceptions section does NOT include explicit `--fix` callouts; the Footer Messages section handles that
+   - Exceptions are rendered in two groups: **format-incompatible providers** and **regular providers**
 
-     - **Missing**: Shows directory-level diagnostics first (if any), then a comma-separated list of missing agent names with word wrapping
+   **Format-incompatible providers** are rendered as simple one-liners in an unordered list, with no sub-bullets:
+   - `<b>{provider}</b> — ❌ uses a non-standard format which is incompatible with Claudine.`
+   - Examples: Goose (YAML recipes), KimiCode (YAML), Roo Code (YAML mode definitions)
+
+   **Regular providers** are grouped by provider with a header line showing provider name, user agent path, and repo agent path:
+   - `<b>{provider} [ user:</b> ~/{user_path}<b>, repo:</b> <magenta>{repo_path}</magenta> ]`
+
+   **Directory-level diagnostics** (missing agent directories) are rendered directly at the provider level, NOT nested under a "missing" category:
+   - `All <b><yellow>{count}</yellow> {scope}</b> scoped agents are missing for <b>{provider}</b> because the directory for agents doesn't exist!`
+   - These appear as immediate children of the provider item in the unordered list
+
+   Within each regular provider, exceptions are further grouped by `ExceptionType`:
+
+     - **Missing**: Comma-separated list of missing agent names with word wrapping (directory-level diagnostics are shown separately above, not nested here)
      - **Invalid**: Each agent shown individually as an OSC8 link with missing property details: `<b>{agent_name}</b> (<i>missing the properties <red>{prop1}</red>, <red>{prop2}</red></i>)`
      - **NoLinks**: Comma-separated OSC8-linked agent names with word wrapping
-     - **ModelPropertyNotShareable**: Agents that specify a `model` property are flagged here. Each agent shown individually: `<b>{agent_name}</b> (<i>specifies <orange>model</orange> property - not shareable across providers</i>)`
+     - **ModelPropertyNotShareable**: Agents that specify a `model` property are flagged here. Each agent shown as an OSC8 link: `<a href="{path}"><b>{agent_name}</b></a> (<i>specifies <orange>model</orange></i>)`
      - **VariantLinkedProperty**: Alias properties that have diverged from their canonical value. Each entry shows: `<b>{agent_name}</b> (<i><orange>{canonical_prop}</orange>="{canonical_value}" differs from <orange>{alias_prop}</orange>="{alias_value}"</i>)`. Auto-fixable with `--apply`.
-     - **FormatIncompatible**: When the canonical source format (e.g., Markdown) does not match the target provider's required format (e.g., YAML), the agent cannot be directly linked. Each entry shows: `<b>{agent_name}</b> (<i>source format <orange>{src_format}</orange> incompatible with {provider}'s required format <orange>{target_format}</orange></i>)`
 
    - Note: The `BrokenLink` exception type from skills is **not applicable** to agents. Since agents are single files rather than directory bundles with inter-file links, broken internal links are not a concern.
    - Exceptions use the same _filtering_ rules as the Defined Agents section so we should ONLY report on those agents which match the fuzzy matching of the filter globs passed in

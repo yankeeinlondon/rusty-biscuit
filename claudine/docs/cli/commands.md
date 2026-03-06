@@ -45,7 +45,7 @@ The reporting is broken down into the following sections:
       - **Detail View**
           - Shown when there is exactly 1 command being shown (typically due to a filter condition)
           - Whether the `-v` / `--verbose` flag was used has no effect
-          - The first line of reporting on the command is the command name (bold, OSC8 link to the command file) followed by the badge for the scope
+          - The first line of reporting on the command is the command name without a leading `/` (bold, OSC8 link to the command file) followed by the badge for the scope
           - The second line is the description of the command (dim, italics) with word wrapping; if no description exists, show `no description`
           - Then a blank line
           - Since commands are single files (not directory bundles), there is **no `FileSystem` tree**. Instead, show the command's **frontmatter properties** as a dim key-value list with a left margin of 2 characters:
@@ -58,15 +58,17 @@ The reporting is broken down into the following sections:
           - If the number of commands (_after filtering_) is less than 6 (and more than 1) we will report using the verbose style.
           - If the user adds the `--verbose` or `-v` flag and there is more than 1 command then we will also report using the verbose style.
           - This mode lists all commands available (after filter) as an unordered list (leveraging `UnorderedList` component from biscuit-terminal)
-              - Each item shows: OSC8-linked command name (bold), scope badge, then description (dim, italics)
+              - Each item shows: OSC8-linked command name without leading `/` (bold), scope badge, then description (dim, italics)
 
       - **Normal**
           - When we have more than 5 commands (and verbose is not forced) we group commands by scope
           - Grouping uses `BTreeMap<CommandScope, Vec<&CommandInfo>>` so scopes appear in order: User, RepoMasked, Repo
           - Each scope section leads with the scope badge and a count: `{badge} <dim>(<i>{count}</i>)</dim>`
           - Followed by a blank line
-          - Then command names rendered as space-separated OSC8 links (bold) with `WordWrap::BespokeProse(Some(50), ...)` to flow across the terminal width
+          - Then command names (without leading `/`) rendered as space-separated OSC8 links (bold) with `WordWrap::BespokeProse(Some(50), ...)` to flow across the terminal width
           - Followed by another blank line
+
+   **Note on command name display:** Command names are shown without a leading `/` character. Users understand they must press `/` to invoke commands; including it in the listing is redundant.
 
 3. Fix Summary
 
@@ -122,21 +124,32 @@ The reporting is broken down into the following sections:
 6. Exceptions
 
    - This area is only shown if there **are** exceptions (either `CommandException` entries or `CommandDiagnostic` entries)
-   - Exceptions are grouped **by provider**, not by scope
-   - Each provider gets a header line showing the provider name, user command path, and repo command path:
-     `<b>{provider} [ user:</b> ~/{user_path}<b>, repo:</b> <magenta>{repo_path}</magenta> ]`
-   - For providers where the command directory name differs from `commands/` (e.g., Codex uses `prompts/`), show the actual path
-   - For providers with no file-based command support (Goose/MCP, KimiCode/built-in), show the path as `-` and include a note about the support level
-   - Within each provider, exceptions are further grouped by `ExceptionType`:
+   - The exceptions section does NOT include explicit `--fix` callouts; the Footer Messages section handles that
+   - Exceptions are rendered in two groups: **format-incompatible providers** and **regular providers**
 
-     - **Missing**: Shows directory-level diagnostics first (if any), then a comma-separated list of missing command names with word wrapping
+   **Format-incompatible providers** are rendered as simple one-liners in an unordered list, with no sub-bullets:
+   - `<b>{provider}</b> — ❌ uses a non-standard format which is incompatible with Claudine.`
+   - Examples: Gemini (TOML), Goose (MCP), Kimi Code (built-in)
+
+   **Regular providers** are grouped by provider with a header line showing provider name, user command path, and repo command path:
+   - `<b>{provider} [ user:</b> ~/{user_path}<b>, repo:</b> <magenta>{repo_path}</magenta> ]`
+   - For providers where the command directory name differs from `commands/` (e.g., Codex uses `prompts/`), show the actual path
+
+   **Directory-level diagnostics** (missing command directories) are rendered directly at the provider level, NOT nested under a "missing" category:
+   - `All <b><yellow>{count}</yellow> {scope}</b> scoped commands are missing for <b>{provider}</b> because the directory for commands doesn't exist!`
+   - These appear as immediate children of the provider item in the unordered list
+
+   Within each regular provider, exceptions are further grouped by `ExceptionType`:
+
+     - **Missing**: Comma-separated list of missing command names with word wrapping (directory-level diagnostics are shown separately above, not nested here)
      - **Invalid**: Each command shown individually as an OSC8 link with missing property details: `<b>{command}</b> (<i>missing the properties <red>{prop1}</red>, <red>{prop2}</red></i>)`
          - For Gemini commands, the required `prompt` property is validated
          - For other Markdown-based providers, validation checks their respective optional/required property sets
      - **NoLinks**: Comma-separated OSC8-linked command names with word wrapping
      - **VariantLinkedProperty**: Alias properties that have diverged from their canonical value. Auto-fixable with `--apply`.
      - **ModelPropertyNotShareable**: Commands that specify a `model` property are flagged here because model values are provider-specific and cannot be meaningfully shared across CLIs
-         - Each entry shows: `<b>{command}</b> <dim>(<i>specifies model: <orange>{model_value}</orange></i>)</dim>`
+         - Each entry shows: `<a href="{path}"><b>{command}</b></a> (<i>specifies <orange>model = {model_value}</orange></i>)`
+         - Command names are OSC8 links to the command file
          - This is a **warning**, not a blocking error -- the command is still linked but the model property may cause issues in non-originating providers
 
    - Exceptions use the same _filtering_ rules as the Defined Commands section so we should ONLY report on those commands which match the fuzzy matching of the filter globs passed in
