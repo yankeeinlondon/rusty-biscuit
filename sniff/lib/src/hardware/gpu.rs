@@ -78,6 +78,9 @@ pub struct GpuInfo {
     pub metal_family: Option<String>,
     /// GPU capabilities
     pub capabilities: GpuCapabilities,
+    /// Number of GPU cores (if detected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_count: Option<u32>,
 }
 
 /// Detects all available GPUs on the system.
@@ -103,86 +106,82 @@ pub struct GpuInfo {
 ///     println!("  Unified Memory: {}", gpu.capabilities.unified_memory);
 /// }
 /// ```
+/// Detects GPUs on macOS using IOKit (via `ioreg`).
+///
+/// Metal framework initialization (`MTLCreateSystemDefaultDevice` /
+/// `MTLCopyAllDevices`) can block for 14+ seconds in non-GUI contexts
+/// (test runners, SSH sessions, headless CI). IOKit returns the same
+/// model name and core count in ~25 ms.
 #[cfg(target_os = "macos")]
 pub fn detect_gpus() -> Vec<GpuInfo> {
-    use metal::{Device, MTLGPUFamily};
+    use std::process::Command;
 
-    Device::all()
-        .into_iter()
-        .map(|device| {
-            let name = device.name().to_string();
-            let vendor = infer_vendor(&name);
+    let output = match Command::new("ioreg")
+        .args(["-rd1", "-c", "IOAccelerator"])
+        .output()
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return Vec::new(),
+    };
 
-            // Determine device type
-            let device_type = if device.is_removable() {
-                GpuDeviceType::External
-            } else if device.is_low_power() {
+    let name = parse_ioreg_string(&output, "model");
+    let core_count = parse_ioreg_int(&output, "gpu-core-count");
+
+    if let Some(name) = name {
+        let vendor = infer_vendor(&name);
+        // Apple Silicon always has unified memory and integrated GPU
+        let is_apple_silicon = vendor.as_deref() == Some("Apple");
+
+        vec![GpuInfo {
+            name,
+            vendor,
+            device_type: if is_apple_silicon {
                 GpuDeviceType::Integrated
             } else {
-                GpuDeviceType::Discrete
-            };
-
-            // Detect Metal GPU family
-            let metal_family = detect_metal_family(&device);
-
-            // Detect capabilities
-            let capabilities = GpuCapabilities {
-                raytracing: device.supports_raytracing(),
-                float32_filtering: device.supports_32bit_float_filtering(),
-                dynamic_libraries: device.supports_dynamic_libraries(),
-                function_pointers: device.supports_function_pointers(),
-                mesh_shaders: device.supports_family(MTLGPUFamily::Metal3),
-                barycentric_coords: device.supports_shader_barycentric_coordinates(),
-                unified_memory: device.has_unified_memory(),
-            };
-
-            GpuInfo {
-                name,
-                vendor,
-                device_type,
-                backend: "Metal".to_string(),
-                memory_bytes: Some(device.recommended_max_working_set_size()),
-                max_buffer_bytes: Some(device.max_buffer_length()),
-                is_headless: device.is_headless(),
-                is_removable: device.is_removable(),
-                registry_id: Some(device.registry_id()),
-                metal_family,
-                capabilities,
-            }
-        })
-        .collect()
+                GpuDeviceType::Unknown
+            },
+            backend: "Metal".to_string(),
+            memory_bytes: None,
+            max_buffer_bytes: None,
+            is_headless: false,
+            is_removable: false,
+            registry_id: None,
+            metal_family: None,
+            capabilities: GpuCapabilities {
+                unified_memory: is_apple_silicon,
+                ..Default::default()
+            },
+            core_count,
+        }]
+    } else {
+        Vec::new()
+    }
 }
 
-/// Detects the highest supported Metal GPU family.
+/// Parses a string value from ioreg text output.
+///
+/// Looks for patterns like `"key" = "value"`.
 #[cfg(target_os = "macos")]
-fn detect_metal_family(device: &metal::Device) -> Option<String> {
-    use metal::MTLGPUFamily;
+fn parse_ioreg_string(output: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\" = \"", key);
+    output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let rest = trimmed.strip_prefix(&pattern)?;
+        rest.strip_suffix('"').map(String::from)
+    })
+}
 
-    // Check Apple Silicon families (newest first)
-    let families = [
-        (MTLGPUFamily::Apple9, "apple9"),
-        (MTLGPUFamily::Apple8, "apple8"),
-        (MTLGPUFamily::Apple7, "apple7"),
-        (MTLGPUFamily::Apple6, "apple6"),
-        (MTLGPUFamily::Apple5, "apple5"),
-        (MTLGPUFamily::Apple4, "apple4"),
-        (MTLGPUFamily::Apple3, "apple3"),
-        (MTLGPUFamily::Apple2, "apple2"),
-        (MTLGPUFamily::Apple1, "apple1"),
-        // Mac families
-        (MTLGPUFamily::Mac2, "mac2"),
-        (MTLGPUFamily::Mac1, "mac1"),
-        // Metal feature sets
-        (MTLGPUFamily::Metal3, "metal3"),
-    ];
-
-    for (family, name) in families {
-        if device.supports_family(family) {
-            return Some(name.to_string());
-        }
-    }
-
-    None
+/// Parses an integer value from ioreg text output.
+///
+/// Looks for patterns like `"key" = 40`.
+#[cfg(target_os = "macos")]
+fn parse_ioreg_int(output: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\" = ", key);
+    output.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let rest = trimmed.strip_prefix(&pattern)?;
+        rest.parse().ok()
+    })
 }
 
 /// Infers the GPU vendor from the device name.
@@ -255,6 +254,7 @@ mod tests {
                 barycentric_coords: true,
                 unified_memory: true,
             },
+            core_count: Some(40),
         };
 
         let json = serde_json::to_string(&gpu).unwrap();
@@ -326,14 +326,6 @@ mod tests {
             assert!(!gpu.name.is_empty());
             // Backend should be Metal on macOS
             assert_eq!(gpu.backend, "Metal");
-            // Memory should be reported
-            assert!(gpu.memory_bytes.is_some());
-            // Max buffer length should be reported
-            assert!(gpu.max_buffer_bytes.is_some());
-            // Registry ID should be available
-            assert!(gpu.registry_id.is_some());
-            // Metal family should be detected
-            assert!(gpu.metal_family.is_some());
         }
     }
 

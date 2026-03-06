@@ -69,6 +69,13 @@ pub struct HardwareInfo {
 /// Currently returns `Ok` in all cases, but future versions may return
 /// errors for system information gathering failures.
 pub fn detect_hardware() -> Result<HardwareInfo> {
+    // Audio must be detected first. On macOS, linking against extra
+    // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
+    // a ~10s init delay. With only the `core_audio` feature enabled
+    // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
+    // avoids any potential Metal framework interference.
+    let audio_devices = detect_audio_devices();
+
     let sys = System::new_with_specifics(
         RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::everything())
@@ -109,9 +116,7 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
     };
 
     let storage = storage::detect_storage();
-
     let gpu = detect_gpus();
-    let audio_devices = detect_audio_devices();
 
     Ok(HardwareInfo {
         cpu,
