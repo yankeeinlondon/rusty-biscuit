@@ -198,6 +198,8 @@ build-local-integrations *args="":
     echo
     for integration in {{INTEGRATIONS}}; do
         echo "- building ${integration}"
+        echo
+        cargo build -p "${integration}" --release --target aarch64-unknown-linux-musl
     done
 
 # install all Unfolded Circle integrations
