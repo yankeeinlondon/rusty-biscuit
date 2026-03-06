@@ -38,8 +38,6 @@ The Homelab server exposes an endpoint at `/` which provides a nice but very sim
 
 ## Composition API
 
-![Composition API](composition-api.png)
-
 - We will use the Composition API and _composables_ for business logic where possible.
 - Script Setup and SFC:
     - We will use Single File Components (SFC) to define most pages in the SPA and we will use the newer `<script setup lang="ts"></script>` blocks instead of the `<script lang="ts"></script>` blocks.

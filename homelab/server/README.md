@@ -29,18 +29,6 @@ The server uses `~/homey.json` for device configuration. This file is created au
 }
 ```
 
-### Environment Variables (Legacy)
-
-For backward compatibility, you can still use environment variables. These are automatically migrated to the config file on first run.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SONY_RECEIVER` | Sony receiver host (format: `host` or `host:port`) | None |
-| `ARCAM_AMP` | Arcam amplifier hostname or IP | None |
-| `REQUEST_TIMEOUT_MS` | Request timeout in milliseconds | 5000 |
-| `PORT` | Server listen port | 3000 |
-
-> **Note:** The legacy `/sony/*` and `/arcam/*` routes are deprecated. Use the new `/sony_receiver/{name}/*` and `/arcam_amp/{name}/*` routes instead.
 
 ## Installation
 
@@ -51,7 +39,7 @@ cargo install --path homelab/server
 Or via justfile:
 
 ```bash
-just -f homelab/justfile install-server
+just -f install-server
 ```
 
 ## API Endpoints
