@@ -1,5 +1,6 @@
 set dotenv-load
 set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 # List of areas in this monorepo
 areas := "biscuit-hash biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa so-you-say tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
@@ -319,3 +320,15 @@ cp:
     @just _play select-4
     @echo "All committed files from {{BOLD}}rusty-biscuit{{RESET}} monorepo have now been pushed to remote."
     @echo
+
+# install rusty-biscuit CLI's which are used in devops
+init:
+    @echo -e "Initializing the {{RED}}rusty-biscuit{{RESET}} monorepo"
+    @echo
+    @echo -e "First step is to ensure CLI's used for devops are installed"
+    @echo
+    @cd biscuit-terminal >/dev/null && just install
+    @cd darkmatter >/dev/null && just install
+    @cd sniff >/dev/null && just install
+    @cd playa >/dev/null && just install
+    @cd biscuit-speaks >/dev/null  && just install
