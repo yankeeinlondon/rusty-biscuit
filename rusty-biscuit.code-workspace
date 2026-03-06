@@ -139,6 +139,7 @@
             "rmcp",
             "rodio",
             "rustls",
+            "rustup",
             "signingkey",
             "Sonoma",
             "spatialization",

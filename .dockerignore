@@ -1,0 +1,9 @@
+target/
+node_modules/
+.git/
+*.md
+.ai/
+.claude/
+.github/
+**/*.jsonl
+**/frontend/
