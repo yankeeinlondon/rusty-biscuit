@@ -266,14 +266,14 @@ test-server *args="":
 # build frontend SPA (installs deps if needed)
 build-frontend:
     @echo ""
-    @echo "{{BOLD}}Building Frontend SPA{{RESET}}"
+    @echo -e "{{BOLD}}Building Frontend SPA{{RESET}}"
     @cd ./server/frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install) && pnpm build
     @echo ""
 
 # run frontend dev server (Vite on :5173 with proxy to :3000)
 dev-frontend:
     @echo ""
-    @echo "{{BOLD}}Running Frontend Dev Server{{RESET}} ({{ITALIC}}Vite on :5173{{RESET}})"
+    @echo -e "{{BOLD}}Running Frontend Dev Server{{RESET}} ({{ITALIC}}Vite on :5173{{RESET}})"
     @echo ""
     @cd server/frontend && pnpm dev
 
