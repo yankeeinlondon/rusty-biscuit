@@ -43,7 +43,7 @@ _speak *args:
 
 # play a sound effect if `playa` CLI is installed (never errors)
 _play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 --volume 1.5 || exit 0
 
 
 _notify message title=PACKAGE:
@@ -126,19 +126,24 @@ ask prompt:
 # build Homelab packages (lib, cli, server)
 build *args="":
     @echo ""
-    @echo "Build Homelab Packages (Library, Homey CLI, Server)"
+    @echo -e "Build {{BOLD}}Homelab{{RESET}} Packages (Library, Homey CLI, Server)"
     @echo "---------------------------------------------------"
     @echo ""
     @just build-frontend
-    @cargo build -p homelab -p homelab-cli -p homelab-server {{args}}
+    @cargo build -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration {{args}}
+
+
+
+
+
 
 # run tests for Homelab packages
 test *args="":
     @echo ""
-    @echo "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
+    @echo -e "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
     @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homelab-cli -p homelab-server {{args}}
+    @cargo test -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration {{args}}
     @just test-frontend
 
 # run clippy on Homelab packages
@@ -150,26 +155,84 @@ lint:
     @cargo clippy -p homelab -- -D warnings
     @cargo clippy -p homelab-cli -- -D warnings
     @cargo clippy -p homelab-server -- -D warnings
+    @cargo clippy -p arcam-amp-integration -- -D warnings
     @just lint-frontend
 
+# Builds library and CLI and installs the CLI's binary
 install *args="":
     @echo ""
-    @echo "{{BOLD}}Building Homelab Library{{RESET}}"
+    @echo -e "{{BOLD}}Building Homelab Library{{RESET}}"
     @cargo build -p homelab --release  || ( just _play error-2 --background && exit 1 )
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
+    @echo -e "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
     @echo
     @cargo install --path ./cli {{args}}  || ( just _play error-2 --background && exit 1 )
     @echo ""
-    @echo "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
+    @echo -e "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
     @echo ""
+    @just install-integrations {{args}}
     @just _play drop-4
+
+# install server binary
+install-server:
+    @just build-frontend
+    @echo ""
+    @echo -e "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
+    @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
+    @echo ""
+    @echo -e "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
+    @echo ""
+
+
+# install frontend dependencies
+install-frontend:
+    @cd server/frontend && pnpm install
+
+INTEGRATIONS := `sniff repo --packages integration`
+
+build-local-integrations *args="":
+    @echo
+    @echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the local device/remote"
+    @echo
+
+# install all Unfolded Circle integrations
+install-integrations args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for integration in {{INTEGRATIONS}}; do
+        echo
+        echo -e "Installing the {{BOLD}}{{BLUE}}${integration}{{RESET}} integration"
+        echo
+        cargo install --path "./${integration}" {{args}} || (
+            just _play error-2 --background &&
+            echo -e "{{RED}}{{BOLD}}Error: {{RESET}}problems installing the {{BOLD}}${integration}{{RESET}}!" &&
+            exit 1
+        )
+        echo
+        "${integration}" --help
+        echo
+    done
+    just _speak "All Unfolded Circle integrations were installed on the host computer"
+
+docker-build-arcam:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "Building a docker image for the {{BOLD}}Arcam{{RESET}} integration for the Unfolded Circle Remote"
+    echo
+    docker build -f arcam-amp-integration/Dockerfile -t arcam-amp-integration .. || (
+        echo "Failed to build a Docker image for the Arcam integration!" &&
+        just _play "error-2" &&
+        just _speak "f"
+    )
+    echo
+    echo -e "The {{BOLD}}Arcam{{RESET}}"
 
 check:
     @echo ""
     @echo "Checking Homelab Library, CLI and Server"
     @echo ""
-    @cargo check -p homelab -p homelab-cli -p homelab-server
+    @cargo check -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration
 
 # run server in dev mode
 server *args="":
@@ -185,15 +248,6 @@ test-server *args="":
     @echo ""
     @cargo test -p homelab-server {{args}}
 
-# install server binary
-install-server:
-    @just build-frontend
-    @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
-    @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
-    @echo ""
-    @echo "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
-    @echo ""
 
 # build frontend SPA (installs deps if needed)
 build-frontend:
@@ -209,9 +263,7 @@ dev-frontend:
     @echo ""
     @cd server/frontend && pnpm dev
 
-# install frontend dependencies
-install-frontend:
-    @cd server/frontend && pnpm install
+
 
 # lint frontend code with oxlint
 lint-frontend:
@@ -270,9 +322,31 @@ cp:
     @echo ""
     @git push
     @echo ""
-    @just play select-4
+    @just -play select-4
     @echo -e "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
     @echo
+
+create-integration name="" prompt="":
+    #!/usr/bin/env bash
+    if [ -z "{{name}}" ]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} no {{BOLD}}name{{RESET}} provided for the integration!"
+        echo
+        echo -e "syntax: {{BOLD}}just create-integration{{RESET}} {{DIM}}{{ITALIC}} [name] [prompt]"
+        echo
+        exit 99
+    fi
+
+    if [ -z "{{prompt}}" ]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} no {{BOLD}}prompt{{RESET}} provided for the {{name}} integration! Exiting..."
+        echo
+        echo -e "syntax: {{BOLD}}just create-integration{{RESET}} {{DIM}}{{ITALIC}} [name] [prompt]"
+        echo
+        exit 99
+    fi
+
+    mkdir -p "./docs/integrations/"
+    touch "./docs/integration/{{name}}.md"
+
 
 # build the 'homelab' skill
 skill-homelab:
