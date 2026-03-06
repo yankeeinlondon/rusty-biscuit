@@ -193,13 +193,20 @@ INTEGRATIONS := `sniff repo --packages integration`
 build-local-integrations *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    if ! command -v cargo-zigbuild &> /dev/null; then
+        echo -e "{{RED}}{{BOLD}}Error:{{RESET}} {{BOLD}}cargo-zigbuild{{RESET}} is not installed. Install it with: {{DIM}}cargo install cargo-zigbuild{{RESET}}"
+        exit 1
+    fi
     echo
-    echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the local device/remote"
+    echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the UC Remote (aarch64-linux-musl)"
+    echo -e "{{DIM}}using cargo-zigbuild for cross-compilation{{RESET}}"
     echo
     for integration in {{INTEGRATIONS}}; do
-        echo "- building ${integration}"
+        echo -e "- building {{BOLD}}${integration}{{RESET}}"
         echo
-        cargo build -p "${integration}" --release --target aarch64-unknown-linux-musl
+        cargo zigbuild -p "${integration}" --release --target aarch64-unknown-linux-musl {{args}}
+        echo -e "{{DIM}}  → ../target/aarch64-unknown-linux-musl/release/${integration}{{RESET}}"
+        echo
     done
 
 # install all Unfolded Circle integrations

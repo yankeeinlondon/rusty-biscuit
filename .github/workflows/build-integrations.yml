@@ -1,0 +1,37 @@
+name: Build UC Integrations
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build aarch64 integration binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build arcam-amp-integration
+        run: cross build -p arcam-amp-integration --release --target aarch64-unknown-linux-musl
+
+      - name: Package archive
+        run: |
+          mkdir -p pkg/arcam-amp-integration
+          cp target/aarch64-unknown-linux-musl/release/arcam-amp-integration pkg/arcam-amp-integration/
+          cp homelab/arcam-amp-integration/driver.json pkg/arcam-amp-integration/ 2>/dev/null || true
+          cd pkg && tar czf arcam-amp-integration-aarch64.tar.gz arcam-amp-integration
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" pkg/arcam-amp-integration-aarch64.tar.gz

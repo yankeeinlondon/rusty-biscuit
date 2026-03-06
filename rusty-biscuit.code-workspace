@@ -150,7 +150,8 @@
             "winmm",
             "worktree",
             "worktrees",
-            "ZENMUX"
+            "ZENMUX",
+            "zigbuild"
         ],
         "svgPreview.autoOpen": false
     }

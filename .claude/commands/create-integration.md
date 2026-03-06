@@ -20,4 +20,5 @@ If the above is empty or says "$ARGUMENTS", stop immediately and reply with:
 > 1. the name of the device or service you are providing an integration for
 > 2. a prompt which provides context on the device/service; ideally a design document is referenced
 >
-> - `/create-integration sony-receiver use the @homelab/docs/`
+> - `/create-integration sony-receiver use the @homelab/docs/research.md to build an integration`
+

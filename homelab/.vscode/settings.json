@@ -17,7 +17,8 @@
         "tungstenite",
         "unfoldedcircle",
         "ZENMUX",
-        "Zidoo"
+        "Zidoo",
+        "zigbuild"
     ],
     "svgPreview.autoOpen": false
 }
