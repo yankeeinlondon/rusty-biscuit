@@ -13,16 +13,16 @@
 //! **GET**:
 //! - `GetSystemInfo` - Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn.
 //! - `ExportBackup` - Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream.
-//! - `GetResource` - Download a single stored resource by type and identifier. Binary response supports image/audio/file resources.
+//! - `GetResource` - Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.
 //! - `QueryLogsText` - Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.
 //!
 //! **POST**:
 //! - `Login` - Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference.
 //! - `Logout` - Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.
-//! - `UploadResource` - Upload a custom resource (icon/background/etc.) for the selected resource type via multipart form-data (`file`).
+//! - `UploadResource` - Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.
 //! - `InstallCustomIntegration` - Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.
 //! - `UploadCustomIrCodeSet` - Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.
-//! - `InstallCustomComponent` - Upload and install a custom UI or web-configurator component package (`file`). Returns install/activation status.
+//! - `InstallCustomComponent` - Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.
 //!
 //! **PUT**:
 //! - `RestoreBackup` - Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.
@@ -563,15 +563,15 @@ pub enum UnfoldedCircleCoreRestRequest {
     ExportBackup(ExportBackupCoreRestRequest),
     /// Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.
     RestoreBackup(RestoreBackupCoreRestRequest),
-    /// Upload a custom resource (icon/background/etc.) for the selected resource type via multipart form-data (`file`).
+    /// Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.
     UploadResource(UploadResourceCoreRestRequest),
-    /// Download a single stored resource by type and identifier. Binary response supports image/audio/file resources.
+    /// Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.
     GetResource(GetResourceCoreRestRequest),
     /// Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.
     InstallCustomIntegration(InstallCustomIntegrationCoreRestRequest),
     /// Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.
     UploadCustomIrCodeSet(UploadCustomIrCodeSetCoreRestRequest),
-    /// Upload and install a custom UI or web-configurator component package (`file`). Returns install/activation status.
+    /// Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.
     InstallCustomComponent(InstallCustomComponentCoreRestRequest),
     /// Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.
     QueryLogsText(QueryLogsTextCoreRestRequest),
@@ -1428,7 +1428,7 @@ impl UnfoldedCircleCoreRest {
     }
     /// Convenience method for the `GetResource` endpoint.
     ///
-    /// Download a single stored resource by type and identifier. Binary response supports image/audio/file resources.
+    /// Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.
     #[must_use = "this returns a Future that must be awaited"]
     pub async fn get_resource(
         &self,
