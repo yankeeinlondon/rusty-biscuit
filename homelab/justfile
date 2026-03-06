@@ -191,9 +191,14 @@ install-frontend:
 INTEGRATIONS := `sniff repo --packages integration`
 
 build-local-integrations *args="":
-    @echo
-    @echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the local device/remote"
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the local device/remote"
+    echo
+    for integration in {{INTEGRATIONS}}; do
+        echo "- building ${integration}"
+    done
 
 # install all Unfolded Circle integrations
 install-integrations args="":
