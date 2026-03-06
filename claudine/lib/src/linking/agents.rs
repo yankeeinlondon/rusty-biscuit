@@ -484,15 +484,10 @@ fn check_scope_missing(
     };
 
     if !provider_dir.exists() {
-        let message = if provider_dir.parent().is_some_and(|parent| parent.exists()) {
-            format!(
-                "All <b>{scope_label}</b> scoped agents are NOT currently linked because the agents directory for <b>{provider}</b> does not exist! Use the <red>--fix</red> flag to fix this.",
-            )
-        } else {
-            format!(
-                "All <b>{scope_label}</b> scoped agents are NOT currently linked because the base configuration directory for <b>{provider}</b> does not exist! Use the <red>--fix</red> flag to fix this.",
-            )
-        };
+        let count = canonical.len();
+        let message = format!(
+            "All <b><yellow>{count}</yellow> {scope_label}</b> scoped agents are missing for <b>{provider}</b> because the directory for agents doesn't exist!",
+        );
 
         diagnostics.push(AgentDirectoryDiagnostic { provider, message });
         return;

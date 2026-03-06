@@ -193,7 +193,7 @@ fn render_detail(term: &Terminal, cmd: &CommandInfo) {
     let desc = cmd.description.as_deref().unwrap_or("no description");
 
     let name_line = Prose::new(format!(
-        r#"<a href="{}"><b>/{}</b></a> {badge}"#,
+        r#"<a href="{}"><b>{}</b></a> {badge}"#,
         cmd.command_file_path.display(),
         cmd.name,
     ));
@@ -249,7 +249,7 @@ fn render_verbose(term: &Terminal, commands: &[CommandInfo]) {
         let badge = scope_badge(cmd.scope);
         let desc = cmd.description.as_deref().unwrap_or("no description");
         let item = Prose::new(format!(
-            r#"<a href="{}"><b>/{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
+            r#"<a href="{}"><b>{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
             cmd.command_file_path.display(),
             cmd.name,
         ));
@@ -275,7 +275,7 @@ fn render_normal(term: &Terminal, commands: &[CommandInfo]) {
             .iter()
             .map(|c| {
                 format!(
-                    r#"<a href="{}"><b>/{}</b></a>"#,
+                    r#"<a href="{}"><b>{}</b></a>"#,
                     c.command_file_path.display(),
                     c.name
                 )
@@ -325,108 +325,129 @@ fn render_exceptions(
         all_providers.insert(key.clone());
     }
 
-    let mut outer_list = UnorderedList::empty();
+    // Separate format-incompatible-only providers from others
+    let mut format_incompatible_providers: Vec<&String> = Vec::new();
+    let mut regular_providers: Vec<&String> = Vec::new();
 
     for provider_name in &all_providers {
-        let provider_header = build_provider_header(provider_name);
-        outer_list.add(Prose::new(provider_header));
+        let has_only_format_incompatible = by_provider
+            .get(provider_name)
+            .is_some_and(|type_map| {
+                type_map
+                    .keys()
+                    .all(|t| *t == CommandExceptionType::FormatIncompatible)
+            })
+            && !diag_by_provider.contains_key(provider_name);
 
-        let mut inner_list = UnorderedList::empty();
-
-        if let Some(type_map) = by_provider.get(provider_name) {
-            for (exc_type, entries) in type_map {
-                let count = entries.len();
-                let category_label = Prose::new(format!("<b>{exc_type}</b> ({count})"));
-                inner_list.add(category_label);
-
-                let mut detail_list = UnorderedList::empty();
-
-                match exc_type {
-                    CommandExceptionType::Missing => {
-                        if let Some(provider_diags) = diag_by_provider.get(provider_name) {
-                            for diag in provider_diags {
-                                detail_list.add(Prose::new(diag.message.clone()));
-                            }
-                        }
-                        let topics: Vec<String> =
-                            entries.iter().map(|e| e.name.clone()).collect();
-                        let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
-                            WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
-                        );
-                        detail_list.add(topic_line);
-                    }
-                    CommandExceptionType::Invalid => {
-                        for e in entries {
-                            let props_markup = e
-                                .missing_properties
-                                .iter()
-                                .map(|p| format!("<red>{p}</red>"))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let label = format!(
-                                r#"<b><a href="{}">{}</a></b> (<i>missing the properties {}</i>)"#,
-                                e.command_file_path.display(),
-                                e.name,
-                                props_markup
-                            );
-                            detail_list.add(Prose::new(label));
-                        }
-                    }
-                    CommandExceptionType::ModelPropertyNotShareable => {
-                        for e in entries {
-                            let model_info = e
-                                .model_value
-                                .as_deref()
-                                .map(|v| format!(" = {v}"))
-                                .unwrap_or_default();
-                            let label = format!(
-                                r#"<b>{}</b> (<i>specifies <orange>model{model_info}</orange> property - not shareable across providers</i>)"#,
-                                e.name
-                            );
-                            detail_list.add(Prose::new(label));
-                        }
-                    }
-                    CommandExceptionType::FormatIncompatible => {
-                        let topics: Vec<String> =
-                            entries.iter().map(|e| e.name.clone()).collect();
-                        let topic_line = Prose::new(format!(
-                            "<dim><i>format incompatible: {}</i></dim>",
-                            topics.join(", ")
-                        ))
-                        .with_word_wrap(WordWrap::BespokeProse(
-                            Some(500),
-                            vec![' ', ','],
-                            Some(2),
-                        ));
-                        detail_list.add(topic_line);
-                    }
-                    CommandExceptionType::NoLinks => {
-                        let topics: Vec<String> =
-                            entries.iter().map(|e| e.name.clone()).collect();
-                        let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
-                            WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
-                        );
-                        detail_list.add(topic_line);
-                    }
-                }
-
-                inner_list.add(detail_list);
-            }
-        } else if let Some(provider_diags) = diag_by_provider.get(provider_name) {
-            let category_label = Prose::new("<b>missing</b> (0)".to_string());
-            inner_list.add(category_label);
-
-            let mut detail_list = UnorderedList::empty();
-            for diag in provider_diags {
-                detail_list.add(Prose::new(diag.message.clone()));
-            }
-            inner_list.add(detail_list);
+        if has_only_format_incompatible {
+            format_incompatible_providers.push(provider_name);
+        } else {
+            regular_providers.push(provider_name);
         }
-
-        outer_list.add(inner_list);
     }
 
-    log::data(&outer_list.render(term));
+    // Render format-incompatible providers as simple one-liners
+    if !format_incompatible_providers.is_empty() {
+        let mut fi_list = UnorderedList::empty();
+        for provider_name in &format_incompatible_providers {
+            fi_list.add(Prose::new(format!(
+                "<b>{provider_name}</b> — ❌ uses a non-standard format which is incompatible with Claudine."
+            )));
+        }
+        log::data(&fi_list.render(term));
+    }
+
+    // Render regular providers with full exception detail
+    if !regular_providers.is_empty() {
+        let mut outer_list = UnorderedList::empty();
+
+        for provider_name in &regular_providers {
+            let provider_header = build_provider_header(provider_name);
+            outer_list.add(Prose::new(provider_header));
+
+            let mut inner_list = UnorderedList::empty();
+
+            // Render directory-level diagnostics directly at provider level (not nested under "missing")
+            if let Some(provider_diags) = diag_by_provider.get(*provider_name) {
+                for diag in provider_diags {
+                    inner_list.add(Prose::new(diag.message.clone()));
+                }
+            }
+
+            if let Some(type_map) = by_provider.get(*provider_name) {
+                for (exc_type, entries) in type_map {
+                    // Skip FormatIncompatible here — handled above
+                    if *exc_type == CommandExceptionType::FormatIncompatible {
+                        continue;
+                    }
+
+                    let count = entries.len();
+                    let category_label = Prose::new(format!("<b>{exc_type}</b> ({count})"));
+                    inner_list.add(category_label);
+
+                    let mut detail_list = UnorderedList::empty();
+
+                    match exc_type {
+                        CommandExceptionType::Missing => {
+                            let topics: Vec<String> =
+                                entries.iter().map(|e| e.name.clone()).collect();
+                            let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
+                                WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
+                            );
+                            detail_list.add(topic_line);
+                        }
+                        CommandExceptionType::Invalid => {
+                            for e in entries {
+                                let props_markup = e
+                                    .missing_properties
+                                    .iter()
+                                    .map(|p| format!("<red>{p}</red>"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let label = format!(
+                                    r#"<b><a href="{}">{}</a></b> (<i>missing the properties {}</i>)"#,
+                                    e.command_file_path.display(),
+                                    e.name,
+                                    props_markup
+                                );
+                                detail_list.add(Prose::new(label));
+                            }
+                        }
+                        CommandExceptionType::ModelPropertyNotShareable => {
+                            for e in entries {
+                                let model_info = e
+                                    .model_value
+                                    .as_deref()
+                                    .map(|v| format!(" = {v}"))
+                                    .unwrap_or_default();
+                                let label = format!(
+                                    r#"<a href="{}"><b>{}</b></a> (<i>specifies <orange>model{model_info}</orange></i>)"#,
+                                    e.command_file_path.display(),
+                                    e.name
+                                );
+                                detail_list.add(Prose::new(label));
+                            }
+                        }
+                        CommandExceptionType::NoLinks => {
+                            let topics: Vec<String> =
+                                entries.iter().map(|e| e.name.clone()).collect();
+                            let topic_line = Prose::new(topics.join(", ")).with_word_wrap(
+                                WordWrap::BespokeProse(Some(500), vec![' ', ','], Some(2)),
+                            );
+                            detail_list.add(topic_line);
+                        }
+                        CommandExceptionType::FormatIncompatible => unreachable!(),
+                    }
+
+                    inner_list.add(detail_list);
+                }
+            }
+
+            outer_list.add(inner_list);
+        }
+
+        log::data(&outer_list.render(term));
+    }
 }
 
 fn render_fix_summary(term: &Terminal, summary: &CommandFixSummary) {

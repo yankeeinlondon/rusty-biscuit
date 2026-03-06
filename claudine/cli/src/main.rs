@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
         Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),
         Some(Commands::Skills(args)) => commands::skills::run(args, cli.verbose > 0).await,
         Some(Commands::Agents(args)) => commands::agents::run(args, cli.verbose > 0).await,
-        Some(Commands::Slash(args)) => {
+        Some(Commands::SlashCommands(args)) => {
             commands::slash_commands::run(args, cli.verbose > 0).await
         }
         Some(Commands::Providers) => commands::providers::run(),
