@@ -566,20 +566,20 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
             remotes_list.add(Prose::new(line));
 
             // Verbose: show remote branches as nested list, excluding the default branch
-            if verbose > 0 {
-                if let Some(ref branches) = remote.branches {
-                    let default = remote.default_branch.as_deref();
-                    let non_default: Vec<_> = branches
-                        .iter()
-                        .filter(|b| default.is_none_or(|d| b.as_str() != d))
-                        .collect();
-                    if !non_default.is_empty() {
-                        let mut branch_list = UnorderedList::empty();
-                        for branch in non_default {
-                            branch_list.add(Prose::new(format!("<dim>{}</dim>", branch)));
-                        }
-                        remotes_list.add(branch_list);
+            if verbose > 0
+                && let Some(ref branches) = remote.branches
+            {
+                let default = remote.default_branch.as_deref();
+                let non_default: Vec<_> = branches
+                    .iter()
+                    .filter(|b| default.is_none_or(|d| b.as_str() != d))
+                    .collect();
+                if !non_default.is_empty() {
+                    let mut branch_list = UnorderedList::empty();
+                    for branch in non_default {
+                        branch_list.add(Prose::new(format!("<dim>{}</dim>", branch)));
                     }
+                    remotes_list.add(branch_list);
                 }
             }
         }
