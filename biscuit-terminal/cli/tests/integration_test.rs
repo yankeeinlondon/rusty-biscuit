@@ -1248,6 +1248,7 @@ macro_rules! require_mmdc {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_bar_chart_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1258,6 +1259,7 @@ fn test_bar_chart_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_bar_chart_renders_json_input() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1268,6 +1270,7 @@ fn test_bar_chart_renders_json_input() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_bar_chart_renders_with_all_options() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1284,6 +1287,7 @@ fn test_bar_chart_renders_with_all_options() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_line_chart_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1294,6 +1298,7 @@ fn test_line_chart_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_line_chart_renders_with_options() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1306,6 +1311,7 @@ fn test_line_chart_renders_with_options() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_timeline_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1316,6 +1322,7 @@ fn test_timeline_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_timeline_renders_with_events() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1328,6 +1335,7 @@ fn test_timeline_renders_with_events() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_state_diagram_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1338,6 +1346,7 @@ fn test_state_diagram_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_state_diagram_renders_with_transitions() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1349,6 +1358,7 @@ fn test_state_diagram_renders_with_transitions() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_erd_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1359,6 +1369,7 @@ fn test_erd_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_erd_renders_with_entities() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1373,6 +1384,7 @@ fn test_erd_renders_with_entities() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_flowchart_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
@@ -1383,6 +1395,7 @@ fn test_flowchart_example_renders() {
 }
 
 #[test]
+#[serial_test::serial(mmdc)]
 fn test_git_graph_example_renders() {
     require_mmdc!();
     cargo_bin_cmd!("bt")
