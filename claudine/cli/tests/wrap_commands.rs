@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
@@ -126,10 +126,61 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn codex_wrapper_uses_shadow_home_for_repo_prompt_overlay_without_repo_flag() {
+    let workspace = tempdir().unwrap();
+    let repo_dir = workspace.path().join("repo");
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let env_path = workspace.path().join("env.txt");
+
+    fs::create_dir_all(&repo_dir).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(fake_home.join(".codex")).unwrap();
+    fs::create_dir_all(repo_dir.join(".claude/commands")).unwrap();
+    fs::write(
+        repo_dir.join(".claude/commands/review.md"),
+        "---\ndescription: review\n---\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+{
+  printf 'HOME=%s\n' "$HOME"
+  if [ -L "$HOME/.codex/prompts/review.md" ]; then
+    printf 'HAS_REPO_PROMPT=1\n'
+  else
+    printf 'HAS_REPO_PROMPT=0\n'
+  fi
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&repo_dir)
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .success();
+
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(env_lines.contains(&format!("HOME={}", fake_home.join(".claudine").display())));
+    assert!(env_lines.contains("HAS_REPO_PROMPT=1"));
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_reports_removed_sensitive_env_names() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(fake_home.join(".codex")).unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -140,7 +191,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env_clear()
-        .env("HOME", std::env::var("HOME").unwrap())
+        .env("HOME", &fake_home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("TERM_WIDTH", "80")

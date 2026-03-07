@@ -1,5 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 54
 expression: strip_ansi(&stdout)
 ---
 Claudine — cross-agent hook/event system for agentic CLIs
@@ -18,7 +19,7 @@ Commands:
   actions      Show which actions are configured and for which events
   skills       List available skills and their scopes
   agents       List available agent definitions and their scopes
-  slash        List available slash commands and their scopes
+  commands     List available slash commands and their scopes
   providers    Show provider capability matrix (skill/slash/agent/hooks)
   uninstall    Remove Claudine hooks from all agents
   claude       Wrap Claude Code with Claudine preflight/env handling

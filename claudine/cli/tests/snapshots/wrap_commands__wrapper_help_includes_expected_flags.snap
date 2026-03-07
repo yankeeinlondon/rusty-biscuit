@@ -21,5 +21,5 @@ Options:
       --dry-run                      Show what would be executed without launching the child
   -q, --quiet                        Suppress the Claudine preflight summary banner
       --sandbox                      Enable provider-specific sandboxing
-      --repo                         Restrict to repo-scoped skills/commands by setting HOME=/dev/null
+      --repo                         Use only repo-scoped skills, commands, and agents via a shadow HOME
   -h, --help                         Print help
