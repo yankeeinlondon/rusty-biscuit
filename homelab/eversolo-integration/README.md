@@ -6,8 +6,8 @@ Unfolded Circle integration driver for Eversolo streamers that expose the local 
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes an Eversolo device as:
 
-- a coarse power switch backed by HTTP `poweroff` plus Wake-on-LAN for power on
-- a media player entity for playback, volume, mute, metadata, and input selection
+- a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
+- a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
 
 ## Entity Model
 
@@ -24,6 +24,25 @@ The `{name}` comes from `--device-name` and defaults to `streamer`.
 |--------|------------|
 | `power` | `state` = `ON`, `OFF`, or `UNKNOWN` |
 | `player` | `state`, `volume`, `muted`, `source`, `media_position`, `media_duration`, `media_title`, `media_artist`, `media_album` |
+
+The power switch is inferred as:
+
+- `ON` while the streamer is reachable and active
+- `OFF` while the streamer is in effective standby or truly unreachable
+
+The player state is inferred as:
+
+- `PLAYING` while media is actively playing
+- `PAUSED` while paused with the display still on
+- `STANDBY` when media is not actively playing and the front-panel display is off
+- `ON` for other reachable idle states
+- `OFF` when the device is unreachable
+
+### Power Commands
+
+- `power/off` pauses playback if needed and turns the front-panel screen off so the device enters effective standby instead of full shutdown
+- `power/on` wakes effective standby with the Eversolo `screen` power option when the device is still reachable
+- `power/on` falls back to Wake-on-LAN only when the streamer is no longer reachable over HTTP
 
 ### Source Selection
 
@@ -44,8 +63,15 @@ sequenceDiagram
     I->>E: GET /ZidooMusicControl/v2/getInputAndOutputList
     I-->>R: power switch + media player
 
+    R->>I: entity_command (power/off)
+    I->>E: GET /ZidooMusicControl/v2/playOrPause (if currently playing)
+    I->>E: GET /ZidooMusicControl/v2/setPowerOption?tag=screen
+    I-->>R: result (code: 200)
+    I-->>R: entity_change (power: OFF, player: STANDBY)
+
     R->>I: entity_command (power/on)
-    I->>W: magic packet UDP/9517
+    I->>E: GET /ZidooMusicControl/v2/setPowerOption?tag=screen (if reachable standby)
+    I->>W: magic packet UDP/9517 (only if unreachable)
     I-->>R: result (code: 200)
     I-->>R: entity_change (state: ON)
 
@@ -135,7 +161,8 @@ cargo run -p eversolo-integration -- \
 The driver runs a background poll loop per configured device. Each loop refreshes:
 
 - connection reachability
-- power state inference
+- power-switch state for active vs standby/off
+- effective standby inference for the media-player entity
 - media player attributes such as playback state, metadata, volume, mute, and source
 - dynamic source list metadata used by `select_source`
 
@@ -143,7 +170,8 @@ This means front-panel changes, mobile-app commands, or other API clients can be
 
 ## Limitations
 
-- Power state is still coarse. If the HTTP API is reachable the device is treated as `ON`; if it is not reachable, the integration marks the device disconnected and applies a stable offline schema with `OFF` power/player state plus cleared playback metadata. That keeps the UC attribute shape stable, but a network outage is still observationally indistinguishable from power-off.
-- Power on depends on Wake-on-LAN. If `--mac` is not configured, `power on` and `power toggle` from an offline state return a UC `400` result.
+- The `power` switch is intentionally user-facing rather than a strict true-power indicator. `OFF` means either effective standby or unreachable/truly off; the `player` entity carries the finer `STANDBY` vs `OFF` distinction.
+- A network outage is still observationally indistinguishable from true power-off. On poll failure the integration marks the device disconnected and applies a stable offline schema with `OFF` power/player state plus cleared playback metadata.
+- Power on from true off still depends on Wake-on-LAN. If `--mac` is not configured, `power on` and `power toggle` from an unreachable state return a UC `400` result.
 - Output switching, screen controls, brightness, and VU/spectrum display modes are intentionally not exposed in this first pass. The protocol research shows those endpoints exist, but this repo does not yet have an established UC entity pattern for them.
 - Installed/local-mode packaging is not included. This package currently targets external deployment only.
