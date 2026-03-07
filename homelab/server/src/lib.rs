@@ -15,7 +15,7 @@ use axum::{
     routing::{get, put},
 };
 use homelab::arcam::Arcam;
-use homelab::eversolo::Eversolo;
+use homelab::eversolo::{EffectivePowerState, Eversolo, infer_effective_power_state};
 use homelab::samsung_tv::SamsungTv;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -91,7 +91,7 @@ pub fn build_router(state: AppState) -> Router {
 /// | Status           | Label      | Dot   | Meaning                                       |
 /// |------------------|------------|-------|-----------------------------------------------|
 /// | `"active"`       | Active     | green | Powered on and usable                         |
-/// | `"standby"`      | Standby    | amber | Low-power mode, reachable on the network      |
+/// | `"standby"`      | Standby    | amber | Reachable, but idling with its display off    |
 /// | `"off"`          | Off        | grey  | Unreachable on the network (truly off)         |
 /// | `"not_configured"` | —       | grey  | No device configured                           |
 ///
@@ -243,7 +243,8 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
 /// Probe the first configured Eversolo device and return its status.
 ///
 /// Returns `None` if no Eversolo devices are configured.
-/// Calls `get_state()` to determine reachability and playback state.
+/// Calls `get_state()` to determine reachability and playback state, and uses
+/// screen brightness when available to infer effective standby.
 async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
     let (name, needs_mac) = {
         let devices = state.eversolo_devices.read().await;
@@ -259,16 +260,27 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
 
     let eversolo = Eversolo::new(host, port);
 
-    let result = match timeout(state.request_timeout, eversolo.get_state()).await {
-        Ok(Ok(resp)) => {
-            // Determine power state from playback state:
-            //   state 1 (Playing) or 2 (Paused) → Active
-            //   anything else (idle, screen off)  → Standby
-            let is_active = resp.state == 1 || resp.state == 2;
-            let (status, label) = if is_active {
-                ("active", if resp.state == 1 { "Playing" } else { "Paused" })
-            } else {
-                ("standby", "Standby")
+    let result = match timeout(state.request_timeout, async {
+        let (playback_state, screen_brightness) =
+            tokio::join!(eversolo.get_state(), eversolo.get_screen_brightness());
+        Ok::<_, homelab::eversolo::EversoloError>((playback_state?, screen_brightness.ok()))
+    })
+    .await
+    {
+        Ok(Ok((resp, screen_brightness))) => {
+            let effective_power_state = infer_effective_power_state(
+                resp.state,
+                screen_brightness
+                    .filter(|response| response.status.is_none_or(|status| status == 200))
+                    .map(|response| response.current_value),
+            );
+            let (status, label) = match effective_power_state {
+                EffectivePowerState::Standby => ("standby", "Standby"),
+                EffectivePowerState::Active => match resp.state {
+                    1 => ("active", "Playing"),
+                    2 => ("active", "Paused"),
+                    _ => ("active", "Active"),
+                },
             };
 
             let mut detail = serde_json::Map::new();
