@@ -769,6 +769,12 @@ This is a Rust workspace with the following modules:
 
 ### SQL & Database
 
+- [rusqlite](https://github.com/rusqlite/rusqlite) _v0.31_ [📄](https://docs.rs/rusqlite)
+
+    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index._
+
+    _Tags: database, sqlite, embedded_
+
 - [sqlx](https://github.com/launchbadge/sqlx) _v0.8_ [📄](https://docs.rs/sqlx)
 
     _Async, pure Rust SQL toolkit with compile-time checked queries. Supports PostgreSQL, MySQL, and SQLite._
