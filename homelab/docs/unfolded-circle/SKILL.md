@@ -1,5 +1,5 @@
 ---
-name: unfolded-circle-remote
+name: unfolded-circle
 description: Deep knowledge base for working with and developing the Unfolded Circle Remote's TCP/IP Integrations, the "Core API", and the "Dock API".
 ---
 # Unfolded Circle Remote Two/3
