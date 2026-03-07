@@ -1611,9 +1611,7 @@ pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, Delt
     };
 
     let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
-    let diff = repo
-        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
-        .ok();
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None).ok();
 
     let Some(diff) = diff else {
         return Vec::new();
@@ -1637,11 +1635,7 @@ pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, Delt
 /// and includes commits where at least one changed file starts with `path_prefix`.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
-pub fn get_commits_for_path(
-    repo: &Repository,
-    path_prefix: &str,
-    count: usize,
-) -> Vec<CommitInfo> {
+pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
     let Ok(mut revwalk) = repo.revwalk() else {
@@ -1693,8 +1687,7 @@ pub fn get_commits_for_path(
                 sha: oid.to_string(),
                 message: commit.message().unwrap_or("").trim().to_string(),
                 author: author.name().unwrap_or("Unknown").to_string(),
-                timestamp: DateTime::from_timestamp(commit.time().seconds(), 0)
-                    .unwrap_or_default(),
+                timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
                 remotes: None,
                 refs,
             });

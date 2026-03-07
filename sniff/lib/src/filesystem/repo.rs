@@ -189,8 +189,7 @@ impl RepoInfo {
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
 
         packages.iter().find(|pkg| {
-            let pkg_path =
-                std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
+            let pkg_path = std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
             dir.starts_with(&pkg_path)
         })
     }
@@ -206,8 +205,7 @@ impl RepoInfo {
 
         // Check if inside a specific package first
         if let Some(pkg) = packages.iter().find(|pkg| {
-            let pkg_path =
-                std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
+            let pkg_path = std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
             dir.starts_with(&pkg_path)
         }) {
             return Some(&pkg.package_area);
@@ -215,11 +213,8 @@ impl RepoInfo {
 
         // Fall back to checking package area directories
         let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
-        let areas: HashSet<&str> = packages
-            .iter()
-            .map(|p| p.package_area.as_str())
-            .filter(|a| *a != "root")
-            .collect();
+        let areas: HashSet<&str> =
+            packages.iter().map(|p| p.package_area.as_str()).filter(|a| *a != "root").collect();
 
         for area in &areas {
             let area_path = root.join(area);

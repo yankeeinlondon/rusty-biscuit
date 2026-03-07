@@ -206,10 +206,7 @@ fn split_path(path: &str) -> (String, String) {
 ///
 /// Parses conventional commit format and includes SHA, timestamp, ref decorations,
 /// and optionally the author (when `verbose > 0`).
-fn format_commit_line(
-    commit: &sniff::filesystem::git::CommitInfo,
-    verbose: u8,
-) -> String {
+fn format_commit_line(commit: &sniff::filesystem::git::CommitInfo, verbose: u8) -> String {
     let cc = ConventionalCommit::parse(&commit.message);
     let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
     let sha = commit.sha[0..7].to_string();
@@ -291,11 +288,7 @@ pub fn print_hash_section(
         .map(|(path, kind)| {
             let path_str = path.display().to_string();
             let (dir, name) = split_path(&path_str);
-            let dir_part = if dir.is_empty() {
-                String::new()
-            } else {
-                dir
-            };
+            let dir_part = if dir.is_empty() { String::new() } else { dir };
             match kind {
                 DeltaKind::Added => format!("<lime>{}: {}<b>{}</b></lime>", kind, dir_part, name),
                 DeltaKind::Modified => {
@@ -837,8 +830,7 @@ pub fn print_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, 
             let terminal = Terminal::default();
             let line = format!(
                 "{} (<i>located in</i> <blue>{}</blue>)",
-                pkg.name,
-                pkg.relative
+                pkg.name, pkg.relative
             );
             print!("{}", Prose::new(&line).display(&terminal));
         } else {

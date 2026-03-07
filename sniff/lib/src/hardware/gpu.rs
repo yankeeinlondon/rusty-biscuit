@@ -117,7 +117,11 @@ pub fn detect_gpus() -> Vec<GpuInfo> {
     use std::process::Command;
 
     let output = match Command::new("ioreg")
-        .args(["-rd1", "-c", "IOAccelerator"])
+        .args([
+            "-rd1",
+            "-c",
+            "IOAccelerator",
+        ])
         .output()
     {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
@@ -132,27 +136,29 @@ pub fn detect_gpus() -> Vec<GpuInfo> {
         // Apple Silicon always has unified memory and integrated GPU
         let is_apple_silicon = vendor.as_deref() == Some("Apple");
 
-        vec![GpuInfo {
-            name,
-            vendor,
-            device_type: if is_apple_silicon {
-                GpuDeviceType::Integrated
-            } else {
-                GpuDeviceType::Unknown
+        vec![
+            GpuInfo {
+                name,
+                vendor,
+                device_type: if is_apple_silicon {
+                    GpuDeviceType::Integrated
+                } else {
+                    GpuDeviceType::Unknown
+                },
+                backend: "Metal".to_string(),
+                memory_bytes: None,
+                max_buffer_bytes: None,
+                is_headless: false,
+                is_removable: false,
+                registry_id: None,
+                metal_family: None,
+                capabilities: GpuCapabilities {
+                    unified_memory: is_apple_silicon,
+                    ..Default::default()
+                },
+                core_count,
             },
-            backend: "Metal".to_string(),
-            memory_bytes: None,
-            max_buffer_bytes: None,
-            is_headless: false,
-            is_removable: false,
-            registry_id: None,
-            metal_family: None,
-            capabilities: GpuCapabilities {
-                unified_memory: is_apple_silicon,
-                ..Default::default()
-            },
-            core_count,
-        }]
+        ]
     } else {
         Vec::new()
     }

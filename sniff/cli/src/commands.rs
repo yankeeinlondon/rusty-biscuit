@@ -117,8 +117,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
-        let repo = git2::Repository::discover(dir)
-            .map_err(|e| format!("Not a git repository: {}", e))?;
+        let repo =
+            git2::Repository::discover(dir).map_err(|e| format!("Not a git repository: {}", e))?;
         let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
             .ok_or_else(|| format!("Commit not found: {}", sha))?;
         let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
@@ -251,9 +251,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     git.status.untracked_count = git
                         .file_changes
                         .iter()
-                        .filter(|f| {
-                            f.status == sniff::filesystem::git::FileStatus::Untracked
-                        })
+                        .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
                         .count();
                     git.status.is_dirty = git.status.staged_count > 0
                         || git.status.unstaged_count > 0

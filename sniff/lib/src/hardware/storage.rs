@@ -74,7 +74,9 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             }
 
             // Skip system snapshot volumes (except /System/Volumes/Data which is the real data volume)
-            if mount_point.starts_with("/System/Volumes/") && mount_point.as_ref() != "/System/Volumes/Data" {
+            if mount_point.starts_with("/System/Volumes/")
+                && mount_point.as_ref() != "/System/Volumes/Data"
+            {
                 continue;
             }
 
@@ -113,10 +115,28 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
     use std::io::BufRead;
 
     const VIRTUAL_FS: &[&str] = &[
-        "proc", "sysfs", "tmpfs", "devpts", "cgroup", "cgroup2",
-        "pstore", "debugfs", "securityfs", "configfs", "fusectl",
-        "mqueue", "hugetlbfs", "devtmpfs", "binfmt_misc", "autofs",
-        "tracefs", "bpf", "efivarfs", "nsfs", "ramfs", "overlay",
+        "proc",
+        "sysfs",
+        "tmpfs",
+        "devpts",
+        "cgroup",
+        "cgroup2",
+        "pstore",
+        "debugfs",
+        "securityfs",
+        "configfs",
+        "fusectl",
+        "mqueue",
+        "hugetlbfs",
+        "devtmpfs",
+        "binfmt_misc",
+        "autofs",
+        "tracefs",
+        "bpf",
+        "efivarfs",
+        "nsfs",
+        "ramfs",
+        "overlay",
     ];
 
     let file = match std::fs::File::open("/proc/mounts") {
