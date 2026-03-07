@@ -420,6 +420,10 @@ mod tests {
     fn generated_ws_shared_parses_as_valid_rust() {
         let tokens = generate_ws_shared_module();
         let file = syn::parse2::<syn::File>(tokens);
-        assert!(file.is_ok(), "Generated ws_shared must parse: {:?}", file.err());
+        assert!(
+            file.is_ok(),
+            "Generated ws_shared must parse: {:?}",
+            file.err()
+        );
     }
 }

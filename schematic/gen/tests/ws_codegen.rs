@@ -11,7 +11,7 @@ use schematic_definitions::{
 use schematic_gen::ws_codegen::client::generate_ws_client_module;
 use schematic_gen::ws_codegen::docs::generate_module_docs;
 use schematic_gen::ws_codegen::host::generate_ws_host_module;
-use schematic_gen::ws_codegen::plan::{lower_to_plan, EndpointRole, WsRuntimePlan};
+use schematic_gen::ws_codegen::plan::{EndpointRole, WsRuntimePlan, lower_to_plan};
 use schematic_gen::ws_codegen::shared::generate_ws_shared_module;
 
 fn lower_all_apis() -> Vec<(&'static str, WsRuntimePlan)> {
@@ -340,7 +340,8 @@ fn module_docs_include_api_info() {
         for ep in &plan.endpoints {
             assert!(
                 code.contains(&ep.id),
-                "{name} module docs should list endpoint {}", ep.id
+                "{name} module docs should list endpoint {}",
+                ep.id
             );
         }
     }

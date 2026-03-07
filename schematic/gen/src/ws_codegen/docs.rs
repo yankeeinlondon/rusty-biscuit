@@ -44,7 +44,9 @@ pub fn generate_module_docs(plan: &WsRuntimePlan) -> TokenStream {
 
 fn generate_auth_doc_lines(plan: &WsRuntimePlan) -> Vec<String> {
     match &plan.auth {
-        super::plan::WsAuthStrategy::None => vec!["//! - No automatic handshake authentication is configured.".to_string()],
+        super::plan::WsAuthStrategy::None => {
+            vec!["//! - No automatic handshake authentication is configured.".to_string()]
+        }
         super::plan::WsAuthStrategy::HeaderBased { strategy, env_auth } => {
             let mut lines = vec![format!(
                 "//! - Handshake auth strategy: {}.",

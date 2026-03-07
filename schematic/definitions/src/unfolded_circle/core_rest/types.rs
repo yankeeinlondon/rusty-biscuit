@@ -188,8 +188,14 @@ mod tests {
 
     #[test]
     fn integration_driver_type_serializes_to_uppercase() {
-        assert_eq!(serde_json::to_string(&IntegrationDriverType::Local).unwrap(), r#""LOCAL""#);
-        assert_eq!(serde_json::to_string(&IntegrationDriverType::Custom).unwrap(), r#""CUSTOM""#);
+        assert_eq!(
+            serde_json::to_string(&IntegrationDriverType::Local).unwrap(),
+            r#""LOCAL""#
+        );
+        assert_eq!(
+            serde_json::to_string(&IntegrationDriverType::Custom).unwrap(),
+            r#""CUSTOM""#
+        );
         assert_eq!(
             serde_json::to_string(&IntegrationDriverType::External).unwrap(),
             r#""EXTERNAL""#
@@ -202,19 +208,34 @@ mod tests {
             serde_json::to_string(&DriverState::NotConfigured).unwrap(),
             r#""NOT_CONFIGURED""#
         );
-        assert_eq!(serde_json::to_string(&DriverState::Active).unwrap(), r#""ACTIVE""#);
-        assert_eq!(serde_json::to_string(&DriverState::Idle).unwrap(), r#""IDLE""#);
-        assert_eq!(serde_json::to_string(&DriverState::Connecting).unwrap(), r#""CONNECTING""#);
+        assert_eq!(
+            serde_json::to_string(&DriverState::Active).unwrap(),
+            r#""ACTIVE""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DriverState::Idle).unwrap(),
+            r#""IDLE""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DriverState::Connecting).unwrap(),
+            r#""CONNECTING""#
+        );
         assert_eq!(
             serde_json::to_string(&DriverState::Reconnecting).unwrap(),
             r#""RECONNECTING""#
         );
-        assert_eq!(serde_json::to_string(&DriverState::Error).unwrap(), r#""ERROR""#);
+        assert_eq!(
+            serde_json::to_string(&DriverState::Error).unwrap(),
+            r#""ERROR""#
+        );
     }
 
     #[test]
     fn backup_restore_item_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Db).unwrap(), r#""db""#);
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Db).unwrap(),
+            r#""db""#
+        );
         assert_eq!(
             serde_json::to_string(&BackupRestoreItem::IntegrationDriver).unwrap(),
             r#""integration_driver""#
@@ -223,17 +244,38 @@ mod tests {
             serde_json::to_string(&BackupRestoreItem::Integration).unwrap(),
             r#""integration""#
         );
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Activity).unwrap(), r#""activity""#);
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Macro).unwrap(), r#""macro""#);
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Remote).unwrap(), r#""remote""#);
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Profile).unwrap(), r#""profile""#);
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Dock).unwrap(), r#""dock""#);
-        assert_eq!(serde_json::to_string(&BackupRestoreItem::Resource).unwrap(), r#""resource""#);
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Activity).unwrap(),
+            r#""activity""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Macro).unwrap(),
+            r#""macro""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Remote).unwrap(),
+            r#""remote""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Profile).unwrap(),
+            r#""profile""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Dock).unwrap(),
+            r#""dock""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BackupRestoreItem::Resource).unwrap(),
+            r#""resource""#
+        );
     }
 
     #[test]
     fn custom_component_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&CustomComponent::Ui).unwrap(), r#""ui""#);
+        assert_eq!(
+            serde_json::to_string(&CustomComponent::Ui).unwrap(),
+            r#""ui""#
+        );
         assert_eq!(
             serde_json::to_string(&CustomComponent::WebConfigurator).unwrap(),
             r#""web_configurator""#

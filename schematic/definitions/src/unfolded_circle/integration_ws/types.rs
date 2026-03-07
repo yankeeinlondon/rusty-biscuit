@@ -239,9 +239,18 @@ mod tests {
 
     #[test]
     fn envelope_kind_serializes_to_lowercase() {
-        assert_eq!(serde_json::to_string(&IntegrationWsEnvelopeKind::Req).unwrap(), "\"req\"");
-        assert_eq!(serde_json::to_string(&IntegrationWsEnvelopeKind::Resp).unwrap(), "\"resp\"");
-        assert_eq!(serde_json::to_string(&IntegrationWsEnvelopeKind::Event).unwrap(), "\"event\"");
+        assert_eq!(
+            serde_json::to_string(&IntegrationWsEnvelopeKind::Req).unwrap(),
+            "\"req\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IntegrationWsEnvelopeKind::Resp).unwrap(),
+            "\"resp\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IntegrationWsEnvelopeKind::Event).unwrap(),
+            "\"event\""
+        );
     }
 
     #[test]
@@ -249,21 +258,52 @@ mod tests {
         let cases: Vec<(IntegrationWsKnownMessage, &str)> = vec![
             (IntegrationWsKnownMessage::Auth, "\"auth\""),
             (IntegrationWsKnownMessage::AuthRequired, "\"auth_required\""),
-            (IntegrationWsKnownMessage::Authentication, "\"authentication\""),
-            (IntegrationWsKnownMessage::GetDriverVersion, "\"get_driver_version\""),
-            (IntegrationWsKnownMessage::GetDeviceState, "\"get_device_state\""),
-            (IntegrationWsKnownMessage::GetAvailableEntities, "\"get_available_entities\""),
-            (IntegrationWsKnownMessage::SubscribeEvents, "\"subscribe_events\""),
-            (IntegrationWsKnownMessage::GetEntityStates, "\"get_entity_states\""),
-            (IntegrationWsKnownMessage::EntityCommand, "\"entity_command\""),
+            (
+                IntegrationWsKnownMessage::Authentication,
+                "\"authentication\"",
+            ),
+            (
+                IntegrationWsKnownMessage::GetDriverVersion,
+                "\"get_driver_version\"",
+            ),
+            (
+                IntegrationWsKnownMessage::GetDeviceState,
+                "\"get_device_state\"",
+            ),
+            (
+                IntegrationWsKnownMessage::GetAvailableEntities,
+                "\"get_available_entities\"",
+            ),
+            (
+                IntegrationWsKnownMessage::SubscribeEvents,
+                "\"subscribe_events\"",
+            ),
+            (
+                IntegrationWsKnownMessage::GetEntityStates,
+                "\"get_entity_states\"",
+            ),
+            (
+                IntegrationWsKnownMessage::EntityCommand,
+                "\"entity_command\"",
+            ),
             (IntegrationWsKnownMessage::EntityChange, "\"entity_change\""),
             (IntegrationWsKnownMessage::DeviceState, "\"device_state\""),
             (IntegrationWsKnownMessage::SetupDriver, "\"setup_driver\""),
-            (IntegrationWsKnownMessage::SetDriverUserData, "\"set_driver_user_data\""),
-            (IntegrationWsKnownMessage::DriverSetupChange, "\"driver_setup_change\""),
+            (
+                IntegrationWsKnownMessage::SetDriverUserData,
+                "\"set_driver_user_data\"",
+            ),
+            (
+                IntegrationWsKnownMessage::DriverSetupChange,
+                "\"driver_setup_change\"",
+            ),
         ];
         for (variant, expected) in cases {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), expected, "failed for {variant:?}");
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                expected,
+                "failed for {variant:?}"
+            );
         }
     }
 
@@ -272,7 +312,10 @@ mod tests {
     #[test]
     fn message_name_deserializes_known_auth() {
         let name: IntegrationWsMessageName = serde_json::from_str("\"auth\"").unwrap();
-        assert_eq!(name, IntegrationWsMessageName::Known(IntegrationWsKnownMessage::Auth));
+        assert_eq!(
+            name,
+            IntegrationWsMessageName::Known(IntegrationWsKnownMessage::Auth)
+        );
     }
 
     #[test]
@@ -287,15 +330,18 @@ mod tests {
     #[test]
     fn message_name_deserializes_unknown_as_other() {
         let name: IntegrationWsMessageName = serde_json::from_str("\"some_future_msg\"").unwrap();
-        assert_eq!(name, IntegrationWsMessageName::Other("some_future_msg".to_string()));
+        assert_eq!(
+            name,
+            IntegrationWsMessageName::Other("some_future_msg".to_string())
+        );
     }
 
     // ── Envelope roundtrip with RawValue (Priority 3) ────────────────
 
     #[test]
     fn request_envelope_roundtrip() {
-        let raw_data = RawValue::from_string(r#"{"entity_id":"light.1","cmd":"on"}"#.to_string())
-            .unwrap();
+        let raw_data =
+            RawValue::from_string(r#"{"entity_id":"light.1","cmd":"on"}"#.to_string()).unwrap();
         let envelope = IntegrationWsRequestEnvelope {
             kind: IntegrationWsEnvelopeKind::Req,
             id: 1,
@@ -370,7 +416,12 @@ mod tests {
 
         let result = envelope.parse_payload::<serde_json::Value>();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("msg_data is absent"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("msg_data is absent")
+        );
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! WS runtime plan: lowering `WebSocketApi` into concrete generation decisions.
 
+use schematic_define::AuthStrategy;
 use schematic_define::websocket::{
     AuthFlowHints, FrameFormat, HeartbeatHints, MessageDirection, ParamType, RequestIdType,
     WebSocketApi, WebSocketEndpoint,
 };
-use schematic_define::AuthStrategy;
 
 use crate::errors::GeneratorError;
 use crate::parser::extract_path_params;
@@ -488,11 +488,11 @@ pub fn lower_to_plan(api: &WebSocketApi) -> Result<WsRuntimePlan, GeneratorError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::Schema;
     use schematic_define::websocket::{
         ConnectionLifecycle, CorrelationHints, MessageSchema, ParamType, WebSocketEndpointHints,
         WebSocketRuntimeHints,
     };
-    use schematic_define::Schema;
 
     fn minimal_api() -> WebSocketApi {
         WebSocketApi {
@@ -593,7 +593,10 @@ mod tests {
     fn lower_infers_correlation_from_envelope_pattern() {
         let plan = lower_to_plan(&correlated_api()).unwrap();
         let ep = &plan.endpoints[0];
-        assert!(matches!(ep.correlation, CorrelationStrategy::Correlated { .. }));
+        assert!(matches!(
+            ep.correlation,
+            CorrelationStrategy::Correlated { .. }
+        ));
         if let CorrelationStrategy::Correlated {
             ref request_id_field,
             ref response_id_field,
@@ -723,10 +726,11 @@ mod tests {
         let mut api = minimal_api();
         api.endpoints.clear();
         let plan = lower_to_plan(&api).unwrap();
-        assert!(plan
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == WsSeverity::Warning));
+        assert!(
+            plan.diagnostics
+                .iter()
+                .any(|d| d.severity == WsSeverity::Warning)
+        );
     }
 
     #[test]

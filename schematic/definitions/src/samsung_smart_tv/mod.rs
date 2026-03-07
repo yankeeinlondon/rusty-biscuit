@@ -24,9 +24,7 @@ pub use remote_ws::define_samsung_smart_tv_remote_ws_api;
 pub use types::*;
 
 use crate::registry::SchemaRegistry;
-use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
-};
+use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
 /// Creates a schema registry containing Samsung Smart TV REST response types.
 ///

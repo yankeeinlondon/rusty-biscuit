@@ -198,9 +198,18 @@ mod tests {
 
     #[test]
     fn envelope_type_serializes_to_lowercase() {
-        assert_eq!(serde_json::to_string(&DockWsEnvelopeType::Req).unwrap(), "\"req\"");
-        assert_eq!(serde_json::to_string(&DockWsEnvelopeType::Resp).unwrap(), "\"resp\"");
-        assert_eq!(serde_json::to_string(&DockWsEnvelopeType::Event).unwrap(), "\"event\"");
+        assert_eq!(
+            serde_json::to_string(&DockWsEnvelopeType::Req).unwrap(),
+            "\"req\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DockWsEnvelopeType::Resp).unwrap(),
+            "\"resp\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DockWsEnvelopeType::Event).unwrap(),
+            "\"event\""
+        );
     }
 
     #[test]
@@ -218,7 +227,11 @@ mod tests {
             (DockWsKnownMessage::StatusUpdate, "\"status_update\""),
         ];
         for (variant, expected) in cases {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), expected, "failed for {variant:?}");
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                expected,
+                "failed for {variant:?}"
+            );
         }
     }
 
@@ -239,7 +252,10 @@ mod tests {
     #[test]
     fn message_name_deserializes_unknown_as_other() {
         let name: DockWsMessageName = serde_json::from_str("\"some_future_msg\"").unwrap();
-        assert_eq!(name, DockWsMessageName::Other("some_future_msg".to_string()));
+        assert_eq!(
+            name,
+            DockWsMessageName::Other("some_future_msg".to_string())
+        );
     }
 
     // ── serde(rename = "type") field (Priority 4) ────────────────────
@@ -249,12 +265,21 @@ mod tests {
         let json = r#"{"type":"req","id":1,"msg":"get_status"}"#;
         let env: DockWsRequestEnvelope = serde_json::from_str(json).unwrap();
         assert_eq!(env.type_name, DockWsEnvelopeType::Req);
-        assert_eq!(env.msg, DockWsMessageName::Known(DockWsKnownMessage::GetStatus));
+        assert_eq!(
+            env.msg,
+            DockWsMessageName::Known(DockWsKnownMessage::GetStatus)
+        );
         assert!(env.msg_data.is_none());
 
         let serialized = serde_json::to_string(&env).unwrap();
-        assert!(serialized.contains("\"type\":"), "serialized JSON must use \"type\" not \"type_name\": {serialized}");
-        assert!(!serialized.contains("\"type_name\":"), "must not contain \"type_name\": {serialized}");
+        assert!(
+            serialized.contains("\"type\":"),
+            "serialized JSON must use \"type\" not \"type_name\": {serialized}"
+        );
+        assert!(
+            !serialized.contains("\"type_name\":"),
+            "must not contain \"type_name\": {serialized}"
+        );
     }
 
     #[test]
@@ -323,7 +348,8 @@ mod tests {
 
     #[test]
     fn request_envelope_roundtrip_with_msg_data() {
-        let json = r#"{"type":"req","id":42,"msg":"ir_send","msg_data":{"code":"ABC123","repeat":2}}"#;
+        let json =
+            r#"{"type":"req","id":42,"msg":"ir_send","msg_data":{"code":"ABC123","repeat":2}}"#;
         let env: DockWsRequestEnvelope = serde_json::from_str(json).unwrap();
         assert_eq!(env.id, 42);
         assert!(env.msg_data.is_some());
@@ -356,7 +382,8 @@ mod tests {
 
     #[test]
     fn request_parse_payload_with_data() {
-        let raw: Box<RawValue> = RawValue::from_string(r#"{"code":"NEC-1234","repeat":3}"#.to_string()).unwrap();
+        let raw: Box<RawValue> =
+            RawValue::from_string(r#"{"code":"NEC-1234","repeat":3}"#.to_string()).unwrap();
         let env = DockWsRequestEnvelope {
             type_name: DockWsEnvelopeType::Req,
             id: 1,
@@ -364,7 +391,13 @@ mod tests {
             msg_data: Some(raw),
         };
         let payload: IrPayload = env.parse_payload().unwrap();
-        assert_eq!(payload, IrPayload { code: "NEC-1234".to_string(), repeat: 3 });
+        assert_eq!(
+            payload,
+            IrPayload {
+                code: "NEC-1234".to_string(),
+                repeat: 3
+            }
+        );
     }
 
     #[test]
@@ -377,12 +410,18 @@ mod tests {
         };
         let result = env.parse_payload::<IrPayload>();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("msg_data is absent"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("msg_data is absent")
+        );
     }
 
     #[test]
     fn event_parse_payload_with_data() {
-        let raw: Box<RawValue> = RawValue::from_string(r#"{"code":"RC5-99","repeat":1}"#.to_string()).unwrap();
+        let raw: Box<RawValue> =
+            RawValue::from_string(r#"{"code":"RC5-99","repeat":1}"#.to_string()).unwrap();
         let env = DockWsEventEnvelope {
             type_name: DockWsEnvelopeType::Event,
             msg: DockWsMessageName::Known(DockWsKnownMessage::IrLearnResult),

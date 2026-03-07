@@ -34,18 +34,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn new() -> Self {
         Self {
             base_url: "ws://remote.local".to_string(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "UCR_INTEGRATION_TOKEN".to_string(),
+                        ]),
                         header: "auth-token".to_string(),
                     }),
-                }),
+                },
+            ),
         }
     }
     /// Create a new client with a custom base URL.
@@ -53,18 +54,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "UCR_INTEGRATION_TOKEN".to_string(),
+                        ]),
                         header: "auth-token".to_string(),
                     }),
-                }),
+                },
+            ),
         }
     }
     /// Returns the configured base URL.
@@ -79,11 +81,10 @@ impl UnfoldedCircleIntegrationWs {
     ) -> Result<IntegrationClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
-            return Err(
-                super::ws_shared::WsError::Protocol(
-                    format!("unresolved path placeholder in '{}'", path),
-                ),
-            );
+            return Err(super::ws_shared::WsError::Protocol(format!(
+                "unresolved path placeholder in '{}'",
+                path
+            )));
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -102,9 +103,7 @@ impl Default for UnfoldedCircleIntegrationWs {
 ///Client for the Integration endpoint.
 pub struct IntegrationClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    >,
+    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
     request_timeout: std::time::Duration,
     max_pending: usize,
 }
@@ -124,8 +123,7 @@ impl IntegrationClient {
         for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value
-                    .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
+                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
             ) {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
@@ -137,9 +135,9 @@ impl IntegrationClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
+            .map_err(|_| {
+                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
+            })??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -150,24 +148,16 @@ impl IntegrationClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
-        );
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
+        let (state_tx, state_rx) =
+            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
+                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
             >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -185,30 +175,24 @@ impl IntegrationClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
                     tokio::time::sleep(delay).await;
                     match IntegrationClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
+                        &url_for_supervisor,
+                        &options_for_supervisor,
+                        &header_pairs_for_supervisor,
+                    )
+                    .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -288,10 +272,7 @@ impl IntegrationClient {
         })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(
-        &self,
-        message: serde_json::Value,
-    ) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -315,9 +296,8 @@ impl IntegrationClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
+    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
+    {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.
@@ -343,9 +323,9 @@ impl IntegrationClient {
         {
             let mut pending = self.transport.pending.lock().await;
             if pending.len() >= self.max_pending {
-                return Err(
-                    super::ws_shared::WsError::BackpressureFull(self.max_pending),
-                );
+                return Err(super::ws_shared::WsError::BackpressureFull(
+                    self.max_pending,
+                ));
             }
             pending.insert(id, tx);
         }
@@ -381,9 +361,9 @@ impl UnfoldedCircleIntegrationWsHost {
             .status(status)
             .body(Some(message.to_string()))
             .unwrap_or_else(|_| {
-                tokio_tungstenite::tungstenite::http::Response::new(
-                    Some("Unauthorized".to_string()),
-                )
+                tokio_tungstenite::tungstenite::http::Response::new(Some(
+                    "Unauthorized".to_string(),
+                ))
             })
     }
     fn validate_upgrade_request(
@@ -399,33 +379,28 @@ impl UnfoldedCircleIntegrationWsHost {
             .filter(|value| !value.trim().is_empty())
             .collect();
         if expected_values.is_empty() {
-            return Err(
-                Self::auth_error_response(
-                    tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    "WebSocket host auth is configured but no auth env vars are set",
-                ),
-            );
+            return Err(Self::auth_error_response(
+                tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "WebSocket host auth is configured but no auth env vars are set",
+            ));
         }
         let Some(received) = request
             .headers()
             .get("auth-token")
-            .and_then(|value| value.to_str().ok()) else {
-            return Err(
-                Self::auth_error_response(
-                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                    "Missing authentication header",
-                ),
-            );
+            .and_then(|value| value.to_str().ok())
+        else {
+            return Err(Self::auth_error_response(
+                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                "Missing authentication header",
+            ));
         };
         if expected_values.iter().any(|expected| expected == received) {
             Ok(response)
         } else {
-            Err(
-                Self::auth_error_response(
-                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                    "Invalid authentication header",
-                ),
-            )
+            Err(Self::auth_error_response(
+                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                "Invalid authentication header",
+            ))
         }
     }
     /// Serve WebSocket connections on the given TCP listener.
@@ -440,11 +415,9 @@ impl UnfoldedCircleIntegrationWsHost {
                 .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
             let handler = handler.clone();
             tokio::spawn(async move {
-                if let Ok(ws_stream) = tokio_tungstenite::accept_hdr_async(
-                        stream,
-                        Self::validate_upgrade_request,
-                    )
-                    .await
+                if let Ok(ws_stream) =
+                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
+                        .await
                 {
                     Self::handle_connection(ws_stream, handler).await;
                 }
@@ -473,8 +446,7 @@ impl UnfoldedCircleIntegrationWsHost {
                 Ok(Message::Text(text)) => {
                     match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
                         Ok(request) => {
-                            if let Some(response) = handler.handle_message(request).await
-                            {
+                            if let Some(response) = handler.handle_message(request).await {
                                 if let Ok(resp_text) = serde_json::to_string(&response) {
                                     let _ = write.send(Message::Text(resp_text.into())).await;
                                 }

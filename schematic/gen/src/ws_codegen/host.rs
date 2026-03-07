@@ -258,10 +258,7 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
     }
 }
 
-fn generate_handler_trait(
-    _plan: &WsRuntimePlan,
-    _endpoints: &[&EndpointPlan],
-) -> TokenStream {
+fn generate_handler_trait(_plan: &WsRuntimePlan, _endpoints: &[&EndpointPlan]) -> TokenStream {
     quote! {
         /// Handler trait for WebSocket host connections.
         ///
@@ -279,9 +276,7 @@ fn generate_handler_trait(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ws_codegen::plan::{
-        CorrelationStrategy, WsAuthStrategy, WsRuntimePlan,
-    };
+    use crate::ws_codegen::plan::{CorrelationStrategy, WsAuthStrategy, WsRuntimePlan};
     use schematic_define::websocket::{FrameFormat, RequestIdType};
 
     fn test_plan_with_host() -> WsRuntimePlan {
@@ -322,7 +317,11 @@ mod tests {
         let plan = test_plan_with_host();
         let tokens = generate_ws_host_module(&plan);
         let code = tokens.to_string();
-        assert!(code.contains("IntegrationWsHost"), "Expected IntegrationWsHost in: {}", code);
+        assert!(
+            code.contains("IntegrationWsHost"),
+            "Expected IntegrationWsHost in: {}",
+            code
+        );
         assert!(code.contains("WsHandler"));
     }
 

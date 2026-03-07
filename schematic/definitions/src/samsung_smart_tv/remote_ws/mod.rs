@@ -124,8 +124,7 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
             direction: MessageDirection::Server,
             schema: Schema::new("SamsungRemoteConnectEvent"),
             description: Some(
-                "Emitted when the Art Mode channel is successfully connected."
-                    .to_string(),
+                "Emitted when the Art Mode channel is successfully connected.".to_string(),
             ),
         },
         MessageSchema {
@@ -133,43 +132,42 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
             direction: MessageDirection::Bidirectional,
             schema: Schema::new("SamsungRemoteEnvelope"),
             description: Some(
-                "Generic envelope with deferred payload for the Art Mode channel."
-                    .to_string(),
+                "Generic envelope with deferred payload for the Art Mode channel.".to_string(),
             ),
         },
     ];
 
     let endpoints = vec![
         WebSocketEndpoint {
-        id: "RemoteControl".to_string(),
-        path: "/api/v2/channels/samsung.remote.control".to_string(),
-        description: "Samsung remote control channel for key transport and lifecycle events. \
+            id: "RemoteControl".to_string(),
+            path: "/api/v2/channels/samsung.remote.control".to_string(),
+            description: "Samsung remote control channel for key transport and lifecycle events. \
             First connection may trigger an on-TV approval prompt; approved sessions \
             provide a token for subsequent reconnects."
-            .to_string(),
-        connection_params: vec![
-            ConnectionParam {
-                name: "name".to_string(),
-                param_type: ParamType::String,
-                required: true,
-                description: Some(
-                    "Base64-encoded client name used by Samsung remote channel".to_string(),
-                ),
-            },
-            ConnectionParam {
-                name: "token".to_string(),
-                param_type: ParamType::String,
-                required: false,
-                description: Some(
-                    "Previously approved remote token to bypass repeated on-TV prompts"
-                        .to_string(),
-                ),
-            },
-        ],
-        lifecycle: ConnectionLifecycle::default(),
-        messages,
-        runtime: None,
-    },
+                .to_string(),
+            connection_params: vec![
+                ConnectionParam {
+                    name: "name".to_string(),
+                    param_type: ParamType::String,
+                    required: true,
+                    description: Some(
+                        "Base64-encoded client name used by Samsung remote channel".to_string(),
+                    ),
+                },
+                ConnectionParam {
+                    name: "token".to_string(),
+                    param_type: ParamType::String,
+                    required: false,
+                    description: Some(
+                        "Previously approved remote token to bypass repeated on-TV prompts"
+                            .to_string(),
+                    ),
+                },
+            ],
+            lifecycle: ConnectionLifecycle::default(),
+            messages,
+            runtime: None,
+        },
         WebSocketEndpoint {
             id: "ArtMode".to_string(),
             path: "/api/v2/channels/com.samsung.art-app".to_string(),
@@ -319,13 +317,25 @@ mod tests {
         let api = define_samsung_smart_tv_remote_ws_api();
         let ep = &api.endpoints[0];
 
-        let cmd = ep.messages.iter().find(|m| m.name == "RemoteControlCommand").unwrap();
+        let cmd = ep
+            .messages
+            .iter()
+            .find(|m| m.name == "RemoteControlCommand")
+            .unwrap();
         assert_eq!(cmd.direction, MessageDirection::Client);
 
-        let connect = ep.messages.iter().find(|m| m.name == "ChannelConnectEvent").unwrap();
+        let connect = ep
+            .messages
+            .iter()
+            .find(|m| m.name == "ChannelConnectEvent")
+            .unwrap();
         assert_eq!(connect.direction, MessageDirection::Server);
 
-        let envelope = ep.messages.iter().find(|m| m.name == "ChannelEnvelope").unwrap();
+        let envelope = ep
+            .messages
+            .iter()
+            .find(|m| m.name == "ChannelEnvelope")
+            .unwrap();
         assert_eq!(envelope.direction, MessageDirection::Bidirectional);
     }
 }

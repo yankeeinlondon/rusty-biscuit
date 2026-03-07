@@ -164,8 +164,14 @@ mod tests {
         }"#;
 
         let resp: SamsungDeviceInfoResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.extra.get("version").and_then(|v| v.as_str()), Some("2.0.25"));
-        assert_eq!(resp.extra.get("uri").and_then(|v| v.as_str()), Some("http://192.168.1.1:8001/api/v2/"));
+        assert_eq!(
+            resp.extra.get("version").and_then(|v| v.as_str()),
+            Some("2.0.25")
+        );
+        assert_eq!(
+            resp.extra.get("uri").and_then(|v| v.as_str()),
+            Some("http://192.168.1.1:8001/api/v2/")
+        );
 
         let device = resp.device.as_ref().unwrap();
         // wifiMac is now a typed field
@@ -235,7 +241,10 @@ mod tests {
         assert_eq!(device.firmware_version.as_deref(), Some("T-KTMDEUC-1300.3"));
         assert_eq!(device.manufacturer.as_deref(), Some("Samsung"));
         assert_eq!(device.country_code.as_deref(), Some("US"));
-        assert_eq!(device.duid.as_deref(), Some("uuid:12345678-1234-1234-1234-123456789012"));
+        assert_eq!(
+            device.duid.as_deref(),
+            Some("uuid:12345678-1234-1234-1234-123456789012")
+        );
     }
 
     #[test]
@@ -255,6 +264,9 @@ mod tests {
         assert_eq!(resp.version.as_deref(), Some("3.0.0"));
         assert_eq!(resp.name.as_deref(), Some("YouTube"));
         assert_eq!(resp.id.as_deref(), Some("111299001912"));
-        assert_eq!(resp.extra.get("extra_field").and_then(|v| v.as_str()), Some("value"));
+        assert_eq!(
+            resp.extra.get("extra_field").and_then(|v| v.as_str()),
+            Some("value")
+        );
     }
 }

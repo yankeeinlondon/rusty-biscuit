@@ -626,7 +626,9 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                         name: "voice_id".to_string(),
                         param_type: ParamType::String,
                         required: true,
-                        description: Some("Voice identifier used in the websocket path".to_string()),
+                        description: Some(
+                            "Voice identifier used in the websocket path".to_string(),
+                        ),
                     },
                     ConnectionParam {
                         name: "model_id".to_string(),
@@ -729,7 +731,9 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
                         name: "voice_id".to_string(),
                         param_type: ParamType::String,
                         required: true,
-                        description: Some("Voice identifier used in the websocket path".to_string()),
+                        description: Some(
+                            "Voice identifier used in the websocket path".to_string(),
+                        ),
                     },
                     ConnectionParam {
                         name: "model_id".to_string(),

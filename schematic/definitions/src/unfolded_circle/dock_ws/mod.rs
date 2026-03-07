@@ -120,11 +120,13 @@ mod tests {
         assert_eq!(api.env_auth, vec!["UCR_DOCK_TOKEN".to_string()]);
         assert_eq!(api.endpoints.len(), 1);
         assert_eq!(api.endpoints[0].path, "/");
-        assert!(api.endpoints[0]
-            .runtime
-            .as_ref()
-            .and_then(|runtime| runtime.auth_flow.as_ref())
-            .is_some());
+        assert!(
+            api.endpoints[0]
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.auth_flow.as_ref())
+                .is_some()
+        );
     }
 
     #[test]

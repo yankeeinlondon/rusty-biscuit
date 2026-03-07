@@ -546,8 +546,7 @@ mod tests {
 
     #[test]
     fn known_event_serializes_correctly() {
-        let event =
-            SamsungRemoteEventName::Known(SamsungRemoteKnownEvent::MsChannelConnect);
+        let event = SamsungRemoteEventName::Known(SamsungRemoteKnownEvent::MsChannelConnect);
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(json, r#""ms.channel.connect""#);
     }
@@ -556,7 +555,10 @@ mod tests {
     fn known_event_app_control_variants_serialize_correctly() {
         let launch = SamsungRemoteEventName::Known(SamsungRemoteKnownEvent::EdAppsLaunch);
         let installed = SamsungRemoteEventName::Known(SamsungRemoteKnownEvent::EdInstalledAppGet);
-        assert_eq!(serde_json::to_string(&launch).unwrap(), r#""ed.apps.launch""#);
+        assert_eq!(
+            serde_json::to_string(&launch).unwrap(),
+            r#""ed.apps.launch""#
+        );
         assert_eq!(
             serde_json::to_string(&installed).unwrap(),
             r#""ed.installedApp.get""#
@@ -567,9 +569,7 @@ mod tests {
     fn unknown_event_passthrough() {
         let json = r#""ms.channel.future""#;
         let event: SamsungRemoteEventName = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(event, SamsungRemoteEventName::Other(ref s) if s == "ms.channel.future")
-        );
+        assert!(matches!(event, SamsungRemoteEventName::Other(ref s) if s == "ms.channel.future"));
     }
 
     #[test]
@@ -647,7 +647,8 @@ mod tests {
 
     #[test]
     fn installed_app_deserializes() {
-        let json = r#"{"appId":"111299001912","name":"YouTube","app_type":2,"icon":"/path/icon.png"}"#;
+        let json =
+            r#"{"appId":"111299001912","name":"YouTube","app_type":2,"icon":"/path/icon.png"}"#;
         let app: SamsungInstalledApp = serde_json::from_str(json).unwrap();
         assert_eq!(app.app_id, "111299001912");
         assert_eq!(app.name, "YouTube");
@@ -713,6 +714,9 @@ mod tests {
     #[test]
     fn art_app_request_event_known() {
         let event = SamsungRemoteEventName::Known(SamsungRemoteKnownEvent::ArtAppRequest);
-        assert_eq!(serde_json::to_string(&event).unwrap(), r#""art_app_request""#);
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#""art_app_request""#
+        );
     }
 }

@@ -524,14 +524,26 @@ mod tests {
 
     #[test]
     fn envelope_kind_serializes_to_lowercase() {
-        assert_eq!(serde_json::to_string(&CoreWsEnvelopeKind::Req).unwrap(), "\"req\"");
-        assert_eq!(serde_json::to_string(&CoreWsEnvelopeKind::Resp).unwrap(), "\"resp\"");
-        assert_eq!(serde_json::to_string(&CoreWsEnvelopeKind::Event).unwrap(), "\"event\"");
+        assert_eq!(
+            serde_json::to_string(&CoreWsEnvelopeKind::Req).unwrap(),
+            "\"req\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CoreWsEnvelopeKind::Resp).unwrap(),
+            "\"resp\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CoreWsEnvelopeKind::Event).unwrap(),
+            "\"event\""
+        );
     }
 
     #[test]
     fn known_message_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::Auth).unwrap(), "\"auth\"");
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::Auth).unwrap(),
+            "\"auth\""
+        );
         assert_eq!(
             serde_json::to_string(&CoreWsKnownMessage::AuthRequired).unwrap(),
             "\"auth_required\""
@@ -540,15 +552,30 @@ mod tests {
             serde_json::to_string(&CoreWsKnownMessage::Authentication).unwrap(),
             "\"authentication\""
         );
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::Ping).unwrap(), "\"ping\"");
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::Pong).unwrap(), "\"pong\"");
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::Result).unwrap(), "\"result\"");
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::Version).unwrap(), "\"version\"");
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::Ping).unwrap(),
+            "\"ping\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::Pong).unwrap(),
+            "\"pong\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::Result).unwrap(),
+            "\"result\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::Version).unwrap(),
+            "\"version\""
+        );
         assert_eq!(
             serde_json::to_string(&CoreWsKnownMessage::VersionInfo).unwrap(),
             "\"version_info\""
         );
-        assert_eq!(serde_json::to_string(&CoreWsKnownMessage::System).unwrap(), "\"system\"");
+        assert_eq!(
+            serde_json::to_string(&CoreWsKnownMessage::System).unwrap(),
+            "\"system\""
+        );
         assert_eq!(
             serde_json::to_string(&CoreWsKnownMessage::SystemInfo).unwrap(),
             "\"system_info\""
@@ -594,13 +621,19 @@ mod tests {
     #[test]
     fn message_name_deserializes_new_known_variant() {
         let name: CoreWsMessageName = serde_json::from_str("\"get_entities\"").unwrap();
-        assert_eq!(name, CoreWsMessageName::Known(CoreWsKnownMessage::GetEntities));
+        assert_eq!(
+            name,
+            CoreWsMessageName::Known(CoreWsKnownMessage::GetEntities)
+        );
     }
 
     #[test]
     fn message_name_deserializes_unknown_as_other() {
         let name: CoreWsMessageName = serde_json::from_str("\"some_future_msg\"").unwrap();
-        assert_eq!(name, CoreWsMessageName::Other("some_future_msg".to_string()));
+        assert_eq!(
+            name,
+            CoreWsMessageName::Other("some_future_msg".to_string())
+        );
     }
 
     #[test]
@@ -632,7 +665,10 @@ mod tests {
 
         assert_eq!(decoded.kind, CoreWsEnvelopeKind::Req);
         assert_eq!(decoded.id, 42);
-        assert_eq!(decoded.msg, CoreWsMessageName::Known(CoreWsKnownMessage::Ping));
+        assert_eq!(
+            decoded.msg,
+            CoreWsMessageName::Known(CoreWsKnownMessage::Ping)
+        );
         assert!(decoded.msg_data.is_some());
     }
 
@@ -651,7 +687,10 @@ mod tests {
 
         assert_eq!(decoded.kind, CoreWsEnvelopeKind::Resp);
         assert_eq!(decoded.req_id, 42);
-        assert_eq!(decoded.msg, CoreWsMessageName::Known(CoreWsKnownMessage::Pong));
+        assert_eq!(
+            decoded.msg,
+            CoreWsMessageName::Known(CoreWsKnownMessage::Pong)
+        );
         assert_eq!(decoded.code, 200);
         assert!(decoded.msg_data.is_none());
     }
@@ -717,6 +756,11 @@ mod tests {
 
         let result = envelope.parse_payload::<serde_json::Value>();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("msg_data is absent"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("msg_data is absent")
+        );
     }
 }

@@ -113,7 +113,10 @@ fn generate_connection_param_struct(ep: &EndpointPlan) -> TokenStream {
         })
         .collect();
 
-    let doc = format!("Typed query parameters for the {} websocket endpoint.", ep.id);
+    let doc = format!(
+        "Typed query parameters for the {} websocket endpoint.",
+        ep.id
+    );
     quote! {
         #[doc = #doc]
         #derives
@@ -126,10 +129,7 @@ fn generate_connection_param_struct(ep: &EndpointPlan) -> TokenStream {
 fn generate_headers_init(plan: &WsRuntimePlan) -> TokenStream {
     match &plan.auth {
         WsAuthStrategy::None => quote! { schematic_define::Headers::default() },
-        WsAuthStrategy::HeaderBased {
-            strategy,
-            env_auth,
-        }
+        WsAuthStrategy::HeaderBased { strategy, env_auth }
         | WsAuthStrategy::MessageBased {
             header_strategy: strategy,
             env_auth,
@@ -144,7 +144,10 @@ fn generate_headers_init(plan: &WsRuntimePlan) -> TokenStream {
     }
 }
 
-fn generate_env_mapping(strategy: &schematic_define::AuthStrategy, env_auth: &[String]) -> TokenStream {
+fn generate_env_mapping(
+    strategy: &schematic_define::AuthStrategy,
+    env_auth: &[String],
+) -> TokenStream {
     match strategy {
         schematic_define::AuthStrategy::ApiKey { header } => {
             quote! {
@@ -483,10 +486,7 @@ fn generate_endpoint_client(plan: &WsRuntimePlan, ep: &EndpointPlan) -> TokenStr
         }
     };
 
-    let constructor_extra_fields = if let CorrelationStrategy::Correlated {
-        ..
-    } = ep.correlation
-    {
+    let constructor_extra_fields = if let CorrelationStrategy::Correlated { .. } = ep.correlation {
         quote! {
             request_timeout: _options.request_timeout,
             max_pending: _options.max_pending_requests,
@@ -808,7 +808,10 @@ fn to_snake_case(s: &str) -> String {
         let is_upper = c.is_uppercase();
         let next_is_lower = chars.peek().is_some_and(|ch| ch.is_lowercase());
 
-        if !result.is_empty() && is_upper && (prev_was_lower_or_digit || (prev_was_upper && next_is_lower)) {
+        if !result.is_empty()
+            && is_upper
+            && (prev_was_lower_or_digit || (prev_was_upper && next_is_lower))
+        {
             result.push('_');
         }
         result.extend(c.to_lowercase());
@@ -829,10 +832,7 @@ fn parse_schema_type_tokens(schema_type: &str) -> TokenStream {
 fn generate_lifecycle_helper(method: &LifecycleMessagePlan, kind: &str) -> TokenStream {
     let method_ident = format_ident!("send_{}", to_snake_case(&method.name));
     let payload_type = parse_schema_type_tokens(&method.schema_type);
-    let doc = format!(
-        "Send the `{}` {} lifecycle message.",
-        method.name, kind
-    );
+    let doc = format!("Send the `{}` {} lifecycle message.", method.name, kind);
 
     quote! {
         #[doc = #doc]

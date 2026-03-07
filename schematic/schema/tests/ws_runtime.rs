@@ -5,9 +5,7 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use schematic_schema::elevenlabs_ws::{ElevenLabsTTSWs, TextToSpeechConnectionParams};
 use schematic_schema::unfolded_circle_core_ws::UnfoldedCircleCoreWs;
-use schematic_schema::ws_shared::{
-    ReconnectPolicy, WsClientOptions, WsConnectionState, WsError,
-};
+use schematic_schema::ws_shared::{ReconnectPolicy, WsClientOptions, WsConnectionState, WsError};
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::accept_hdr_async;
@@ -31,7 +29,8 @@ async fn ws_connect_substitutes_path_and_query_params() {
         let (stream, _) = listener.accept().await.unwrap();
         let _ws = accept_hdr_async(
             stream,
-            move |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+            move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                  response| {
                 let _ = uri_tx.send(request.uri().to_string());
                 Ok(response)
             },
@@ -90,7 +89,10 @@ async fn ws_correlated_request_uses_options_timeout() {
         .build();
     let ws = client.connect_core_ws(options).await.unwrap();
 
-    let err = ws.request(serde_json::json!({"cmd": "no_response"})).await.unwrap_err();
+    let err = ws
+        .request(serde_json::json!({"cmd": "no_response"}))
+        .await
+        .unwrap_err();
     assert!(matches!(err, WsError::RequestTimeout(_)));
 
     let _ = ws.close().await;
@@ -143,7 +145,9 @@ async fn ws_reconnect_policy_redials_after_disconnect() {
             let request = parse_json_message(msg);
             let req_id = request.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let response = serde_json::json!({"req_id": req_id, "ok": true});
-            ws2.send(Message::Text(response.to_string().into())).await.unwrap();
+            ws2.send(Message::Text(response.to_string().into()))
+                .await
+                .unwrap();
         }
     });
 
@@ -175,7 +179,10 @@ async fn ws_reconnect_policy_redials_after_disconnect() {
     }
     assert_eq!(ws.state(), WsConnectionState::Ready);
 
-    let response = ws.request(serde_json::json!({"cmd": "second"})).await.unwrap();
+    let response = ws
+        .request(serde_json::json!({"cmd": "second"}))
+        .await
+        .unwrap();
     assert_eq!(response.get("ok").and_then(|v| v.as_bool()), Some(true));
 
     let _ = ws.close().await;

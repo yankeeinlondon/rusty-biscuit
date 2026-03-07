@@ -110,7 +110,17 @@ use crate::schema::Schema;
 /// assert_eq!(FrameFormat::from_str("json_binary").unwrap(), FrameFormat::JsonBinary);
 /// ```
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumIter,
     EnumString,
 )]
 #[serde(rename_all = "snake_case")]
@@ -139,7 +149,17 @@ pub enum FrameFormat {
 /// assert_eq!(RequestIdType::from_str("string").unwrap(), RequestIdType::String);
 /// ```
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumIter,
     EnumString,
 )]
 #[serde(rename_all = "snake_case")]

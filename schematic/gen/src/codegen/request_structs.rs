@@ -326,7 +326,10 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            lines.push(format!("     .with_{}(/* value */)", to_snake_case(&qp.name)));
+            lines.push(format!(
+                "     .with_{}(/* value */)",
+                to_snake_case(&qp.name)
+            ));
         }
         lines.push(";".to_string());
     } else {
@@ -337,7 +340,10 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            lines.push(format!("     .with_{}(/* value */)", to_snake_case(&qp.name)));
+            lines.push(format!(
+                "     .with_{}(/* value */)",
+                to_snake_case(&qp.name)
+            ));
         }
         lines.push(";".to_string());
     }
@@ -1808,7 +1814,12 @@ mod tests {
             "/audio/mute",
             None,
             vec![
-                ("isMute", false, Some("Whether to mute"), QueryParamType::Boolean),
+                (
+                    "isMute",
+                    false,
+                    Some("Whether to mute"),
+                    QueryParamType::Boolean,
+                ),
                 ("openType", false, None, QueryParamType::String),
             ],
         );
