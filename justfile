@@ -322,7 +322,7 @@ cp:
     @echo
 
 # install rusty-biscuit CLI's which are used in devops
-init:
+init: _ensure-build-deps
     @echo -e "Initializing the {{RED}}rusty-biscuit{{RESET}} monorepo"
     @echo
     @echo -e "First step is to ensure CLI's used for devops are installed"
@@ -332,3 +332,26 @@ init:
     @cd sniff >/dev/null && just install
     @cd playa >/dev/null && just install
     @cd biscuit-speaks >/dev/null  && just install
+
+# ensure C compiler and linker are available for building Rust crates
+_ensure-build-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cc &> /dev/null; then
+        exit 0
+    fi
+    echo -e "{{RED}}Missing build dependencies{{RESET}} (cc linker not found)"
+    echo "Installing build essentials..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config libssl-dev
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y gcc gcc-c++ make pkg-config openssl-devel
+    elif command -v pacman &> /dev/null; then
+        sudo pacman -S --noconfirm base-devel pkg-config openssl
+    elif command -v apk &> /dev/null; then
+        sudo apk add build-base pkgconf openssl-dev
+    else
+        echo "Could not detect package manager. Please install a C compiler (gcc/clang) manually."
+        exit 1
+    fi
+    echo "Build dependencies installed."
