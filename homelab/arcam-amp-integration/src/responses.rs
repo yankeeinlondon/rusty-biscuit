@@ -30,12 +30,14 @@ pub fn device_state_event(state: &str) -> Value {
 pub fn available_entities_response(req_id: u64, entities: &[ArcamEntity]) -> Value {
     let entity_list: Vec<Value> = entities
         .iter()
-        .map(|e| json!({
-            "entity_id": e.entity_id,
-            "entity_type": e.entity_type,
-            "name": e.name,
-            "features": e.features,
-        }))
+        .map(|e| {
+            json!({
+                "entity_id": e.entity_id,
+                "entity_type": e.entity_type,
+                "name": e.name,
+                "features": e.features,
+            })
+        })
         .collect();
 
     json!({
@@ -49,11 +51,13 @@ pub fn available_entities_response(req_id: u64, entities: &[ArcamEntity]) -> Val
 pub fn entity_states_response(req_id: u64, states: &[ArcamEntityState]) -> Value {
     let state_list: Vec<Value> = states
         .iter()
-        .map(|s| json!({
-            "entity_id": s.entity_id,
-            "entity_type": s.entity_type,
-            "attributes": s.attributes,
-        }))
+        .map(|s| {
+            json!({
+                "entity_id": s.entity_id,
+                "entity_type": s.entity_type,
+                "attributes": s.attributes,
+            })
+        })
         .collect();
 
     json!({

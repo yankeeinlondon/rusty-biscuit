@@ -199,7 +199,9 @@ pub(crate) async fn get_volume_by_name(
 ) -> Result<impl IntoResponse, ServerError> {
     let eversolo = create_eversolo_by_name(&state, &name).await?;
     let playback_state = with_timeout(state.request_timeout, eversolo.get_state()).await?;
-    Ok(Json(serde_json::to_value(playback_state.volume_data).unwrap()))
+    Ok(Json(
+        serde_json::to_value(playback_state.volume_data).unwrap(),
+    ))
 }
 
 #[utoipa::path(
@@ -355,8 +357,7 @@ pub(crate) async fn set_power_by_name(
     Json(req): Json<TagRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let eversolo = create_eversolo_by_name(&state, &name).await?;
-    let resp =
-        with_timeout(state.request_timeout, eversolo.set_power_option(&req.tag)).await?;
+    let resp = with_timeout(state.request_timeout, eversolo.set_power_option(&req.tag)).await?;
     Ok(Json(serde_json::to_value(resp).unwrap()))
 }
 
@@ -377,8 +378,7 @@ pub(crate) async fn get_brightness_by_name(
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, ServerError> {
     let eversolo = create_eversolo_by_name(&state, &name).await?;
-    let screen =
-        with_timeout(state.request_timeout, eversolo.get_screen_brightness()).await?;
+    let screen = with_timeout(state.request_timeout, eversolo.get_screen_brightness()).await?;
     let knob = with_timeout(state.request_timeout, eversolo.get_knob_brightness()).await?;
     Ok(Json(serde_json::json!({
         "screen": serde_json::to_value(screen).unwrap(),
@@ -449,8 +449,7 @@ pub(crate) async fn get_display_modes_by_name(
 ) -> Result<impl IntoResponse, ServerError> {
     let eversolo = create_eversolo_by_name(&state, &name).await?;
     let vu = with_timeout(state.request_timeout, eversolo.get_vu_modes()).await?;
-    let spectrum =
-        with_timeout(state.request_timeout, eversolo.get_spectrum_modes()).await?;
+    let spectrum = with_timeout(state.request_timeout, eversolo.get_spectrum_modes()).await?;
     Ok(Json(serde_json::json!({
         "vu": serde_json::to_value(vu).unwrap(),
         "spectrum": serde_json::to_value(spectrum).unwrap(),
@@ -478,15 +477,9 @@ pub(crate) async fn set_display_mode_by_name(
 ) -> Result<impl IntoResponse, ServerError> {
     let eversolo = create_eversolo_by_name(&state, &name).await?;
     let resp = match req.target.as_str() {
-        "vu" => {
-            with_timeout(state.request_timeout, eversolo.set_vu_mode(req.index)).await?
-        }
+        "vu" => with_timeout(state.request_timeout, eversolo.set_vu_mode(req.index)).await?,
         "spectrum" => {
-            with_timeout(
-                state.request_timeout,
-                eversolo.set_spectrum_mode(req.index),
-            )
-            .await?
+            with_timeout(state.request_timeout, eversolo.set_spectrum_mode(req.index)).await?
         }
         _ => {
             return Err(ServerError::InvalidParameter(format!(
@@ -533,10 +526,7 @@ pub(crate) async fn wake_by_name(
 
 // --- Helpers ---
 
-async fn create_eversolo_by_name(
-    state: &AppState,
-    name: &str,
-) -> Result<Eversolo, ServerError> {
+async fn create_eversolo_by_name(state: &AppState, name: &str) -> Result<Eversolo, ServerError> {
     let (host, port) = state
         .get_eversolo(name)
         .await

@@ -56,10 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let mut devices = HashMap::new();
-    devices.insert(
-        args.device_name.clone(),
-        (args.host.clone(), args.port),
-    );
+    devices.insert(args.device_name.clone(), (args.host.clone(), args.port));
 
     let handler = Arc::new(ArcamIntegrationHandler::new(
         devices,

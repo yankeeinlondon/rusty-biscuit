@@ -319,7 +319,11 @@ impl SamsungTv {
         let mut extra = std::collections::BTreeMap::new();
         extra.insert(
             "value".to_string(),
-            serde_json::Value::String(if on { "on".to_string() } else { "off".to_string() }),
+            serde_json::Value::String(if on {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            }),
         );
         self.send_art_mode_command(SamsungArtModeRequest::SetArtModeStatus, extra)
             .await

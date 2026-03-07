@@ -12,8 +12,8 @@ use tracing::{debug, warn};
 use crate::dispatch::execute_operation;
 use crate::error::ArcamIntegrationError;
 use crate::responses::{
-    available_entities_response, device_state_event, driver_version_response,
-    entity_change_event, entity_states_response, result_response,
+    available_entities_response, device_state_event, driver_version_response, entity_change_event,
+    entity_states_response, result_response,
 };
 use crate::types::{
     self, ArcamEntity, ArcamEntityState, device_name_from_entity_id, resolve_command,
@@ -49,11 +49,7 @@ impl ArcamIntegrationHandler {
         }
     }
 
-    async fn handle_entity_command(
-        &self,
-        req_id: u64,
-        msg_data: &Value,
-    ) -> Option<Value> {
+    async fn handle_entity_command(&self, req_id: u64, msg_data: &Value) -> Option<Value> {
         let entity_id = msg_data.get("entity_id")?.as_str()?;
         let cmd_id = msg_data.get("cmd_id")?.as_str()?;
 
@@ -106,10 +102,7 @@ impl WsHandler for ArcamIntegrationHandler {
     async fn handle_message(&self, message: Value) -> Option<Value> {
         let kind = message.get("kind")?.as_str()?;
         let msg = message.get("msg")?.as_str()?;
-        let req_id = message
-            .get("req_id")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let req_id = message.get("req_id").and_then(|v| v.as_u64()).unwrap_or(0);
 
         if kind != "req" {
             debug!(kind, msg, "ignoring non-request message");
@@ -130,9 +123,7 @@ impl WsHandler for ArcamIntegrationHandler {
                 Some(device_state_event(state))
             }
 
-            "get_available_entities" => {
-                Some(available_entities_response(req_id, &self.entities))
-            }
+            "get_available_entities" => Some(available_entities_response(req_id, &self.entities)),
 
             "subscribe_events" => Some(result_response(req_id, 200)),
 

@@ -43,10 +43,9 @@ fn serve_embedded(path: &str) -> Response {
         None => {
             // SPA fallback: serve index.html for unmatched routes
             match FrontendAssets::get("index.html") {
-                Some(index) => Html(
-                    String::from_utf8_lossy(&index.data).to_string(),
-                )
-                .into_response(),
+                Some(index) => {
+                    Html(String::from_utf8_lossy(&index.data).to_string()).into_response()
+                }
                 None => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Frontend not built. Run `pnpm build` in homelab/server/frontend/",

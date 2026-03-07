@@ -67,8 +67,8 @@ fn parse_mac(mac: &str) -> Result<[u8; 6], WolError> {
 
     let mut bytes = [0u8; 6];
     for (i, part) in parts.iter().enumerate() {
-        bytes[i] = u8::from_str_radix(part, 16)
-            .map_err(|_| WolError::InvalidMac(mac.to_string()))?;
+        bytes[i] =
+            u8::from_str_radix(part, 16).map_err(|_| WolError::InvalidMac(mac.to_string()))?;
     }
 
     Ok(bytes)

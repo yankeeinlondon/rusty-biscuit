@@ -6,12 +6,11 @@ use schematic_schema::eversolo::{
     DeviceGetModelRequest, Eversolo as EversoloClient, MusicGetInputOutputListRequest,
     MusicGetStateRequest, MusicPlayLastRequest, MusicPlayNextRequest, MusicPlayOrPauseRequest,
     MusicSeekToRequest, MusicSetInputRequest, MusicSetMuteRequest, MusicSetOutputRequest,
-    MusicSetVolumeRequest, PowerGetOptionsRequest, PowerSetOptionRequest,
-    RemoteInputTextRequest, RemoteSendKeyRequest, SystemChangeVuDisplayRequest,
-    SystemGetKnobBrightnessRequest, SystemGetScreenBrightnessRequest,
-    SystemGetSpectrumModeListRequest, SystemGetVuModeListRequest,
-    SystemSetKnobBrightnessRequest, SystemSetScreenBrightnessRequest,
-    SystemSetSpectrumModeRequest, SystemSetVuModeRequest,
+    MusicSetVolumeRequest, PowerGetOptionsRequest, PowerSetOptionRequest, RemoteInputTextRequest,
+    RemoteSendKeyRequest, SystemChangeVuDisplayRequest, SystemGetKnobBrightnessRequest,
+    SystemGetScreenBrightnessRequest, SystemGetSpectrumModeListRequest, SystemGetVuModeListRequest,
+    SystemSetKnobBrightnessRequest, SystemSetScreenBrightnessRequest, SystemSetSpectrumModeRequest,
+    SystemSetVuModeRequest,
 };
 
 // Re-export response types for consumers
@@ -122,9 +121,7 @@ impl Eversolo {
     // ── Audio ───────────────────────────────────────────────────────
 
     /// List available audio inputs and outputs.
-    pub async fn get_inputs_outputs(
-        &self,
-    ) -> Result<InputOutputListResponse, EversoloError> {
+    pub async fn get_inputs_outputs(&self) -> Result<InputOutputListResponse, EversoloError> {
         Ok(self
             .client
             .request::<InputOutputListResponse>(MusicGetInputOutputListRequest {})
@@ -132,10 +129,7 @@ impl Eversolo {
     }
 
     /// Set the active audio input.
-    pub async fn set_input(
-        &self,
-        tag: &str,
-    ) -> Result<InputOutputListResponse, EversoloError> {
+    pub async fn set_input(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
         Ok(self
             .client
             .request::<InputOutputListResponse>(
@@ -145,10 +139,7 @@ impl Eversolo {
     }
 
     /// Set the active audio output.
-    pub async fn set_output(
-        &self,
-        tag: &str,
-    ) -> Result<InputOutputListResponse, EversoloError> {
+    pub async fn set_output(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
         Ok(self
             .client
             .request::<InputOutputListResponse>(
@@ -186,15 +177,10 @@ impl Eversolo {
     }
 
     /// Execute a power action by tag.
-    pub async fn set_power_option(
-        &self,
-        tag: &str,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn set_power_option(&self, tag: &str) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                PowerSetOptionRequest::new().with_tag(tag.to_string()),
-            )
+            .request::<StatusResponse>(PowerSetOptionRequest::new().with_tag(tag.to_string()))
             .await?)
     }
 
@@ -204,9 +190,7 @@ impl Eversolo {
     pub async fn send_key(&self, key: &str) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                RemoteSendKeyRequest::new().with_key(key.to_string()),
-            )
+            .request::<StatusResponse>(RemoteSendKeyRequest::new().with_key(key.to_string()))
             .await?)
     }
 
@@ -214,9 +198,7 @@ impl Eversolo {
     pub async fn input_text(&self, text: &str) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                RemoteInputTextRequest::new().with_text(text.to_string()),
-            )
+            .request::<StatusResponse>(RemoteInputTextRequest::new().with_text(text.to_string()))
             .await?)
     }
 
@@ -231,15 +213,10 @@ impl Eversolo {
     }
 
     /// Set screen brightness level.
-    pub async fn set_screen_brightness(
-        &self,
-        index: i64,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn set_screen_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                SystemSetScreenBrightnessRequest::new().with_index(index),
-            )
+            .request::<StatusResponse>(SystemSetScreenBrightnessRequest::new().with_index(index))
             .await?)
     }
 
@@ -252,15 +229,10 @@ impl Eversolo {
     }
 
     /// Set knob LED brightness level.
-    pub async fn set_knob_brightness(
-        &self,
-        index: i64,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn set_knob_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                SystemSetKnobBrightnessRequest::new().with_index(index),
-            )
+            .request::<StatusResponse>(SystemSetKnobBrightnessRequest::new().with_index(index))
             .await?)
     }
 
@@ -273,10 +245,7 @@ impl Eversolo {
     }
 
     /// Set the VU meter display mode.
-    pub async fn set_vu_mode(
-        &self,
-        index: i64,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn set_vu_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
             .request::<StatusResponse>(SystemSetVuModeRequest::new().with_index(index))
@@ -284,9 +253,7 @@ impl Eversolo {
     }
 
     /// List available spectrum display modes.
-    pub async fn get_spectrum_modes(
-        &self,
-    ) -> Result<DisplayModeListResponse, EversoloError> {
+    pub async fn get_spectrum_modes(&self) -> Result<DisplayModeListResponse, EversoloError> {
         Ok(self
             .client
             .request::<DisplayModeListResponse>(SystemGetSpectrumModeListRequest {})
@@ -295,24 +262,16 @@ impl Eversolo {
 
     /// Set the spectrum display mode.
     #[allow(non_snake_case)]
-    pub async fn set_spectrum_mode(
-        &self,
-        index: i64,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn set_spectrum_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
-            .request::<StatusResponse>(
-                SystemSetSpectrumModeRequest::new().with_index(index),
-            )
+            .request::<StatusResponse>(SystemSetSpectrumModeRequest::new().with_index(index))
             .await?)
     }
 
     /// Toggle VU display open/close.
     #[allow(non_snake_case)]
-    pub async fn change_vu_display(
-        &self,
-        open_type: i64,
-    ) -> Result<StatusResponse, EversoloError> {
+    pub async fn change_vu_display(&self, open_type: i64) -> Result<StatusResponse, EversoloError> {
         Ok(self
             .client
             .request::<StatusResponse>(

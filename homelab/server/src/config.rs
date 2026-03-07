@@ -56,9 +56,14 @@ pub fn migrate_from_env(config: &mut HomeyConfig) -> bool {
     {
         let name = generate_petname();
         let (host, port) = parse_host_port(&host, 9529);
-        config
-            .eversolo_devices
-            .insert(name, EversoloService { host, port, mac_address: None });
+        config.eversolo_devices.insert(
+            name,
+            EversoloService {
+                host,
+                port,
+                mac_address: None,
+            },
+        );
         modified = true;
     }
 

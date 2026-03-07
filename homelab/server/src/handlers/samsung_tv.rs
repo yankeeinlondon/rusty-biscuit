@@ -153,7 +153,9 @@ pub(crate) async fn launch_app_by_name(
         }
         (None, Some(app_name)) => {
             with_timeout(state.request_timeout, tv.launch_app_by_name(&app_name)).await?;
-            Ok(Json(serde_json::json!({"launched_by": "name", "app_name": app_name})))
+            Ok(Json(
+                serde_json::json!({"launched_by": "name", "app_name": app_name}),
+            ))
         }
         (None, None) => Err(ServerError::InvalidParameter(
             "either 'id' or 'name' is required".to_string(),
@@ -288,7 +290,9 @@ pub(crate) async fn install_app_by_name(
 ) -> Result<impl IntoResponse, ServerError> {
     let tv = create_samsung_by_name(&state, &name).await?;
     with_timeout(state.request_timeout, tv.install_app(&app_id)).await?;
-    Ok(Json(serde_json::json!({"install_initiated": true, "app_id": app_id})))
+    Ok(Json(
+        serde_json::json!({"install_initiated": true, "app_id": app_id}),
+    ))
 }
 
 #[utoipa::path(
@@ -315,7 +319,9 @@ pub(crate) async fn launch_app_ws_by_name(
         tv.launch_app_ws(&req.app_id, req.meta_tag.as_deref()),
     )
     .await?;
-    Ok(Json(serde_json::json!({"launched": true, "app_id": req.app_id})))
+    Ok(Json(
+        serde_json::json!({"launched": true, "app_id": req.app_id}),
+    ))
 }
 
 #[utoipa::path(
@@ -447,7 +453,9 @@ pub(crate) async fn select_art_by_name(
 ) -> Result<impl IntoResponse, ServerError> {
     let tv = create_samsung_by_name(&state, &name).await?;
     with_timeout(state.request_timeout, tv.select_artwork(&req.content_id)).await?;
-    Ok(Json(serde_json::json!({"selected": true, "content_id": req.content_id})))
+    Ok(Json(
+        serde_json::json!({"selected": true, "content_id": req.content_id}),
+    ))
 }
 
 #[utoipa::path(
@@ -496,10 +504,7 @@ pub(crate) async fn set_art_brightness_by_name(
 
 // --- Helpers ---
 
-async fn create_samsung_by_name(
-    state: &AppState,
-    name: &str,
-) -> Result<SamsungTv, ServerError> {
+async fn create_samsung_by_name(state: &AppState, name: &str) -> Result<SamsungTv, ServerError> {
     let (host, rest_port, ws_port, use_https) = state
         .get_samsung_tv(name)
         .await

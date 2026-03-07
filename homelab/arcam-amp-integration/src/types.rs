@@ -130,25 +130,52 @@ mod tests {
 
     #[test]
     fn test_resolve_command() {
-        assert_eq!(resolve_command("arcam.office.power", "on"), Some(ArcamOperation::PowerOn));
-        assert_eq!(resolve_command("arcam.office.power", "off"), Some(ArcamOperation::PowerOff));
-        assert_eq!(resolve_command("arcam.office.power", "toggle"), Some(ArcamOperation::PowerToggle));
-        assert_eq!(resolve_command("arcam.office.mute", "on"), Some(ArcamOperation::MuteOn));
-        assert_eq!(resolve_command("arcam.office.mute", "toggle"), Some(ArcamOperation::MuteToggle));
+        assert_eq!(
+            resolve_command("arcam.office.power", "on"),
+            Some(ArcamOperation::PowerOn)
+        );
+        assert_eq!(
+            resolve_command("arcam.office.power", "off"),
+            Some(ArcamOperation::PowerOff)
+        );
+        assert_eq!(
+            resolve_command("arcam.office.power", "toggle"),
+            Some(ArcamOperation::PowerToggle)
+        );
+        assert_eq!(
+            resolve_command("arcam.office.mute", "on"),
+            Some(ArcamOperation::MuteOn)
+        );
+        assert_eq!(
+            resolve_command("arcam.office.mute", "toggle"),
+            Some(ArcamOperation::MuteToggle)
+        );
         assert_eq!(resolve_command("arcam.office.power", "invalid"), None);
         assert_eq!(resolve_command("arcam.office.unknown", "on"), None);
     }
 
     #[test]
     fn test_device_name_from_entity_id() {
-        assert_eq!(device_name_from_entity_id("arcam.office.power"), Some("office"));
-        assert_eq!(device_name_from_entity_id("arcam.living-room.mute"), Some("living-room"));
+        assert_eq!(
+            device_name_from_entity_id("arcam.office.power"),
+            Some("office")
+        );
+        assert_eq!(
+            device_name_from_entity_id("arcam.living-room.mute"),
+            Some("living-room")
+        );
         assert_eq!(device_name_from_entity_id("invalid"), None);
     }
 
     #[test]
     fn test_device_state_serialization() {
-        assert_eq!(serde_json::to_string(&DeviceState::Connected).unwrap(), "\"CONNECTED\"");
-        assert_eq!(serde_json::to_string(&DeviceState::Disconnected).unwrap(), "\"DISCONNECTED\"");
+        assert_eq!(
+            serde_json::to_string(&DeviceState::Connected).unwrap(),
+            "\"CONNECTED\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DeviceState::Disconnected).unwrap(),
+            "\"DISCONNECTED\""
+        );
     }
 }

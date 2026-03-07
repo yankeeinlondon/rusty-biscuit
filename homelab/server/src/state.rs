@@ -419,10 +419,7 @@ impl AppState {
     }
 
     /// Removes an Eversolo device and saves config.
-    pub async fn remove_eversolo(
-        &self,
-        name: &str,
-    ) -> Result<bool, crate::config::ConfigError> {
+    pub async fn remove_eversolo(&self, name: &str) -> Result<bool, crate::config::ConfigError> {
         let mut config = self.config.read().await.clone();
         let removed = config.eversolo_devices.remove(name).is_some();
 
@@ -501,9 +498,7 @@ impl AppState {
         }
 
         let mut config = self.config.read().await.clone();
-        config
-            .samsung_tvs
-            .insert(name.clone(), service.clone());
+        config.samsung_tvs.insert(name.clone(), service.clone());
         if let Some(path) = &self.config_path {
             config.save_to(path)?;
         }
@@ -521,10 +516,7 @@ impl AppState {
     }
 
     /// Removes a Samsung TV and saves config.
-    pub async fn remove_samsung_tv(
-        &self,
-        name: &str,
-    ) -> Result<bool, crate::config::ConfigError> {
+    pub async fn remove_samsung_tv(&self, name: &str) -> Result<bool, crate::config::ConfigError> {
         let mut config = self.config.read().await.clone();
         let removed = config.samsung_tvs.remove(name).is_some();
 
@@ -558,9 +550,7 @@ impl AppState {
             None => return Ok(false),
         };
 
-        config
-            .samsung_tvs
-            .insert(new_name.clone(), service.clone());
+        config.samsung_tvs.insert(new_name.clone(), service.clone());
 
         if let Some(path) = &self.config_path {
             config.save_to(path)?;

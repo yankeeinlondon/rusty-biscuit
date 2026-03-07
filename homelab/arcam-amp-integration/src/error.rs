@@ -38,9 +38,18 @@ mod tests {
 
     #[test]
     fn test_error_uc_codes() {
-        assert_eq!(ArcamIntegrationError::UnknownEntity("x".into()).uc_error_code(), 404);
-        assert_eq!(ArcamIntegrationError::UnknownCommand("x".into()).uc_error_code(), 400);
+        assert_eq!(
+            ArcamIntegrationError::UnknownEntity("x".into()).uc_error_code(),
+            404
+        );
+        assert_eq!(
+            ArcamIntegrationError::UnknownCommand("x".into()).uc_error_code(),
+            400
+        );
         assert_eq!(ArcamIntegrationError::Timeout.uc_error_code(), 503);
-        assert_eq!(ArcamIntegrationError::InvalidHost("x".into()).uc_error_code(), 503);
+        assert_eq!(
+            ArcamIntegrationError::InvalidHost("x".into()).uc_error_code(),
+            503
+        );
     }
 }

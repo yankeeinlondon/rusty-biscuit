@@ -59,8 +59,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest(
             "/eversolo",
-            handlers::crud::eversolo_crud_routes()
-                .merge(handlers::eversolo::routes_with_name()),
+            handlers::crud::eversolo_crud_routes().merge(handlers::eversolo::routes_with_name()),
         )
         .nest(
             "/samsung_tv",
@@ -261,82 +260,83 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
     let eversolo = Eversolo::new(host, port);
 
     let result = match timeout(state.request_timeout, eversolo.get_state()).await {
-            Ok(Ok(resp)) => {
-                // Determine power state from playback state:
-                //   state 1 (Playing) or 2 (Paused) → Active
-                //   anything else (idle, screen off)  → Standby
-                let is_active = resp.state == 1 || resp.state == 2;
-                let (status, label) = if is_active {
-                    ("active", if resp.state == 1 { "Playing" } else { "Paused" })
+        Ok(Ok(resp)) => {
+            // Determine power state from playback state:
+            //   state 1 (Playing) or 2 (Paused) → Active
+            //   anything else (idle, screen off)  → Standby
+            let is_active = resp.state == 1 || resp.state == 2;
+            let (status, label) = if is_active {
+                ("active", if resp.state == 1 { "Playing" } else { "Paused" })
+            } else {
+                ("standby", "Standby")
+            };
+
+            let mut detail = serde_json::Map::new();
+            if let Some(vol) = &resp.volume_data {
+                detail.insert("volume".into(), json!(vol.current_volume));
+                detail.insert("max_volume".into(), json!(vol.max_volume));
+                detail.insert("muted".into(), json!(vol.is_mute));
+            }
+            if let Some(music) = &resp.playing_music {
+                if let Some(title) = &music.title {
+                    detail.insert("title".into(), json!(title));
+                }
+                if let Some(artist) = &music.artist {
+                    detail.insert("artist".into(), json!(artist));
+                }
+            }
+
+            // Auto-detect MAC address if not yet stored
+            if needs_mac
+                && let Ok(model_info) = eversolo.get_model().await
+                && !model_info.net_mac.is_empty()
+            {
+                let mac = model_info.net_mac.clone();
+                let name = name.clone();
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let mut devices = state.eversolo_devices.write().await;
+                    if let Some(service) = devices.get_mut(&name) {
+                        service.mac_address = Some(mac);
+                    }
+                    let mut config = state.config.write().await;
+                    if let Some(service) = config.eversolo_devices.get_mut(&name) {
+                        service.mac_address =
+                            devices.get(&name).and_then(|s| s.mac_address.clone());
+                    }
+                    if let Some(path) = &state.config_path {
+                        let _ = config.save_to(path);
+                    }
+                });
+            }
+
+            DeviceStatusJson {
+                status,
+                label: label.to_string(),
+                detail: if detail.is_empty() {
+                    None
                 } else {
-                    ("standby", "Standby")
-                };
-
-                let mut detail = serde_json::Map::new();
-                if let Some(vol) = &resp.volume_data {
-                    detail.insert("volume".into(), json!(vol.current_volume));
-                    detail.insert("max_volume".into(), json!(vol.max_volume));
-                    detail.insert("muted".into(), json!(vol.is_mute));
-                }
-                if let Some(music) = &resp.playing_music {
-                    if let Some(title) = &music.title {
-                        detail.insert("title".into(), json!(title));
-                    }
-                    if let Some(artist) = &music.artist {
-                        detail.insert("artist".into(), json!(artist));
-                    }
-                }
-
-                // Auto-detect MAC address if not yet stored
-                if needs_mac
-                    && let Ok(model_info) = eversolo.get_model().await
-                    && !model_info.net_mac.is_empty()
-                {
-                    let mac = model_info.net_mac.clone();
-                    let name = name.clone();
-                    let state = state.clone();
-                    tokio::spawn(async move {
-                        let mut devices = state.eversolo_devices.write().await;
-                        if let Some(service) = devices.get_mut(&name) {
-                            service.mac_address = Some(mac);
-                        }
-                        let mut config = state.config.write().await;
-                        if let Some(service) = config.eversolo_devices.get_mut(&name) {
-                            service.mac_address = devices.get(&name).and_then(|s| s.mac_address.clone());
-                        }
-                        if let Some(path) = &state.config_path {
-                            let _ = config.save_to(path);
-                        }
-                    });
-                }
-
-                DeviceStatusJson {
-                    status,
-                    label: label.to_string(),
-                    detail: if detail.is_empty() {
-                        None
-                    } else {
-                        Some(serde_json::Value::Object(detail))
-                    },
-                }
+                    Some(serde_json::Value::Object(detail))
+                },
             }
-            Ok(Err(e)) => {
-                tracing::trace!(error = %e, "Eversolo probe unreachable");
-                DeviceStatusJson {
-                    status: "off",
-                    label: "Off".to_string(),
-                    detail: None,
-                }
+        }
+        Ok(Err(e)) => {
+            tracing::trace!(error = %e, "Eversolo probe unreachable");
+            DeviceStatusJson {
+                status: "off",
+                label: "Off".to_string(),
+                detail: None,
             }
-            Err(_) => {
-                tracing::trace!("Eversolo probe timeout");
-                DeviceStatusJson {
-                    status: "off",
-                    label: "Off".to_string(),
-                    detail: None,
-                }
+        }
+        Err(_) => {
+            tracing::trace!("Eversolo probe timeout");
+            DeviceStatusJson {
+                status: "off",
+                label: "Off".to_string(),
+                detail: None,
             }
-        };
+        }
+    };
 
     // Log state changes at INFO, steady-state at TRACE
     {
@@ -370,64 +370,64 @@ async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
     };
 
     let result = match timeout(state.request_timeout, tv.get_device_info()).await {
-            Ok(Ok(info)) => {
-                let mut detail = serde_json::Map::new();
-                if let Some(name) = &info.name {
-                    detail.insert("name".into(), json!(name));
+        Ok(Ok(info)) => {
+            let mut detail = serde_json::Map::new();
+            if let Some(name) = &info.name {
+                detail.insert("name".into(), json!(name));
+            }
+            if let Some(device) = &info.device {
+                if let Some(model) = &device.model_name {
+                    detail.insert("model".into(), json!(model));
                 }
-                if let Some(device) = &info.device {
-                    if let Some(model) = &device.model_name {
-                        detail.insert("model".into(), json!(model));
-                    }
-                    // Auto-detect MAC address if not yet stored
-                    if needs_mac
-                        && let Some(mac) = device.extra.get("wifiMac").and_then(|v| v.as_str())
-                    {
-                        let mac = mac.to_string();
-                        let name = tv_name.clone();
-                        let state = state.clone();
-                        tokio::spawn(async move {
-                            let mut tvs = state.samsung_tvs.write().await;
-                            if let Some(service) = tvs.get_mut(&name) {
-                                service.mac_address = Some(mac);
-                            }
-                            let mut config = state.config.write().await;
-                            if let Some(service) = config.samsung_tvs.get_mut(&name) {
-                                service.mac_address = tvs.get(&name).and_then(|s| s.mac_address.clone());
-                            }
-                            if let Some(path) = &state.config_path {
-                                let _ = config.save_to(path);
-                            }
-                        });
-                    }
-                }
-                DeviceStatusJson {
-                    status: "active",
-                    label: "Active".to_string(),
-                    detail: if detail.is_empty() {
-                        None
-                    } else {
-                        Some(serde_json::Value::Object(detail))
-                    },
+                // Auto-detect MAC address if not yet stored
+                if needs_mac && let Some(mac) = device.extra.get("wifiMac").and_then(|v| v.as_str())
+                {
+                    let mac = mac.to_string();
+                    let name = tv_name.clone();
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let mut tvs = state.samsung_tvs.write().await;
+                        if let Some(service) = tvs.get_mut(&name) {
+                            service.mac_address = Some(mac);
+                        }
+                        let mut config = state.config.write().await;
+                        if let Some(service) = config.samsung_tvs.get_mut(&name) {
+                            service.mac_address =
+                                tvs.get(&name).and_then(|s| s.mac_address.clone());
+                        }
+                        if let Some(path) = &state.config_path {
+                            let _ = config.save_to(path);
+                        }
+                    });
                 }
             }
-            Ok(Err(e)) => {
-                tracing::trace!(error = %e, "Samsung TV probe unreachable");
-                DeviceStatusJson {
-                    status: "off",
-                    label: "Off".to_string(),
-                    detail: None,
-                }
+            DeviceStatusJson {
+                status: "active",
+                label: "Active".to_string(),
+                detail: if detail.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::Value::Object(detail))
+                },
             }
-            Err(_) => {
-                tracing::trace!("Samsung TV probe timeout");
-                DeviceStatusJson {
-                    status: "off",
-                    label: "Off".to_string(),
-                    detail: None,
-                }
+        }
+        Ok(Err(e)) => {
+            tracing::trace!(error = %e, "Samsung TV probe unreachable");
+            DeviceStatusJson {
+                status: "off",
+                label: "Off".to_string(),
+                detail: None,
             }
-        };
+        }
+        Err(_) => {
+            tracing::trace!("Samsung TV probe timeout");
+            DeviceStatusJson {
+                status: "off",
+                label: "Off".to_string(),
+                detail: None,
+            }
+        }
+    };
 
     // Log state changes at INFO, steady-state at TRACE
     {
@@ -1453,7 +1453,6 @@ async fn arcam_auto_shutdown_set(
 struct SetAutoShutdownRequest {
     value: u8,
 }
-
 
 // --- Health Endpoints ---
 
