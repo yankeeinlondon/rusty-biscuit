@@ -130,7 +130,7 @@ build *args="":
     @echo "---------------------------------------------------"
     @echo ""
     @just build-frontend
-    @cargo build -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration {{args}}
+    @cargo build -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration -p sony-receiver-integration {{args}}
 
 
 
@@ -143,7 +143,7 @@ test *args="":
     @echo -e "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
     @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration {{args}}
+    @cargo test -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration -p sony-receiver-integration {{args}}
     @just test-frontend
 
 # run clippy on Homelab packages
@@ -156,6 +156,7 @@ lint:
     @cargo clippy -p homelab-cli -- -D warnings
     @cargo clippy -p homelab-server -- -D warnings
     @cargo clippy -p arcam-amp-integration -- -D warnings
+    @cargo clippy -p sony-receiver-integration -- -D warnings
     @just lint-frontend
 
 # Builds library and CLI and installs the CLI's binary
@@ -188,7 +189,7 @@ install-server:
 install-frontend:
     @cd server/frontend && pnpm install
 
-INTEGRATIONS := `sniff repo --packages integration`
+INTEGRATIONS := `sniff repo --packages integration | tr -d ','`
 
 build-local-integrations *args="":
     #!/usr/bin/env bash
@@ -246,7 +247,7 @@ check:
     @echo ""
     @echo "Checking Homelab Library, CLI and Server"
     @echo ""
-    @cargo check -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration
+    @cargo check -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration -p sony-receiver-integration
 
 # run server in dev mode
 server *args="":

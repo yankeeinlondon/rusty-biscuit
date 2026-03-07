@@ -9,12 +9,12 @@ use color_eyre::Result;
 use color_eyre::eyre::WrapErr;
 use homelab::arcam::{Arcam, ArcamResponse, DEFAULT_PORT as ARCAM_DEFAULT_PORT};
 use homelab::config::{HomeyConfig, parse_host_port};
-use homelab::eversolo::{Eversolo, InputOutputListResponse, DEFAULT_PORT as EVERSOLO_DEFAULT_PORT};
-use homelab::samsung_tv::{
-    SamsungTv, DEFAULT_REST_PORT as SAMSUNG_DEFAULT_REST_PORT,
-    DEFAULT_WS_PORT as SAMSUNG_DEFAULT_WS_PORT,
-};
+use homelab::eversolo::{DEFAULT_PORT as EVERSOLO_DEFAULT_PORT, Eversolo, InputOutputListResponse};
 use homelab::network::Host;
+use homelab::samsung_tv::{
+    DEFAULT_REST_PORT as SAMSUNG_DEFAULT_REST_PORT, DEFAULT_WS_PORT as SAMSUNG_DEFAULT_WS_PORT,
+    SamsungTv,
+};
 use homelab::sony_receiver::{
     GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
 };
@@ -1211,7 +1211,11 @@ fn resolve_arcam(
     if let Some(ref n) = name {
         if let Some(service) = config.arcam_amps.get(n) {
             let resolved_port = port.unwrap_or(service.port);
-            return Ok((service.host.clone(), resolved_port, DeviceSource::Name(n.clone())));
+            return Ok((
+                service.host.clone(),
+                resolved_port,
+                DeviceSource::Name(n.clone()),
+            ));
         }
         let available = device_names(&config.arcam_amps);
         return Err(color_eyre::eyre::eyre!(
@@ -1317,14 +1321,12 @@ async fn handle_eversolo_music(
                 };
                 println!(
                     "{}",
-                    styled(format!(
-                        "<b>Eversolo</b> is <b>{status_label}</b> {suffix}"
-                    ))
+                    styled(format!("<b>Eversolo</b> is <b>{status_label}</b> {suffix}"))
                 );
 
                 if let Some(ref music) = state.playing_music {
-                    let mut table = Table::new()
-                        .with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
+                    let mut table =
+                        Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
                     if let Some(ref title) = music.title {
                         table.add_row(vec!["Title".into(), title.as_str().into()]);
                     }
@@ -1362,7 +1364,10 @@ async fn handle_eversolo_music(
         EversoloMusicAction::PlayPause => {
             eversolo.play_or_pause().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"action": "play_pause"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"action": "play_pause"}))?
+                );
             } else {
                 println!("{}", styled(format!("Toggled play/pause {suffix}")));
             }
@@ -1370,7 +1375,10 @@ async fn handle_eversolo_music(
         EversoloMusicAction::Next => {
             eversolo.play_next().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"action": "next"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"action": "next"}))?
+                );
             } else {
                 println!("{}", styled(format!("Skipped to next track {suffix}")));
             }
@@ -1383,10 +1391,7 @@ async fn handle_eversolo_music(
                     serde_json::to_string_pretty(&json!({"action": "previous"}))?
                 );
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Skipped to previous track {suffix}"))
-                );
+                println!("{}", styled(format!("Skipped to previous track {suffix}")));
             }
         }
         EversoloMusicAction::Seek { seconds } => {
@@ -1398,10 +1403,7 @@ async fn handle_eversolo_music(
                     serde_json::to_string_pretty(&json!({"action": "seek", "seconds": seconds}))?
                 );
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Seeked to {seconds}s {suffix}"))
-                );
+                println!("{}", styled(format!("Seeked to {seconds}s {suffix}")));
             }
         }
     }
@@ -1457,10 +1459,7 @@ async fn handle_eversolo_audio(
         EversoloAudioAction::Mute => {
             eversolo.set_mute(true).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"muted": true}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&json!({"muted": true}))?);
             } else {
                 println!("{}", styled(format!("<b>Muted</b> {suffix}")));
             }
@@ -1489,10 +1488,7 @@ async fn handle_eversolo_audio(
             if json {
                 println!("{}", serde_json::to_string_pretty(&io)?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Set input to <b>{tag}</b> {suffix}"))
-                );
+                println!("{}", styled(format!("Set input to <b>{tag}</b> {suffix}")));
                 print_routing_tables(&io, suffix);
             }
         }
@@ -1501,10 +1497,7 @@ async fn handle_eversolo_audio(
             if json {
                 println!("{}", serde_json::to_string_pretty(&io)?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Set output to <b>{tag}</b> {suffix}"))
-                );
+                println!("{}", styled(format!("Set output to <b>{tag}</b> {suffix}")));
                 print_routing_tables(&io, suffix);
             }
         }
@@ -1528,10 +1521,8 @@ async fn handle_eversolo_power(
                     "{}",
                     styled(format!("<b>Eversolo Power Options</b> {suffix}"))
                 );
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new("Name"),
-                    TableColumn::new("Tag"),
-                ]);
+                let mut table = Table::new()
+                    .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Tag")]);
                 for opt in &opts.data {
                     table.add_row(vec![opt.name.as_str().into(), opt.tag.as_str().into()]);
                 }
@@ -1569,10 +1560,7 @@ async fn handle_eversolo_display(
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                let max_str = resp
-                    .max
-                    .map(|m| format!("/{m}"))
-                    .unwrap_or_default();
+                let max_str = resp.max.map(|m| format!("/{m}")).unwrap_or_default();
                 println!(
                     "{}",
                     styled(format!(
@@ -1592,9 +1580,7 @@ async fn handle_eversolo_display(
             } else {
                 println!(
                     "{}",
-                    styled(format!(
-                        "Set screen brightness to <b>{index}</b> {suffix}"
-                    ))
+                    styled(format!("Set screen brightness to <b>{index}</b> {suffix}"))
                 );
             }
         }
@@ -1603,10 +1589,7 @@ async fn handle_eversolo_display(
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                let max_str = resp
-                    .max
-                    .map(|m| format!("/{m}"))
-                    .unwrap_or_default();
+                let max_str = resp.max.map(|m| format!("/{m}")).unwrap_or_default();
                 println!(
                     "{}",
                     styled(format!(
@@ -1626,9 +1609,7 @@ async fn handle_eversolo_display(
             } else {
                 println!(
                     "{}",
-                    styled(format!(
-                        "Set knob brightness to <b>{index}</b> {suffix}"
-                    ))
+                    styled(format!("Set knob brightness to <b>{index}</b> {suffix}"))
                 );
             }
         }
@@ -1637,29 +1618,18 @@ async fn handle_eversolo_display(
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("<b>VU Meter Modes</b> {suffix}"))
-                );
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new("Index"),
-                    TableColumn::new("Name"),
-                ]);
+                println!("{}", styled(format!("<b>VU Meter Modes</b> {suffix}")));
+                let mut table = Table::new()
+                    .with_columns(vec![TableColumn::new("Index"), TableColumn::new("Name")]);
                 for (i, mode) in resp.data.iter().enumerate() {
                     let idx = mode
                         .index
                         .map(|n| n.to_string())
                         .unwrap_or_else(|| i.to_string());
-                    table.add_row(vec![
-                        idx.as_str().into(),
-                        mode.title.as_str().into(),
-                    ]);
+                    table.add_row(vec![idx.as_str().into(), mode.title.as_str().into()]);
                 }
                 if let Some(current) = resp.current_index {
-                    table.add_row(vec![
-                        "Current".into(),
-                        current.to_string().as_str().into(),
-                    ]);
+                    table.add_row(vec!["Current".into(), current.to_string().as_str().into()]);
                 }
                 print!("\n{}", table.display(&Terminal::default()));
             }
@@ -1683,29 +1653,18 @@ async fn handle_eversolo_display(
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("<b>Spectrum Modes</b> {suffix}"))
-                );
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new("Index"),
-                    TableColumn::new("Name"),
-                ]);
+                println!("{}", styled(format!("<b>Spectrum Modes</b> {suffix}")));
+                let mut table = Table::new()
+                    .with_columns(vec![TableColumn::new("Index"), TableColumn::new("Name")]);
                 for (i, mode) in resp.data.iter().enumerate() {
                     let idx = mode
                         .index
                         .map(|n| n.to_string())
                         .unwrap_or_else(|| i.to_string());
-                    table.add_row(vec![
-                        idx.as_str().into(),
-                        mode.title.as_str().into(),
-                    ]);
+                    table.add_row(vec![idx.as_str().into(), mode.title.as_str().into()]);
                 }
                 if let Some(current) = resp.current_index {
-                    table.add_row(vec![
-                        "Current".into(),
-                        current.to_string().as_str().into(),
-                    ]);
+                    table.add_row(vec!["Current".into(), current.to_string().as_str().into()]);
                 }
                 print!("\n{}", table.display(&Terminal::default()));
             }
@@ -1720,9 +1679,7 @@ async fn handle_eversolo_display(
             } else {
                 println!(
                     "{}",
-                    styled(format!(
-                        "Set spectrum mode to <b>{index}</b> {suffix}"
-                    ))
+                    styled(format!("Set spectrum mode to <b>{index}</b> {suffix}"))
                 );
             }
         }
@@ -1740,29 +1697,17 @@ async fn handle_eversolo_remote(
         EversoloRemoteAction::Key { key } => {
             eversolo.send_key(&key).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"key": key}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&json!({"key": key}))?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Sent key <b>{key}</b> {suffix}"))
-                );
+                println!("{}", styled(format!("Sent key <b>{key}</b> {suffix}")));
             }
         }
         EversoloRemoteAction::Text { text } => {
             eversolo.input_text(&text).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"text": text}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&json!({"text": text}))?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Sent text input {suffix}"))
-                );
+                println!("{}", styled(format!("Sent text input {suffix}")));
             }
         }
     }
@@ -1804,7 +1749,11 @@ fn resolve_eversolo(
     if let Some(ref n) = name {
         if let Some(service) = config.eversolo_devices.get(n) {
             let resolved_port = port.unwrap_or(service.port);
-            return Ok((service.host.clone(), resolved_port, DeviceSource::Name(n.clone())));
+            return Ok((
+                service.host.clone(),
+                resolved_port,
+                DeviceSource::Name(n.clone()),
+            ));
         }
         let available = device_names(&config.eversolo_devices);
         return Err(color_eyre::eyre::eyre!(
@@ -1818,7 +1767,11 @@ fn resolve_eversolo(
     if config.eversolo_devices.len() == 1 {
         let (dev_name, service) = config.eversolo_devices.iter().next().unwrap();
         let resolved_port = port.unwrap_or(service.port);
-        return Ok((service.host.clone(), resolved_port, DeviceSource::Auto(dev_name.clone())));
+        return Ok((
+            service.host.clone(),
+            resolved_port,
+            DeviceSource::Auto(dev_name.clone()),
+        ));
     }
 
     // 4. Error with available devices
@@ -1931,43 +1884,45 @@ async fn handle_samsung_app(
     suffix: &str,
 ) -> Result<()> {
     match action {
-        SamsungAppAction::Launch { id, name } => {
-            match (id, name) {
-                (Some(app_id), _) => {
-                    tv.launch_app_by_id(&app_id).await?;
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&json!({"launched_by": "id", "app_id": app_id}))?
-                        );
-                    } else {
-                        println!(
-                            "{}",
-                            styled(format!("Launched app <b>{app_id}</b> {suffix}"))
-                        );
-                    }
-                }
-                (None, Some(app_name)) => {
-                    tv.launch_app_by_name(&app_name).await?;
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&json!({"launched_by": "name", "app_name": app_name}))?
-                        );
-                    } else {
-                        println!(
-                            "{}",
-                            styled(format!("Launched app <b>{app_name}</b> {suffix}"))
-                        );
-                    }
-                }
-                (None, None) => {
-                    return Err(color_eyre::eyre::eyre!(
-                        "Either --id or --name is required for app launch"
-                    ));
+        SamsungAppAction::Launch { id, name } => match (id, name) {
+            (Some(app_id), _) => {
+                tv.launch_app_by_id(&app_id).await?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &json!({"launched_by": "id", "app_id": app_id})
+                        )?
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        styled(format!("Launched app <b>{app_id}</b> {suffix}"))
+                    );
                 }
             }
-        }
+            (None, Some(app_name)) => {
+                tv.launch_app_by_name(&app_name).await?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &json!({"launched_by": "name", "app_name": app_name})
+                        )?
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        styled(format!("Launched app <b>{app_name}</b> {suffix}"))
+                    );
+                }
+            }
+            (None, None) => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Either --id or --name is required for app launch"
+                ));
+            }
+        },
         SamsungAppAction::Status { id } => {
             let status = tv.get_app_status(&id).await?;
             if json {
@@ -1995,7 +1950,10 @@ async fn handle_samsung_app(
         SamsungAppAction::Close { id } => {
             tv.close_app(&id).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"closed": true, "app_id": id}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"closed": true, "app_id": id}))?
+                );
             } else {
                 println!("{}", styled(format!("Closed app <b>{id}</b> {suffix}")));
             }
@@ -2003,25 +1961,45 @@ async fn handle_samsung_app(
         SamsungAppAction::Install { id } => {
             tv.install_app(&id).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"install_initiated": true, "app_id": id}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &json!({"install_initiated": true, "app_id": id})
+                    )?
+                );
             } else {
-                println!("{}", styled(format!("Install initiated for <b>{id}</b> {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Install initiated for <b>{id}</b> {suffix}"))
+                );
             }
         }
         SamsungAppAction::LaunchWs { id, meta_tag } => {
             tv.launch_app_ws(&id, meta_tag.as_deref()).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"launched_ws": true, "app_id": id}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"launched_ws": true, "app_id": id}))?
+                );
             } else {
-                println!("{}", styled(format!("Launched app <b>{id}</b> via WebSocket {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Launched app <b>{id}</b> via WebSocket {suffix}"))
+                );
             }
         }
         SamsungAppAction::List => {
             tv.request_installed_apps().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"request_sent": true}))?
+                );
             } else {
-                println!("{}", styled(format!("Installed apps request sent {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Installed apps request sent {suffix}"))
+                );
             }
         }
     }
@@ -2038,15 +2016,9 @@ async fn handle_samsung_remote(
         SamsungRemoteAction::SendKey { key } => {
             tv.send_key(&key).await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"key": key}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&json!({"key": key}))?);
             } else {
-                println!(
-                    "{}",
-                    styled(format!("Sent key <b>{key}</b> {suffix}"))
-                );
+                println!("{}", styled(format!("Sent key <b>{key}</b> {suffix}")));
             }
         }
     }
@@ -2063,15 +2035,24 @@ async fn handle_samsung_art(
         SamsungArtAction::Status => {
             tv.get_art_mode_status().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"request_sent": true}))?
+                );
             } else {
-                println!("{}", styled(format!("Art Mode status request sent {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Art Mode status request sent {suffix}"))
+                );
             }
         }
         SamsungArtAction::On => {
             tv.set_art_mode(true).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"art_mode": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"art_mode": true}))?
+                );
             } else {
                 println!("{}", styled(format!("Art Mode set to <b>on</b> {suffix}")));
             }
@@ -2079,7 +2060,10 @@ async fn handle_samsung_art(
         SamsungArtAction::Off => {
             tv.set_art_mode(false).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"art_mode": false}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"art_mode": false}))?
+                );
             } else {
                 println!("{}", styled(format!("Art Mode set to <b>off</b> {suffix}")));
             }
@@ -2087,15 +2071,24 @@ async fn handle_samsung_art(
         SamsungArtAction::Current => {
             tv.get_current_artwork().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"request_sent": true}))?
+                );
             } else {
-                println!("{}", styled(format!("Current artwork request sent {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Current artwork request sent {suffix}"))
+                );
             }
         }
         SamsungArtAction::List => {
             tv.get_artwork_list().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"request_sent": true}))?
+                );
             } else {
                 println!("{}", styled(format!("Artwork list request sent {suffix}")));
             }
@@ -2103,15 +2096,26 @@ async fn handle_samsung_art(
         SamsungArtAction::Select { content_id } => {
             tv.select_artwork(&content_id).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"selected": true, "content_id": content_id}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &json!({"selected": true, "content_id": content_id})
+                    )?
+                );
             } else {
-                println!("{}", styled(format!("Selected artwork <b>{content_id}</b> {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!("Selected artwork <b>{content_id}</b> {suffix}"))
+                );
             }
         }
         SamsungArtAction::Brightness => {
             tv.get_art_brightness().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"request_sent": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"request_sent": true}))?
+                );
             } else {
                 println!("{}", styled(format!("Brightness request sent {suffix}")));
             }
@@ -2119,9 +2123,17 @@ async fn handle_samsung_art(
         SamsungArtAction::SetBrightness { level } => {
             tv.set_art_brightness(level).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"brightness": level}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"brightness": level}))?
+                );
             } else {
-                println!("{}", styled(format!("Art Mode brightness set to <b>{level}</b> {suffix}")));
+                println!(
+                    "{}",
+                    styled(format!(
+                        "Art Mode brightness set to <b>{level}</b> {suffix}"
+                    ))
+                );
             }
         }
     }
@@ -2151,10 +2163,7 @@ async fn handle_samsung_discover(timeout_secs: u64, json: bool) -> Result<()> {
     } else {
         println!(
             "{}",
-            styled(format!(
-                "<b>Discovered {} Samsung TV(s)</b>",
-                tvs.len()
-            ))
+            styled(format!("<b>Discovered {} Samsung TV(s)</b>", tvs.len()))
         );
         let mut table = Table::new().with_columns(vec![
             TableColumn::new("Host"),
@@ -2190,7 +2199,13 @@ fn resolve_samsung(
         let (host_str, inline_port) = parse_host_port(&h, SAMSUNG_DEFAULT_REST_PORT);
         let resolved_port = port.unwrap_or(inline_port);
         let resolved_ws = ws_port.unwrap_or(SAMSUNG_DEFAULT_WS_PORT);
-        return Ok((host_str, resolved_port, resolved_ws, https_flag, DeviceSource::Flag));
+        return Ok((
+            host_str,
+            resolved_port,
+            resolved_ws,
+            https_flag,
+            DeviceSource::Flag,
+        ));
     }
 
     let config = HomeyConfig::load().unwrap_or_default();
