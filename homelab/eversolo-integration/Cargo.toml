@@ -1,0 +1,19 @@
+[package]
+name = "eversolo-integration"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "eversolo-integration"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+homelab = { path = "../lib" }
+schematic-schema = { path = "../../schematic/schema" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
