@@ -51,7 +51,9 @@ fn test_filter_help_describes_path_wildcard_and_exact_matching() {
         .success()
         .stdout(predicate::str::contains("File path or symbol-name filters"))
         .stdout(predicate::str::contains("File-like filters (paths such as"))
-        .stdout(predicate::str::contains("Remaining filters are symbol-name filters"))
+        .stdout(predicate::str::contains(
+            "Remaining filters are symbol-name filters",
+        ))
         .stdout(predicate::str::contains("fuzzy"))
         .stdout(predicate::str::contains("contains match"))
         .stdout(predicate::str::contains("wildcard match"))
@@ -460,7 +462,9 @@ fn test_exclude_files_glob_filters_scanned_files() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("tree-hugger/lib/tests/fixtures/sample.rs"))
+        .stdout(predicate::str::contains(
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+        ))
         .stdout(predicate::str::contains("tree-hugger/cli/src/main.rs").not());
 }
 
@@ -907,8 +911,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 
 #[test]
 fn test_symbols_prelude_reports_direct_prelude_exports() {
-    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/prelude_pkg");
+    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
     let mut cmd = Command::cargo_bin("hug").unwrap();
     cmd.current_dir(&fixture_pkg)
@@ -928,8 +931,7 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
 
 #[test]
 fn test_symbols_prelude_comments_show_resolved_doc_comments() {
-    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/prelude_pkg");
+    let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
     let mut cmd = Command::cargo_bin("hug").unwrap();
     cmd.current_dir(&fixture_pkg)

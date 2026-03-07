@@ -12,10 +12,9 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
-    FunctionSignature,
-    ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage, SchemaVersion, SourceContext,
-    SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
-    find_git_root, find_package_root,
+    FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage,
+    SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile,
+    TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
 };
 
 #[derive(Parser, Debug)]
@@ -908,8 +907,8 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerE
             .filter(|import| is_prelude_export(import, &source))
             .collect();
         let mut resolved_exports = Vec::with_capacity(exports.len());
-        let package_root = package_root_for_prelude_file(&candidate)
-            .unwrap_or_else(|| root_dir.to_path_buf());
+        let package_root =
+            package_root_for_prelude_file(&candidate).unwrap_or_else(|| root_dir.to_path_buf());
 
         for import in &exports {
             names.insert(import.name.clone());
@@ -1069,7 +1068,9 @@ fn is_public_rust_use_statement(statement: &str) -> bool {
     if let Some(after_scope) = after_pub.strip_prefix('(')
         && let Some(close_idx) = after_scope.find(')')
     {
-        return after_scope[close_idx + 1..].trim_start().starts_with("use ");
+        return after_scope[close_idx + 1..]
+            .trim_start()
+            .starts_with("use ");
     }
 
     false
@@ -1116,10 +1117,11 @@ fn resolve_prelude_export_metadata(
         }
 
         // Fallback for symbols not captured by tree-sitter symbol queries (e.g., some type aliases).
-        let source_text = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
-            path: candidate.clone(),
-            source,
-        })?;
+        let source_text =
+            std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
+                path: candidate.clone(),
+                source,
+            })?;
         if let Some(kind) = infer_rust_decl_kind(&source_text, target_name) {
             return Ok(Some(ResolvedPreludeMetadata {
                 kind,
@@ -1134,7 +1136,10 @@ fn resolve_prelude_export_metadata(
 }
 
 fn import_target_symbol_name(import: &ImportSymbol) -> &str {
-    let raw = import.original_name.as_deref().unwrap_or(import.name.as_str());
+    let raw = import
+        .original_name
+        .as_deref()
+        .unwrap_or(import.name.as_str());
     raw.rsplit("::").next().unwrap_or(raw)
 }
 
@@ -1406,7 +1411,8 @@ fn summarize_file(
                     .filter(|s| s.kind.is_function())
                     .collect(),
             };
-            summary.symbols = apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
+            summary.symbols =
+                apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Types => {
             let symbols = match filter {
@@ -1426,7 +1432,8 @@ fn summarize_file(
                     .filter(|s| s.kind.is_type())
                     .collect(),
             };
-            summary.symbols = apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
+            summary.symbols =
+                apply_symbol_filters(symbols, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Symbols => {
             match filter {
@@ -1452,7 +1459,8 @@ fn summarize_file(
                             .into_iter()
                             .filter(|s| filter.names.contains(&s.name))
                             .collect();
-                    } else if let Some(prelude_exports) = filter.exports_by_file.get(&tree_file.file)
+                    } else if let Some(prelude_exports) =
+                        filter.exports_by_file.get(&tree_file.file)
                     {
                         summary.symbols = prelude_exports.clone();
                         summary.exports = summary.symbols.clone();
