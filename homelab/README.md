@@ -9,6 +9,9 @@ Home automation control for AV equipment over the local network.
 | `homelab` | — | Core library: Arcam amplifier + Sony ES receiver control |
 | `homelab-cli` | `homey` | CLI for controlling AV devices from the terminal |
 | `homelab-server` | `homelab-server` | REST API server (Axum) for AV device control |
+| `arcam-amp-integration` | `arcam-amp-integration` | Unfolded Circle external integration for Arcam amplifiers |
+| `sony-receiver-integration` | `sony-receiver-integration` | Unfolded Circle external integration for Sony ES receivers |
+| `eversolo-integration` | `eversolo-integration` | Unfolded Circle external integration for Eversolo streamers |
 
 ## Supported AV Devices
 
@@ -122,4 +125,5 @@ homey sony native zone
 - [Library](lib/README.md) — Module reference and Sony JSON-RPC lessons learned
 - [CLI](cli/README.md) — Complete command reference, environment variables, shell completions
 - [Server](server/README.md) — REST endpoints, error codes, usage examples
+- [Eversolo Integration](eversolo-integration/README.md) — UC Remote external integration for Eversolo
 - [Sony STR-AZ7000ES](docs/sony-str-az7000es.md) — Network API reference for the receiver
