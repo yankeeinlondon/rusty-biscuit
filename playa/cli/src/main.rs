@@ -84,6 +84,10 @@ enum Command {
     /// Show a table of available audio players
     Players,
 
+    /// Show available native output channels (audio devices)
+    #[cfg(feature = "sfx-native")]
+    OutputChannels,
+
     /// Show audio ducking backend info
     #[cfg(feature = "audio-ducking")]
     DuckInfo,
@@ -343,6 +347,10 @@ async fn run_cli() {
             let (markdown, missing) = build_metadata_markdown();
             render_markdown(&markdown, &missing);
         }
+        #[cfg(feature = "sfx-native")]
+        Some(Command::OutputChannels) => {
+            list_output_channels();
+        }
         Some(Command::DuckInfo) => {
             print_duck_info().await;
         }
@@ -384,6 +392,10 @@ fn run_cli_sync() {
         Some(Command::Players) => {
             let (markdown, missing) = build_metadata_markdown();
             render_markdown(&markdown, &missing);
+        }
+        #[cfg(feature = "sfx-native")]
+        Some(Command::OutputChannels) => {
+            list_output_channels();
         }
         Some(Command::Effect { name, playback }) => {
             play_effect_sync(&name, &playback);
@@ -978,6 +990,57 @@ fn strip_osc8_sequences(input: &str) -> String {
 
     output.push_str(remaining);
     output
+}
+
+#[cfg(feature = "sfx-native")]
+fn list_output_channels() {
+    match playa::get_output_channels() {
+        Ok(channels) => {
+            if channels.is_empty() {
+                println!("No native audio output channels found.");
+                return;
+            }
+
+            println!("Available Output Channels");
+            println!("=========================");
+            println!();
+
+            let mut list = UnorderedList::empty();
+            for channel in channels {
+                let mut styled_name = channel.name.clone();
+                let mut markers = Vec::new();
+
+                if channel.is_default_audio && channel.is_default_sfx {
+                    styled_name = format!("<bold><italic>{}</italic></bold>", styled_name);
+                } else if channel.is_default_audio {
+                    styled_name = format!("<bold>{}</bold>", styled_name);
+                } else if channel.is_default_sfx {
+                    styled_name = format!("<italic>{}</italic>", styled_name);
+                }
+
+                if channel.is_default_audio {
+                    markers.push("default audio");
+                }
+                if channel.is_default_sfx {
+                    markers.push("default sfx");
+                }
+
+                let text = if markers.is_empty() {
+                    styled_name
+                } else {
+                    format!("{} <dim>({})</dim>", styled_name, markers.join(", "))
+                };
+
+                list.add(Prose::new(text));
+            }
+            let output = list.render_optimistic(None);
+            print!("{}", output);
+        }
+        Err(e) => {
+            eprintln!("Failed to get output channels: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]

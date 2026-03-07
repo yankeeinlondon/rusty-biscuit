@@ -1,4 +1,5 @@
 mod audio;
+mod channels;
 mod detection;
 mod error;
 mod playa;
@@ -38,6 +39,11 @@ mod effects;
 pub use crate::effects::SoundEffect;
 
 pub use crate::audio::{Audio, AudioData, AudioSourceKind};
+pub use crate::channels::OutputChannel;
+
+#[cfg(feature = "sfx-native")]
+pub use crate::channels::get_output_channels;
+
 pub use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,
 };

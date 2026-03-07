@@ -125,7 +125,7 @@ pub(crate) fn open_sfx_stream() -> Result<rodio::MixerDeviceSink, rodio::DeviceS
 // ============================================================================
 
 #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
-mod macos {
+pub(crate) mod macos {
     use std::ffi::CStr;
     use std::mem;
 
