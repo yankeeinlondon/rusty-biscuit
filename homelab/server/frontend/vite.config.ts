@@ -105,6 +105,10 @@ export default defineConfig({
         short_name: 'Homelab',
         theme_color: '#1a1a2e',
       },
+      workbox: {
+        // Don't intercept navigations to server-side routes
+        navigateFallbackDenylist: [/^\/explore/, /^\/status/, /^\/health/, /^\/sony_receiver/, /^\/arcam_amp/, /^\/arcam/, /^\/eversolo/, /^\/samsung_tv/],
+      },
     }),
   ],
 
