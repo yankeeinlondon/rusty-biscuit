@@ -609,11 +609,12 @@ Commands:
     sniff services --state all  Show all services
 
 Output modes:
-  - No subcommand: JSON output (all data)
+  - No subcommand: Show this help (use --json for full JSON output)
   - With subcommand: Text output by default, use --json for JSON
 
 Examples:
-  sniff                      # Full system info as JSON
+  sniff                      # Show this help
+  sniff --json               # Full system info as JSON
   sniff cpu                  # CPU info as text
   sniff cpu --json           # CPU info as JSON
   sniff --json cpu           # Same as above (flag position flexible)

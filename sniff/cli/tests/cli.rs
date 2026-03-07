@@ -135,14 +135,26 @@ fn test_completions_help_flag_shows_setup() {
 
 // ============================================================================
 // Output Mode Tests
-// No subcommand = JSON output (all data)
+// No subcommand = show help
+// No subcommand + --json = JSON output (all data)
 // With subcommand = text output by default, --json for JSON
 // ============================================================================
 
 #[test]
-fn test_no_subcommand_outputs_json() {
-    // Without a subcommand, the output should be JSON
+fn test_no_subcommand_shows_help() {
+    // Without a subcommand, the output should be the help text
     cargo_bin_cmd!("sniff")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Commands:"))
+        .stdout(predicate::str::contains("sniff os"));
+}
+
+#[test]
+fn test_no_subcommand_with_json_outputs_json() {
+    // Without a subcommand but with --json, the output should be JSON
+    cargo_bin_cmd!("sniff")
+        .arg("--json")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"hardware\""))

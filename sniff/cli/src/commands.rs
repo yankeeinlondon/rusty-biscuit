@@ -28,6 +28,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // No subcommand and no --json flag: show help
+    if cli.command.is_none() && !cli.json {
+        Cli::command().print_help()?;
+        return Ok(());
+    }
+
     if matches!(cli.command, Some(Commands::Topics)) {
         output::print_topics_table();
         return Ok(());
@@ -288,7 +294,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
 
     // Output logic:
-    // - No subcommand: always JSON
+    // - No subcommand + --json: full JSON output (help already handled above)
     // - With subcommand: text by default, --json for JSON
     let use_json = cli.command.is_none() || cli.json;
 
