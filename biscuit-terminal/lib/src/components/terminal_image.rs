@@ -17,7 +17,7 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::discovery::detection::TerminalApp;
@@ -1659,7 +1659,7 @@ mod tests {
         assert!(result.contains("f=100")); // PNG format
         assert!(result.contains("a=T")); // Transmit and display
         assert!(result.contains("t=d")); // Direct transmission
-                                         // Should end with string terminator
+        // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 

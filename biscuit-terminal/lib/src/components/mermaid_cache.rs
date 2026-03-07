@@ -631,10 +631,12 @@ mod tests {
     #[test]
     fn test_cache_new() {
         let cache = MermaidCache::new();
-        assert!(cache
-            .cache_dir()
-            .to_string_lossy()
-            .contains("mermaid-cache"));
+        assert!(
+            cache
+                .cache_dir()
+                .to_string_lossy()
+                .contains("mermaid-cache")
+        );
     }
 
     #[test]
