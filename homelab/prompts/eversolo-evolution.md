@@ -1,4 +1,4 @@
-# Eversolo Evolution
+# Eversolo Streamer
 
 ## Power State Abstraction
 
@@ -14,3 +14,10 @@ That means when we detect:
 - AND, display is off
 
 we should associate that as the device being in the Standby state.
+
+## Changes
+
+I believe that this logic is already in the Homelab Server but it is not currently in the `eversolo-integration` for Unfolded Circle.
+
+- fix this in the eversolo-integration
+- validate that it is implemented in the homelab server too
