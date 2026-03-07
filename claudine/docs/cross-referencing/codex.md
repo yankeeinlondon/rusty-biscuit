@@ -192,6 +192,8 @@ No. Codex does not read `.claude/commands/` or `~/.claude/commands/`. There is n
 
 Custom prompts were Markdown files stored in `~/.codex/prompts/` with YAML frontmatter. They are **deprecated** in favor of skills.
 
+Current Codex documentation says custom prompts live in the local Codex home directory and **are not shared through the repository**. In practice, this means project-scoped `.codex/prompts/` files should not be relied on for discovery in current Codex builds.
+
 **Frontmatter fields (deprecated):**
 
 | Field | Description |
@@ -213,7 +215,8 @@ Custom prompts were Markdown files stored in `~/.codex/prompts/` with YAML front
 | Custom commands | Deprecated (use skills instead) | Supported via `.claude/commands/*.md` |
 | Built-in commands | ~23 built-in commands | Built-in commands |
 | File format | Was Markdown with YAML frontmatter (deprecated) | Markdown with YAML frontmatter |
-| Subdirectory support | Not applicable (deprecated) | Supported (subdirectories create namespaces) |
+| Storage scope | User-scoped `~/.codex/prompts/` only | User- and repo-scoped `.claude/commands/` |
+| Subdirectory support | Deprecated prompt files may still use nested paths under user scope | Supported (subdirectories create namespaces) |
 | Cross-reading | Does not read `.claude/commands/` | N/A |
 
 ---

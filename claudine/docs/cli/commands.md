@@ -196,7 +196,7 @@ The following table summarizes how each provider handles commands, derived from 
 | Provider  | Support Level  | Format   | Repo Path              | User Path                     | Required Props | Optional Props                                                                                       |
 |-----------|---------------|----------|------------------------|-------------------------------|----------------|------------------------------------------------------------------------------------------------------|
 | Claude    | Full          | Markdown | `.claude/commands`     | `.claude/commands`            | (none)         | name, description, argument-hint, disable-model-invocation, user-invocable, allowed-tools, model, context, agent, hooks |
-| Codex     | CustomFormat  | Markdown | `.codex/prompts`       | `.codex/prompts`              | (none)         | description, argument-hint                                                                           |
+| Codex     | CustomFormat  | Markdown | (none)                 | `.codex/prompts`              | (none)         | description, argument-hint                                                                           |
 | Gemini    | CustomFormat  | TOML     | `.gemini/commands`     | `.gemini/commands`            | prompt         | description                                                                                          |
 | Goose     | CustomFormat  | MCP      | (none)                 | (none)                        | N/A            | N/A                                                                                                  |
 | KimiCode  | Limited       | Built-in | N/A                    | N/A                           | N/A            | N/A                                                                                                  |
@@ -207,7 +207,7 @@ The following table summarizes how each provider handles commands, derived from 
 ### Linking Implications
 
 - **Full + Markdown** providers (Claude, OpenCode, Qwen, Roo Code): Commands can be symlinked directly from the canonical provider. Frontmatter properties not recognized by the target provider are silently ignored.
-- **CustomFormat + Markdown** (Codex): Symlinks work since the format is Markdown, but Codex uses a `prompts/` directory instead of `commands/`. The linking logic must account for this path difference.
+- **CustomFormat + Markdown** (Codex): User-scoped symlinks work since the format is Markdown, but Codex uses a `prompts/` directory instead of `commands/` and does not currently document repo-scoped prompt discovery.
 - **CustomFormat + TOML** (Gemini): Cannot be symlinked from a Markdown-based canonical provider. Requires format conversion or manual creation. Counted as `format_incompatible` in the fix summary.
 - **CustomFormat + MCP** (Goose): Commands are MCP-based, not file-based. Cannot participate in file-based linking. Counted as `format_incompatible` and noted in the provider exception header.
 - **Limited / Built-in** (KimiCode): No custom command support. Skipped entirely during linking. Not counted as `format_incompatible` (there is nothing to link to).

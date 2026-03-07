@@ -166,6 +166,7 @@ pub enum CapabilityAreaKind {
 - Slash commands:
   - Built-ins: yes
   - Custom: deprecated (`~/.codex/prompts/*.md`)
+  - Scope: user only; not repository-shared
   - Maturity: deprecated for custom, stable for built-ins
 - Subagents:
   - Enabled: true
