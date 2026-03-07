@@ -11,6 +11,16 @@ jobs:
   build:
     name: Build aarch64 integration binaries
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: arcam-amp-integration
+            package_dir: homelab/arcam-amp-integration
+          - package: eversolo-integration
+            package_dir: homelab/eversolo-integration
+          - package: sony-receiver-integration
+            package_dir: homelab/sony-receiver-integration
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,17 +31,17 @@ jobs:
       - name: Install cross
         run: cargo install cross --locked
 
-      - name: Build arcam-amp-integration
-        run: cross build -p arcam-amp-integration --release --target aarch64-unknown-linux-musl
+      - name: Build ${{ matrix.package }}
+        run: cross build -p "${{ matrix.package }}" --release --target aarch64-unknown-linux-musl
 
       - name: Package archive
         run: |
-          mkdir -p pkg/arcam-amp-integration
-          cp target/aarch64-unknown-linux-musl/release/arcam-amp-integration pkg/arcam-amp-integration/
-          cp homelab/arcam-amp-integration/driver.json pkg/arcam-amp-integration/ 2>/dev/null || true
-          cd pkg && tar czf arcam-amp-integration-aarch64.tar.gz arcam-amp-integration
+          mkdir -p "pkg/${{ matrix.package }}"
+          cp "target/aarch64-unknown-linux-musl/release/${{ matrix.package }}" "pkg/${{ matrix.package }}/"
+          cp "${{ matrix.package_dir }}/driver.json" "pkg/${{ matrix.package }}/" 2>/dev/null || true
+          cd pkg && tar czf "${{ matrix.package }}-aarch64.tar.gz" "${{ matrix.package }}"
 
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" pkg/arcam-amp-integration-aarch64.tar.gz
+        run: gh release upload "${{ github.event.release.tag_name }}" "pkg/${{ matrix.package }}-aarch64.tar.gz"
