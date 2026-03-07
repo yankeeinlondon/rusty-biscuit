@@ -6,7 +6,6 @@
 mod dispatch;
 mod error;
 mod handler;
-mod responses;
 mod types;
 
 use std::collections::HashMap;
@@ -84,11 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
+    let hub = UnfoldedCircleIntegrationWsHost::new_event_hub();
     let handler = Arc::new(EversoloIntegrationHandler::new(
         devices,
         Duration::from_secs(args.timeout),
+        hub.clone(),
     ));
-    handler.refresh_all().await;
+    handler.refresh_all(false).await;
     handler.start_polling(Duration::from_secs(args.poll_interval));
 
     info!(
@@ -103,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting Eversolo UC integration driver"
     );
 
-    UnfoldedCircleIntegrationWsHost::serve_addr(&args.listen, handler).await?;
+    UnfoldedCircleIntegrationWsHost::serve_addr_with_hub(&args.listen, handler, hub).await?;
 
     Ok(())
 }

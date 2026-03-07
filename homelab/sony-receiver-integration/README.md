@@ -55,6 +55,7 @@ sequenceDiagram
     R->>I: entity_command (receiver, volume_set)
     I->>S: HTTP POST :10000/sony/audio
     S-->>I: OK
+    I-->>R: result (code: 200)
     I-->>R: entity_change (volume: 42)
 ```
 
@@ -88,6 +89,7 @@ sony-receiver-integration --host 192.168.1.120 --device-name living
 | `--port` | `10000` | Sony JSON-RPC port |
 | `--device-name` | `receiver` | Name used in entity IDs |
 | `--timeout` | `10` | HTTP operation timeout (seconds) |
+| `--poll-interval` | `5` | Background poll interval in seconds |
 
 ### Authentication
 
@@ -113,9 +115,15 @@ In the UC Web Configurator:
 - `tokio` -- Async runtime
 - `clap` -- CLI argument parsing
 
+## State Synchronization
+
+- `get_entity_states` refreshes power, volume, mute, and the advertised UC `source` value together before responding.
+- A background poll loop diffs the refreshed snapshot against the keyed cache and emits `entity_change` for subscribed clients when those attributes change outside the UC Remote.
+- `device_state` is driven by refresh success or failure. If the receiver cannot be queried, the integration marks it disconnected and updates cached entity states to a stable `UNKNOWN` schema instead of continuing to present stale data as fresh.
+- Power commands are followed by a full receiver refresh so the `power` switch and `receiver` media-player entity stay aligned.
+
 ## Limitations
 
-- **No proactive push events**: The handler is request-response only. State changes made outside the integration (e.g., using the physical remote) are not pushed to the UC Remote. State is fetched on `get_entity_states` requests.
 - **Single connection**: The Sony receiver only accepts one concurrent TCP connection per API port. The integration opens and closes connections per request to avoid blocking other clients.
 - **Power status quirk**: Uses the Native Web API (port 80) for power status because the JSON-RPC API is unreliable with Network Standby enabled.
 - **Volume step size**: Volume up/down increments by 1 unit per command. The receiver's volume range is 0-100.
@@ -123,5 +131,5 @@ In the UC Web Configurator:
 ## Lessons Learned
 
 - The UC Integration protocol requires the **driver to be the WebSocket server** and the Remote to be the client.
-- The `WsHandler` trait supports request-response only. Proactive push events require a mechanism outside the trait.
+- `entity_command` returns a synchronous UC `result` envelope. Cache diffs are pushed separately as `entity_change` events.
 - Sony receivers need `pool_max_idle_per_host(0)` to prevent connection conflicts.

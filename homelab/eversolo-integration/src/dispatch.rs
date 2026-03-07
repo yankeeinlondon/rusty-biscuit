@@ -294,7 +294,9 @@ fn power_attrs(on: bool) -> HashMap<String, Value> {
 }
 
 fn player_power_attrs(on: bool) -> HashMap<String, Value> {
-    HashMap::from([("state".to_string(), json!(if on { "ON" } else { "OFF" }))])
+    let mut attrs = offline_player_attributes();
+    attrs.insert("state".to_string(), json!(if on { "ON" } else { "OFF" }));
+    attrs
 }
 
 fn player_attrs(
@@ -359,6 +361,24 @@ fn available_source_names(routing: &InputOutputListResponse) -> Vec<String> {
         .collect()
 }
 
+pub fn offline_power_attributes() -> HashMap<String, Value> {
+    power_attrs(false)
+}
+
+pub fn offline_player_attributes() -> HashMap<String, Value> {
+    HashMap::from([
+        ("state".to_string(), json!("OFF")),
+        ("volume".to_string(), json!(0)),
+        ("muted".to_string(), json!(false)),
+        ("source".to_string(), json!("")),
+        ("media_position".to_string(), Value::Null),
+        ("media_duration".to_string(), Value::Null),
+        ("media_title".to_string(), Value::Null),
+        ("media_artist".to_string(), Value::Null),
+        ("media_album".to_string(), Value::Null),
+    ])
+}
+
 fn volume_steps_from_state(state: &GetStateResponse) -> u32 {
     state
         .volume_data
@@ -389,8 +409,11 @@ fn resolve_input_tag(routing: &InputOutputListResponse, source: &str) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::EversoloOperation;
     use homelab::eversolo::GetStateResponse;
     use schematic_schema::eversolo::{InputItem, OutputItem, PlayingMusic, VolumeData};
+    use std::env;
+    use std::time::Duration;
 
     fn sample_routing() -> InputOutputListResponse {
         InputOutputListResponse {
@@ -469,6 +492,30 @@ mod tests {
         );
     }
 
+    fn eversolo_real_target() -> Option<DeviceConfig> {
+        let host = env::var("EVERSOLO_REAL_HOST").ok()?;
+        let port = env::var("EVERSOLO_REAL_PORT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(9529);
+        Some(DeviceConfig {
+            host,
+            port,
+            mac_address: None,
+            wol_broadcast: "255.255.255.255".to_string(),
+            wol_port: 9517,
+        })
+    }
+
+    fn require_eversolo_destructive() {
+        let enabled = env::var("EVERSOLO_REAL_ALLOW_DESTRUCTIVE").ok();
+        assert_eq!(
+            enabled.as_deref(),
+            Some("1"),
+            "set EVERSOLO_REAL_ALLOW_DESTRUCTIVE=1 to run this test"
+        );
+    }
+
     #[test]
     fn test_volume_steps_from_state() {
         assert_eq!(volume_steps_from_state(&sample_state()), 160);
@@ -494,6 +541,131 @@ mod tests {
             Some("XMOS".to_string())
         );
         assert_eq!(resolve_input_tag(&routing, "unknown"), None);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a reachable Eversolo device configured via EVERSOLO_REAL_HOST"]
+    async fn real_device_fetch_snapshot_returns_catalog_and_player_state() {
+        let config = eversolo_real_target().expect("set EVERSOLO_REAL_HOST to run this test");
+        let snapshot = fetch_snapshot(&config, Duration::from_secs(10))
+            .await
+            .expect("real Eversolo snapshot fetch should succeed");
+
+        assert!(snapshot.power_attributes.contains_key("state"));
+        assert!(snapshot.player_attributes.contains_key("state"));
+        assert!(snapshot.player_attributes.contains_key("source"));
+        assert!(snapshot.catalog.volume_steps >= 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a reachable Eversolo device and writes volume before restoring it"]
+    async fn destructive_real_device_volume_command_roundtrips() {
+        require_eversolo_destructive();
+        let config = eversolo_real_target().expect("set EVERSOLO_REAL_HOST to run this test");
+        let timeout = Duration::from_secs(10);
+        let before = fetch_snapshot(&config, timeout)
+            .await
+            .expect("initial Eversolo snapshot should succeed");
+        let current = before
+            .player_attributes
+            .get("volume")
+            .and_then(Value::as_i64)
+            .expect("volume should be present") as i32;
+        if current == 0 {
+            eprintln!(
+                "Skipping Eversolo destructive volume test because current volume is already 0"
+            );
+            return;
+        }
+        let target = current - 1;
+
+        execute_operation(&config, EversoloOperation::VolumeSet(target), timeout)
+            .await
+            .expect("Eversolo volume change should succeed");
+        let changed = fetch_snapshot(&config, timeout)
+            .await
+            .expect("post-volume snapshot should succeed");
+        let observed = changed
+            .player_attributes
+            .get("volume")
+            .and_then(Value::as_i64)
+            .expect("volume should be present") as i32;
+        assert_eq!(observed, target);
+
+        execute_operation(&config, EversoloOperation::VolumeSet(current), timeout)
+            .await
+            .expect("Eversolo volume restoration should succeed");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a reachable Eversolo device and switches source before restoring it"]
+    async fn destructive_real_device_source_switch_roundtrips() {
+        require_eversolo_destructive();
+        let config = eversolo_real_target().expect("set EVERSOLO_REAL_HOST to run this test");
+        let timeout = Duration::from_secs(10);
+        let before = fetch_snapshot(&config, timeout)
+            .await
+            .expect("initial Eversolo snapshot should succeed");
+        if before
+            .player_attributes
+            .get("state")
+            .and_then(Value::as_str)
+            == Some("OFF")
+        {
+            eprintln!("Skipping Eversolo destructive source test because the player is OFF");
+            return;
+        }
+
+        let Some(current_source) = before
+            .player_attributes
+            .get("source")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+        else {
+            eprintln!(
+                "Skipping Eversolo destructive source test because the current source is unknown"
+            );
+            return;
+        };
+
+        let Some(target_source) = before
+            .catalog
+            .source_list
+            .iter()
+            .find(|source| *source != &current_source)
+            .cloned()
+        else {
+            eprintln!(
+                "Skipping Eversolo destructive source test because no alternate source is available"
+            );
+            return;
+        };
+
+        execute_operation(
+            &config,
+            EversoloOperation::SelectSource(target_source.clone()),
+            timeout,
+        )
+        .await
+        .expect("Eversolo source change should succeed");
+        let changed = fetch_snapshot(&config, timeout)
+            .await
+            .expect("post-source snapshot should succeed");
+        let observed = changed
+            .player_attributes
+            .get("source")
+            .and_then(Value::as_str)
+            .expect("source should be present");
+        assert_eq!(observed, target_source);
+
+        execute_operation(
+            &config,
+            EversoloOperation::SelectSource(current_source),
+            timeout,
+        )
+        .await
+        .expect("Eversolo source restoration should succeed");
     }
 
     #[test]

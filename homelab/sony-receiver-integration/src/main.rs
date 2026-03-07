@@ -7,7 +7,6 @@
 mod dispatch;
 mod error;
 mod handler;
-mod responses;
 mod types;
 
 use std::collections::HashMap;
@@ -44,6 +43,10 @@ struct Args {
     /// Timeout in seconds for Sony HTTP operations
     #[arg(long, default_value_t = 10)]
     timeout: u64,
+
+    /// Poll interval in seconds for refreshing receiver state.
+    #[arg(long, default_value_t = 5)]
+    poll_interval: u64,
 }
 
 #[tokio::main]
@@ -59,20 +62,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut devices = HashMap::new();
     devices.insert(args.device_name.clone(), (args.host.clone(), args.port));
 
+    let hub = UnfoldedCircleIntegrationWsHost::new_event_hub();
     let handler = Arc::new(SonyIntegrationHandler::new(
         devices,
         Duration::from_secs(args.timeout),
+        hub.clone(),
     ));
+    handler.refresh_all(false).await;
+    handler.start_polling(Duration::from_secs(args.poll_interval));
 
     info!(
         listen = %args.listen,
         host = %args.host,
         port = args.port,
         device_name = %args.device_name,
+        poll_interval = args.poll_interval,
         "starting Sony receiver UC integration driver"
     );
 
-    UnfoldedCircleIntegrationWsHost::serve_addr(&args.listen, handler).await?;
+    UnfoldedCircleIntegrationWsHost::serve_addr_with_hub(&args.listen, handler, hub).await?;
 
     Ok(())
 }

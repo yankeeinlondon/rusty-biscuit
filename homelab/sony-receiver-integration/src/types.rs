@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use unfolded_integration_helper::EntityState;
 
 /// Driver metadata constants
 pub const DRIVER_ID: &str = "sony-receiver";
@@ -31,14 +32,6 @@ pub struct SonyEntity {
     pub features: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// Current state snapshot of a Sony entity.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SonyEntityState {
-    pub entity_id: String,
-    pub entity_type: String,
-    pub attributes: HashMap<String, serde_json::Value>,
 }
 
 /// Sony operation resolved from a UC entity command.
@@ -89,23 +82,23 @@ pub fn build_entities(device_name: &str) -> Vec<SonyEntity> {
 }
 
 /// Build initial entity states (unknown until polled).
-pub fn build_initial_states(device_name: &str) -> Vec<SonyEntityState> {
+pub fn build_initial_states(device_name: &str) -> Vec<EntityState> {
     vec![
-        SonyEntityState {
-            entity_id: format!("sony.{device_name}.power"),
-            entity_type: "switch".to_string(),
-            attributes: HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
-        },
-        SonyEntityState {
-            entity_id: format!("sony.{device_name}.receiver"),
-            entity_type: "media_player".to_string(),
-            attributes: HashMap::from([
+        EntityState::new(
+            format!("sony.{device_name}.power"),
+            "switch",
+            HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
+        ),
+        EntityState::new(
+            format!("sony.{device_name}.receiver"),
+            "media_player",
+            HashMap::from([
                 ("state".to_string(), serde_json::json!("UNKNOWN")),
                 ("volume".to_string(), serde_json::json!(0)),
                 ("muted".to_string(), serde_json::json!(false)),
                 ("source".to_string(), serde_json::json!("")),
             ]),
-        },
+        ),
     ]
 }
 

@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use unfolded_integration_helper::EntityState;
 
 /// Driver metadata constants.
 pub const DRIVER_ID: &str = "eversolo-streamer";
@@ -32,14 +33,6 @@ pub struct EversoloEntity {
     pub features: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<HashMap<String, Value>>,
-}
-
-/// Current state snapshot of an Eversolo entity.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EversoloEntityState {
-    pub entity_id: String,
-    pub entity_type: String,
-    pub attributes: HashMap<String, Value>,
 }
 
 /// Eversolo operation resolved from a UC entity command.
@@ -106,23 +99,23 @@ pub fn build_entities(
 }
 
 /// Build initial entity states (unknown until polled).
-pub fn build_initial_states(device_name: &str) -> Vec<EversoloEntityState> {
+pub fn build_initial_states(device_name: &str) -> Vec<EntityState> {
     vec![
-        EversoloEntityState {
-            entity_id: format!("eversolo.{device_name}.power"),
-            entity_type: "switch".to_string(),
-            attributes: HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
-        },
-        EversoloEntityState {
-            entity_id: format!("eversolo.{device_name}.player"),
-            entity_type: "media_player".to_string(),
-            attributes: HashMap::from([
+        EntityState::new(
+            format!("eversolo.{device_name}.power"),
+            "switch",
+            HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
+        ),
+        EntityState::new(
+            format!("eversolo.{device_name}.player"),
+            "media_player",
+            HashMap::from([
                 ("state".to_string(), serde_json::json!("UNKNOWN")),
                 ("volume".to_string(), serde_json::json!(0)),
                 ("muted".to_string(), serde_json::json!(false)),
                 ("source".to_string(), serde_json::json!("")),
             ]),
-        },
+        ),
     ]
 }
 

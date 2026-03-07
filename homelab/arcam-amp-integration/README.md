@@ -13,7 +13,7 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 | `arcam.{name}.power` | switch | on_off, toggle | on, off, toggle |
 | `arcam.{name}.mute` | switch | on_off, toggle | on, off, toggle |
 
-The `{name}` comes from the `--device-name` flag (default: `amp`). Entity state is `ON` or `OFF`.
+The `{name}` comes from the `--device-name` flag (default: `amp`). Entity state is `ON`, `OFF`, or `UNKNOWN` while the amplifier is unreachable.
 
 ### How It Works
 
@@ -36,6 +36,7 @@ sequenceDiagram
     R->>I: entity_command (power, on)
     I->>A: TCP :50000 power on
     A-->>I: ACK
+    I-->>R: result (code: 200)
     I-->>R: entity_change (state: ON)
 ```
 
@@ -60,6 +61,7 @@ arcam-amp-integration --host 192.168.1.102 --device-name office
 | `--port` | `50000` | Arcam TCP port |
 | `--device-name` | `amp` | Name used in entity IDs |
 | `--timeout` | `5` | Arcam TCP operation timeout (seconds) |
+| `--poll-interval` | `5` | Background poll interval in seconds |
 
 ### Authentication
 
@@ -125,81 +127,22 @@ docker run --rm --network host arcam-amp-integration \
   --host 192.168.1.102 --device-name office
 ```
 
-## Installing on the Remote (Local Mode)
+## State Synchronization
 
-Installed integrations run directly on the UC Remote hardware. No external server needed, but the binary must be cross-compiled for the Remote's `aarch64-linux` target.
-
-### Cross-Compile
-
-```bash
-# Add the target (one-time)
-rustup target add aarch64-unknown-linux-musl
-
-# Build a static binary
-cargo build -p arcam-amp-integration --release --target aarch64-unknown-linux-musl
-```
-
-### Package the Archive
-
-Installed integrations are uploaded as a `.tar.gz` archive with a specific structure:
-
-```
-arcam-amp-integration.tar.gz
-  arcam-amp-integration/
-    driver.json
-    arcam-amp-integration        # the aarch64 binary
-```
-
-The `driver.json` manifest describes the driver to the Remote:
-
-```json
-{
-  "driver_id": "arcam-amplifier",
-  "version": "0.1.0",
-  "min_core_api": "0.14.0",
-  "name": { "en": "Arcam Amplifier" },
-  "icon": "custom:arcam-amplifier",
-  "description": {
-    "en": "Power and mute control for Arcam PA-series amplifiers"
-  },
-  "port": 9090,
-  "developer": {
-    "name": "Ken Snyder"
-  }
-}
-```
-
-Create the archive:
-
-```bash
-mkdir -p pkg/arcam-amp-integration
-cp target/aarch64-unknown-linux-musl/release/arcam-amp-integration pkg/arcam-amp-integration/
-cp driver.json pkg/arcam-amp-integration/
-cd pkg && tar czf arcam-amp-integration.tar.gz arcam-amp-integration
-```
-
-### Upload to the Remote
-
-1. Open the UC Web Configurator
-2. Go to **Integrations & Docks** > **+** > **Upload custom integration**
-3. Select the `.tar.gz` archive
-4. The Remote installs and starts the driver automatically
-
-### Installed Mode Constraints
-
-- The binary runs in a sandbox with limited filesystem access (`$UC_CONFIG_HOME`, `$UC_DATA_HOME`, `/tmp`)
-- Authentication is not used for local integrations (the connection is implicitly trusted)
-- Memory usage should stay under 100 MB
-- Updates require removing and re-installing the integration
+- The driver performs a startup refresh before it begins serving the WebSocket API, so the first `get_entity_states` call is not a hard-coded all-`OFF` guess.
+- `get_entity_states` runs a fresh power + mute query against the amplifier and updates the cache before responding.
+- A background poll loop diffs refreshed state against the cache and broadcasts `entity_change` to subscribed clients when power or mute changes outside the UC Remote.
+- `device_state` reflects actual amplifier reachability, not just configuration presence. When the amplifier cannot be queried, cached entity states move to `UNKNOWN` and the integration emits a `DISCONNECTED` device-state event.
 
 ## Key Dependencies
 
 - `homelab` -- Arcam TCP protocol implementation (power, mute, system status)
-- `schematic-schema` -- UC Integration WebSocket host (`WsHandler` trait, auth, connection management)
+- `schematic-schema` -- UC Integration WebSocket host (`WsHandler`, shared event hub, auth, connection management)
+- `unfolded-integration-helper` -- shared UC envelope builders, keyed cache, subscriptions, and protocol fixtures
 - `tokio` -- Async runtime
 - `clap` -- CLI argument parsing
 
 ## Lessons Learned
 
 - The UC Integration protocol requires the **driver to be the WebSocket server** and the Remote to be the client. This is the opposite of most hub-based protocols.
-- The `WsHandler` trait supports request-response only. Proactive push events (e.g., state polling changes) require a mechanism outside the trait -- this is a known limitation to address in a future iteration.
+- `entity_command` returns a synchronous UC `result` envelope. Actual state changes are pushed later through `entity_change` events when the cache changes.

@@ -236,6 +236,7 @@ dependencies = [
  "tokio-tungstenite 0.28.0",
  "tracing",
  "tracing-subscriber",
+ "unfolded-integration-helper",
 ]
 
 [[package]]
@@ -2135,6 +2136,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "unfolded-integration-helper",
 ]
 
 [[package]]
@@ -7019,6 +7021,7 @@ dependencies = [
  "tokio-tungstenite 0.28.0",
  "tracing",
  "tracing-subscriber",
+ "unfolded-integration-helper",
 ]
 
 [[package]]
@@ -8715,6 +8718,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unchained-ai",
+]
+
+[[package]]
+name = "unfolded-integration-helper"
+version = "0.1.0"
+dependencies = [
+ "schematic-schema",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

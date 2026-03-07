@@ -41,12 +41,12 @@ Treat the first whitespace-delimited token in `$ARGUMENTS` as the integration na
 Before making changes, inspect these files and use them as the baseline shape for the new integration:
 
 - `homelab/arcam-amp-integration/README.md`
+- `homelab/unfolded-integration-helper/src/lib.rs`
 - `homelab/arcam-amp-integration/Cargo.toml`
 - `homelab/arcam-amp-integration/src/main.rs`
 - `homelab/arcam-amp-integration/src/handler.rs`
 - `homelab/arcam-amp-integration/src/dispatch.rs`
 - `homelab/arcam-amp-integration/src/types.rs`
-- `homelab/arcam-amp-integration/src/responses.rs`
 - `homelab/arcam-amp-integration/src/error.rs`
 - `schematic/schema/src/unfolded_circle_integration_ws.rs`
 
@@ -55,7 +55,7 @@ The Arcam integration establishes the house pattern:
 - the integration driver is the **WebSocket server**
 - the UC Remote is the **WebSocket client**
 - transport-specific I/O is isolated from the UC protocol handler
-- JSON response/event builders live in a dedicated module
+- `homelab/unfolded-integration-helper` owns UC envelope parsing/building, keyed state caching, and subscription helpers
 - entity definitions and command resolution are kept in pure types/helpers
 
 ---
@@ -86,10 +86,14 @@ When creating the new integration, explicitly account for these lessons from the
    - add packaging instructions that match the actual archive layout
    - ensure the README reflects the files that exist in the package
 
-5. Be honest about eventing limitations:
-   - the current handler pattern is request-response oriented
-   - if proactive push events are not implemented, say so
-   - do not pretend polling or push updates exist unless the code actually does that
+5. Implement and describe state synchronization correctly:
+    - `device_state` is for the integration's connection/availability relative to the target system, not for per-entity power/input/volume changes
+    - per-entity state changes must be sent as `entity_change` events when the real device changes, even if the change did not originate from the remote
+    - support unsolicited updates from the real device by either subscribing to native device events or polling and diffing against cached state
+    - keep an internal entity-state cache so `get_entity_states` returns the latest known snapshot after reconnects, standby wake, or explicit refresh requests
+    - parse inbound UC requests from top-level `id`
+    - emit responses with top-level `req_id` and top-level `code`
+    - treat `entity_command` as a synchronous `result` response plus later `entity_change` events when state changes
 
 6. Model entities from user value, not protocol convenience:
    - expose only controls and states the target device can reliably support
@@ -107,7 +111,6 @@ Create or update the integration so that it includes, at minimum:
 - `homelab/<integration-name>-integration/src/handler.rs`
 - `homelab/<integration-name>-integration/src/dispatch.rs`
 - `homelab/<integration-name>-integration/src/types.rs`
-- `homelab/<integration-name>-integration/src/responses.rs`
 - `homelab/<integration-name>-integration/src/error.rs`
 
 Add these when needed:
@@ -127,6 +130,7 @@ Use the design brief and any referenced docs to determine:
 - the real transport: TCP, telnet, HTTP, WebSocket, serial bridge, cloud API, etc.
 - the core capabilities worth exposing as UC entities
 - the state model you can actually read back reliably
+- how unsolicited state changes are detected: device push notifications, subscriptions, webhooks, polling, or no mechanism at all
 - configuration required to connect: host, port, credentials, device name, timeout, zones, IDs, etc.
 
 If the user referenced local files with `@path`, read them before designing anything.
@@ -143,6 +147,8 @@ Before coding, define:
 - command IDs
 - state attributes
 - how device operations map onto UC commands
+- which state transitions should emit `entity_change` events
+- which backend failures should emit `device_state`
 
 Prefer a small explicit table in the README.
 
@@ -166,34 +172,47 @@ Your implementation should generally follow this structure:
     - parse CLI arguments with `clap`
     - initialize tracing
     - build config/device registry
-    - construct the handler
-    - start `UnfoldedCircleIntegrationWsHost::serve_addr(...)`
+    - create `UnfoldedCircleIntegrationWsHost::new_event_hub()`
+    - construct the handler with the shared hub
+    - start `UnfoldedCircleIntegrationWsHost::serve_addr_with_hub(...)`
 
 - `types.rs`
     - driver constants
-    - entity/state structs
+    - entity structs
     - command enums
     - entity builders
     - command resolution helpers
-
-- `responses.rs`
-    - JSON builders for UC responses/events
-    - keep this module pure and deterministic
 
 - `error.rs`
     - integration error enum with `thiserror`
     - map internal failures to UC result codes
 
+- `homelab/unfolded-integration-helper`
+    - use its request parser, response/event builders, keyed state cache, protocol fixtures, and subscription bridge
+    - do not hand-build UC envelopes ad hoc in each integration
+
 - `dispatch.rs`
     - transport-specific command execution
     - timeout handling
     - state fetching
+    - device event subscription and/or polling loop when the protocol supports external state changes
     - translation from protocol results into UC attributes
 
 - `handler.rs`
     - implement `WsHandler`
     - route incoming UC messages
-    - return the correct response/event shape
+    - parse requests with `IntegrationRequest`
+    - return `result` acknowledgements for commands
+    - track subscribers from `subscribe_events` and broadcast `entity_change` / `device_state` events as needed
+
+State handling requirements:
+
+- maintain an internal cache of the latest known entity attributes
+- update that cache after successful remote-initiated commands and after externally observed device changes
+- replace or merge cached attributes intentionally so stale fields are cleared when the device schema changes
+- emit `entity_change` when a device powers off due to inactivity, when someone changes a setting at the physical device, or when any other non-remote action changes a mapped UC attribute
+- emit `device_state` only when the integration's ability to talk to the target system changes, such as connect, disconnect, unavailable, or error transitions
+- make sure `get_entity_states` returns the cached snapshot so the remote can resync after reconnect or standby wake
 
 ### 5. Documentation
 
@@ -202,6 +221,7 @@ The README must include:
 - what the integration controls
 - entity table
 - architecture summary
+- how state synchronization works, including how unsolicited external changes reach the remote
 - how to run it as an external integration
 - configuration flags and environment variables
 - how to register it with the remote

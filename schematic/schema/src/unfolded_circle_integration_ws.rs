@@ -350,9 +350,252 @@ impl IntegrationClient {
         }
     }
 }
+const HOST_OUTBOUND_CAPACITY: usize = 64;
+
+#[derive(Debug)]
+struct HostConnection {
+    sender: tokio::sync::mpsc::Sender<serde_json::Value>,
+    subscribed: bool,
+}
+
+#[derive(Debug)]
+struct HostState {
+    next_connection_id: std::sync::atomic::AtomicU64,
+    connections: tokio::sync::RwLock<std::collections::HashMap<u64, HostConnection>>,
+}
+
+impl Default for HostState {
+    fn default() -> Self {
+        Self {
+            next_connection_id: std::sync::atomic::AtomicU64::new(1),
+            connections: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+/// Shared connection registry and event broadcaster for integration hosts.
+#[derive(Clone, Debug, Default)]
+pub struct UnfoldedCircleEventHub {
+    state: std::sync::Arc<HostState>,
+}
+
+impl UnfoldedCircleEventHub {
+    /// Create a new empty hub.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    async fn register_connection(&self) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
+        use std::sync::atomic::Ordering;
+
+        let connection_id = self
+            .state
+            .next_connection_id
+            .fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = tokio::sync::mpsc::channel(HOST_OUTBOUND_CAPACITY);
+
+        self.state.connections.write().await.insert(
+            connection_id,
+            HostConnection {
+                sender,
+                subscribed: false,
+            },
+        );
+
+        (connection_id, receiver)
+    }
+
+    async fn connection_sender(
+        &self,
+        connection_id: u64,
+    ) -> Option<tokio::sync::mpsc::Sender<serde_json::Value>> {
+        self.state
+            .connections
+            .read()
+            .await
+            .get(&connection_id)
+            .map(|connection| connection.sender.clone())
+    }
+
+    async fn stale_connection_ids(
+        &self,
+        only_subscribed: bool,
+        message: &serde_json::Value,
+    ) -> (usize, Vec<u64>) {
+        let senders: Vec<(u64, tokio::sync::mpsc::Sender<serde_json::Value>)> = self
+            .state
+            .connections
+            .read()
+            .await
+            .iter()
+            .filter(|(_, connection)| !only_subscribed || connection.subscribed)
+            .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
+            .collect();
+
+        let mut delivered = 0;
+        let mut stale = Vec::new();
+
+        for (connection_id, sender) in senders {
+            match sender.try_send(message.clone()) {
+                Ok(()) => delivered += 1,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+                | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    stale.push(connection_id);
+                }
+            }
+        }
+
+        (delivered, stale)
+    }
+
+    /// Mark a connection as subscribed to unsolicited events.
+    pub async fn mark_subscribed(&self, connection_id: u64) -> bool {
+        if let Some(connection) = self.state.connections.write().await.get_mut(&connection_id) {
+            connection.subscribed = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a connection from the registry.
+    pub async fn remove_connection(&self, connection_id: u64) {
+        self.state.connections.write().await.remove(&connection_id);
+    }
+
+    /// Send a message to a single connection.
+    ///
+    /// Slow or disconnected clients are removed to prevent stalled fan-out.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`super::ws_shared::WsError::Disconnected`] if the connection no
+    /// longer exists or the outbound queue has closed. Returns
+    /// [`super::ws_shared::WsError::BackpressureFull`] if the connection's
+    /// outbound queue is full.
+    pub async fn send_to_connection(
+        &self,
+        connection_id: u64,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
+        let Some(sender) = self.connection_sender(connection_id).await else {
+            return Err(super::ws_shared::WsError::Disconnected);
+        };
+
+        match sender.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                self.remove_connection(connection_id).await;
+                Err(super::ws_shared::WsError::BackpressureFull(
+                    HOST_OUTBOUND_CAPACITY,
+                ))
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                self.remove_connection(connection_id).await;
+                Err(super::ws_shared::WsError::Disconnected)
+            }
+        }
+    }
+
+    /// Broadcast a message to all currently connected clients.
+    pub async fn broadcast(&self, message: serde_json::Value) -> usize {
+        let (delivered, stale) = self.stale_connection_ids(false, &message).await;
+
+        if !stale.is_empty() {
+            let mut connections = self.state.connections.write().await;
+            for connection_id in stale {
+                connections.remove(&connection_id);
+            }
+        }
+
+        delivered
+    }
+
+    /// Broadcast a message only to clients that previously subscribed.
+    pub async fn broadcast_to_subscribers(&self, message: serde_json::Value) -> usize {
+        let (delivered, stale) = self.stale_connection_ids(true, &message).await;
+
+        if !stale.is_empty() {
+            let mut connections = self.state.connections.write().await;
+            for connection_id in stale {
+                connections.remove(&connection_id);
+            }
+        }
+
+        delivered
+    }
+}
+
+/// Per-connection host context exposed to request handlers.
+#[derive(Clone, Debug)]
+pub struct WsConnectionContext {
+    connection_id: u64,
+    hub: UnfoldedCircleEventHub,
+}
+
+impl WsConnectionContext {
+    /// Construct a new connection context from a host-assigned connection id and
+    /// shared event hub.
+    #[must_use]
+    pub fn new(connection_id: u64, hub: UnfoldedCircleEventHub) -> Self {
+        Self { connection_id, hub }
+    }
+
+    /// Returns the unique connection id assigned by the host.
+    #[must_use]
+    pub fn connection_id(&self) -> u64 {
+        self.connection_id
+    }
+
+    /// Returns a clone of the shared event hub.
+    #[must_use]
+    pub fn event_hub(&self) -> UnfoldedCircleEventHub {
+        self.hub.clone()
+    }
+
+    /// Mark this connection as subscribed for unsolicited events.
+    pub async fn mark_subscribed(&self) -> bool {
+        self.hub.mark_subscribed(self.connection_id).await
+    }
+
+    /// Send a message directly to the current connection.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates queueing errors from the underlying event hub.
+    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
+        self.hub
+            .send_to_connection(self.connection_id, message)
+            .await
+    }
+}
+
 /// WebSocket host server.
 pub struct UnfoldedCircleIntegrationWsHost;
 impl UnfoldedCircleIntegrationWsHost {
+    fn configured_auth_tokens() -> Vec<String> {
+        vec!["UCR_INTEGRATION_TOKEN".to_string()]
+            .into_iter()
+            .filter_map(|env| std::env::var(env).ok())
+            .filter(|value| !value.trim().is_empty())
+            .collect()
+    }
+
+    fn auth_is_required() -> bool {
+        !Self::configured_auth_tokens().is_empty()
+    }
+
+    fn authentication_success_response() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "resp",
+            "req_id": 0,
+            "msg": "authentication",
+            "code": 200,
+            "msg_data": {}
+        })
+    }
+
     fn auth_error_response(
         status: tokio_tungstenite::tungstenite::http::StatusCode,
         message: &str,
@@ -373,16 +616,9 @@ impl UnfoldedCircleIntegrationWsHost {
         tokio_tungstenite::tungstenite::handshake::server::Response,
         tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
     > {
-        let expected_values: Vec<String> = vec!["UCR_INTEGRATION_TOKEN".to_string()]
-            .into_iter()
-            .filter_map(|env| std::env::var(env).ok())
-            .filter(|value| !value.trim().is_empty())
-            .collect();
+        let expected_values = Self::configured_auth_tokens();
         if expected_values.is_empty() {
-            return Err(Self::auth_error_response(
-                tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "WebSocket host auth is configured but no auth env vars are set",
-            ));
+            return Ok(response);
         }
         let Some(received) = request
             .headers()
@@ -403,10 +639,26 @@ impl UnfoldedCircleIntegrationWsHost {
             ))
         }
     }
+    /// Create a new shared event hub for integrations that need unsolicited
+    /// event delivery.
+    #[must_use]
+    pub fn new_event_hub() -> UnfoldedCircleEventHub {
+        UnfoldedCircleEventHub::new()
+    }
+
     /// Serve WebSocket connections on the given TCP listener.
     pub async fn serve<H: WsHandler + 'static>(
         listener: tokio::net::TcpListener,
         handler: std::sync::Arc<H>,
+    ) -> Result<(), super::ws_shared::WsError> {
+        Self::serve_with_hub(listener, handler, UnfoldedCircleEventHub::new()).await
+    }
+
+    /// Serve WebSocket connections with a caller-provided event hub.
+    pub async fn serve_with_hub<H: WsHandler + 'static>(
+        listener: tokio::net::TcpListener,
+        handler: std::sync::Arc<H>,
+        hub: UnfoldedCircleEventHub,
     ) -> Result<(), super::ws_shared::WsError> {
         loop {
             let (stream, _) = listener
@@ -414,12 +666,13 @@ impl UnfoldedCircleIntegrationWsHost {
                 .await
                 .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
             let handler = handler.clone();
+            let hub = hub.clone();
             tokio::spawn(async move {
                 if let Ok(ws_stream) =
                     tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
                         .await
                 {
-                    Self::handle_connection(ws_stream, handler).await;
+                    Self::handle_connection(ws_stream, handler, hub).await;
                 }
             });
         }
@@ -429,26 +682,87 @@ impl UnfoldedCircleIntegrationWsHost {
         addr: impl tokio::net::ToSocketAddrs,
         handler: std::sync::Arc<H>,
     ) -> Result<(), super::ws_shared::WsError> {
+        Self::serve_addr_with_hub(addr, handler, UnfoldedCircleEventHub::new()).await
+    }
+
+    /// Serve WebSocket connections on the given address with a caller-provided
+    /// event hub.
+    pub async fn serve_addr_with_hub<H: WsHandler + 'static>(
+        addr: impl tokio::net::ToSocketAddrs,
+        handler: std::sync::Arc<H>,
+        hub: UnfoldedCircleEventHub,
+    ) -> Result<(), super::ws_shared::WsError> {
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
-        Self::serve(listener, handler).await
+        Self::serve_with_hub(listener, handler, hub).await
     }
     async fn handle_connection<H: WsHandler>(
         ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
         handler: std::sync::Arc<H>,
+        hub: UnfoldedCircleEventHub,
     ) {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
+
+        let (connection_id, mut outbound_rx) = hub.register_connection().await;
         let (mut write, mut read) = ws_stream.split();
+
+        let writer = tokio::spawn(async move {
+            while let Some(message) = outbound_rx.recv().await {
+                let Ok(text) = serde_json::to_string(&message) else {
+                    continue;
+                };
+
+                if write.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+
+            let _ = write.close().await;
+        });
+
+        if !Self::auth_is_required()
+            && hub
+                .send_to_connection(connection_id, Self::authentication_success_response())
+                .await
+                .is_err()
+        {
+            hub.remove_connection(connection_id).await;
+            let _ = writer.await;
+            return;
+        }
+
         while let Some(msg_result) = read.next().await {
             match msg_result {
                 Ok(Message::Text(text)) => {
                     match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
                         Ok(request) => {
-                            if let Some(response) = handler.handle_message(request).await {
-                                if let Ok(resp_text) = serde_json::to_string(&response) {
-                                    let _ = write.send(Message::Text(resp_text.into())).await;
+                            let context = WsConnectionContext::new(connection_id, hub.clone());
+                            if let Some(response) = handler.handle_message(request, context).await {
+                                if hub
+                                    .send_to_connection(connection_id, response)
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Ok(Message::Binary(data)) => {
+                    match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
+                        Ok(request) => {
+                            let context = WsConnectionContext::new(connection_id, hub.clone());
+                            if let Some(response) = handler.handle_message(request, context).await {
+                                if hub
+                                    .send_to_connection(connection_id, response)
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
                                 }
                             }
                         }
@@ -459,6 +773,9 @@ impl UnfoldedCircleIntegrationWsHost {
                 _ => {}
             }
         }
+
+        hub.remove_connection(connection_id).await;
+        let _ = writer.await;
     }
 }
 /// Handler trait for WebSocket host connections.
@@ -469,5 +786,360 @@ pub trait WsHandler: Send + Sync {
     fn handle_message(
         &self,
         message: serde_json::Value,
+        context: WsConnectionContext,
     ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use std::{future::Future, sync::OnceLock, time::Duration};
+
+    #[derive(Clone)]
+    struct TestHandler;
+
+    impl WsHandler for TestHandler {
+        async fn handle_message(
+            &self,
+            message: serde_json::Value,
+            context: WsConnectionContext,
+        ) -> Option<serde_json::Value> {
+            let msg = message.get("msg")?.as_str()?;
+            let id = message
+                .get("id")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+
+            match msg {
+                "ping" => Some(json!({
+                    "kind": "resp",
+                    "req_id": id,
+                    "msg": "result",
+                    "code": 200,
+                    "msg_data": { "echo": "pong" }
+                })),
+                "subscribe_events" => {
+                    context.mark_subscribed().await;
+                    Some(json!({
+                        "kind": "resp",
+                        "req_id": id,
+                        "msg": "subscribe_events_result",
+                        "code": 200,
+                        "msg_data": { "subscribed": true }
+                    }))
+                }
+                _ => Some(json!({
+                    "kind": "resp",
+                    "req_id": id,
+                    "msg": "result",
+                    "code": 400,
+                    "msg_data": { "echo": "bad_request" }
+                })),
+            }
+        }
+    }
+
+    type TestClient = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+
+    fn auth_env_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    struct AuthTokenEnvGuard {
+        previous: Option<String>,
+    }
+
+    impl AuthTokenEnvGuard {
+        fn set(token: Option<&str>) -> Self {
+            let previous = std::env::var("UCR_INTEGRATION_TOKEN").ok();
+
+            // SAFETY: tests serialize all environment mutation through
+            // `auth_env_lock`, so no concurrent readers/writers within this test
+            // process observe mutation races.
+            unsafe {
+                match token {
+                    Some(token) => std::env::set_var("UCR_INTEGRATION_TOKEN", token),
+                    None => std::env::remove_var("UCR_INTEGRATION_TOKEN"),
+                }
+            }
+
+            Self { previous }
+        }
+    }
+
+    impl Drop for AuthTokenEnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `AuthTokenEnvGuard::set`; restoration is performed
+            // while the same serialized test lock is still held.
+            unsafe {
+                match &self.previous {
+                    Some(token) => std::env::set_var("UCR_INTEGRATION_TOKEN", token),
+                    None => std::env::remove_var("UCR_INTEGRATION_TOKEN"),
+                }
+            }
+        }
+    }
+
+    async fn with_auth_token_env<T, Fut>(token: Option<&str>, f: impl FnOnce() -> Fut) -> T
+    where
+        Fut: Future<Output = T>,
+    {
+        let _lock = auth_env_lock().lock().await;
+        let _guard = AuthTokenEnvGuard::set(token);
+        f().await
+    }
+
+    fn message_to_json(message: tokio_tungstenite::tungstenite::Message) -> serde_json::Value {
+        let text = message.into_text().unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    async fn recv_json(client: &mut TestClient) -> serde_json::Value {
+        let message = client.next().await.unwrap().unwrap();
+        message_to_json(message)
+    }
+
+    async fn drain_optional_authentication(client: &mut TestClient) {
+        let Ok(Some(Ok(message))) =
+            tokio::time::timeout(Duration::from_millis(100), client.next()).await
+        else {
+            return;
+        };
+
+        let value = message_to_json(message);
+        assert_eq!(value["msg"], "authentication");
+        assert_eq!(value["req_id"], 0);
+        assert_eq!(value["code"], 200);
+    }
+
+    async fn spawn_client(
+        handler: std::sync::Arc<TestHandler>,
+        hub: UnfoldedCircleEventHub,
+    ) -> (TestClient, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+            UnfoldedCircleIntegrationWsHost::handle_connection(ws_stream, handler, hub).await;
+        });
+
+        let (client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+
+        (client, server)
+    }
+
+    async fn spawn_host_server(
+        handler: std::sync::Arc<TestHandler>,
+        hub: UnfoldedCircleEventHub,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let _ = UnfoldedCircleIntegrationWsHost::serve_with_hub(listener, handler, hub).await;
+        });
+
+        (addr, server)
+    }
+
+    #[tokio::test]
+    async fn test_handle_connection_preserves_request_response_flow() {
+        let hub = UnfoldedCircleEventHub::new();
+        let (mut client, server) = spawn_client(std::sync::Arc::new(TestHandler), hub).await;
+        drain_optional_authentication(&mut client).await;
+
+        client
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "kind": "req",
+                    "id": 7,
+                    "msg": "ping"
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+
+        let value = recv_json(&mut client).await;
+
+        assert_eq!(value["req_id"], 7);
+        assert_eq!(value["code"], 200);
+        assert_eq!(value["msg_data"]["echo"], "pong");
+
+        client.close(None).await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_only_reaches_subscribed_clients() {
+        let hub = UnfoldedCircleEventHub::new();
+        let handler = std::sync::Arc::new(TestHandler);
+        let (mut subscribed_client, subscribed_server) =
+            spawn_client(handler.clone(), hub.clone()).await;
+        let (mut idle_client, idle_server) = spawn_client(handler, hub.clone()).await;
+        drain_optional_authentication(&mut subscribed_client).await;
+        drain_optional_authentication(&mut idle_client).await;
+
+        subscribed_client
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "kind": "req",
+                    "id": 1,
+                    "msg": "subscribe_events"
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+
+        let response_value = recv_json(&mut subscribed_client).await;
+        assert_eq!(response_value["code"], 200);
+
+        let delivered = hub
+            .broadcast_to_subscribers(json!({
+                "kind": "event",
+                "msg": "entity_change",
+                "msg_data": {
+                    "entity_id": "demo.entity",
+                    "entity_type": "switch",
+                    "attributes": {
+                        "state": "ON"
+                    }
+                }
+            }))
+            .await;
+        assert_eq!(delivered, 1);
+
+        let subscribed_value = recv_json(&mut subscribed_client).await;
+        assert_eq!(subscribed_value["msg"], "entity_change");
+
+        let idle_event =
+            tokio::time::timeout(std::time::Duration::from_millis(100), idle_client.next()).await;
+        assert!(idle_event.is_err());
+
+        subscribed_client.close(None).await.unwrap();
+        idle_client.close(None).await.unwrap();
+        subscribed_server.await.unwrap();
+        idle_server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_disconnected_subscribers_are_removed() {
+        let hub = UnfoldedCircleEventHub::new();
+        let handler = std::sync::Arc::new(TestHandler);
+        let (mut client, server) = spawn_client(handler, hub.clone()).await;
+        drain_optional_authentication(&mut client).await;
+
+        client
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "kind": "req",
+                    "id": 2,
+                    "msg": "subscribe_events"
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let _ = client.next().await.unwrap().unwrap();
+
+        client.close(None).await.unwrap();
+        server.await.unwrap();
+
+        let delivered = hub
+            .broadcast_to_subscribers(json!({
+                "kind": "event",
+                "msg": "device_state",
+                "msg_data": { "state": "DISCONNECTED" }
+            }))
+            .await;
+        assert_eq!(delivered, 0);
+    }
+
+    #[tokio::test]
+    async fn test_optional_auth_upgrade_succeeds_and_emits_authentication() {
+        with_auth_token_env(None, || async {
+            let hub = UnfoldedCircleEventHub::new();
+            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
+
+            let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+                .await
+                .unwrap();
+            let value = recv_json(&mut client).await;
+
+            assert_eq!(value["msg"], "authentication");
+            assert_eq!(value["req_id"], 0);
+            assert_eq!(value["code"], 200);
+            assert_eq!(value["msg_data"], json!({}));
+
+            client.close(None).await.unwrap();
+            server.abort();
+            let _ = server.await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_configured_auth_rejects_missing_upgrade_header() {
+        with_auth_token_env(Some("secret-token"), || async {
+            let hub = UnfoldedCircleEventHub::new();
+            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
+
+            let result = tokio_tungstenite::connect_async(format!("ws://{addr}")).await;
+            assert!(result.is_err());
+
+            server.abort();
+            let _ = server.await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_configured_auth_accepts_matching_upgrade_header_without_initial_auth() {
+        with_auth_token_env(Some("secret-token"), || async {
+            let hub = UnfoldedCircleEventHub::new();
+            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
+
+            let request = tokio_tungstenite::tungstenite::http::Request::builder()
+                .uri(format!("ws://{addr}"))
+                .header("auth-token", "secret-token")
+                .body(())
+                .unwrap();
+
+            let (mut client, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+            client
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    json!({
+                        "kind": "req",
+                        "id": 9,
+                        "msg": "ping"
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+
+            let value = recv_json(&mut client).await;
+            assert_eq!(value["msg"], "result");
+            assert_eq!(value["req_id"], 9);
+            assert_eq!(value["msg_data"]["echo"], "pong");
+
+            client.close(None).await.unwrap();
+            server.abort();
+            let _ = server.await;
+        })
+        .await;
+    }
 }

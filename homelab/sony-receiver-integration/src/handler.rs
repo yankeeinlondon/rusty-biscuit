@@ -4,20 +4,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use schematic_schema::unfolded_circle_integration_ws::WsHandler;
+use schematic_schema::unfolded_circle_integration_ws::{
+    UnfoldedCircleEventHub, WsConnectionContext, WsHandler,
+};
 use serde_json::Value;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-
-use crate::dispatch::{execute_operation, fetch_receiver_state};
-use crate::error::SonyIntegrationError;
-use crate::responses::{
-    available_entities_response, device_state_event, driver_version_response, entity_change_event,
+use unfolded_integration_helper::{
+    ConnectivityState, ConnectivityTracker, IntegrationRequest, StateCache, SubscriptionRegistry,
+    available_entities_response, device_state_event, driver_version_response,
     entity_states_response, result_response,
 };
-use crate::types::{
-    self, SonyEntity, SonyEntityState, device_name_from_entity_id, resolve_command,
+
+use crate::dispatch::{
+    execute_operation, fetch_receiver_state, offline_receiver_attrs, unknown_power_attrs,
 };
+use crate::error::SonyIntegrationError;
+use crate::types::{self, SonyEntity, device_name_from_entity_id, resolve_command};
 
 /// Sony receiver integration handler implementing the UC WsHandler trait.
 pub struct SonyIntegrationHandler {
@@ -26,13 +29,21 @@ pub struct SonyIntegrationHandler {
     /// Entity registry
     entities: Vec<SonyEntity>,
     /// Cached entity states
-    states: Arc<RwLock<Vec<SonyEntityState>>>,
+    states: Arc<RwLock<StateCache>>,
+    /// Device connectivity tracker
+    connectivity: Arc<RwLock<ConnectivityTracker>>,
+    /// Subscription bridge to the shared host
+    subscriptions: SubscriptionRegistry,
     /// Request timeout for Sony HTTP operations
     request_timeout: Duration,
 }
 
 impl SonyIntegrationHandler {
-    pub fn new(devices: HashMap<String, (String, u16)>, request_timeout: Duration) -> Self {
+    pub fn new(
+        devices: HashMap<String, (String, u16)>,
+        request_timeout: Duration,
+        hub: UnfoldedCircleEventHub,
+    ) -> Self {
         let mut entities = Vec::new();
         let mut states = Vec::new();
 
@@ -44,146 +55,218 @@ impl SonyIntegrationHandler {
         Self {
             devices,
             entities,
-            states: Arc::new(RwLock::new(states)),
+            states: Arc::new(RwLock::new(StateCache::new(states))),
+            connectivity: Arc::new(RwLock::new(ConnectivityTracker::default())),
+            subscriptions: SubscriptionRegistry::new(hub),
             request_timeout,
         }
     }
 
-    async fn handle_entity_command(&self, req_id: u64, msg_data: &Value) -> Option<Value> {
-        let entity_id = msg_data.get("entity_id")?.as_str()?;
-        let cmd_id = msg_data.get("cmd_id")?.as_str()?;
-        let params = msg_data.get("params").cloned().unwrap_or_default();
+    pub async fn refresh_all(&self, emit_events: bool) {
+        for (device_name, (host, port)) in self.devices.clone() {
+            self.refresh_device(&device_name, &host, port, emit_events)
+                .await;
+        }
+    }
+
+    pub fn start_polling(self: &Arc<Self>, interval: Duration) {
+        for (device_name, (host, port)) in self.devices.clone() {
+            let handler = Arc::clone(self);
+            tokio::spawn(async move {
+                loop {
+                    handler
+                        .refresh_device(&device_name, &host, port, true)
+                        .await;
+                    tokio::time::sleep(interval).await;
+                }
+            });
+        }
+    }
+
+    async fn refresh_device(&self, device_name: &str, host: &str, port: u16, emit_events: bool) {
+        let (changed_states, aggregate_state) =
+            match fetch_receiver_state(host, port, self.request_timeout).await {
+                Ok(snapshot) => {
+                    let changed_states = {
+                        let mut states = self.states.write().await;
+                        let mut changed = Vec::new();
+
+                        if let Some(state) = states.replace_attributes(
+                            &format!("sony.{device_name}.power"),
+                            "switch",
+                            snapshot.power_attributes,
+                        ) {
+                            changed.push(state);
+                        }
+                        if let Some(state) = states.replace_attributes(
+                            &format!("sony.{device_name}.receiver"),
+                            "media_player",
+                            snapshot.receiver_attributes,
+                        ) {
+                            changed.push(state);
+                        }
+
+                        changed
+                    };
+
+                    let aggregate_state = {
+                        let mut connectivity = self.connectivity.write().await;
+                        if connectivity.mark_connected(device_name) {
+                            Some(connectivity.aggregate_state())
+                        } else {
+                            None
+                        }
+                    };
+
+                    (changed_states, aggregate_state)
+                }
+                Err(error) => {
+                    warn!(device_name, error = %error, "failed to refresh Sony receiver state");
+
+                    let changed_states = {
+                        let mut states = self.states.write().await;
+                        let mut changed = Vec::new();
+
+                        if let Some(state) = states.replace_attributes(
+                            &format!("sony.{device_name}.power"),
+                            "switch",
+                            unknown_power_attrs(),
+                        ) {
+                            changed.push(state);
+                        }
+                        if let Some(state) = states.replace_attributes(
+                            &format!("sony.{device_name}.receiver"),
+                            "media_player",
+                            offline_receiver_attrs(),
+                        ) {
+                            changed.push(state);
+                        }
+
+                        changed
+                    };
+
+                    let aggregate_state = {
+                        let mut connectivity = self.connectivity.write().await;
+                        if connectivity.mark_disconnected(device_name) {
+                            Some(connectivity.aggregate_state())
+                        } else {
+                            None
+                        }
+                    };
+
+                    (changed_states, aggregate_state)
+                }
+            };
+
+        if emit_events {
+            for state in changed_states {
+                self.subscriptions
+                    .broadcast_entity_change(
+                        &state.entity_id,
+                        &state.entity_type,
+                        &state.attributes,
+                    )
+                    .await;
+            }
+
+            if let Some(state) = aggregate_state {
+                self.subscriptions.broadcast_device_state(state).await;
+            }
+        }
+    }
+
+    async fn current_device_state(&self) -> ConnectivityState {
+        self.connectivity.read().await.aggregate_state()
+    }
+
+    async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {
+        let entity_id = request.msg_data.get("entity_id")?.as_str()?;
+        let cmd_id = request.msg_data.get("cmd_id")?.as_str()?;
+        let params = request.msg_data.get("params").cloned().unwrap_or_default();
 
         let operation = match resolve_command(entity_id, cmd_id, &params) {
-            Some(op) => op,
+            Some(operation) => operation,
             None => {
                 warn!(entity_id, cmd_id, "unknown entity command");
-                let err = if self.entities.iter().any(|e| e.entity_id == entity_id) {
+                let error = if self
+                    .entities
+                    .iter()
+                    .any(|entity| entity.entity_id == entity_id)
+                {
                     SonyIntegrationError::UnknownCommand(cmd_id.to_string())
                 } else {
                     SonyIntegrationError::UnknownEntity(entity_id.to_string())
                 };
-                return Some(result_response(req_id, err.uc_error_code()));
+                return Some(result_response(request.id, error.uc_error_code()));
             }
         };
 
         let device_name = match device_name_from_entity_id(entity_id) {
-            Some(n) => n,
-            None => return Some(result_response(req_id, 404)),
+            Some(device_name) => device_name,
+            None => return Some(result_response(request.id, 404)),
         };
 
         let (host, port) = match self.devices.get(device_name) {
-            Some(hp) => hp,
-            None => return Some(result_response(req_id, 404)),
+            Some(device) => device,
+            None => return Some(result_response(request.id, 404)),
         };
 
         match execute_operation(host, *port, operation, self.request_timeout).await {
-            Ok((entity_kind, attrs)) => {
-                // Determine the full entity_id and type for the affected entity
-                let affected_entity_id = format!("sony.{device_name}.{entity_kind}");
-                let entity_type = match entity_kind {
-                    "power" => "switch",
-                    "receiver" => "media_player",
-                    _ => "switch",
-                };
-
-                // Update cached state
-                let mut states = self.states.write().await;
-                if let Some(state) = states
-                    .iter_mut()
-                    .find(|s| s.entity_id == affected_entity_id)
-                {
-                    for (k, v) in &attrs {
-                        state.attributes.insert(k.clone(), v.clone());
-                    }
-                }
-                drop(states);
-
+            Ok(()) => {
                 debug!(entity_id, cmd_id, "entity command executed");
-
-                Some(entity_change_event(
-                    &affected_entity_id,
-                    entity_type,
-                    &attrs,
-                ))
+                self.refresh_device(device_name, host, *port, true).await;
+                Some(result_response(request.id, 200))
             }
-            Err(e) => {
-                warn!(entity_id, cmd_id, error = %e, "entity command failed");
-                Some(result_response(req_id, e.uc_error_code()))
+            Err(error) => {
+                warn!(entity_id, cmd_id, error = %error, "entity command failed");
+                Some(result_response(request.id, error.uc_error_code()))
             }
         }
-    }
-
-    async fn handle_get_entity_states(&self, req_id: u64) -> Value {
-        // Try to fetch fresh state from each device
-        for (name, (host, port)) in &self.devices {
-            if let Ok(attrs) = fetch_receiver_state(host, *port, self.request_timeout).await {
-                let mut states = self.states.write().await;
-
-                // Update power entity
-                let power_id = format!("sony.{name}.power");
-                if let Some(state) = states.iter_mut().find(|s| s.entity_id == power_id)
-                    && let Some(power_state) = attrs.get("state")
-                {
-                    state
-                        .attributes
-                        .insert("state".to_string(), power_state.clone());
-                }
-
-                // Update receiver entity
-                let receiver_id = format!("sony.{name}.receiver");
-                if let Some(state) = states.iter_mut().find(|s| s.entity_id == receiver_id) {
-                    for (k, v) in &attrs {
-                        state.attributes.insert(k.clone(), v.clone());
-                    }
-                }
-            }
-        }
-
-        let states = self.states.read().await;
-        entity_states_response(req_id, &states)
     }
 }
 
 impl WsHandler for SonyIntegrationHandler {
-    async fn handle_message(&self, message: Value) -> Option<Value> {
-        let kind = message.get("kind")?.as_str()?;
-        let msg = message.get("msg")?.as_str()?;
-        let req_id = message.get("req_id").and_then(|v| v.as_u64()).unwrap_or(0);
-
-        if kind != "req" {
-            debug!(kind, msg, "ignoring non-request message");
-            return None;
-        }
-
-        debug!(msg, req_id, "handling request");
-
-        match msg {
-            "get_driver_version" => Some(driver_version_response(req_id)),
-
-            "get_device_state" => {
-                let state = if self.devices.is_empty() {
-                    "DISCONNECTED"
-                } else {
-                    "CONNECTED"
-                };
-                Some(device_state_event(state))
+    async fn handle_message(&self, message: Value, context: WsConnectionContext) -> Option<Value> {
+        let request = match IntegrationRequest::parse(message) {
+            Ok(request) => request,
+            Err(unfolded_integration_helper::EnvelopeError::UnexpectedKind(kind)) => {
+                debug!(kind = ?kind, "ignoring non-request message");
+                return None;
             }
-
-            "get_available_entities" => Some(available_entities_response(req_id, &self.entities)),
-
-            "subscribe_events" => Some(result_response(req_id, 200)),
-
-            "get_entity_states" => Some(self.handle_get_entity_states(req_id).await),
-
-            "entity_command" => {
-                let msg_data = message.get("msg_data").cloned().unwrap_or_default();
-                self.handle_entity_command(req_id, &msg_data).await
+            Err(error) => {
+                warn!(error = %error, "invalid UC request envelope");
+                return None;
             }
+        };
 
+        debug!(msg = %request.msg, req_id = request.id, "handling request");
+
+        match request.msg.as_str() {
+            "get_driver_version" => Some(driver_version_response(
+                request.id,
+                types::DRIVER_ID,
+                types::DRIVER_VERSION,
+                types::MIN_CORE_API,
+            )),
+            "get_device_state" => Some(device_state_event(
+                self.current_device_state().await.as_uc_label(),
+            )),
+            "get_available_entities" => {
+                Some(available_entities_response(request.id, &self.entities))
+            }
+            "subscribe_events" => {
+                self.subscriptions.subscribe(&context).await;
+                Some(result_response(request.id, 200))
+            }
+            "get_entity_states" => {
+                self.refresh_all(false).await;
+                let states = self.states.read().await.snapshot();
+                Some(entity_states_response(request.id, &states))
+            }
+            "entity_command" => self.handle_entity_command(&request).await,
             _ => {
-                warn!(msg, "unknown message type");
-                Some(result_response(req_id, 400))
+                warn!(msg = %request.msg, "unknown message type");
+                Some(result_response(request.id, 400))
             }
         }
     }
@@ -193,73 +276,66 @@ impl WsHandler for SonyIntegrationHandler {
 mod tests {
     use super::*;
     use serde_json::json;
+    use unfolded_integration_helper::test_fixtures::{
+        entity_command_request, request, subscribe_events_request,
+    };
 
     fn handler_no_devices() -> SonyIntegrationHandler {
-        SonyIntegrationHandler::new(HashMap::new(), Duration::from_secs(5))
+        SonyIntegrationHandler::new(
+            HashMap::new(),
+            Duration::from_secs(5),
+            UnfoldedCircleEventHub::new(),
+        )
     }
 
     fn handler_with_device() -> SonyIntegrationHandler {
         let mut devices = HashMap::new();
         devices.insert("living".to_string(), ("192.168.99.99".to_string(), 10000));
-        SonyIntegrationHandler::new(devices, Duration::from_secs(5))
+        SonyIntegrationHandler::new(
+            devices,
+            Duration::from_millis(50),
+            UnfoldedCircleEventHub::new(),
+        )
+    }
+
+    fn context() -> WsConnectionContext {
+        WsConnectionContext::new(1, UnfoldedCircleEventHub::new())
     }
 
     #[tokio::test]
     async fn test_handle_get_driver_version() {
         let handler = handler_no_devices();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 1,
-                "msg": "get_driver_version"
-            }))
-            .await;
-        let resp = resp.unwrap();
+            .handle_message(request(1, "get_driver_version", json!({})), context())
+            .await
+            .unwrap();
+
         assert_eq!(resp["kind"], "resp");
         assert_eq!(resp["req_id"], 1);
         assert_eq!(resp["msg"], "driver_version");
         assert_eq!(resp["msg_data"]["name"], "sony-receiver");
+        assert_eq!(resp["code"], 200);
     }
 
     #[tokio::test]
     async fn test_handle_get_device_state_no_devices() {
         let handler = handler_no_devices();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 2,
-                "msg": "get_device_state"
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["state"], "DISCONNECTED");
-    }
+            .handle_message(request(2, "get_device_state", json!({})), context())
+            .await
+            .unwrap();
 
-    #[tokio::test]
-    async fn test_handle_get_device_state_with_devices() {
-        let handler = handler_with_device();
-        let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 2,
-                "msg": "get_device_state"
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["state"], "CONNECTED");
+        assert_eq!(resp["msg_data"]["state"], "DISCONNECTED");
     }
 
     #[tokio::test]
     async fn test_handle_get_available_entities() {
         let handler = handler_with_device();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 3,
-                "msg": "get_available_entities"
-            }))
-            .await;
-        let resp = resp.unwrap();
+            .handle_message(request(3, "get_available_entities", json!({})), context())
+            .await
+            .unwrap();
+
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         assert_eq!(entities.len(), 2);
         assert_eq!(entities[0]["entity_type"], "switch");
@@ -270,29 +346,22 @@ mod tests {
     async fn test_handle_subscribe_events() {
         let handler = handler_no_devices();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 4,
-                "msg": "subscribe_events"
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["code"], 200);
+            .handle_message(subscribe_events_request(4), context())
+            .await
+            .unwrap();
+
+        assert_eq!(resp["code"], 200);
     }
 
     #[tokio::test]
     async fn test_handle_get_entity_states() {
         let handler = handler_with_device();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 5,
-                "msg": "get_entity_states"
-            }))
-            .await;
-        let resp = resp.unwrap();
+            .handle_message(request(5, "get_entity_states", json!({})), context())
+            .await
+            .unwrap();
+
         assert_eq!(resp["msg"], "entity_states");
-        // Returns cached state (may fail to fetch from fake device, falls back to initial)
         let states = resp["msg_data"].as_array().unwrap();
         assert_eq!(states.len(), 2);
     }
@@ -301,61 +370,41 @@ mod tests {
     async fn test_handle_unknown_message() {
         let handler = handler_no_devices();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 6,
-                "msg": "bogus_message"
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["code"], 400);
-    }
+            .handle_message(request(6, "bogus_message", json!({})), context())
+            .await
+            .unwrap();
 
-    #[tokio::test]
-    async fn test_handle_non_req_message() {
-        let handler = handler_no_devices();
-        let resp = handler
-            .handle_message(json!({
-                "kind": "event",
-                "msg": "something"
-            }))
-            .await;
-        assert!(resp.is_none());
+        assert_eq!(resp["msg"], "result");
+        assert_eq!(resp["code"], 400);
     }
 
     #[tokio::test]
     async fn test_entity_command_unknown_entity() {
-        let handler = handler_with_device();
+        let handler = handler_no_devices();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 7,
-                "msg": "entity_command",
-                "msg_data": {
-                    "entity_id": "sony.living.unknown",
-                    "cmd_id": "on"
-                }
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["code"], 404);
+            .handle_message(
+                entity_command_request(7, "sony.living.unknown", "on", json!({})),
+                context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp["msg"], "result");
+        assert_eq!(resp["code"], 404);
     }
 
     #[tokio::test]
     async fn test_entity_command_unknown_cmd() {
         let handler = handler_with_device();
         let resp = handler
-            .handle_message(json!({
-                "kind": "req",
-                "req_id": 8,
-                "msg": "entity_command",
-                "msg_data": {
-                    "entity_id": "sony.living.power",
-                    "cmd_id": "invalid"
-                }
-            }))
-            .await;
-        let resp = resp.unwrap();
-        assert_eq!(resp["msg_data"]["code"], 400);
+            .handle_message(
+                entity_command_request(8, "sony.living.power", "invalid", json!({})),
+                context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp["msg"], "result");
+        assert_eq!(resp["code"], 400);
     }
 }

@@ -130,7 +130,7 @@ build *args="":
     @echo "---------------------------------------------------"
     @echo ""
     @just build-frontend
-    @cargo build -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
+    @cargo build -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
 
 
 
@@ -143,8 +143,36 @@ test *args="":
     @echo -e "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
     @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homelab-cli -p homelab-server -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
+    @cargo test -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
     @just test-frontend
+
+# run opt-in ignored tests against real devices
+test-integrations-real-base *args="":
+    @echo ""
+    @echo -e "Testing {{BOLD}}Homelab{{RESET}} Real Devices ({{ITALIC}}ignored tests only{{RESET}})"
+    @echo ""
+    @echo "Required env vars by package:"
+    @echo "  Arcam:    ARCAM_REAL_HOST [ARCAM_REAL_PORT]"
+    @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT]"
+    @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT]"
+    @echo ""
+    @cargo test -p arcam-amp-integration real_device -- --ignored --nocapture {{args}}
+    @cargo test -p sony-receiver-integration real_device -- --ignored --nocapture {{args}}
+    @cargo test -p eversolo-integration real_device -- --ignored --nocapture {{args}}
+
+# run opt-in ignored write tests against real devices; tests restore prior state
+test-integrations-real-destructive *args="":
+    @echo ""
+    @echo -e "Testing {{BOLD}}Homelab{{RESET}} Real Devices ({{ITALIC}}destructive ignored tests{{RESET}})"
+    @echo ""
+    @echo "Required env vars by package:"
+    @echo "  Arcam:    ARCAM_REAL_HOST [ARCAM_REAL_PORT] ARCAM_REAL_ALLOW_DESTRUCTIVE=1"
+    @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT] SONY_REAL_ALLOW_DESTRUCTIVE=1"
+    @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT] EVERSOLO_REAL_ALLOW_DESTRUCTIVE=1"
+    @echo ""
+    @cargo test -p arcam-amp-integration destructive_real_device -- --ignored --nocapture {{args}}
+    @cargo test -p sony-receiver-integration destructive_real_device -- --ignored --nocapture {{args}}
+    @cargo test -p eversolo-integration destructive_real_device -- --ignored --nocapture {{args}}
 
 # run clippy on Homelab packages
 lint:
@@ -155,6 +183,7 @@ lint:
     @cargo clippy -p homelab -- -D warnings
     @cargo clippy -p homelab-cli -- -D warnings
     @cargo clippy -p homelab-server -- -D warnings
+    @cargo clippy -p unfolded-integration-helper -- -D warnings
     @cargo clippy -p arcam-amp-integration -- -D warnings
     @cargo clippy -p eversolo-integration -- -D warnings
     @cargo clippy -p sony-receiver-integration -- -D warnings
@@ -190,7 +219,7 @@ install-server:
 install-frontend:
     @cd server/frontend && pnpm install
 
-INTEGRATIONS := `sniff repo --packages integration | tr -d ','`
+INTEGRATIONS := `sniff repo --packages integration | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '`
 
 build-local-integrations *args="":
     #!/usr/bin/env bash

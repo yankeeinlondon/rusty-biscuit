@@ -34,27 +34,264 @@ pub fn generate_ws_host_module(plan: &WsRuntimePlan) -> TokenStream {
 fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
     let base = plan.api_name.strip_suffix("Ws").unwrap_or(&plan.api_name);
     let struct_name = format_ident!("{}WsHost", base);
-    let (accept_expr, auth_helpers) = generate_accept_and_auth_helpers(plan);
+    let (accept_expr, auth_helpers, emit_initial_authentication) =
+        generate_accept_and_auth_helpers(plan);
 
     quote! {
+        const HOST_OUTBOUND_CAPACITY: usize = 64;
+
+        #[derive(Debug)]
+        struct HostConnection {
+            sender: tokio::sync::mpsc::Sender<serde_json::Value>,
+            subscribed: bool,
+        }
+
+        #[derive(Debug)]
+        struct HostState {
+            next_connection_id: std::sync::atomic::AtomicU64,
+            connections: tokio::sync::RwLock<std::collections::HashMap<u64, HostConnection>>,
+        }
+
+        impl Default for HostState {
+            fn default() -> Self {
+                Self {
+                    next_connection_id: std::sync::atomic::AtomicU64::new(1),
+                    connections: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+                }
+            }
+        }
+
+        /// Shared connection registry and event broadcaster for integration hosts.
+        #[derive(Clone, Debug, Default)]
+        pub struct UnfoldedCircleEventHub {
+            state: std::sync::Arc<HostState>,
+        }
+
+        impl UnfoldedCircleEventHub {
+            /// Create a new empty hub.
+            #[must_use]
+            pub fn new() -> Self {
+                Self::default()
+            }
+
+            async fn register_connection(&self) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
+                use std::sync::atomic::Ordering;
+
+                let connection_id = self
+                    .state
+                    .next_connection_id
+                    .fetch_add(1, Ordering::Relaxed);
+                let (sender, receiver) = tokio::sync::mpsc::channel(HOST_OUTBOUND_CAPACITY);
+
+                self.state.connections.write().await.insert(
+                    connection_id,
+                    HostConnection {
+                        sender,
+                        subscribed: false,
+                    },
+                );
+
+                (connection_id, receiver)
+            }
+
+            async fn connection_sender(
+                &self,
+                connection_id: u64,
+            ) -> Option<tokio::sync::mpsc::Sender<serde_json::Value>> {
+                self.state
+                    .connections
+                    .read()
+                    .await
+                    .get(&connection_id)
+                    .map(|connection| connection.sender.clone())
+            }
+
+            async fn stale_connection_ids(
+                &self,
+                only_subscribed: bool,
+                message: &serde_json::Value,
+            ) -> (usize, Vec<u64>) {
+                let senders: Vec<(u64, tokio::sync::mpsc::Sender<serde_json::Value>)> = self
+                    .state
+                    .connections
+                    .read()
+                    .await
+                    .iter()
+                    .filter(|(_, connection)| !only_subscribed || connection.subscribed)
+                    .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
+                    .collect();
+
+                let mut delivered = 0;
+                let mut stale = Vec::new();
+
+                for (connection_id, sender) in senders {
+                    match sender.try_send(message.clone()) {
+                        Ok(()) => delivered += 1,
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+                        | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            stale.push(connection_id);
+                        }
+                    }
+                }
+
+                (delivered, stale)
+            }
+
+            /// Mark a connection as subscribed to unsolicited events.
+            pub async fn mark_subscribed(&self, connection_id: u64) -> bool {
+                if let Some(connection) = self.state.connections.write().await.get_mut(&connection_id) {
+                    connection.subscribed = true;
+                    true
+                } else {
+                    false
+                }
+            }
+
+            /// Remove a connection from the registry.
+            pub async fn remove_connection(&self, connection_id: u64) {
+                self.state.connections.write().await.remove(&connection_id);
+            }
+
+            /// Send a message to a single connection.
+            ///
+            /// Slow or disconnected clients are removed to prevent stalled fan-out.
+            ///
+            /// ## Errors
+            ///
+            /// Returns [`super::ws_shared::WsError::Disconnected`] if the connection no
+            /// longer exists or the outbound queue has closed. Returns
+            /// [`super::ws_shared::WsError::BackpressureFull`] if the connection's
+            /// outbound queue is full.
+            pub async fn send_to_connection(
+                &self,
+                connection_id: u64,
+                message: serde_json::Value,
+            ) -> Result<(), super::ws_shared::WsError> {
+                let Some(sender) = self.connection_sender(connection_id).await else {
+                    return Err(super::ws_shared::WsError::Disconnected);
+                };
+
+                match sender.try_send(message) {
+                    Ok(()) => Ok(()),
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        self.remove_connection(connection_id).await;
+                        Err(super::ws_shared::WsError::BackpressureFull(
+                            HOST_OUTBOUND_CAPACITY,
+                        ))
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        self.remove_connection(connection_id).await;
+                        Err(super::ws_shared::WsError::Disconnected)
+                    }
+                }
+            }
+
+            /// Broadcast a message to all currently connected clients.
+            pub async fn broadcast(&self, message: serde_json::Value) -> usize {
+                let (delivered, stale) = self.stale_connection_ids(false, &message).await;
+
+                if !stale.is_empty() {
+                    let mut connections = self.state.connections.write().await;
+                    for connection_id in stale {
+                        connections.remove(&connection_id);
+                    }
+                }
+
+                delivered
+            }
+
+            /// Broadcast a message only to clients that previously subscribed.
+            pub async fn broadcast_to_subscribers(&self, message: serde_json::Value) -> usize {
+                let (delivered, stale) = self.stale_connection_ids(true, &message).await;
+
+                if !stale.is_empty() {
+                    let mut connections = self.state.connections.write().await;
+                    for connection_id in stale {
+                        connections.remove(&connection_id);
+                    }
+                }
+
+                delivered
+            }
+        }
+
+        /// Per-connection host context exposed to request handlers.
+        #[derive(Clone, Debug)]
+        pub struct WsConnectionContext {
+            connection_id: u64,
+            hub: UnfoldedCircleEventHub,
+        }
+
+        impl WsConnectionContext {
+            pub fn new(connection_id: u64, hub: UnfoldedCircleEventHub) -> Self {
+                Self { connection_id, hub }
+            }
+
+            /// Returns the unique connection id assigned by the host.
+            #[must_use]
+            pub fn connection_id(&self) -> u64 {
+                self.connection_id
+            }
+
+            /// Returns a clone of the shared event hub.
+            #[must_use]
+            pub fn event_hub(&self) -> UnfoldedCircleEventHub {
+                self.hub.clone()
+            }
+
+            /// Mark this connection as subscribed for unsolicited events.
+            pub async fn mark_subscribed(&self) -> bool {
+                self.hub.mark_subscribed(self.connection_id).await
+            }
+
+            /// Send a message directly to the current connection.
+            ///
+            /// ## Errors
+            ///
+            /// Propagates queueing errors from the underlying event hub.
+            pub async fn send(
+                &self,
+                message: serde_json::Value,
+            ) -> Result<(), super::ws_shared::WsError> {
+                self.hub.send_to_connection(self.connection_id, message).await
+            }
+        }
+
         /// WebSocket host server.
         pub struct #struct_name;
 
         impl #struct_name {
             #auth_helpers
 
+            /// Create a new shared event hub for integrations that need unsolicited
+            /// event delivery.
+            #[must_use]
+            pub fn new_event_hub() -> UnfoldedCircleEventHub {
+                UnfoldedCircleEventHub::new()
+            }
+
             /// Serve WebSocket connections on the given TCP listener.
             pub async fn serve<H: WsHandler + 'static>(
                 listener: tokio::net::TcpListener,
                 handler: std::sync::Arc<H>,
             ) -> Result<(), super::ws_shared::WsError> {
+                Self::serve_with_hub(listener, handler, UnfoldedCircleEventHub::new()).await
+            }
+
+            /// Serve WebSocket connections with a caller-provided event hub.
+            pub async fn serve_with_hub<H: WsHandler + 'static>(
+                listener: tokio::net::TcpListener,
+                handler: std::sync::Arc<H>,
+                hub: UnfoldedCircleEventHub,
+            ) -> Result<(), super::ws_shared::WsError> {
                 loop {
                     let (stream, _) = listener.accept().await
                         .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
                     let handler = handler.clone();
+                    let hub = hub.clone();
                     tokio::spawn(async move {
                         if let Ok(ws_stream) = #accept_expr {
-                            Self::handle_connection(ws_stream, handler).await;
+                            Self::handle_connection(ws_stream, handler, hub).await;
                         }
                     });
                 }
@@ -65,27 +302,79 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 addr: impl tokio::net::ToSocketAddrs,
                 handler: std::sync::Arc<H>,
             ) -> Result<(), super::ws_shared::WsError> {
+                Self::serve_addr_with_hub(addr, handler, UnfoldedCircleEventHub::new()).await
+            }
+
+            /// Serve WebSocket connections on the given address with a caller-provided
+            /// event hub.
+            pub async fn serve_addr_with_hub<H: WsHandler + 'static>(
+                addr: impl tokio::net::ToSocketAddrs,
+                handler: std::sync::Arc<H>,
+                hub: UnfoldedCircleEventHub,
+            ) -> Result<(), super::ws_shared::WsError> {
                 let listener = tokio::net::TcpListener::bind(addr).await
                     .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
-                Self::serve(listener, handler).await
+                Self::serve_with_hub(listener, handler, hub).await
             }
 
             async fn handle_connection<H: WsHandler>(
                 ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
                 handler: std::sync::Arc<H>,
+                hub: UnfoldedCircleEventHub,
             ) {
                 use futures_util::{SinkExt, StreamExt};
                 use tokio_tungstenite::tungstenite::Message;
 
+                let (connection_id, mut outbound_rx) = hub.register_connection().await;
                 let (mut write, mut read) = ws_stream.split();
+
+                let writer = tokio::spawn(async move {
+                    while let Some(message) = outbound_rx.recv().await {
+                        let Ok(text) = serde_json::to_string(&message) else {
+                            continue;
+                        };
+
+                        if write.send(Message::Text(text.into())).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    let _ = write.close().await;
+                });
+
+                if #emit_initial_authentication
+                    && hub
+                        .send_to_connection(connection_id, Self::authentication_success_response())
+                        .await
+                        .is_err()
+                {
+                    hub.remove_connection(connection_id).await;
+                    let _ = writer.await;
+                    return;
+                }
+
                 while let Some(msg_result) = read.next().await {
                     match msg_result {
                         Ok(Message::Text(text)) => {
                             match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
                                 Ok(request) => {
-                                    if let Some(response) = handler.handle_message(request).await {
-                                        if let Ok(resp_text) = serde_json::to_string(&response) {
-                                            let _ = write.send(Message::Text(resp_text.into())).await;
+                                    let context = WsConnectionContext::new(connection_id, hub.clone());
+                                    if let Some(response) = handler.handle_message(request, context).await {
+                                        if hub.send_to_connection(connection_id, response).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                        Ok(Message::Binary(data)) => {
+                            match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
+                                Ok(request) => {
+                                    let context = WsConnectionContext::new(connection_id, hub.clone());
+                                    if let Some(response) = handler.handle_message(request, context).await {
+                                        if hub.send_to_connection(connection_id, response).await.is_err() {
+                                            break;
                                         }
                                     }
                                 }
@@ -96,12 +385,17 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                         _ => {}
                     }
                 }
+
+                hub.remove_connection(connection_id).await;
+                let _ = writer.await;
             }
         }
     }
 }
 
-fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, TokenStream) {
+fn generate_accept_and_auth_helpers(
+    plan: &WsRuntimePlan,
+) -> (TokenStream, TokenStream, TokenStream) {
     let (strategy, env_auth) = match &plan.auth {
         WsAuthStrategy::HeaderBased { strategy, env_auth } => (strategy, env_auth.as_slice()),
         WsAuthStrategy::MessageBased {
@@ -113,6 +407,7 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
             return (
                 quote! { tokio_tungstenite::accept_async(stream).await },
                 TokenStream::new(),
+                quote! { false },
             );
         }
     };
@@ -128,6 +423,28 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         .await
                 },
                 quote! {
+                    fn configured_auth_tokens() -> Vec<String> {
+                        vec![#(#env_names.to_string()),*]
+                            .into_iter()
+                            .filter_map(|env| std::env::var(env).ok())
+                            .filter(|value| !value.trim().is_empty())
+                            .collect()
+                    }
+
+                    fn auth_is_required() -> bool {
+                        !Self::configured_auth_tokens().is_empty()
+                    }
+
+                    fn authentication_success_response() -> serde_json::Value {
+                        serde_json::json!({
+                            "kind": "resp",
+                            "req_id": 0,
+                            "msg": "authentication",
+                            "code": 200,
+                            "msg_data": {}
+                        })
+                    }
+
                     fn auth_error_response(
                         status: tokio_tungstenite::tungstenite::http::StatusCode,
                         message: &str,
@@ -147,17 +464,10 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         tokio_tungstenite::tungstenite::handshake::server::Response,
                         tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
                     > {
-                        let expected_values: Vec<String> = vec![#(#env_names.to_string()),*]
-                            .into_iter()
-                            .filter_map(|env| std::env::var(env).ok())
-                            .filter(|value| !value.trim().is_empty())
-                            .collect();
+                        let expected_values = Self::configured_auth_tokens();
 
                         if expected_values.is_empty() {
-                            return Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                "WebSocket host auth is configured but no auth env vars are set",
-                            ));
+                            return Ok(response);
                         }
 
                         let Some(received) = request
@@ -181,6 +491,7 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         }
                     }
                 },
+                quote! { !Self::auth_is_required() },
             )
         }
         schematic_define::AuthStrategy::BearerToken { header } => {
@@ -195,6 +506,28 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         .await
                 },
                 quote! {
+                    fn configured_auth_tokens() -> Vec<String> {
+                        vec![#(#env_names.to_string()),*]
+                            .into_iter()
+                            .filter_map(|env| std::env::var(env).ok())
+                            .filter(|value| !value.trim().is_empty())
+                            .collect()
+                    }
+
+                    fn auth_is_required() -> bool {
+                        !Self::configured_auth_tokens().is_empty()
+                    }
+
+                    fn authentication_success_response() -> serde_json::Value {
+                        serde_json::json!({
+                            "kind": "resp",
+                            "req_id": 0,
+                            "msg": "authentication",
+                            "code": 200,
+                            "msg_data": {}
+                        })
+                    }
+
                     fn auth_error_response(
                         status: tokio_tungstenite::tungstenite::http::StatusCode,
                         message: &str,
@@ -214,17 +547,10 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         tokio_tungstenite::tungstenite::handshake::server::Response,
                         tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
                     > {
-                        let expected_values: Vec<String> = vec![#(#env_names.to_string()),*]
-                            .into_iter()
-                            .filter_map(|env| std::env::var(env).ok())
-                            .filter(|value| !value.trim().is_empty())
-                            .collect();
+                        let expected_values = Self::configured_auth_tokens();
 
                         if expected_values.is_empty() {
-                            return Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                "WebSocket host auth is configured but no auth env vars are set",
-                            ));
+                            return Ok(response);
                         }
 
                         let Some(received) = request
@@ -249,28 +575,31 @@ fn generate_accept_and_auth_helpers(plan: &WsRuntimePlan) -> (TokenStream, Token
                         }
                     }
                 },
+                quote! { !Self::auth_is_required() },
             )
         }
         _ => (
             quote! { tokio_tungstenite::accept_async(stream).await },
             TokenStream::new(),
+            quote! { false },
         ),
     }
 }
 
 fn generate_handler_trait(_plan: &WsRuntimePlan, _endpoints: &[&EndpointPlan]) -> TokenStream {
     quote! {
-        /// Handler trait for WebSocket host connections.
-        ///
-        /// Implement this trait to handle incoming WebSocket messages.
-        pub trait WsHandler: Send + Sync {
-            /// Handle an incoming message, optionally returning a response.
-            fn handle_message(
-                &self,
-                message: serde_json::Value,
-            ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send;
-        }
+            /// Handler trait for WebSocket host connections.
+            ///
+            /// Implement this trait to handle incoming WebSocket messages.
+    pub trait WsHandler: Send + Sync {
+        /// Handle an incoming message, optionally returning a response.
+        fn handle_message(
+            &self,
+            message: serde_json::Value,
+            context: WsConnectionContext,
+        ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send;
     }
+        }
 }
 
 #[cfg(test)]

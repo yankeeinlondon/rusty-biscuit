@@ -46,11 +46,13 @@ sequenceDiagram
 
     R->>I: entity_command (power/on)
     I->>W: magic packet UDP/9517
+    I-->>R: result (code: 200)
     I-->>R: entity_change (state: ON)
 
     R->>I: entity_command (player/select_source)
     I->>E: GET /ZidooMusicControl/v2/setInputList?tag=...
     I->>E: GET /ZidooMusicControl/v2/getState
+    I-->>R: result (code: 200)
     I-->>R: entity_change (source: ...)
 ```
 
@@ -59,7 +61,7 @@ The integration follows the house pattern used by the Arcam and Sony drivers:
 - `main.rs` parses CLI args, sets up tracing, and starts the WebSocket host
 - `dispatch.rs` owns HTTP and WoL operations against the device
 - `handler.rs` translates UC requests into domain operations
-- `responses.rs` builds protocol JSON payloads
+- `homelab/unfolded-integration-helper` owns shared UC envelope builders, keyed cache logic, subscriptions, and fixtures
 - `types.rs` owns entity and command mapping
 
 ## Running as an External Integration
@@ -94,13 +96,13 @@ eversolo-integration \
 
 ### Authentication
 
-`schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost` currently enforces the `auth-token` WebSocket header. In practice that means this driver requires `UCR_INTEGRATION_TOKEN` to be set on the server side and configured on the UC Remote.
+`schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost` only requires the `auth-token` WebSocket header when `UCR_INTEGRATION_TOKEN` is set. If that environment variable is unset, the driver accepts unauthenticated connections and immediately returns a successful `authentication` response to the Remote.
 
 ```bash
 UCR_INTEGRATION_TOKEN=my-secret eversolo-integration --host 192.168.1.140
 ```
 
-This is a repo-level runtime constraint, not an Eversolo protocol feature.
+This is a repo-level optional runtime control, not an Eversolo protocol feature.
 
 ### Registering on the Remote
 
@@ -108,7 +110,7 @@ In the UC Web Configurator:
 
 1. Go to **Integrations & Docks** > **+** > **Add external integration**
 2. Enter the host and port where the driver is running, for example `192.168.1.50:9092`
-3. Enter the same token configured in `UCR_INTEGRATION_TOKEN`
+3. If you set `UCR_INTEGRATION_TOKEN`, enter the same token on the Remote; otherwise leave auth unset
 4. Save the integration and let the Remote query entities
 
 ## Validation
@@ -137,12 +139,11 @@ The driver runs a background poll loop per configured device. Each loop refreshe
 - media player attributes such as playback state, metadata, volume, mute, and source
 - dynamic source list metadata used by `select_source`
 
-This means front-panel changes, mobile-app commands, or other API clients can be reflected in the driver's cached state without waiting for a UC command path through this integration.
+This means front-panel changes, mobile-app commands, or other API clients can be reflected in the driver's cached state without waiting for a UC command path through this integration. When a client has successfully called `subscribe_events`, poll diffs are broadcast as `entity_change` / `device_state` events over the WebSocket host.
 
 ## Limitations
 
-- The background poller updates the driver's cache, but it still does not proactively push `entity_change` events over the WebSocket connection. `subscribe_events` returns success, but the current `UnfoldedCircleIntegrationWsHost` only writes messages while directly handling inbound requests.
-- Power state is coarse. If the HTTP API is reachable the device is treated as `ON`; if it is not reachable, the integration marks the device disconnected and coerces the power/player entities to `OFF`. That handles normal standby/off cases well, but a network outage is observationally indistinguishable from power-off.
+- Power state is still coarse. If the HTTP API is reachable the device is treated as `ON`; if it is not reachable, the integration marks the device disconnected and applies a stable offline schema with `OFF` power/player state plus cleared playback metadata. That keeps the UC attribute shape stable, but a network outage is still observationally indistinguishable from power-off.
 - Power on depends on Wake-on-LAN. If `--mac` is not configured, `power on` and `power toggle` from an offline state return a UC `400` result.
 - Output switching, screen controls, brightness, and VU/spectrum display modes are intentionally not exposed in this first pass. The protocol research shows those endpoints exist, but this repo does not yet have an established UC entity pattern for them.
 - Installed/local-mode packaging is not included. This package currently targets external deployment only.

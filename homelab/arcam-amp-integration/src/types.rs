@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use unfolded_integration_helper::EntityState;
 
 /// Driver metadata constants
 pub const DRIVER_ID: &str = "arcam-amplifier";
@@ -29,14 +30,6 @@ pub struct ArcamEntity {
     pub entity_type: String,
     pub name: HashMap<String, String>,
     pub features: Vec<String>,
-}
-
-/// Current state snapshot of an Arcam entity
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArcamEntityState {
-    pub entity_id: String,
-    pub entity_type: String,
-    pub attributes: HashMap<String, serde_json::Value>,
 }
 
 /// Arcam operation resolved from a UC entity command
@@ -69,18 +62,18 @@ pub fn build_entities(device_name: &str) -> Vec<ArcamEntity> {
 }
 
 /// Build initial entity states (all OFF until polled).
-pub fn build_initial_states(device_name: &str) -> Vec<ArcamEntityState> {
+pub fn build_initial_states(device_name: &str) -> Vec<EntityState> {
     vec![
-        ArcamEntityState {
-            entity_id: format!("arcam.{device_name}.power"),
-            entity_type: "switch".to_string(),
-            attributes: HashMap::from([("state".to_string(), serde_json::json!("OFF"))]),
-        },
-        ArcamEntityState {
-            entity_id: format!("arcam.{device_name}.mute"),
-            entity_type: "switch".to_string(),
-            attributes: HashMap::from([("state".to_string(), serde_json::json!("OFF"))]),
-        },
+        EntityState::new(
+            format!("arcam.{device_name}.power"),
+            "switch",
+            HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
+        ),
+        EntityState::new(
+            format!("arcam.{device_name}.mute"),
+            "switch",
+            HashMap::from([("state".to_string(), serde_json::json!("UNKNOWN"))]),
+        ),
     ]
 }
 
@@ -124,8 +117,8 @@ mod tests {
     fn test_build_initial_states() {
         let states = build_initial_states("office");
         assert_eq!(states.len(), 2);
-        assert_eq!(states[0].attributes["state"], "OFF");
-        assert_eq!(states[1].attributes["state"], "OFF");
+        assert_eq!(states[0].attributes["state"], "UNKNOWN");
+        assert_eq!(states[1].attributes["state"], "UNKNOWN");
     }
 
     #[test]

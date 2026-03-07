@@ -12,7 +12,7 @@ members = [
     "claudine/cli",
     "claudine/lib",
     "darkmatter/cli",
-    "darkmatter/lib", "homelab/arcam-amp-integration", "homelab/cli", "homelab/eversolo-integration", "homelab/lib", "homelab/server", "homelab/sony-receiver-integration", "model-citizen/cli", "model-citizen/lib",
+    "darkmatter/lib", "homelab/arcam-amp-integration", "homelab/cli", "homelab/eversolo-integration", "homelab/lib", "homelab/server", "homelab/sony-receiver-integration", "homelab/unfolded-integration-helper", "model-citizen/cli", "model-citizen/lib",
     "unchained-ai/model_id",
     "playa/cli",
     "playa/lib",
