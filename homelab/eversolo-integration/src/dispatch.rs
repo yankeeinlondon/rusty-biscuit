@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use homelab::eversolo::{Eversolo, GetStateResponse, InputOutputListResponse};
+use homelab::eversolo::{
+    EffectivePowerState, Eversolo, GetStateResponse, InputOutputListResponse,
+    infer_effective_power_state, is_actively_playing,
+};
 use homelab::network::parse_host;
 use homelab::wol::send_magic_packet;
 use schematic_schema::eversolo::VolumeData;
@@ -35,17 +38,10 @@ pub struct EntityUpdate {
     pub attributes: HashMap<String, Value>,
 }
 
-/// Probe whether the device is currently reachable over HTTP.
-pub async fn probe_device(config: &DeviceConfig, timeout: Duration) -> bool {
-    let client = match build_client(config) {
-        Ok(client) => client,
-        Err(_) => return false,
-    };
-
-    match run_with_timeout(timeout, client.get_model()).await {
-        Ok(model) => model.status == 200,
-        Err(_) => false,
-    }
+#[derive(Debug, Clone, PartialEq)]
+struct PlaybackContext {
+    state: GetStateResponse,
+    effective_power_state: EffectivePowerState,
 }
 
 /// Fetch a full device snapshot for UC entity state.
@@ -54,22 +50,18 @@ pub async fn fetch_snapshot(
     timeout: Duration,
 ) -> Result<DeviceSnapshot, EversoloIntegrationError> {
     let client = build_client(config)?;
-    let (state, routing) = run_with_timeout(timeout, async {
-        tokio::try_join!(client.get_state(), client.get_inputs_outputs())
-    })
-    .await?;
-
-    ensure_optional_status(state.status)?;
+    let playback = fetch_playback_context(&client, timeout).await?;
+    let routing = run_with_timeout(timeout, client.get_inputs_outputs()).await?;
     ensure_status(routing.status)?;
 
     let catalog = EntityCatalog {
         source_list: available_source_names(&routing),
-        volume_steps: volume_steps_from_state(&state),
+        volume_steps: volume_steps_from_state(&playback.state),
     };
 
     Ok(DeviceSnapshot {
-        power_attributes: power_attrs(true),
-        player_attributes: player_attrs(&state, &routing),
+        power_attributes: effective_power_attrs(playback.effective_power_state),
+        player_attributes: player_attrs(&playback.state, &routing, playback.effective_power_state),
         catalog,
     })
 }
@@ -81,13 +73,18 @@ pub async fn execute_operation(
     timeout: Duration,
 ) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
     match operation {
-        EversoloOperation::PowerOn => power_on(config),
+        EversoloOperation::PowerOn => power_on(config, timeout).await,
         EversoloOperation::PowerOff => power_off(config, timeout).await,
         EversoloOperation::PowerToggle => {
-            if probe_device(config, timeout).await {
-                power_off(config, timeout).await
-            } else {
-                power_on(config)
+            let client = build_client(config)?;
+            match fetch_playback_context(&client, timeout).await {
+                Ok(playback) => match playback.effective_power_state {
+                    EffectivePowerState::Active => power_off(config, timeout).await,
+                    EffectivePowerState::Standby => power_on(config, timeout).await,
+                },
+                Err(EversoloIntegrationError::Eversolo(_))
+                | Err(EversoloIntegrationError::Timeout) => power_on(config, timeout).await,
+                Err(error) => Err(error),
             }
         }
         EversoloOperation::PlayPause => {
@@ -196,7 +193,28 @@ pub async fn execute_operation(
     }
 }
 
-fn power_on(config: &DeviceConfig) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+async fn power_on(
+    config: &DeviceConfig,
+    timeout: Duration,
+) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+    let client = build_client(config)?;
+
+    match fetch_playback_context(&client, timeout).await {
+        Ok(playback) => match playback.effective_power_state {
+            EffectivePowerState::Active => snapshot_updates(config, timeout).await,
+            EffectivePowerState::Standby => {
+                wake_from_standby(&client, timeout).await?;
+                snapshot_updates(config, timeout).await
+            }
+        },
+        Err(EversoloIntegrationError::Eversolo(_)) | Err(EversoloIntegrationError::Timeout) => {
+            power_on_via_wol(config)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn power_on_via_wol(config: &DeviceConfig) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
     let mac = config
         .mac_address
         .as_deref()
@@ -222,21 +240,19 @@ async fn power_off(
     timeout: Duration,
 ) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
     let client = build_client(config)?;
-    let resp = run_with_timeout(timeout, client.set_power_option("poweroff")).await?;
-    ensure_status(resp.status)?;
+    let playback = fetch_playback_context(&client, timeout).await?;
 
-    Ok(vec![
-        EntityUpdate {
-            entity_kind: "power",
-            entity_type: "switch",
-            attributes: power_attrs(false),
-        },
-        EntityUpdate {
-            entity_kind: "player",
-            entity_type: "media_player",
-            attributes: player_power_attrs(false),
-        },
-    ])
+    if is_actively_playing(playback.state.state) {
+        let resp = run_with_timeout(timeout, client.play_or_pause()).await?;
+        ensure_status(resp.status)?;
+    }
+
+    if playback.effective_power_state != EffectivePowerState::Standby {
+        let resp = run_with_timeout(timeout, client.set_power_option("screen")).await?;
+        ensure_status(resp.status)?;
+    }
+
+    snapshot_updates(config, timeout).await
 }
 
 async fn snapshot_updates(
@@ -261,6 +277,37 @@ async fn snapshot_updates(
 fn build_client(config: &DeviceConfig) -> Result<Eversolo, EversoloIntegrationError> {
     let host = parse_host(&config.host).map_err(|e| EversoloIntegrationError::InvalidHost(e.0))?;
     Ok(Eversolo::new(host.to_string(), config.port))
+}
+
+async fn fetch_playback_context(
+    client: &Eversolo,
+    timeout: Duration,
+) -> Result<PlaybackContext, EversoloIntegrationError> {
+    let (state, screen_brightness) = run_with_timeout(timeout, async {
+        let (state, screen_brightness) =
+            tokio::join!(client.get_state(), client.get_screen_brightness());
+        Ok::<_, homelab::eversolo::EversoloError>((state?, screen_brightness.ok()))
+    })
+    .await?;
+
+    ensure_optional_status(state.status)?;
+    let screen_brightness = screen_brightness
+        .filter(|response| response.status.is_none_or(|status| status == 200))
+        .map(|response| response.current_value);
+
+    Ok(PlaybackContext {
+        effective_power_state: infer_effective_power_state(state.state, screen_brightness),
+        state,
+    })
+}
+
+async fn wake_from_standby(
+    client: &Eversolo,
+    timeout: Duration,
+) -> Result<(), EversoloIntegrationError> {
+    let resp = run_with_timeout(timeout, client.set_power_option("screen")).await?;
+    ensure_status(resp.status)?;
+    Ok(())
 }
 
 async fn run_with_timeout<T>(
@@ -289,6 +336,10 @@ fn ensure_optional_status(status: Option<i32>) -> Result<(), EversoloIntegration
     Ok(())
 }
 
+fn effective_power_attrs(effective_power_state: EffectivePowerState) -> HashMap<String, Value> {
+    power_attrs(effective_power_state == EffectivePowerState::Active)
+}
+
 fn power_attrs(on: bool) -> HashMap<String, Value> {
     HashMap::from([("state".to_string(), json!(if on { "ON" } else { "OFF" }))])
 }
@@ -302,10 +353,11 @@ fn player_power_attrs(on: bool) -> HashMap<String, Value> {
 fn player_attrs(
     state: &GetStateResponse,
     routing: &InputOutputListResponse,
+    effective_power_state: EffectivePowerState,
 ) -> HashMap<String, Value> {
     let mut attrs = HashMap::from([(
         "state".to_string(),
-        json!(playback_state_label(state.state)),
+        json!(playback_state_label(state.state, effective_power_state)),
     )]);
 
     if let Some(volume_data) = &state.volume_data {
@@ -340,11 +392,14 @@ fn player_attrs(
     attrs
 }
 
-fn playback_state_label(state: i32) -> &'static str {
-    match state {
-        1 => "PLAYING",
-        2 => "PAUSED",
-        _ => "ON",
+fn playback_state_label(state: i32, effective_power_state: EffectivePowerState) -> &'static str {
+    match effective_power_state {
+        EffectivePowerState::Standby => "STANDBY",
+        EffectivePowerState::Active => match state {
+            1 => "PLAYING",
+            2 => "PAUSED",
+            _ => "ON",
+        },
     }
 }
 
@@ -470,9 +525,31 @@ mod tests {
 
     #[test]
     fn test_playback_state_label() {
-        assert_eq!(playback_state_label(1), "PLAYING");
-        assert_eq!(playback_state_label(2), "PAUSED");
-        assert_eq!(playback_state_label(0), "ON");
+        assert_eq!(
+            playback_state_label(1, EffectivePowerState::Active),
+            "PLAYING"
+        );
+        assert_eq!(
+            playback_state_label(2, EffectivePowerState::Active),
+            "PAUSED"
+        );
+        assert_eq!(playback_state_label(0, EffectivePowerState::Active), "ON");
+        assert_eq!(
+            playback_state_label(0, EffectivePowerState::Standby),
+            "STANDBY"
+        );
+    }
+
+    #[test]
+    fn test_effective_power_attrs_treats_standby_as_switch_off() {
+        assert_eq!(
+            effective_power_attrs(EffectivePowerState::Active)["state"],
+            "ON"
+        );
+        assert_eq!(
+            effective_power_attrs(EffectivePowerState::Standby)["state"],
+            "OFF"
+        );
     }
 
     #[test]
@@ -670,11 +747,24 @@ mod tests {
 
     #[test]
     fn test_player_attrs() {
-        let attrs = player_attrs(&sample_state(), &sample_routing());
+        let attrs = player_attrs(
+            &sample_state(),
+            &sample_routing(),
+            EffectivePowerState::Active,
+        );
         assert_eq!(attrs["state"], "PLAYING");
         assert_eq!(attrs["volume"], 55);
         assert_eq!(attrs["source"], "USB DAC");
         assert_eq!(attrs["media_title"], "Song");
+    }
+
+    #[test]
+    fn test_player_attrs_reports_standby_when_screen_is_off_and_playback_is_idle() {
+        let mut state = sample_state();
+        state.state = 0;
+
+        let attrs = player_attrs(&state, &sample_routing(), EffectivePowerState::Standby);
+        assert_eq!(attrs["state"], "STANDBY");
     }
 
     #[test]
