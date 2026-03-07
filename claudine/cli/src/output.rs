@@ -22,11 +22,13 @@ pub(crate) fn log_wrapper_summary(
     verbose: u8,
 ) {
     // Header always includes: Claudine ▸ ProviderName [badges]
-    let mut header_parts: Vec<String> = vec![Prose::new(format!(
-        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
-        profile.provider()
-    ))
-    .render(term)];
+    let mut header_parts: Vec<String> = vec![
+        Prose::new(format!(
+            "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
+            profile.provider()
+        ))
+        .render(term),
+    ];
 
     if yolo_requested {
         header_parts.push(YOLO.to_string());

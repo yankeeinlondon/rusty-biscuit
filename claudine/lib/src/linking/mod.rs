@@ -15,6 +15,10 @@ mod report;
 pub mod skills;
 mod symlink;
 
+pub use agents::{
+    AgentDirectoryDiagnostic, AgentException, AgentExceptionType, AgentFixSummary, AgentInfo,
+    AgentScope, AgentsReport, fix_missing_agents, list_agents,
+};
 pub use canonical::{
     CanonicalSelection, canonical_provider, preference_prompt_count, ranked_provider_preferences,
     select_canonical_provider, set_canonical_provider,
@@ -22,6 +26,10 @@ pub use canonical::{
 pub use capabilities::{
     ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourcePropertySchema,
     ResourceSupport, SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
+};
+pub use commands::{
+    CommandDirectoryDiagnostic, CommandException, CommandExceptionType, CommandFixSummary,
+    CommandInfo, CommandScope, CommandsReport, fix_missing_commands, list_commands,
 };
 pub use compatibility::{classify_canonical_candidate, classify_target_reference};
 pub use conflict::SkillSyncStatus;
@@ -31,17 +39,9 @@ pub use detector::{
 };
 pub use discovery::DiscoveredSkill;
 pub use execution::{ApplySummary, analyze_resource_links, apply_fixable_resources};
+pub use filter::ResourceFilter;
 pub use paths::{ProviderPaths, ProviderSkillPaths, ResourceScope, resolve_repo_root};
 pub use report::{ConflictEntry, InSyncEntry, LinkReport, LinkedEntry, SkippedEntry};
-pub use agents::{
-    AgentDirectoryDiagnostic, AgentException, AgentExceptionType, AgentFixSummary, AgentInfo,
-    AgentScope, AgentsReport, fix_missing_agents, list_agents,
-};
-pub use commands::{
-    CommandDirectoryDiagnostic, CommandException, CommandExceptionType, CommandFixSummary,
-    CommandInfo, CommandScope, CommandsReport, fix_missing_commands, list_commands,
-};
-pub use filter::ResourceFilter;
 pub use skills::{
     ExceptionType, SkillDirectoryDiagnostic, SkillException, SkillFilter, SkillFixSummary,
     SkillInfo, SkillScope, SkillsReport, fix_missing_skills, list_skills,
@@ -161,7 +161,24 @@ fn apply_statuses(
                         continue;
                     }
 
-                    match symlink::create_skill_link(&source.path, &dest_dir, scope)? {
+                    let link_result = if let Some(source_root) =
+                        provider_paths.resource_dir(source.provider, resource, scope)
+                    {
+                        if source.path.starts_with(&source_root) {
+                            symlink::create_resource_link(
+                                &source.path,
+                                &source_root,
+                                &dest_dir,
+                                scope,
+                            )?
+                        } else {
+                            symlink::create_skill_link(&source.path, &dest_dir, scope)?
+                        }
+                    } else {
+                        symlink::create_skill_link(&source.path, &dest_dir, scope)?
+                    };
+
+                    match link_result {
                         LinkResult::Linked { .. } => linked.push(target_provider.to_string()),
                         LinkResult::AlreadyLinked => {}
                         LinkResult::Skipped { reason } => {

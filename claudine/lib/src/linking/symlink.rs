@@ -36,40 +36,51 @@ pub fn category_link_target(path: &Path) -> Result<Option<PathBuf>> {
     }
 }
 
-/// Create a symlink from source skill dir into dest_dir.
+/// Create a symlink from a resource path into a destination resource root.
 ///
-/// User scope creates absolute symlinks. Repo scope creates relative symlinks.
-/// Never overwrites real (non-symlink) directories.
+/// The destination preserves the resource's relative path beneath `source_root`.
 ///
 /// ## Errors
 ///
 /// Returns an error if:
-/// - The source has no file name component
+/// - The source is not contained within `source_root`
+/// - The relative path is empty
 /// - The parent directory cannot be created
 /// - The symlink cannot be created
-pub fn create_skill_link(
+pub fn create_resource_link(
     source: &Path,
-    dest_dir: &Path,
+    source_root: &Path,
+    dest_root: &Path,
     scope: ResourceScope,
 ) -> Result<LinkResult> {
-    let skill_name = source.file_name().ok_or_else(|| {
+    let relative = source.strip_prefix(source_root).map_err(|_| {
         ClaudineError::LinkingError(format!(
-            "source path has no file name: {}",
-            source.display()
+            "source path {} is not contained within source root {}",
+            source.display(),
+            source_root.display()
         ))
     })?;
 
-    let dest = dest_dir.join(skill_name);
+    if relative.as_os_str().is_empty() {
+        return Err(ClaudineError::LinkingError(format!(
+            "source path {} resolves to an empty relative path beneath {}",
+            source.display(),
+            source_root.display()
+        )));
+    }
 
-    // Safety: never overwrite existing non-symlink directories
+    let dest = dest_root.join(relative);
+
+    // Safety: never overwrite existing non-symlink files or directories
     if dest.exists()
         && !dest
             .symlink_metadata()
             .map(|m| m.file_type().is_symlink())
             .unwrap_or(false)
     {
+        let path_label = if dest.is_dir() { "directory" } else { "file" };
         return Ok(LinkResult::Skipped {
-            reason: format!("real directory already exists at {}", dest.display()),
+            reason: format!("real {path_label} already exists at {}", dest.display()),
         });
     }
 
@@ -103,12 +114,10 @@ pub fn create_skill_link(
         });
     }
 
-    // Ensure parent directory exists
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    // Compute link target
     let link_target = match scope {
         ResourceScope::User => source.to_path_buf(),
         ResourceScope::Repo => {
@@ -119,7 +128,6 @@ pub fn create_skill_link(
         }
     };
 
-    // Create the symlink
     #[cfg(unix)]
     std::os::unix::fs::symlink(&link_target, &dest)?;
 
@@ -133,6 +141,28 @@ pub fn create_skill_link(
         dest,
         link_target,
     })
+}
+
+/// Create a symlink from source skill dir into dest_dir.
+///
+/// User scope creates absolute symlinks. Repo scope creates relative symlinks.
+/// Never overwrites real (non-symlink) directories.
+///
+/// ## Errors
+///
+/// Returns an error if:
+/// - The source has no file name component
+/// - The parent directory cannot be created
+/// - The symlink cannot be created
+pub fn create_skill_link(
+    source: &Path,
+    dest_dir: &Path,
+    scope: ResourceScope,
+) -> Result<LinkResult> {
+    let source_root = source.parent().ok_or_else(|| {
+        ClaudineError::LinkingError(format!("source path has no parent: {}", source.display()))
+    })?;
+    create_resource_link(source, source_root, dest_dir, scope)
 }
 
 /// Compute the relative path from `from_dir` to `target`.
@@ -339,6 +369,37 @@ mod tests {
                 assert!(reason.contains("symlink exists but points to"));
             }
             other => panic!("expected Skipped, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resource_link_preserves_nested_relative_path() {
+        let tmp = TempDir::new().unwrap();
+        let source_root = tmp.path().join("source");
+        let source = source_root.join("prompts/create-deep-dive-document.md");
+        let dest_root = tmp.path().join("dest");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "# Prompt").unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let result =
+            create_resource_link(&source, &source_root, &dest_root, ResourceScope::Repo).unwrap();
+
+        match result {
+            LinkResult::Linked {
+                source: src,
+                dest,
+                link_target,
+            } => {
+                assert_eq!(src, source);
+                assert_eq!(dest, dest_root.join("prompts/create-deep-dive-document.md"));
+                assert_eq!(
+                    link_target,
+                    PathBuf::from("../../source/prompts/create-deep-dive-document.md")
+                );
+            }
+            other => panic!("expected Linked, got {other:?}"),
         }
     }
 }

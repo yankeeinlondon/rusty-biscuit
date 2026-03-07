@@ -40,9 +40,7 @@ pub async fn run(args: AgentsArgs, verbose: bool) -> Result<()> {
 
     if is_git_repo && args.apply && repo_canonical_needs_init(&paths) {
         log::message("");
-        log::message(
-            "Repo canonical provider is not configured. Running claudine init --repo ...",
-        );
+        log::message("Repo canonical provider is not configured. Running claudine init --repo ...");
         log::message("");
         super::init::run(super::init::InitArgs {
             quick: false,
@@ -203,7 +201,7 @@ fn render_detail(term: &Terminal, agent: &AgentInfo) {
     if agent.has_model_property {
         log::data("");
         let note = Prose::new(
-            "<dim><i><orange>note:</orange> this agent specifies a <b>model</b> property which limits cross-provider shareability</i></dim>"
+            "<dim><i><orange>note:</orange> this agent specifies a <b>model</b> property which limits cross-provider shareability</i></dim>",
         );
         log::data(&note.render(term));
     }
@@ -215,15 +213,17 @@ fn render_detail(term: &Terminal, agent: &AgentInfo) {
             log::data("");
             let preview_lines: Vec<&str> = body.lines().take(20).collect();
             let preview = preview_lines.join("\n");
-            let preview_prose =
-                Prose::new(format!("<dim>{preview}</dim>"))
-                    .with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None));
+            let preview_prose = Prose::new(format!("<dim>{preview}</dim>"))
+                .with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None));
             log::data(&preview_prose.render(term));
             let total_lines = body.lines().count();
             if total_lines > 20 {
                 log::data(
-                    &Prose::new(format!("<dim><i>... ({} more lines)</i></dim>", total_lines - 20))
-                        .render(term),
+                    &Prose::new(format!(
+                        "<dim><i>... ({} more lines)</i></dim>",
+                        total_lines - 20
+                    ))
+                    .render(term),
                 );
             }
         }
@@ -319,14 +319,11 @@ fn render_exceptions(
     let mut regular_providers: Vec<&String> = Vec::new();
 
     for provider_name in &all_providers {
-        let has_only_format_incompatible = by_provider
-            .get(provider_name)
-            .is_some_and(|type_map| {
-                type_map
-                    .keys()
-                    .all(|t| *t == AgentExceptionType::FormatIncompatible)
-            })
-            && !diag_by_provider.contains_key(provider_name);
+        let has_only_format_incompatible = by_provider.get(provider_name).is_some_and(|type_map| {
+            type_map
+                .keys()
+                .all(|t| *t == AgentExceptionType::FormatIncompatible)
+        }) && !diag_by_provider.contains_key(provider_name);
 
         if has_only_format_incompatible {
             format_incompatible_providers.push(provider_name);

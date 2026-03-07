@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::serde_yaml_ng;
 
@@ -11,7 +11,14 @@ use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capab
 use super::compatibility::parse_markdown_document;
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
-use super::symlink::{LinkResult, create_skill_link};
+use super::symlink::{LinkResult, create_resource_link};
+
+#[derive(Debug, Clone)]
+struct ScannedCommand {
+    name: String,
+    path: PathBuf,
+    relative_path: PathBuf,
+}
 
 /// Scope classification for a discovered slash command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -163,6 +170,10 @@ pub fn fix_missing_commands(paths: &ProviderSkillPaths) -> Result<CommandFixSumm
         }
 
         for scope in [ResourceScope::User, ResourceScope::Repo] {
+            let source_root = match scope {
+                ResourceScope::User => user_dir.as_deref(),
+                ResourceScope::Repo => repo_dir.as_deref(),
+            };
             let reads_claude = paths
                 .also_reads_from(provider, LinkableResource::Command, scope)
                 .iter()
@@ -190,7 +201,17 @@ pub fn fix_missing_commands(paths: &ProviderSkillPaths) -> Result<CommandFixSumm
                 summary.directories_created += 1;
             }
 
-            fix_scope_commands(source_commands, &provider_dir, scope, &mut summary)?;
+            let Some(source_root) = source_root else {
+                continue;
+            };
+
+            fix_scope_commands(
+                source_commands,
+                source_root,
+                &provider_dir,
+                scope,
+                &mut summary,
+            )?;
         }
     }
 
@@ -199,13 +220,14 @@ pub fn fix_missing_commands(paths: &ProviderSkillPaths) -> Result<CommandFixSumm
 
 /// Create symlinks for missing commands in a single (provider, scope) pair.
 fn fix_scope_commands(
-    source_commands: &[(String, PathBuf)],
+    source_commands: &[ScannedCommand],
+    source_root: &Path,
     provider_dir: &Path,
     scope: ResourceScope,
     summary: &mut CommandFixSummary,
 ) -> Result<()> {
-    for (_name, source_path) in source_commands {
-        match create_skill_link(source_path, provider_dir, scope)? {
+    for command in source_commands {
+        match create_resource_link(&command.path, source_root, provider_dir, scope)? {
             LinkResult::Linked { .. } => summary.links_created += 1,
             LinkResult::AlreadyLinked => summary.already_linked += 1,
             LinkResult::Skipped { .. } => summary.skipped += 1,
@@ -230,20 +252,20 @@ pub fn list_commands(paths: &ProviderSkillPaths, filters: &[String]) -> Result<C
     let user_commands = scan_command_dir(user_dir.as_ref());
     let repo_commands = scan_command_dir(repo_dir.as_ref());
 
-    let user_names: BTreeSet<&str> = user_commands.iter().map(|(name, _)| name.as_str()).collect();
-    let repo_names: BTreeSet<&str> = repo_commands.iter().map(|(name, _)| name.as_str()).collect();
+    let user_names: BTreeSet<&str> = user_commands.iter().map(|cmd| cmd.name.as_str()).collect();
+    let repo_names: BTreeSet<&str> = repo_commands.iter().map(|cmd| cmd.name.as_str()).collect();
 
     let mut commands = Vec::new();
 
     // Repo-only commands
-    for (name, path) in &repo_commands {
-        if !user_names.contains(name.as_str()) {
-            let (description, frontmatter, has_model) = read_command_metadata(path);
+    for command in &repo_commands {
+        if !user_names.contains(command.name.as_str()) {
+            let (description, frontmatter, has_model) = read_command_metadata(&command.path);
             commands.push(CommandInfo {
-                name: name.clone(),
+                name: command.name.clone(),
                 scope: CommandScope::Repo,
                 description,
-                command_file_path: path.clone(),
+                command_file_path: command.path.clone(),
                 provider: Provider::Claude,
                 frontmatter,
                 has_model_property: has_model,
@@ -252,14 +274,14 @@ pub fn list_commands(paths: &ProviderSkillPaths, filters: &[String]) -> Result<C
     }
 
     // User-only commands
-    for (name, path) in &user_commands {
-        if !repo_names.contains(name.as_str()) {
-            let (description, frontmatter, has_model) = read_command_metadata(path);
+    for command in &user_commands {
+        if !repo_names.contains(command.name.as_str()) {
+            let (description, frontmatter, has_model) = read_command_metadata(&command.path);
             commands.push(CommandInfo {
-                name: name.clone(),
+                name: command.name.clone(),
                 scope: CommandScope::User,
                 description,
-                command_file_path: path.clone(),
+                command_file_path: command.path.clone(),
                 provider: Provider::Claude,
                 frontmatter,
                 has_model_property: has_model,
@@ -268,16 +290,16 @@ pub fn list_commands(paths: &ProviderSkillPaths, filters: &[String]) -> Result<C
     }
 
     // Commands in both (repo masks user)
-    for (name, _user_path) in &user_commands {
-        if repo_names.contains(name.as_str()) {
+    for command in &user_commands {
+        if repo_names.contains(command.name.as_str()) {
             let repo_path = repo_commands
                 .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, p)| p)
+                .find(|candidate| candidate.name == command.name)
+                .map(|candidate| &candidate.path)
                 .unwrap();
             let (description, frontmatter, has_model) = read_command_metadata(repo_path);
             commands.push(CommandInfo {
-                name: name.clone(),
+                name: command.name.clone(),
                 scope: CommandScope::RepoMasked,
                 description,
                 command_file_path: repo_path.clone(),
@@ -305,8 +327,8 @@ pub fn list_commands(paths: &ProviderSkillPaths, filters: &[String]) -> Result<C
     })
 }
 
-/// Scan a command directory for `*.md` files, returning `(name, path)` pairs.
-fn scan_command_dir(dir: Option<&PathBuf>) -> Vec<(String, PathBuf)> {
+/// Scan a command directory for `*.md` files, returning namespaced command metadata.
+fn scan_command_dir(dir: Option<&PathBuf>) -> Vec<ScannedCommand> {
     let Some(dir) = dir else {
         return Vec::new();
     };
@@ -314,29 +336,67 @@ fn scan_command_dir(dir: Option<&PathBuf>) -> Vec<(String, PathBuf)> {
         return Vec::new();
     }
 
-    let entries = match fs::read_dir(dir) {
+    let mut results = Vec::new();
+    scan_command_dir_recursive(dir, dir, &mut results);
+    results.sort_by(|left, right| left.name.cmp(&right.name).then(left.path.cmp(&right.path)));
+    results
+}
+
+fn scan_command_dir_recursive(root: &Path, current: &Path, results: &mut Vec<ScannedCommand>) {
+    let entries = match fs::read_dir(current) {
         Ok(entries) => entries,
-        Err(_) => return Vec::new(),
+        Err(_) => return,
     };
 
-    let mut results = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_file() {
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with('.') {
             continue;
         }
-        let name = match path.file_stem().and_then(|n| n.to_str()) {
-            Some(name) if name.starts_with('.') => continue,
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-        match path.extension().and_then(|e| e.to_str()) {
-            Some("md") => {}
-            _ => continue,
+
+        if path.is_dir() {
+            scan_command_dir_recursive(root, &path, results);
+            continue;
         }
-        results.push((name, path));
+
+        if !matches!(path.extension().and_then(|e| e.to_str()), Some("md")) {
+            continue;
+        }
+
+        let Some(relative_path) = path.strip_prefix(root).ok().map(Path::to_path_buf) else {
+            continue;
+        };
+        let Some(name) = command_name_from_relative_path(&relative_path) else {
+            continue;
+        };
+
+        results.push(ScannedCommand {
+            name,
+            path,
+            relative_path,
+        });
     }
-    results
+}
+
+fn command_name_from_relative_path(relative_path: &Path) -> Option<String> {
+    let stemmed = relative_path.with_extension("");
+    let mut parts = Vec::new();
+    for component in stemmed.components() {
+        let part = component.as_os_str().to_str()?;
+        if part.is_empty() {
+            return None;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(":"))
+    }
 }
 
 /// Read description, frontmatter, and model property from a command file.
@@ -375,35 +435,35 @@ fn read_command_metadata(command_file: &Path) -> (Option<String>, BTreeMap<Strin
 /// Gather exceptions across all providers that support commands.
 fn gather_exceptions(
     paths: &ProviderSkillPaths,
-    user_commands: &[(String, PathBuf)],
-    repo_commands: &[(String, PathBuf)],
+    user_commands: &[ScannedCommand],
+    repo_commands: &[ScannedCommand],
 ) -> Result<(Vec<CommandException>, Vec<CommandDirectoryDiagnostic>)> {
     let mut exceptions = Vec::new();
     let mut diagnostics = Vec::new();
 
-    let canonical: BTreeMap<&str, &PathBuf> = {
+    let canonical: BTreeMap<&str, &ScannedCommand> = {
         let mut map = BTreeMap::new();
-        for (name, path) in user_commands {
-            map.insert(name.as_str(), path);
+        for command in user_commands {
+            map.insert(command.name.as_str(), command);
         }
-        for (name, path) in repo_commands {
-            map.insert(name.as_str(), path);
+        for command in repo_commands {
+            map.insert(command.name.as_str(), command);
         }
         map
     };
 
     // Check canonical commands for model property
-    for (name, path) in &canonical {
-        check_model_property(&mut exceptions, name, path);
+    for (name, command) in &canonical {
+        check_model_property(&mut exceptions, name, &command.path);
     }
 
-    let user_canonical: BTreeMap<&str, &PathBuf> = user_commands
+    let user_canonical: BTreeMap<&str, &ScannedCommand> = user_commands
         .iter()
-        .map(|(name, path)| (name.as_str(), path))
+        .map(|command| (command.name.as_str(), command))
         .collect();
-    let repo_canonical: BTreeMap<&str, &PathBuf> = repo_commands
+    let repo_canonical: BTreeMap<&str, &ScannedCommand> = repo_commands
         .iter()
-        .map(|(name, path)| (name.as_str(), path))
+        .map(|command| (command.name.as_str(), command))
         .collect();
 
     for provider in ALL_PROVIDERS {
@@ -420,12 +480,12 @@ fn gather_exceptions(
         // Non-Markdown providers get FormatIncompatible exceptions
         if cmd_support.format != Some(ResourceFormat::Markdown) {
             let target_format = cmd_support.format;
-            for (name, path) in &canonical {
+            for (name, command) in &canonical {
                 exceptions.push(CommandException {
                     provider,
                     exception_type: CommandExceptionType::FormatIncompatible,
                     name: name.to_string(),
-                    command_file_path: path.to_path_buf(),
+                    command_file_path: command.path.clone(),
                     missing_properties: Vec::new(),
                     source_format: Some(ResourceFormat::Markdown),
                     target_format,
@@ -476,7 +536,7 @@ fn check_scope_missing(
     paths: &ProviderSkillPaths,
     provider: Provider,
     scope: ResourceScope,
-    canonical: &BTreeMap<&str, &PathBuf>,
+    canonical: &BTreeMap<&str, &ScannedCommand>,
     exceptions: &mut Vec<CommandException>,
     diagnostics: &mut Vec<CommandDirectoryDiagnostic>,
 ) {
@@ -499,8 +559,8 @@ fn check_scope_missing(
         return;
     }
 
-    for name in canonical.keys() {
-        let expected = provider_dir.join(format!("{name}.md"));
+    for (name, command) in canonical {
+        let expected = provider_dir.join(&command.relative_path);
         if !expected.exists() {
             exceptions.push(CommandException {
                 provider,
@@ -573,7 +633,24 @@ mod tests {
 
         let results = scan_command_dir(Some(&dir));
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "commit");
+        assert_eq!(results[0].name, "commit");
+    }
+
+    #[test]
+    fn scan_command_dir_preserves_namespace_from_nested_directories() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("commands");
+        let nested = dir.join("prompts");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("create-deep-dive-document.md"), "# Prompt").unwrap();
+
+        let results = scan_command_dir(Some(&dir));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "prompts:create-deep-dive-document");
+        assert_eq!(
+            results[0].relative_path,
+            PathBuf::from("prompts/create-deep-dive-document.md")
+        );
     }
 
     #[test]
@@ -597,7 +674,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_command_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Command, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Command,
+                ResourceScope::User,
+            )
             .unwrap();
         setup_command(&user_dir, "commit", "description: Commit helper");
 
@@ -611,7 +692,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_command_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Command, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Command,
+                ResourceScope::User,
+            )
             .unwrap();
         setup_command(
             &user_dir,
@@ -629,9 +714,92 @@ mod tests {
         assert_eq!(model_exceptions[0].model_value.as_deref(), Some("opus"));
     }
 
-    fn test_command_paths(base: &Path) -> ProviderSkillPaths {
-        use std::collections::HashMap;
+    #[cfg(unix)]
+    #[test]
+    fn fix_missing_commands_preserves_nested_directories() {
         use super::super::paths::ProviderPaths;
+        use std::collections::HashMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mut providers = HashMap::new();
+        for provider in ALL_PROVIDERS {
+            providers.insert(
+                provider,
+                ProviderPaths {
+                    provider,
+                    user_skills: None,
+                    repo_skills: None,
+                    user_commands: None,
+                    repo_commands: None,
+                    user_agents: None,
+                    repo_agents: None,
+                    skill_also_reads_from: vec![],
+                    command_also_reads_from: vec![],
+                    agent_also_reads_from: vec![],
+                },
+            );
+        }
+
+        providers.insert(
+            Provider::Claude,
+            ProviderPaths {
+                provider: Provider::Claude,
+                user_skills: None,
+                repo_skills: None,
+                user_commands: Some(tmp.path().join("home/.claude/commands")),
+                repo_commands: Some(tmp.path().join("repo/.claude/commands")),
+                user_agents: None,
+                repo_agents: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
+            },
+        );
+        providers.insert(
+            Provider::Codex,
+            ProviderPaths {
+                provider: Provider::Codex,
+                user_skills: None,
+                repo_skills: None,
+                user_commands: Some(tmp.path().join("home/.codex/prompts")),
+                repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
+            },
+        );
+
+        let paths = ProviderSkillPaths::from_providers_for_test(providers, tmp.path().join("home"));
+        let user_source = tmp
+            .path()
+            .join("home/.claude/commands/prompts/create-deep-dive-document.md");
+        fs::create_dir_all(user_source.parent().unwrap()).unwrap();
+        fs::write(
+            &user_source,
+            "---\ndescription: Prompt\n---\nCreate a deep dive.\n",
+        )
+        .unwrap();
+
+        let summary = fix_missing_commands(&paths).unwrap();
+        assert_eq!(summary.links_created, 1);
+
+        let dest = tmp
+            .path()
+            .join("home/.codex/prompts/prompts/create-deep-dive-document.md");
+        let metadata = fs::symlink_metadata(&dest).unwrap();
+        assert!(metadata.file_type().is_symlink());
+        assert_eq!(
+            fs::read_link(&dest).unwrap(),
+            tmp.path()
+                .join("home/.claude/commands/prompts/create-deep-dive-document.md")
+        );
+    }
+
+    fn test_command_paths(base: &Path) -> ProviderSkillPaths {
+        use super::super::paths::ProviderPaths;
+        use std::collections::HashMap;
 
         let mut providers = HashMap::new();
         for provider in ALL_PROVIDERS {

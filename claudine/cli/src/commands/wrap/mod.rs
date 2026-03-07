@@ -56,7 +56,7 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub sandbox: bool,
 
-    /// Restrict to repo-scoped skills/commands by setting HOME=/dev/null.
+    /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
     #[arg(long)]
     pub repo: bool,
 

@@ -339,6 +339,11 @@ fn discover_provider_resources(
         return Ok(out);
     }
 
+    if resource == LinkableResource::Command {
+        discover_nested_command_resources(provider, format, root, root, &mut out)?;
+        return Ok(out);
+    }
+
     let entries = match std::fs::read_dir(root) {
         Ok(entries) => entries,
         Err(_) => return Ok(out),
@@ -354,6 +359,57 @@ fn discover_provider_resources(
     }
 
     Ok(out)
+}
+
+fn discover_nested_command_resources(
+    provider: Provider,
+    format: Option<ResourceFormat>,
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<DiscoveredResource>,
+) -> Result<()> {
+    let entries = match std::fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(()),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            discover_nested_command_resources(provider, format, root, &path, out)?;
+            continue;
+        }
+
+        if !matches_resource_file(&path, LinkableResource::Command, format) {
+            continue;
+        }
+
+        let Some(relative_path) = path.strip_prefix(root).ok() else {
+            continue;
+        };
+        let Some(name) = namespaced_name_from_relative_path(relative_path) else {
+            continue;
+        };
+
+        out.push(build_discovered_resource(
+            provider,
+            name,
+            path,
+            LinkableResource::Command,
+        ));
+    }
+
+    Ok(())
 }
 
 fn discover_path_resource(
@@ -480,6 +536,23 @@ fn build_discovered_resource(
     }
 }
 
+fn namespaced_name_from_relative_path(relative_path: &Path) -> Option<String> {
+    let stemmed = relative_path.with_extension("");
+    let mut parts = Vec::new();
+    for component in stemmed.components() {
+        let part = component.as_os_str().to_str()?;
+        if part.is_empty() {
+            return None;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(":"))
+    }
+}
+
 fn canonical_map(
     resources: &[DiscoveredResource],
     base_provider: Option<Provider>,
@@ -579,6 +652,12 @@ mod tests {
             "---\ndescription: test\n---\n",
         );
         write(
+            &home
+                .path()
+                .join(".claude/commands/prompts/create-deep-dive-document.md"),
+            "---\ndescription: nested\n---\n",
+        );
+        write(
             &home.path().join(".gemini/commands/user-gemini.toml"),
             r#"prompt = "hello""#,
         );
@@ -603,6 +682,12 @@ mod tests {
                 .user_resources()
                 .iter()
                 .any(|resource| resource.name == "user-cmd")
+        );
+        assert!(
+            commands
+                .user_resources()
+                .iter()
+                .any(|resource| resource.name == "prompts:create-deep-dive-document")
         );
         assert!(
             commands

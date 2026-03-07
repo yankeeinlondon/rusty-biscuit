@@ -16,7 +16,9 @@ use super::model::{
     ResourceScope as ModelScope, ResourceType,
 };
 use super::paths::{ProviderSkillPaths, ResourceScope as PathScope};
-use super::symlink::{LinkResult, category_link_target, create_skill_link, relative_path};
+use super::symlink::{
+    LinkResult, category_link_target, create_resource_link, create_skill_link, relative_path,
+};
 
 const DERIVED_FM_HASH_KEY: &str = "_claudine_fm_hash";
 const DERIVED_BODY_HASH_KEY: &str = "_claudine_body_hash";
@@ -451,7 +453,18 @@ fn apply_direct_link(
     }
 
     let source = canonical_link_source_path(resource, canonical);
-    match create_skill_link(&source, &dest_dir, scope)? {
+    let link_result =
+        if let Some(source_root) = paths.resource_dir(canonical.provider, resource, scope) {
+            if source.starts_with(&source_root) {
+                create_resource_link(&source, &source_root, &dest_dir, scope)?
+            } else {
+                create_skill_link(&source, &dest_dir, scope)?
+            }
+        } else {
+            create_skill_link(&source, &dest_dir, scope)?
+        };
+
+    match link_result {
         LinkResult::Linked { .. } | LinkResult::AlreadyLinked => Ok(true),
         LinkResult::Skipped { .. } => Ok(false),
     }
@@ -477,7 +490,21 @@ fn apply_derived_write(
     let Some(dest_dir) = paths.resource_dir(provider, resource, scope) else {
         return Ok(false);
     };
-    let target_path = expected_resource_path(&dest_dir, name, resource, target_format);
+    let relative_path = paths
+        .resource_dir(canonical.provider, resource, scope)
+        .and_then(|source_root| {
+            canonical_link_source_path(resource, canonical)
+                .strip_prefix(source_root)
+                .ok()
+                .map(Path::to_path_buf)
+        });
+    let target_path = expected_resource_path(
+        &dest_dir,
+        name,
+        resource,
+        target_format,
+        relative_path.as_deref(),
+    );
 
     if target_path
         .symlink_metadata()
@@ -640,6 +667,7 @@ fn expected_resource_path(
     name: &str,
     resource: LinkableResource,
     format: ResourceFormat,
+    relative_path: Option<&Path>,
 ) -> PathBuf {
     match resource {
         LinkableResource::Skill => dest_dir.join(name),
@@ -652,7 +680,14 @@ fn expected_resource_path(
                 _ => "",
             };
 
-            if extension.is_empty() {
+            if let Some(relative_path) = relative_path {
+                let target_relative = if extension.is_empty() {
+                    relative_path.to_path_buf()
+                } else {
+                    relative_path.with_extension(extension)
+                };
+                dest_dir.join(target_relative)
+            } else if extension.is_empty() {
                 dest_dir.join(name)
             } else {
                 dest_dir.join(format!("{name}.{extension}"))

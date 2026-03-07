@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 use crate::events::Provider;
@@ -89,36 +89,7 @@ pub fn discover_commands(
         if !dir.exists() {
             continue;
         }
-        let entries = match fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            let file_name = match path.file_name().and_then(|name| name.to_str()) {
-                Some(name) if name.ends_with(".md") && !name.starts_with('.') => name.to_string(),
-                _ => continue,
-            };
-
-            let is_symlink = fs::symlink_metadata(&path)
-                .map(|meta| meta.file_type().is_symlink())
-                .unwrap_or(false);
-
-            let name = file_name
-                .strip_suffix(".md")
-                .unwrap_or(&file_name)
-                .to_string();
-
-            commands.push(DiscoveredSkill {
-                name,
-                path,
-                provider,
-                is_symlink,
-                hash: None,
-            });
-        }
+        discover_command_tree(dir, dir, provider, &mut commands);
     }
 
     commands.sort_by(|left, right| {
@@ -129,11 +100,77 @@ pub fn discover_commands(
     Ok(commands)
 }
 
+fn discover_command_tree(
+    root: &Path,
+    current: &Path,
+    provider: Provider,
+    commands: &mut Vec<DiscoveredSkill>,
+) {
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            discover_command_tree(root, &path, provider, commands);
+            continue;
+        }
+
+        if !matches!(path.extension().and_then(|ext| ext.to_str()), Some("md")) {
+            continue;
+        }
+
+        let Some(relative_path) = path.strip_prefix(root).ok() else {
+            continue;
+        };
+        let Some(name) = command_name_from_relative_path(relative_path) else {
+            continue;
+        };
+
+        let is_symlink = fs::symlink_metadata(&path)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false);
+
+        commands.push(DiscoveredSkill {
+            name,
+            path,
+            provider,
+            is_symlink,
+            hash: None,
+        });
+    }
+}
+
+fn command_name_from_relative_path(relative_path: &Path) -> Option<String> {
+    let stemmed = relative_path.with_extension("");
+    let mut parts = Vec::new();
+    for component in stemmed.components() {
+        let part = component.as_os_str().to_str()?;
+        if part.is_empty() {
+            return None;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(":"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::Path;
-
     use tempfile::TempDir;
 
     use super::*;
@@ -166,6 +203,31 @@ mod tests {
                 user_skills: Some(claude_user_skills),
                 repo_skills: None,
                 user_commands: None,
+                repo_commands: None,
+                user_agents: None,
+                repo_agents: None,
+                skill_also_reads_from: vec![],
+                command_also_reads_from: vec![],
+                agent_also_reads_from: vec![],
+            },
+        );
+
+        ProviderSkillPaths::from_providers_for_test(providers, PathBuf::from("/tmp"))
+    }
+
+    fn test_command_paths(claude_user_commands: PathBuf) -> ProviderSkillPaths {
+        let mut providers = HashMap::new();
+        for provider in super::super::capabilities::ALL_PROVIDERS {
+            providers.insert(provider, empty_provider(provider));
+        }
+
+        providers.insert(
+            Provider::Claude,
+            ProviderPaths {
+                provider: Provider::Claude,
+                user_skills: None,
+                repo_skills: None,
+                user_commands: Some(claude_user_commands),
                 repo_commands: None,
                 user_agents: None,
                 repo_agents: None,
@@ -243,5 +305,24 @@ mod tests {
 
         assert_eq!(skills.len(), 1);
         assert!(skills[0].is_symlink);
+    }
+
+    #[test]
+    fn discovers_nested_commands_as_namespaced_commands() {
+        let temp_dir = TempDir::new().unwrap();
+        let command_root = temp_dir.path().join("claude_commands");
+        let nested = command_root.join("prompts");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("create-deep-dive-document.md"),
+            "---\ndescription: Prompt\n---\n",
+        )
+        .unwrap();
+
+        let paths = test_command_paths(command_root);
+        let commands = discover_commands(&paths, ResourceScope::User).unwrap();
+
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "prompts:create-deep-dive-document");
     }
 }

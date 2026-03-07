@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::{detect_repo, Package};
+use sniff::filesystem::repo::{Package, detect_repo};
 
 use super::profile::WrapperProfile;
 use super::repo_home;
@@ -87,9 +87,12 @@ pub(crate) fn build_child_env(
 
     let mut shadow_home_path = None;
 
-    // When --repo is used, set up shadow HOME to restrict to repo-scoped resources
-    if repo {
-        match repo_home::build_repo_home_env(provider) {
+    let needs_shadow_home = repo_home::needs_shadow_home(provider, cwd, repo);
+
+    // Use a shadow HOME when repo-only isolation is requested, or when Codex
+    // needs repo-local prompt overlay because custom prompts are user-scoped.
+    if needs_shadow_home {
+        match repo_home::build_repo_home_env(provider, cwd, repo) {
             Ok((shadow_env, shadow_path)) => {
                 for (key, value) in shadow_env {
                     env.insert(key, value);

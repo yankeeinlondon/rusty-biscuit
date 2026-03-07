@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::serde_yaml_ng;
 
@@ -646,7 +646,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_agent_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Agent, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
             .unwrap();
         setup_agent(&user_dir, "researcher", "description: Research agent");
 
@@ -660,10 +664,18 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_agent_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Agent, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
             .unwrap();
         let repo_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Agent, ResourceScope::Repo)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::Repo,
+            )
             .unwrap();
         setup_agent(&user_dir, "researcher", "description: User version");
         setup_agent(&repo_dir, "researcher", "description: Repo version");
@@ -671,7 +683,10 @@ mod tests {
         let report = list_agents(&paths, &[]).unwrap();
         assert_eq!(report.agents.len(), 1);
         assert_eq!(report.agents[0].scope, AgentScope::RepoMasked);
-        assert_eq!(report.agents[0].description.as_deref(), Some("Repo version"));
+        assert_eq!(
+            report.agents[0].description.as_deref(),
+            Some("Repo version")
+        );
     }
 
     #[test]
@@ -679,7 +694,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_agent_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Agent, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
             .unwrap();
         setup_agent(&user_dir, "researcher", "description: Research");
         setup_agent(&user_dir, "coder", "description: Coding");
@@ -694,7 +713,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = test_agent_paths(tmp.path());
         let user_dir = paths
-            .target_dir(Provider::Claude, LinkableResource::Agent, ResourceScope::User)
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
             .unwrap();
         setup_agent(
             &user_dir,
@@ -713,8 +736,8 @@ mod tests {
     }
 
     fn test_agent_paths(base: &Path) -> ProviderSkillPaths {
-        use std::collections::HashMap;
         use super::super::paths::ProviderPaths;
+        use std::collections::HashMap;
 
         let mut providers = HashMap::new();
         for provider in ALL_PROVIDERS {

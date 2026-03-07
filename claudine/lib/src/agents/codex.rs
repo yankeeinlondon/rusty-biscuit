@@ -188,10 +188,13 @@ fn codex_capabilities() -> AgentCapabilities {
             custom_format: CommandFormat::Markdown,
             paths: paths(
                 &["~/.codex/prompts"],
-                &[".codex/prompts"],
                 &[],
                 &[],
-                &["custom prompts are deprecated in favor of built-ins"],
+                &[],
+                &[
+                    "custom prompts are deprecated in favor of built-ins",
+                    "custom prompts are documented as user-scoped only",
+                ],
             ),
             supports_subdirectory_namespacing: true,
             supports_hot_reload: false,
@@ -200,6 +203,7 @@ fn codex_capabilities() -> AgentCapabilities {
             notes: vec![
                 "Built-in slash commands are stable",
                 "Custom prompt files remain available but deprecated",
+                "Prompt files are not shared through the repository",
             ],
         },
         subagents: SubagentCapabilities {

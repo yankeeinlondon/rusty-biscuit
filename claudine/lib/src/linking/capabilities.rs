@@ -644,15 +644,16 @@ fn codex_capabilities() -> ProviderCapabilities {
         skills: ResourceSupport::full(ResourceFormat::Markdown, ".codex/skills", ".codex/skills")
             .with_also_reads(vec![".claude/skills", ".agents/skills"])
             .with_properties(CODEX_SKILL_SCHEMA),
-        // Codex custom prompts are deprecated but still supported.
-        // Keep metadata so capability-driven linking can make explicit decisions.
+        // Codex custom prompts are deprecated but still supported from user scope.
+        // Current Codex docs state prompt files live in the local Codex home and
+        // are not shared through the repository, so repo_path is intentionally empty.
         // TODO: remove when Codex fully drops prompt files.
         commands: ResourceSupport::custom_format(
             ResourceFormat::Markdown,
-            ".codex/prompts",
+            "",
             ".codex/prompts",
         )
-        .with_note("Deprecated custom prompts; prefer skills")
+        .with_note("Deprecated custom prompts; user scope only; prefer skills")
         .with_properties(CODEX_COMMAND_SCHEMA),
         agents: ResourceSupport::full(ResourceFormat::Markdown, ".codex/agents", ".codex/agents"),
         scripts: ResourceSupport::full(

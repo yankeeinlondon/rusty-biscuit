@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Context, Result, bail};
 
 use claudine::events::Provider;
+use claudine::linking::resolve_repo_root;
 
 pub struct RepoHomeManager {
     agent_offset: String,
@@ -16,7 +18,7 @@ impl RepoHomeManager {
     pub fn new(provider: Provider) -> Self {
         let agent_offset = provider.agent_offset().to_string();
         let user_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-        
+
         // Shadow home root: ~/.claudine/
         // Agent config in shadow: ~/.claudine/.claude (for Claude), etc.
         let shadow_home = user_home.join(".claudine").join(&agent_offset);
@@ -54,7 +56,7 @@ impl RepoHomeManager {
         Ok(self.shadow_home.clone())
     }
 
-    pub fn sync_shadow_home(&self) -> Result<()> {
+    pub fn sync_shadow_home(&self, repo_only: bool) -> Result<()> {
         let original_home = self.original_home();
         if !original_home.exists() {
             return Ok(());
@@ -66,7 +68,7 @@ impl RepoHomeManager {
             let source = entry.path();
             let dest = self.shadow_home.join(&file_name);
 
-            if self.should_exclude(&file_name) {
+            if self.should_exclude(&file_name, repo_only) {
                 continue;
             }
 
@@ -110,18 +112,25 @@ impl RepoHomeManager {
         Ok(())
     }
 
-    fn should_exclude(&self, file_name: &std::ffi::OsStr) -> bool {
-        let excluded = self.excluded_dirs();
+    fn should_exclude(&self, file_name: &std::ffi::OsStr, repo_only: bool) -> bool {
+        let excluded = self.excluded_dirs(repo_only);
         let file_name_str = file_name.to_string_lossy();
         excluded
             .iter()
             .any(|&excluded| file_name_str == excluded || file_name_str == format!(".{}", excluded))
     }
 
-    fn excluded_dirs(&self) -> Vec<&'static str> {
+    fn excluded_dirs(&self, repo_only: bool) -> Vec<&'static str> {
+        if !repo_only {
+            return match self.agent_offset.as_str() {
+                ".codex" => vec!["prompts"],
+                _ => vec![],
+            };
+        }
+
         match self.agent_offset.as_str() {
             ".claude" => vec!["skills", "commands", "agents", "hooks"],
-            ".codex" => vec!["skills", "agents"],
+            ".codex" => vec!["skills", "agents", "prompts"],
             ".gemini" => vec!["skills", "agents"],
             ".goose" => vec!["skills", "agents"],
             ".kimi" => vec!["skills", "agents"],
@@ -132,43 +141,29 @@ impl RepoHomeManager {
         }
     }
 
-    pub fn is_fresh(&self) -> bool {
-        if !self.shadow_home.exists() {
-            return false;
-        }
+}
 
-        let Ok(shadow_meta) = fs::metadata(&self.shadow_home) else {
-            return false;
-        };
-
-        let Ok(shadow_modified) = shadow_meta.modified() else {
-            return false;
-        };
-
-        let original_home = self.original_home();
-        if !original_home.exists() {
-            return true;
-        }
-
-        if let Ok(original_meta) = fs::metadata(&original_home)
-            && let Ok(original_modified) = original_meta.modified()
-        {
-            return shadow_modified >= original_modified;
-        }
-
-        true
-    }
+pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> bool {
+    repo_only || matches!(provider, Provider::Codex) && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
 }
 
 pub fn build_repo_home_env(
     provider: Provider,
+    cwd: &Path,
+    repo_only: bool,
 ) -> Result<(HashMap<OsString, OsString>, Option<PathBuf>)> {
     let manager = RepoHomeManager::new(provider);
     let shadow_home = manager.ensure_shadow_home()?;
+    manager.sync_shadow_home(repo_only)?;
 
-    if !manager.is_fresh() {
-        manager.sync_shadow_home()?;
-    }
+    let repo_root = resolve_repo_root(cwd);
+    materialize_repo_scoped_resources(
+        provider,
+        &shadow_home,
+        &manager.original_home(),
+        &repo_root,
+        repo_only,
+    )?;
 
     let mut env = HashMap::new();
     // Set HOME to the shadow home root (~/.claudine), not the agent subdirectory
@@ -176,8 +171,278 @@ pub fn build_repo_home_env(
     let shadow_home_root = shadow_home
         .parent()
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("~")).join(".claudine"));
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".claudine")
+        });
     env.insert(OsString::from("HOME"), OsString::from(shadow_home_root));
 
     Ok((env, Some(shadow_home)))
+}
+
+fn materialize_repo_scoped_resources(
+    provider: Provider,
+    shadow_home: &Path,
+    original_home: &Path,
+    repo_root: &Path,
+    repo_only: bool,
+) -> Result<()> {
+    match provider {
+        Provider::Codex => {
+            materialize_codex_prompts(
+                &original_home.join("prompts"),
+                &shadow_home.join("prompts"),
+                repo_root,
+                repo_only,
+            )?;
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn codex_repo_prompts_source(repo_root: &Path) -> Option<PathBuf> {
+    [
+        repo_root.join(".codex/prompts"),
+        repo_root.join(".claude/commands"),
+    ]
+    .into_iter()
+    .find(|path| path.is_dir())
+}
+
+fn materialize_codex_prompts(
+    user_prompts: &Path,
+    dest: &Path,
+    repo_root: &Path,
+    repo_only: bool,
+) -> Result<()> {
+    remove_existing_path(dest)?;
+    fs::create_dir_all(dest)?;
+
+    if !repo_only {
+        merge_prompt_tree(user_prompts, dest, false)?;
+    }
+
+    if let Some(repo_prompts) = codex_repo_prompts_source(repo_root) {
+        merge_prompt_tree(&repo_prompts, dest, true)?;
+    }
+
+    Ok(())
+}
+
+fn merge_prompt_tree(source_root: &Path, dest_root: &Path, overwrite: bool) -> Result<()> {
+    if !source_root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(source_root)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let Some(file_name) = source_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        let dest_path = dest_root.join(file_name);
+
+        if source_path.is_dir() {
+            fs::create_dir_all(&dest_path)?;
+            merge_prompt_tree(&source_path, &dest_path, overwrite)?;
+            continue;
+        }
+
+        if overwrite {
+            remove_existing_path(&dest_path)?;
+        } else if dest_path.exists() || dest_path.is_symlink() {
+            continue;
+        }
+
+        link_or_copy_file(&source_path, &dest_path)?;
+    }
+
+    Ok(())
+}
+
+fn link_or_copy_file(source: &Path, dest: &Path) -> Result<()> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, dest)?;
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(()) = std::os::windows::fs::symlink_file(source, dest) {
+            return Ok(());
+        }
+        fs::copy(source, dest)?;
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        fs::copy(source, dest)?;
+    }
+
+    Ok(())
+}
+
+fn remove_existing_path(path: &Path) -> Result<()> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(path)?;
+    } else if metadata.is_dir() {
+        fs::remove_dir_all(path)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn codex_repo_prompts_source_prefers_codex_dir_then_claude_commands() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path();
+        let claude_commands = repo_root.join(".claude/commands");
+        let codex_prompts = repo_root.join(".codex/prompts");
+
+        fs::create_dir_all(&claude_commands).unwrap();
+        assert_eq!(
+            codex_repo_prompts_source(repo_root).as_deref(),
+            Some(claude_commands.as_path())
+        );
+
+        fs::create_dir_all(&codex_prompts).unwrap();
+        assert_eq!(
+            codex_repo_prompts_source(repo_root).as_deref(),
+            Some(codex_prompts.as_path())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_repo_scoped_resources_merges_user_and_repo_prompts() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path().join("repo");
+        let shadow_home = tmp.path().join("shadow/.codex");
+        let original_home = tmp.path().join("home/.codex");
+        let user_prompts = original_home.join("prompts");
+        let claude_commands = repo_root.join(".claude/commands");
+        let prompts_dir = shadow_home.join("prompts");
+        let repo_review = claude_commands.join("review.md");
+        let user_review = user_prompts.join("review.md");
+        let user_commit = user_prompts.join("commit.md");
+
+        fs::create_dir_all(&claude_commands).unwrap();
+        fs::create_dir_all(&user_prompts).unwrap();
+        fs::create_dir_all(&shadow_home).unwrap();
+        fs::write(&user_review, "user review").unwrap();
+        fs::write(&user_commit, "user commit").unwrap();
+        fs::write(&repo_review, "repo review").unwrap();
+        fs::create_dir_all(claude_commands.join("nested")).unwrap();
+        fs::write(claude_commands.join("nested/plan.md"), "repo nested").unwrap();
+
+        materialize_repo_scoped_resources(
+            Provider::Codex,
+            &shadow_home,
+            &original_home,
+            &repo_root,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), repo_review);
+        assert_eq!(fs::read_link(prompts_dir.join("commit.md")).unwrap(), user_commit);
+        assert_eq!(
+            fs::read_link(prompts_dir.join("nested/plan.md")).unwrap(),
+            claude_commands.join("nested/plan.md")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_repo_scoped_resources_repo_only_uses_repo_prompts() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path().join("repo");
+        let shadow_home = tmp.path().join("shadow/.codex");
+        let original_home = tmp.path().join("home/.codex");
+        let user_prompts = original_home.join("prompts");
+        let claude_commands = repo_root.join(".claude/commands");
+        let prompts_dir = shadow_home.join("prompts");
+
+        fs::create_dir_all(&user_prompts).unwrap();
+        fs::create_dir_all(&claude_commands).unwrap();
+        fs::create_dir_all(&shadow_home).unwrap();
+        fs::write(user_prompts.join("commit.md"), "user commit").unwrap();
+        fs::write(claude_commands.join("review.md"), "repo review").unwrap();
+
+        materialize_repo_scoped_resources(
+            Provider::Codex,
+            &shadow_home,
+            &original_home,
+            &repo_root,
+            true,
+        )
+        .unwrap();
+
+        assert!(fs::symlink_metadata(prompts_dir.join("commit.md")).is_err());
+        assert_eq!(
+            fs::read_link(prompts_dir.join("review.md")).unwrap(),
+            claude_commands.join("review.md")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_repo_scoped_resources_replaces_existing_repo_overlay_when_switching_repos() {
+        let tmp = TempDir::new().unwrap();
+        let first_repo = tmp.path().join("repo-one");
+        let second_repo = tmp.path().join("repo-two");
+        let original_home = tmp.path().join("home/.codex");
+        let shadow_home = tmp.path().join("shadow/.codex");
+        let prompts_dir = shadow_home.join("prompts");
+        let first_review = first_repo.join(".claude/commands/review.md");
+        let second_review = second_repo.join(".claude/commands/review.md");
+
+        fs::create_dir_all(first_review.parent().unwrap()).unwrap();
+        fs::create_dir_all(second_review.parent().unwrap()).unwrap();
+        fs::create_dir_all(&shadow_home).unwrap();
+        fs::create_dir_all(original_home.join("prompts")).unwrap();
+        fs::write(&first_review, "repo one").unwrap();
+        fs::write(&second_review, "repo two").unwrap();
+
+        materialize_repo_scoped_resources(
+            Provider::Codex,
+            &shadow_home,
+            &original_home,
+            &first_repo,
+            false,
+        )
+        .unwrap();
+        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), first_review);
+
+        materialize_repo_scoped_resources(
+            Provider::Codex,
+            &shadow_home,
+            &original_home,
+            &second_repo,
+            false,
+        )
+        .unwrap();
+        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), second_review);
+    }
 }
