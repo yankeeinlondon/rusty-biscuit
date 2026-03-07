@@ -355,3 +355,7 @@ _ensure-build-deps:
         exit 1
     fi
     echo "Build dependencies installed."
+
+# sync a just recipe from one justfile to all others that have it
+sync-recipe recipe source:
+    @./scripts/sync-recipe.sh "{{recipe}}" "{{source}}"
