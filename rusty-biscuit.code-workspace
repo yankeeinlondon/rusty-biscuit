@@ -5,6 +5,10 @@
             "path": ".ai"
         },
         {
+            "name": "Monorepo Docs",
+            "path": "docs"
+        },
+        {
             "name": "agent-sandbox",
             "path": "agent-sandbox"
         },
