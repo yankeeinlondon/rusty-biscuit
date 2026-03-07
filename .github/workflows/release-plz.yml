@@ -13,7 +13,7 @@ jobs:
   release-plz-pr:
     name: Create Release PR
     runs-on: ubuntu-latest
-    if: github.repository == 'yankeeinlondon/dockhand'
+    if: github.repository == 'yankeeinlondon/rusty-biscuit'
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
@@ -36,7 +36,7 @@ jobs:
   release-plz-release:
     name: Publish Release
     runs-on: ubuntu-latest
-    if: github.repository == 'yankeeinlondon/dockhand'
+    if: github.repository == 'yankeeinlondon/rusty-biscuit'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
