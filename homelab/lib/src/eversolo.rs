@@ -37,6 +37,15 @@ pub struct Eversolo {
     port: u16,
 }
 
+/// Effective network-visible power state for an Eversolo streamer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectivePowerState {
+    /// The device is on and not in its display-off idle mode.
+    Active,
+    /// The device is reachable but appears to be idling with the display off.
+    Standby,
+}
+
 impl Eversolo {
     /// Creates a new Eversolo client.
     ///
@@ -278,5 +287,63 @@ impl Eversolo {
                 SystemChangeVuDisplayRequest::new().with_open_type(open_type),
             )
             .await?)
+    }
+}
+
+/// Returns whether the streamer is actively playing media.
+pub fn is_actively_playing(playback_state: i32) -> bool {
+    playback_state == 1
+}
+
+/// Infers the effective power state from playback plus screen brightness.
+///
+/// The Eversolo only has true `on` and `off` power states. The front panel can
+/// still enter an idle display-off mode while remaining reachable over HTTP.
+/// We treat that as an effective standby state when playback is not active and
+/// the screen brightness is reported as off.
+pub fn infer_effective_power_state(
+    playback_state: i32,
+    screen_brightness: Option<i32>,
+) -> EffectivePowerState {
+    if !is_actively_playing(playback_state) && screen_brightness.is_some_and(|value| value <= 0) {
+        EffectivePowerState::Standby
+    } else {
+        EffectivePowerState::Active
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EffectivePowerState, infer_effective_power_state, is_actively_playing};
+
+    #[test]
+    fn playing_state_is_active_playback() {
+        assert!(is_actively_playing(1));
+        assert!(!is_actively_playing(0));
+        assert!(!is_actively_playing(2));
+    }
+
+    #[test]
+    fn infers_standby_only_when_not_playing_and_screen_is_off() {
+        assert_eq!(
+            infer_effective_power_state(0, Some(0)),
+            EffectivePowerState::Standby
+        );
+        assert_eq!(
+            infer_effective_power_state(2, Some(0)),
+            EffectivePowerState::Standby
+        );
+        assert_eq!(
+            infer_effective_power_state(1, Some(0)),
+            EffectivePowerState::Active
+        );
+        assert_eq!(
+            infer_effective_power_state(0, Some(1)),
+            EffectivePowerState::Active
+        );
+        assert_eq!(
+            infer_effective_power_state(0, None),
+            EffectivePowerState::Active
+        );
     }
 }
