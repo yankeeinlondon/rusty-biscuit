@@ -51,6 +51,14 @@ pub enum ClaudineError {
         path: PathBuf,
     },
 
+    /// SQLite access failed while working with the reporting index.
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    /// Date or timestamp parsing failed.
+    #[error("date/time parse error: {0}")]
+    ChronoParse(#[from] chrono::ParseError),
+
     /// Regex compilation failed.
     #[error("invalid regex pattern: {0}")]
     RegexError(#[from] regex::Error),
@@ -86,6 +94,19 @@ pub enum ClaudineError {
     /// Failed mapping a protect outcome to provider-native enforcement.
     #[error("protect enforcement mapping error: {0}")]
     ProtectEnforcementMapping(String),
+
+    /// Required Claudine reporting path could not be determined.
+    #[error("reporting path unavailable: {0}")]
+    ReportingPathUnavailable(String),
+
+    /// Reporting date range is invalid.
+    #[error("invalid reporting date range: {from} > {to}")]
+    InvalidReportingDateRange {
+        /// Inclusive range start.
+        from: String,
+        /// Inclusive range end.
+        to: String,
+    },
 }
 
 /// Convenience type alias for Claudine results.

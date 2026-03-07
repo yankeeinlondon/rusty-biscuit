@@ -40,6 +40,7 @@ async fn main() -> Result<()> {
             commands::slash_commands::run(args, cli.verbose > 0).await
         }
         Some(Commands::Providers) => commands::providers::run(),
+        Some(Commands::Logs(args)) => commands::logs::run(args).await,
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         Some(Commands::Claude(args)) => {
             commands::wrap::run_provider_wrapper(Provider::Claude, args)

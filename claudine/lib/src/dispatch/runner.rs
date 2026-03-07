@@ -14,6 +14,7 @@ use crate::actions::{
 };
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
+use crate::reporting::paths;
 use crate::services::{ProtectDecision, ProtectOutcome};
 
 /// Execute hook actions in declaration order.
@@ -296,7 +297,7 @@ fn execute_fire_and_forget(command: &str, args: Option<&[String]>, meta: &EventM
 async fn execute_log(target: &LogTarget, meta: &EventMeta) -> Result<()> {
     match target {
         LogTarget::File { path, rotate_daily } => {
-            let resolved = resolve_file_log_path(path.as_deref(), *rotate_daily);
+            let resolved = paths::resolve_file_log_path(path.as_deref(), *rotate_daily)?;
             write_jsonl(&resolved, meta)
         }
         LogTarget::Server {
@@ -308,33 +309,6 @@ async fn execute_log(target: &LogTarget, meta: &EventMeta) -> Result<()> {
             Ok(())
         }
     }
-}
-
-fn resolve_file_log_path(path: Option<&std::path::Path>, rotate_daily: bool) -> std::path::PathBuf {
-    if let Some(path) = path {
-        return expand_tilde(path);
-    }
-
-    let base = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("~"))
-        .join(".claudine")
-        .join("logs");
-
-    if rotate_daily {
-        let file = format!("{}.jsonl", chrono::Local::now().format("%Y-%m-%d"));
-        base.join(file)
-    } else {
-        base.join("events.jsonl")
-    }
-}
-
-fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
-    if path.starts_with("~")
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(path.strip_prefix("~").unwrap_or(path));
-    }
-    path.to_path_buf()
 }
 
 fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {

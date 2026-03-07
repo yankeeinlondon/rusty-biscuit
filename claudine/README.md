@@ -34,6 +34,9 @@ claudine hooks
 
 # Link skills across providers
 claudine link
+
+# Review today's agent activity
+claudine logs
 ```
 
 ## CLI Commands
@@ -49,6 +52,7 @@ claudine link
 | `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
 | `claudine dry-run <event> [--provider]` | Test event handling without side effects |
@@ -72,6 +76,7 @@ Configuration is stored in `~/.claudine/config.json` (user-scoped) or `<repo>/.c
 - [Shared Event Model](./docs/shared-event-model.md) - Universal event abstraction (16 events)
 - [Agent Configuration](./docs/agent-configuration.md) - Per-provider setup details
 - [Skill Linking](./docs/skill-linking.md) - Cross-provider skill synchronization
+- [Log Reporting](./docs/log-reporting.md) - JSONL-to-SQLite reporting model and `claudine logs`
 - [Provider Hooks](./docs/hooks/) - Per-provider hook specifications
 
 ## Key Dependencies

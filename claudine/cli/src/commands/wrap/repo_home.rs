@@ -140,11 +140,12 @@ impl RepoHomeManager {
             _ => vec!["skills", "commands", "agents", "hooks"],
         }
     }
-
 }
 
 pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> bool {
-    repo_only || matches!(provider, Provider::Codex) && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
+    repo_only
+        || matches!(provider, Provider::Codex)
+            && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
 }
 
 pub fn build_repo_home_env(
@@ -365,8 +366,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), repo_review);
-        assert_eq!(fs::read_link(prompts_dir.join("commit.md")).unwrap(), user_commit);
+        assert_eq!(
+            fs::read_link(prompts_dir.join("review.md")).unwrap(),
+            repo_review
+        );
+        assert_eq!(
+            fs::read_link(prompts_dir.join("commit.md")).unwrap(),
+            user_commit
+        );
         assert_eq!(
             fs::read_link(prompts_dir.join("nested/plan.md")).unwrap(),
             claude_commands.join("nested/plan.md")
@@ -433,7 +440,10 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), first_review);
+        assert_eq!(
+            fs::read_link(prompts_dir.join("review.md")).unwrap(),
+            first_review
+        );
 
         materialize_repo_scoped_resources(
             Provider::Codex,
@@ -443,6 +453,9 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(fs::read_link(prompts_dir.join("review.md")).unwrap(), second_review);
+        assert_eq!(
+            fs::read_link(prompts_dir.join("review.md")).unwrap(),
+            second_review
+        );
     }
 }

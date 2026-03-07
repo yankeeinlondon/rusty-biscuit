@@ -648,13 +648,9 @@ fn codex_capabilities() -> ProviderCapabilities {
         // Current Codex docs state prompt files live in the local Codex home and
         // are not shared through the repository, so repo_path is intentionally empty.
         // TODO: remove when Codex fully drops prompt files.
-        commands: ResourceSupport::custom_format(
-            ResourceFormat::Markdown,
-            "",
-            ".codex/prompts",
-        )
-        .with_note("Deprecated custom prompts; user scope only; prefer skills")
-        .with_properties(CODEX_COMMAND_SCHEMA),
+        commands: ResourceSupport::custom_format(ResourceFormat::Markdown, "", ".codex/prompts")
+            .with_note("Deprecated custom prompts; user scope only; prefer skills")
+            .with_properties(CODEX_COMMAND_SCHEMA),
         agents: ResourceSupport::full(ResourceFormat::Markdown, ".codex/agents", ".codex/agents"),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,

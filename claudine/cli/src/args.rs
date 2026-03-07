@@ -42,6 +42,8 @@ pub(crate) enum Commands {
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers,
+    /// Query and sync Claudine JSONL logs through the reporting index.
+    Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
     /// Wrap Claude Code with Claudine preflight/env handling.

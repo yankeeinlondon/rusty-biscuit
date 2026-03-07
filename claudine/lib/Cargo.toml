@@ -50,6 +50,9 @@ tracing = "0.1"
 # File locking
 fs2 = "0.4"
 
+# SQLite reporting index
+rusqlite = { version = "0.31", features = ["chrono", "serde_json"] }
+
 # Directory traversal
 walkdir = "2.5"
 

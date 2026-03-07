@@ -4,7 +4,7 @@ Core library for the Claudine cross-agent event handling and skill linking syste
 
 ## Architecture
 
-The library is organized into eight top-level modules:
+The library is organized into nine top-level modules:
 
 ```
 claudine/lib/src/
@@ -15,6 +15,7 @@ claudine/lib/src/
 ├── dispatch/    → Event processing pipeline
 ├── events/      → Normalized event model and types
 ├── linking/     → Cross-provider skill and command synchronization
+├── reporting/   → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/    → Cross-provider policy services (Protect)
 └── error.rs     → ClaudineError enum
 ```
@@ -177,6 +178,17 @@ Cross-provider policy engines that operate on normalized event context:
 
 - `protect` — Capability-aware policy evaluation service used to normalize safety decisions (`allow`, `ask`, `stop`, `advisory`) across providers with different control surfaces.
 
+### Reporting (`reporting`)
+
+Library-first reporting over Claudine's JSONL event logs:
+
+- `ReportingStore` — opens `~/.claudine/logs/metrics.db`, creates the schema, syncs JSONL logs, and exposes typed query methods
+- `paths` — shared log/db path resolution so log writing and reporting use the same filesystem layout
+- `ingest` — incremental JSONL ingestion keyed by `(source_file, source_offset)` with conservative session fallback rules
+- `queries` — typed daily summary, sessions, tools, errors, repos, and trends queries
+- `metrics` — derived metrics such as autonomy ratio, research-vs-action ratio, recovery rate, and context pressure
+- `types` — stable result models used by both terminal rendering and `--json` output
+
 ## Action Execution
 
 | Action | Behavior | Blocking |
@@ -201,6 +213,7 @@ Cross-provider policy engines that operate on normalized event context:
 | `tokio` | Async runtime for concurrent action execution |
 | `regex` | Event matcher and mapper pattern compilation |
 | `reqwest` | HTTP client for log server POSTing |
+| `rusqlite` | SQLite-backed reporting index and query layer |
 | `toml_edit` | Format-preserving TOML edits (Codex config) |
 | `thiserror` | Error type derivation |
 | `walkdir` | Directory traversal for skill discovery |

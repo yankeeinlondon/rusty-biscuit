@@ -1,0 +1,642 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use biscuit_hash::xx_hash_bytes;
+use chrono::{Local, Utc};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde_json::Value;
+
+use crate::error::Result;
+use crate::events::EventMeta;
+
+use super::paths;
+use super::types::{DateRange, SyncFailure, SyncRequest, SyncSummary};
+
+#[derive(Debug)]
+struct IngestionStateRow {
+    file_size: i64,
+    fingerprint: String,
+    byte_offset: i64,
+}
+
+#[derive(Debug, Default)]
+struct FileSyncStats {
+    rebuilt: bool,
+    inserted: u64,
+    skipped: u64,
+    anonymous_session_fallbacks: u64,
+}
+
+#[derive(Debug)]
+struct PreparedEvent {
+    source_file: String,
+    source_offset: i64,
+    source_date: String,
+    timestamp: String,
+    provider: String,
+    event: String,
+    session_key: String,
+    session_id: Option<String>,
+    cwd: Option<String>,
+    repo_name: Option<String>,
+    repo_org: Option<String>,
+    branch: Option<String>,
+    primary_language: Option<String>,
+    tool_name: Option<String>,
+    agent_type: Option<String>,
+    notification_type: Option<String>,
+    notification_message: Option<String>,
+    error: Option<String>,
+    model: Option<String>,
+    permission_mode: Option<String>,
+    head_sha: Option<String>,
+    is_dirty: Option<i64>,
+    memory_available_bytes: Option<i64>,
+    hostname: Option<String>,
+    prompt_text: Option<String>,
+    tool_input_json: Option<String>,
+    tool_response_json: Option<String>,
+    extra_json: String,
+    env_json: String,
+    anonymous_session_fallback: bool,
+}
+
+/// Sync JSONL event logs into the SQLite reporting index.
+pub(crate) fn sync(
+    conn: &mut Connection,
+    logs_dir: &Path,
+    request: SyncRequest,
+) -> Result<SyncSummary> {
+    let mut summary = SyncSummary::default();
+    let files = discover_log_files(logs_dir, request)?;
+
+    for file in files {
+        summary.files_scanned += 1;
+        match sync_file(conn, &file) {
+            Ok(stats) => {
+                if stats.rebuilt {
+                    summary.files_rebuilt += 1;
+                }
+                summary.events_inserted += stats.inserted;
+                summary.events_skipped += stats.skipped;
+                summary.anonymous_session_fallbacks += stats.anonymous_session_fallbacks;
+            }
+            Err(failure) => {
+                summary.parse_failures += 1;
+                summary.failures.push(failure);
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+fn discover_log_files(logs_dir: &Path, request: SyncRequest) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    if !logs_dir.exists() {
+        return Ok(files);
+    }
+
+    for entry in std::fs::read_dir(logs_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+
+        let include = match request {
+            SyncRequest::All => true,
+            SyncRequest::Date(date) => {
+                paths::daily_log_date_from_path(&path).is_none_or(|file_date| file_date == date)
+            }
+            SyncRequest::Range(DateRange { from, to }) => paths::daily_log_date_from_path(&path)
+                .is_none_or(|file_date| file_date >= from && file_date <= to),
+        };
+
+        if include {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn sync_file(
+    conn: &mut Connection,
+    path: &Path,
+) -> std::result::Result<FileSyncStats, SyncFailure> {
+    let metadata = std::fs::metadata(path).map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    let file_size = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or_default();
+    let fingerprint = file_fingerprint(path).map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    let state = load_state(conn, path).map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    let rebuild = state
+        .as_ref()
+        .is_some_and(|state| file_size < state.file_size || fingerprint != state.fingerprint);
+    let start_offset = if rebuild {
+        0
+    } else {
+        state
+            .as_ref()
+            .map(|state| state.byte_offset.min(file_size))
+            .unwrap_or(0)
+    };
+
+    if start_offset == file_size && !rebuild {
+        return Ok(FileSyncStats::default());
+    }
+
+    let mut stats = FileSyncStats {
+        rebuilt: rebuild,
+        ..FileSyncStats::default()
+    };
+
+    let tx = conn.transaction().map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    if rebuild {
+        tx.execute(
+            "DELETE FROM events WHERE source_file = ?1",
+            params![path.display().to_string()],
+        )
+        .map_err(|error| SyncFailure {
+            source_file: path.display().to_string(),
+            line_number: 0,
+            message: error.to_string(),
+        })?;
+    }
+
+    let mut file = BufReader::new(File::open(path).map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?);
+    file.seek(SeekFrom::Start(start_offset as u64))
+        .map_err(|error| SyncFailure {
+            source_file: path.display().to_string(),
+            line_number: 0,
+            message: error.to_string(),
+        })?;
+
+    let mut source_offset = start_offset as u64;
+    let mut buffer = Vec::new();
+    let mut line_number = count_lines_before(path, start_offset as u64).unwrap_or(0) + 1;
+    let mut last_event_timestamp: Option<String> = None;
+
+    loop {
+        buffer.clear();
+        let bytes_read = file
+            .read_until(b'\n', &mut buffer)
+            .map_err(|error| SyncFailure {
+                source_file: path.display().to_string(),
+                line_number,
+                message: error.to_string(),
+            })?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let raw_line = String::from_utf8_lossy(&buffer);
+        let line = raw_line.trim_end_matches(['\n', '\r']);
+        if line.trim().is_empty() {
+            source_offset += bytes_read as u64;
+            line_number += 1;
+            continue;
+        }
+
+        let meta: EventMeta = serde_json::from_str(line).map_err(|error| SyncFailure {
+            source_file: path.display().to_string(),
+            line_number,
+            message: error.to_string(),
+        })?;
+
+        let prepared =
+            prepare_event(path, source_offset as i64, meta).map_err(|error| SyncFailure {
+                source_file: path.display().to_string(),
+                line_number,
+                message: error.to_string(),
+            })?;
+
+        let inserted = insert_event(&tx, &prepared).map_err(|error| SyncFailure {
+            source_file: path.display().to_string(),
+            line_number,
+            message: error.to_string(),
+        })?;
+
+        if inserted {
+            stats.inserted += 1;
+            stats.anonymous_session_fallbacks += u64::from(prepared.anonymous_session_fallback);
+
+            if !rebuild {
+                upsert_session(&tx, &prepared).map_err(|error| SyncFailure {
+                    source_file: path.display().to_string(),
+                    line_number,
+                    message: error.to_string(),
+                })?;
+            }
+        } else {
+            stats.skipped += 1;
+        }
+
+        last_event_timestamp = Some(prepared.timestamp.clone());
+        source_offset += bytes_read as u64;
+        line_number += 1;
+    }
+
+    if rebuild {
+        rebuild_sessions(&tx).map_err(|error| SyncFailure {
+            source_file: path.display().to_string(),
+            line_number: 0,
+            message: error.to_string(),
+        })?;
+    }
+
+    save_state(
+        &tx,
+        path,
+        file_size,
+        modified_at,
+        &fingerprint,
+        source_offset as i64,
+        last_event_timestamp.as_deref(),
+    )
+    .map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    tx.commit().map_err(|error| SyncFailure {
+        source_file: path.display().to_string(),
+        line_number: 0,
+        message: error.to_string(),
+    })?;
+
+    Ok(stats)
+}
+
+fn load_state(conn: &Connection, path: &Path) -> Result<Option<IngestionStateRow>> {
+    conn.query_row(
+        "SELECT file_size, fingerprint, byte_offset FROM ingestion_state WHERE source_file = ?1",
+        params![path.display().to_string()],
+        |row| {
+            Ok(IngestionStateRow {
+                file_size: row.get(0)?,
+                fingerprint: row.get(1)?,
+                byte_offset: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn file_fingerprint(path: &Path) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut buffer = [0_u8; 4096];
+    let read = file.read(&mut buffer)?;
+    Ok(format!("{:016x}", xx_hash_bytes(&buffer[..read])))
+}
+
+fn count_lines_before(path: &Path, upto: u64) -> Result<usize> {
+    if upto == 0 {
+        return Ok(0);
+    }
+
+    let mut file = File::open(path)?;
+    let mut remaining = upto;
+    let mut count = 0usize;
+    let mut buffer = [0_u8; 8192];
+
+    while remaining > 0 {
+        let next = usize::try_from(remaining.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        let read = file.read(&mut buffer[..next])?;
+        if read == 0 {
+            break;
+        }
+        count += buffer[..read].iter().filter(|byte| **byte == b'\n').count();
+        remaining -= read as u64;
+    }
+
+    Ok(count)
+}
+
+fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<PreparedEvent> {
+    let provider = meta.provider.as_slug().to_string();
+    let source_file = path.display().to_string();
+    let source_date = paths::daily_log_date_from_path(path)
+        .unwrap_or_else(|| meta.timestamp.with_timezone(&Local).date_naive())
+        .format("%Y-%m-%d")
+        .to_string();
+    let (session_key, anonymous_fallback) = session_key(&meta, &source_file, source_offset);
+
+    let repo = meta.env.git.as_ref();
+    let tool_input_json = meta
+        .tool_input
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let tool_response_json = meta
+        .tool_response
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let extra_json = serde_json::to_string(&meta.extra)?;
+    let env_json = serde_json::to_string(&meta.env)?;
+
+    let prepared = PreparedEvent {
+        source_file,
+        source_offset,
+        source_date,
+        timestamp: meta.timestamp.to_rfc3339(),
+        provider,
+        event: meta.event.as_slug().to_string(),
+        session_key,
+        session_id: meta.session_id.clone(),
+        cwd: meta.cwd.clone(),
+        repo_name: repo.and_then(|git| git.repo_name.clone()),
+        repo_org: repo.and_then(|git| git.repo_org.clone()),
+        branch: repo.and_then(|git| git.branch.clone()),
+        primary_language: meta.env.primary_language.clone(),
+        tool_name: meta.tool_name.clone(),
+        agent_type: meta.agent_type.clone(),
+        notification_type: meta.notification_type.clone(),
+        notification_message: meta.notification_message.clone(),
+        error: meta.error.clone(),
+        model: extra_path_string(&meta.extra, &["model"]),
+        permission_mode: extra_path_string(&meta.extra, &["permission_mode"]),
+        head_sha: repo.and_then(|git| git.head_sha.clone()),
+        is_dirty: repo.map(|git| i64::from(git.is_dirty)),
+        memory_available_bytes: Some(
+            i64::try_from(meta.env.hardware.memory_available_bytes).unwrap_or(i64::MAX),
+        ),
+        hostname: (!meta.env.os.hostname.is_empty()).then(|| meta.env.os.hostname.clone()),
+        prompt_text: meta.prompt.clone(),
+        tool_input_json,
+        tool_response_json,
+        extra_json,
+        env_json,
+        anonymous_session_fallback: anonymous_fallback,
+    };
+
+    Ok(prepared)
+}
+
+fn session_key(meta: &EventMeta, source_file: &str, source_offset: i64) -> (String, bool) {
+    if let Some(session_id) = meta.session_id.as_deref()
+        && !session_id.trim().is_empty()
+    {
+        return (format!("{}:{session_id}", meta.provider.as_slug()), false);
+    }
+
+    let fallback = [
+        ["transcript_path"].as_slice(),
+        ["thread_id"].as_slice(),
+        ["thread-id"].as_slice(),
+        ["session_path"].as_slice(),
+        ["context_path"].as_slice(),
+        ["wire_path"].as_slice(),
+        ["conversation_id"].as_slice(),
+        ["plugin_context", "session_id"].as_slice(),
+        ["plugin_context", "sessionId"].as_slice(),
+    ]
+    .iter()
+    .find_map(|path| extra_path_string(&meta.extra, path));
+
+    if let Some(fallback) = fallback {
+        return (format!("{}:{fallback}", meta.provider.as_slug()), false);
+    }
+
+    (
+        format!("{}:{source_file}:{source_offset}", meta.provider.as_slug()),
+        true,
+    )
+}
+
+fn extra_path_string(
+    extra: &std::collections::HashMap<String, Value>,
+    path: &[&str],
+) -> Option<String> {
+    let mut current = extra.get(*path.first()?)?;
+    for segment in &path[1..] {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(ToOwned::to_owned)
+}
+
+fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
+    let inserted = tx.execute(
+        r#"
+        INSERT OR IGNORE INTO events (
+            source_file, source_offset, source_date, timestamp, provider, event,
+            session_key, session_id, cwd, repo_name, repo_org, branch, primary_language,
+            tool_name, agent_type, notification_type, notification_message, error, model,
+            permission_mode, head_sha, is_dirty, memory_available_bytes, hostname,
+            prompt_text, tool_input_json, tool_response_json, extra_json, env_json
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+            ?14, ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23, ?24,
+            ?25, ?26, ?27, ?28, ?29
+        )
+        "#,
+        params![
+            row.source_file,
+            row.source_offset,
+            row.source_date,
+            row.timestamp,
+            row.provider,
+            row.event,
+            row.session_key,
+            row.session_id,
+            row.cwd,
+            row.repo_name,
+            row.repo_org,
+            row.branch,
+            row.primary_language,
+            row.tool_name,
+            row.agent_type,
+            row.notification_type,
+            row.notification_message,
+            row.error,
+            row.model,
+            row.permission_mode,
+            row.head_sha,
+            row.is_dirty,
+            row.memory_available_bytes,
+            row.hostname,
+            row.prompt_text,
+            row.tool_input_json,
+            row.tool_response_json,
+            row.extra_json,
+            row.env_json,
+        ],
+    )?;
+
+    Ok(inserted > 0)
+}
+
+fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
+    let turn_count = i64::from(row.event == "turn_complete");
+    let tool_call_count = i64::from(row.event == "before_tool");
+    let tool_error_count = i64::from(row.event == "tool_error");
+    let turn_error_count = i64::from(row.event == "turn_error");
+    let subagent_count = i64::from(row.event == "subagent_start");
+
+    tx.execute(
+        r#"
+        INSERT INTO sessions (
+            session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
+            branch, model, permission_mode, hostname, primary_language, event_count, turn_count,
+            tool_call_count, tool_error_count, turn_error_count, subagent_count
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10, ?11, ?12, 1, ?13,
+            ?14, ?15, ?16, ?17
+        )
+        ON CONFLICT(session_key) DO UPDATE SET
+            session_id = COALESCE(excluded.session_id, sessions.session_id),
+            provider = excluded.provider,
+            started_at = MIN(sessions.started_at, excluded.started_at),
+            ended_at = MAX(sessions.ended_at, excluded.ended_at),
+            cwd = COALESCE(excluded.cwd, sessions.cwd),
+            repo_name = COALESCE(excluded.repo_name, sessions.repo_name),
+            repo_org = COALESCE(excluded.repo_org, sessions.repo_org),
+            branch = COALESCE(excluded.branch, sessions.branch),
+            model = COALESCE(excluded.model, sessions.model),
+            permission_mode = COALESCE(excluded.permission_mode, sessions.permission_mode),
+            hostname = COALESCE(excluded.hostname, sessions.hostname),
+            primary_language = COALESCE(excluded.primary_language, sessions.primary_language),
+            event_count = sessions.event_count + 1,
+            turn_count = sessions.turn_count + excluded.turn_count,
+            tool_call_count = sessions.tool_call_count + excluded.tool_call_count,
+            tool_error_count = sessions.tool_error_count + excluded.tool_error_count,
+            turn_error_count = sessions.turn_error_count + excluded.turn_error_count,
+            subagent_count = sessions.subagent_count + excluded.subagent_count
+        "#,
+        params![
+            row.session_key,
+            row.session_id,
+            row.provider,
+            row.timestamp,
+            row.cwd,
+            row.repo_name,
+            row.repo_org,
+            row.branch,
+            row.model,
+            row.permission_mode,
+            row.hostname,
+            row.primary_language,
+            turn_count,
+            tool_call_count,
+            tool_error_count,
+            turn_error_count,
+            subagent_count,
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute("DELETE FROM sessions", [])?;
+    tx.execute_batch(
+        r#"
+        INSERT INTO sessions (
+            session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
+            branch, model, permission_mode, hostname, primary_language, event_count, turn_count,
+            tool_call_count, tool_error_count, turn_error_count, subagent_count
+        )
+        SELECT
+            session_key,
+            MAX(session_id),
+            MAX(provider),
+            MIN(timestamp),
+            MAX(timestamp),
+            MAX(cwd),
+            MAX(repo_name),
+            MAX(repo_org),
+            MAX(branch),
+            MAX(model),
+            MAX(permission_mode),
+            MAX(hostname),
+            MAX(primary_language),
+            COUNT(*),
+            SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN event = 'turn_error' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN event = 'subagent_start' THEN 1 ELSE 0 END)
+        FROM events
+        GROUP BY session_key;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn save_state(
+    tx: &Transaction<'_>,
+    path: &Path,
+    file_size: i64,
+    modified_at: i64,
+    fingerprint: &str,
+    byte_offset: i64,
+    last_event_timestamp: Option<&str>,
+) -> Result<()> {
+    tx.execute(
+        r#"
+        INSERT INTO ingestion_state (
+            source_file, file_size, modified_at, fingerprint, byte_offset,
+            last_event_timestamp, last_synced_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(source_file) DO UPDATE SET
+            file_size = excluded.file_size,
+            modified_at = excluded.modified_at,
+            fingerprint = excluded.fingerprint,
+            byte_offset = excluded.byte_offset,
+            last_event_timestamp = excluded.last_event_timestamp,
+            last_synced_at = excluded.last_synced_at
+        "#,
+        params![
+            path.display().to_string(),
+            file_size,
+            modified_at,
+            fingerprint,
+            byte_offset,
+            last_event_timestamp,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+
+    Ok(())
+}

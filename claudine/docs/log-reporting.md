@@ -4,6 +4,18 @@ Claudine's logging action captures a rich, structured audit trail of every agent
 
 - **IMPORTANT:** This file describes the functional and reporting requirements for a CLI command but we need to make sure we are always focused on the division of responsibilities between a CLI and its underlying library: a CLI is for reporting only, all business logic MUST go into the library!
 
+## Shipped Architecture Notes
+
+The implementation now follows a library-first reporting model:
+
+- JSONL `EventMeta` logs under `~/.claudine/logs/` remain the canonical audit trail and source of truth.
+- SQLite at `~/.claudine/logs/metrics.db` is a derived local index/cache that can be rebuilt from JSONL.
+- The reporting schema starts with raw event rows plus a small `sessions` summary table; common rollups are handled by SQL views and query-time aggregation.
+- Event identity is stable and idempotent via `(source_file, source_offset)`, so `claudine logs sync` can be rerun safely without double-counting.
+- Session identity falls back conservatively: `provider + session_id`, then provider-specific fields such as transcript/thread paths, then `provider + source_file + source_offset`.
+- Read-oriented `claudine logs` commands perform a best-effort sync before querying so users do not need to run `logs sync` manually first.
+- Terminal output intentionally truncates prompts, commands, and error context; the reporting database stores structured payloads, but the CLI does not dump full tool payloads by default.
+
 ## Data Foundation
 
 ### Log Entry Schema (`EventMeta`)
