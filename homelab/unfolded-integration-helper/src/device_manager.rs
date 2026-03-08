@@ -116,6 +116,7 @@ struct ActiveDevice<D: DeviceDriver> {
 }
 
 /// Multi-device manager that owns device lifecycles and routes operations.
+#[derive(Clone)]
 pub struct DeviceManager<D: DeviceDriver> {
     registry: PersistentRegistry,
     devices: Arc<RwLock<HashMap<String, ActiveDevice<D>>>>,

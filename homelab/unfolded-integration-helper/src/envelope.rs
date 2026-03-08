@@ -60,10 +60,14 @@ impl RequestEnvelope {
     ///
     /// Returns an error if the payload is not a valid UC request envelope.
     pub fn parse(value: Value) -> Result<Self, EnvelopeError> {
-        let inner: IntegrationWsRequestEnvelope = serde_json::from_value(value)?;
-        if inner.kind != IntegrationWsEnvelopeKind::Req {
-            return Err(EnvelopeError::UnexpectedKind(inner.kind));
+        let kind: IntegrationWsEnvelopeKind = serde_json::from_value(
+            value.get("kind").cloned().unwrap_or(Value::Null),
+        )?;
+        if kind != IntegrationWsEnvelopeKind::Req {
+            return Err(EnvelopeError::UnexpectedKind(kind));
         }
+
+        let inner: IntegrationWsRequestEnvelope = serde_json::from_value(value)?;
         Ok(Self { inner })
     }
 
@@ -233,5 +237,23 @@ mod tests {
         assert_eq!(response["req_id"], 7);
         assert_eq!(response["code"], 200);
         assert!(response.get("msg_data").is_none());
+    }
+
+    #[test]
+    fn event_without_id_is_rejected_as_unexpected_kind_not_invalid_envelope() {
+        let error = RequestEnvelope::parse(json!({
+            "kind": "event",
+            "msg": "abort_driver_setup",
+            "cat": "DEVICE",
+            "msg_data": {
+                "error": "TIMEOUT"
+            }
+        }))
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            EnvelopeError::UnexpectedKind(IntegrationWsEnvelopeKind::Event)
+        ));
     }
 }

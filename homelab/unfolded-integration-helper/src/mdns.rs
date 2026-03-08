@@ -22,7 +22,9 @@ impl MdnsAdvertiser {
     /// Returns an error if the mDNS daemon cannot be created or the service
     /// cannot be registered.
     pub fn new(
-        driver_name: &str,
+        driver_id: &str,
+        published_name: &str,
+        developer_name: &str,
         driver_version: &str,
         api_version: &str,
         port: u16,
@@ -30,15 +32,16 @@ impl MdnsAdvertiser {
         let daemon = ServiceDaemon::new()?;
 
         let properties = [
-            ("name", driver_name),
-            ("version", driver_version),
+            ("name", published_name),
+            ("ver", driver_version),
+            ("developer", developer_name),
             ("api_version", api_version),
         ];
 
-        let hostname = format!("{}.local.", hostname_slug(driver_name));
+        let hostname = format!("{}.local.", hostname_slug(driver_id));
         let service = ServiceInfo::new(
             UC_SERVICE_TYPE,
-            driver_name,
+            driver_id,
             &hostname,
             "",
             port,
@@ -49,7 +52,9 @@ impl MdnsAdvertiser {
         daemon.register(service)?;
 
         info!(
-            driver = driver_name,
+            driver = driver_id,
+            published_name,
+            developer_name,
             port,
             service_type = UC_SERVICE_TYPE,
             "mDNS advertisement started"
