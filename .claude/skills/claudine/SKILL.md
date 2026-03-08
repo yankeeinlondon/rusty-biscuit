@@ -16,7 +16,6 @@ The dispatch pipeline supports a Handlebars-style template engine with 28 variab
 - [Unified Hook/Event Model](unified-hooks.md)
 - [Supported Actions](hook-actions.md)
 - [Linking Strategy](linking-strategy.md)
-- [Logging Strategy](logging-strategy.md)
 
 ## Claudine CLI
 

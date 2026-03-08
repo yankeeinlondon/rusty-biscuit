@@ -81,6 +81,7 @@
         "DISTROS",
         "DLNA",
         "Dockerfiles",
+        "doctests",
         "dotenvy",
         "doubao",
         "Dpkg",

@@ -82,11 +82,11 @@ In the UC Web Configurator:
 
 ## Running with Docker
 
-The Dockerfile uses a four-stage build (toolchain, dependency cache, compile, scratch runtime) to produce a minimal image (~10 MB) containing only the statically-linked binary.
+The Docker packaging uses a two-stage build: Rust-on-Alpine for compilation, then a small Alpine runtime with an entrypoint that maps environment variables to the integration's CLI flags.
 
 ### Docker Compose (Recommended)
 
-The simplest way to run the integration in a container. Uses `network_mode: host` so the container can reach the Arcam on your LAN and the UC Remote can connect to the WebSocket server.
+The simplest way to run the integration in a container. The checked-in [docker-compose.yaml](docker-compose.yaml) uses `network_mode: host` so the container can reach the Arcam on your LAN and the UC Remote can connect to the WebSocket server.
 
 ```bash
 cd homelab/arcam-amp-integration
@@ -111,6 +111,7 @@ ARCAM_HOST=192.168.1.102 \
 | `LISTEN_PORT` | `9090` | WebSocket listen port |
 | `DEVICE_NAME` | `amp` | Name used in entity IDs |
 | `TIMEOUT` | `5` | Arcam TCP timeout (seconds) |
+| `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
 | `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
 | `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
@@ -119,13 +120,30 @@ ARCAM_HOST=192.168.1.102 \
 Build the image directly and run it yourself:
 
 ```bash
-# Build from the monorepo root (required for workspace context)
+# Recommended from the integration directory
+just build-image
+
+# Or manually from the monorepo root
 docker build -f homelab/arcam-amp-integration/Dockerfile -t arcam-amp-integration .
 
-# Run with host networking
+# Run with host networking and env-based entrypoint defaults
 docker run --rm --network host arcam-amp-integration \
-  --host 192.168.1.102 --device-name office
+  -e ARCAM_HOST=192.168.1.102 \
+  -e DEVICE_NAME=office
 ```
+
+## Validation
+
+From `homelab/arcam-amp-integration/`:
+
+```bash
+just install
+just build-image
+just sanity-test
+just sanity-test-mutate
+```
+
+`sanity-test` requires `ARCAM_REAL_HOST` and optionally `ARCAM_REAL_PORT`. `sanity-test-mutate` additionally requires `ARCAM_REAL_ALLOW_DESTRUCTIVE=1`.
 
 ## State Synchronization
 

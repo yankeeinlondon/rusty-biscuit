@@ -8,7 +8,7 @@ use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
-use super::claudine_command;
+use super::claudine_handle_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 
 /// Name prefix used to identify Claudine-managed hooks in Gemini config.
@@ -107,7 +107,7 @@ impl AgentConfigurator for GeminiConfigurator {
         hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
 
         // Second pass: add/update hooks for events in config
-        let claudine_bin = claudine_command();
+        let handle_command = claudine_handle_command(Provider::Gemini);
         let mut event_count = 0;
         for (event, binding) in &provider_config.events {
             // Skip disabled events
@@ -122,7 +122,7 @@ impl AgentConfigurator for GeminiConfigurator {
             let snake = event.to_string();
             let hook_entry = json!({
                 "name": format!("{CLAUDINE_NAME_PREFIX}{snake}"),
-                "command": format!("{claudine_bin} handle {snake}"),
+                "command": handle_command(&snake),
                 "timeout": 30000,
                 "description": format!("Claudine handler for {snake}")
             });
@@ -362,7 +362,7 @@ mod tests {
         let initial = json!({
             "hooks": {
                 "AfterAgent": [
-                    {"name": "claudine-turn_complete", "command": "claudine handle turn_complete", "timeout": 30000},
+                    {"name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini", "timeout": 30000},
                     {"name": "my-custom-hook", "command": "echo done", "timeout": 5000}
                 ]
             }
@@ -384,7 +384,7 @@ mod tests {
         let settings = tmp.path().join("settings.json");
         fs::write(
             &settings,
-            r#"{"hooks": {"AfterAgent": [{"name": "claudine-turn_complete", "command": "claudine handle turn_complete"}]}}"#,
+            r#"{"hooks": {"AfterAgent": [{"name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini"}]}}"#,
         )
         .unwrap();
 

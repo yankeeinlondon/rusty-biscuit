@@ -1,0 +1,19 @@
+services:
+  eversolo-integration:
+    build:
+      context: ../..
+      dockerfile: homelab/eversolo-integration/Dockerfile
+    network_mode: host
+    environment:
+      EVERSOLO_HOST: ${EVERSOLO_HOST:?Set EVERSOLO_HOST to your Eversolo device IP}
+      EVERSOLO_PORT: ${EVERSOLO_PORT:-9529}
+      LISTEN_PORT: ${LISTEN_PORT:-9092}
+      DEVICE_NAME: ${DEVICE_NAME:-streamer}
+      EVERSOLO_MAC: ${EVERSOLO_MAC:-}
+      WOL_BROADCAST: ${WOL_BROADCAST:-255.255.255.255}
+      WOL_PORT: ${WOL_PORT:-9517}
+      TIMEOUT: ${TIMEOUT:-10}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+      UCR_INTEGRATION_TOKEN: ${UCR_INTEGRATION_TOKEN:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    restart: unless-stopped

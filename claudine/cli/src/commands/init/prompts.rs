@@ -13,11 +13,11 @@ use claudine::services::ProtectPosture;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
-/// Prompt user for ranked provider preferences based on installed provider count.
-///
-/// Returns only the explicitly ranked providers. Remaining installed providers
-/// should be appended alphabetically by the caller.
-pub fn prompt_provider_preferences(installed_providers: &[Provider]) -> Result<Vec<Provider>> {
+/// Prompt user for ranked provider preferences, reusing prior answers as defaults.
+pub fn prompt_provider_preferences_with_defaults(
+    installed_providers: &[Provider],
+    defaults: &[Provider],
+) -> Result<Vec<Provider>> {
     let mut installed = installed_providers.to_vec();
     installed.sort_by_key(|provider| provider.to_string());
     installed.dedup();
@@ -36,13 +36,18 @@ pub fn prompt_provider_preferences(installed_providers: &[Provider]) -> Result<V
     let mut remaining = installed;
     let mut ranked = Vec::new();
 
-    for prompt in prompt_labels.into_iter().take(prompt_count) {
+    for (idx, prompt) in prompt_labels.into_iter().take(prompt_count).enumerate() {
         let options: Vec<String> = remaining
             .iter()
             .map(std::string::ToString::to_string)
             .collect();
+        let starting_cursor = defaults
+            .get(idx)
+            .and_then(|provider| options.iter().position(|option| option == &provider.to_string()))
+            .unwrap_or(0);
         let selected = Select::new(prompt, options.clone())
             .with_help_message("Used for canonical provider ordering")
+            .with_starting_cursor(starting_cursor)
             .prompt()?;
         let index = options
             .iter()
@@ -94,10 +99,14 @@ impl std::fmt::Display for InputActionType {
     }
 }
 
-/// Prompt for global action defaults.
-pub fn prompt_action_profile() -> Result<InitActionProfile> {
-    let logging = prompt_logging_profile()?;
-    let input_required_actions = prompt_input_required_actions()?;
+/// Prompt for global action defaults, reusing prior answers when available.
+pub fn prompt_action_profile_with_defaults(
+    defaults: Option<&InitActionProfile>,
+) -> Result<InitActionProfile> {
+    let logging = prompt_logging_profile(defaults.map(|profile| &profile.logging))?;
+    let input_required_actions = prompt_input_required_actions(
+        defaults.map(|profile| profile.input_required_actions.as_slice()),
+    )?;
 
     Ok(InitActionProfile {
         logging,
@@ -105,10 +114,13 @@ pub fn prompt_action_profile() -> Result<InitActionProfile> {
     })
 }
 
-/// Prompt whether Protect should be enabled and which posture to use.
-pub fn prompt_protect_posture() -> Result<Option<ProtectPosture>> {
+/// Prompt whether Protect should be enabled and which posture to use, reusing a prior answer when
+/// available.
+pub fn prompt_protect_posture_with_default(
+    default: Option<Option<ProtectPosture>>,
+) -> Result<Option<ProtectPosture>> {
     let enabled = Confirm::new("Enable Protect policy engine?")
-        .with_default(true)
+        .with_default(default.unwrap_or(Some(ProtectPosture::Balanced)).is_some())
         .prompt()?;
 
     if !enabled {
@@ -122,7 +134,7 @@ pub fn prompt_protect_posture() -> Result<Option<ProtectPosture>> {
     ];
 
     let selected = Select::new("Select Protect posture:", options)
-        .with_starting_cursor(0)
+        .with_starting_cursor(protect_posture_starting_cursor(default.flatten()))
         .prompt()?;
 
     let posture = match selected {
@@ -134,23 +146,23 @@ pub fn prompt_protect_posture() -> Result<Option<ProtectPosture>> {
     Ok(Some(posture))
 }
 
-fn prompt_logging_profile() -> Result<LoggingProfile> {
+fn prompt_logging_profile(default: Option<&LoggingProfile>) -> Result<LoggingProfile> {
     let options = vec!["All events", "Some events", "No events"];
     let selected = Select::new("Add logging to all, some, or none of the events?", options)
-        .with_starting_cursor(2)
+        .with_starting_cursor(logging_profile_starting_cursor(default))
         .prompt()?;
 
     Ok(match selected {
         "All events" => LoggingProfile::All {
-            target: prompt_log_target()?,
+            target: prompt_log_target(default.and_then(logging_target))?,
         },
         "Some events" => {
-            let events = prompt_logging_event_selection()?;
+            let events = prompt_logging_event_selection(default.and_then(logging_events))?;
             if events.is_empty() {
                 LoggingProfile::None
             } else {
                 LoggingProfile::Some {
-                    target: prompt_log_target()?,
+                    target: prompt_log_target(default.and_then(logging_target))?,
                     events,
                 }
             }
@@ -159,17 +171,29 @@ fn prompt_logging_profile() -> Result<LoggingProfile> {
     })
 }
 
-fn prompt_logging_event_selection() -> Result<HashSet<AgenticEvent>> {
+fn prompt_logging_event_selection(
+    default: Option<&HashSet<AgenticEvent>>,
+) -> Result<HashSet<AgenticEvent>> {
     let options: Vec<String> = INIT_EVENT_DISPLAY_ORDER
         .iter()
         .map(|event| format!("{} - {}", event.as_pascal_case(), event.description()))
         .collect();
 
-    let defaults: Vec<usize> = INIT_EVENT_DISPLAY_ORDER
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, event)| INIT_RECOMMENDED_EVENTS.contains(event).then_some(idx))
-        .collect();
+    let defaults: Vec<usize> = default
+        .map(|events| {
+            INIT_EVENT_DISPLAY_ORDER
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, event)| events.contains(event).then_some(idx))
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            INIT_EVENT_DISPLAY_ORDER
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, event)| INIT_RECOMMENDED_EVENTS.contains(event).then_some(idx))
+                .collect()
+        });
 
     let selected = MultiSelect::new("Select events to log:", options)
         .with_default(&defaults)
@@ -188,14 +212,16 @@ fn prompt_logging_event_selection() -> Result<HashSet<AgenticEvent>> {
         .collect())
 }
 
-fn prompt_log_target() -> Result<LogTarget> {
+fn prompt_log_target(default: Option<&LogTarget>) -> Result<LogTarget> {
     let options = vec![
         "Daily local file (~/.claudine/logs/YYYY-MM-DD.jsonl)",
         "Custom file path",
         "Remote server URL",
     ];
 
-    let selected = Select::new("Where should events be logged?", options).prompt()?;
+    let selected = Select::new("Where should events be logged?", options)
+        .with_starting_cursor(log_target_starting_cursor(default))
+        .prompt()?;
 
     Ok(match selected {
         "Daily local file (~/.claudine/logs/YYYY-MM-DD.jsonl)" => LogTarget::File {
@@ -203,8 +229,15 @@ fn prompt_log_target() -> Result<LogTarget> {
             rotate_daily: true,
         },
         "Custom file path" => {
+            let default_path = match default {
+                Some(LogTarget::File {
+                    path: Some(path),
+                    rotate_daily: false,
+                }) => path.display().to_string(),
+                _ => "~/.claudine/events.jsonl".to_string(),
+            };
             let path = Text::new("Enter file path:")
-                .with_default("~/.claudine/events.jsonl")
+                .with_default(&default_path)
                 .prompt()?;
             LogTarget::File {
                 path: Some(PathBuf::from(shellexpand::tilde(&path).into_owned())),
@@ -212,9 +245,12 @@ fn prompt_log_target() -> Result<LogTarget> {
             }
         }
         "Remote server URL" => {
-            let url_str = Text::new("Enter server URL:")
-                .with_placeholder("https://example.com/events")
-                .prompt()?;
+            let mut prompt = Text::new("Enter server URL:")
+                .with_placeholder("https://example.com/events");
+            if let Some(LogTarget::Server { url, .. }) = default {
+                prompt = prompt.with_default(url);
+            }
+            let url_str = prompt.prompt()?;
             let url = url::Url::parse(&url_str)
                 .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
             LogTarget::Server {
@@ -227,7 +263,7 @@ fn prompt_log_target() -> Result<LogTarget> {
     })
 }
 
-fn prompt_input_required_actions() -> Result<Vec<HookAction>> {
+fn prompt_input_required_actions(defaults: Option<&[HookAction]>) -> Result<Vec<HookAction>> {
     let options = [
         InputActionType::SaySomething,
         InputActionType::SoundEffect,
@@ -237,16 +273,20 @@ fn prompt_input_required_actions() -> Result<Vec<HookAction>> {
         .iter()
         .map(std::string::ToString::to_string)
         .collect();
-    let default_sound = options
-        .iter()
-        .position(|action| *action == InputActionType::SoundEffect)
-        .unwrap_or(0);
+    let default_indices = input_action_default_indices(defaults).unwrap_or_else(|| {
+        vec![
+            options
+                .iter()
+                .position(|action| *action == InputActionType::SoundEffect)
+                .unwrap_or(0),
+        ]
+    });
 
     let selected = MultiSelect::new(
         "What would you like to do when an agent needs input from you?",
         option_strings,
     )
-    .with_default(&[default_sound])
+    .with_default(&default_indices)
     .with_help_message("Space to toggle, Enter to confirm")
     .prompt()?;
 
@@ -356,4 +396,115 @@ pub fn prompt_gitignore_choice() -> Result<GitignoreChoice> {
         "Commit .claudine/config.json" => GitignoreChoice::CommitIt,
         _ => GitignoreChoice::DoNothing,
     })
+}
+
+fn logging_profile_starting_cursor(default: Option<&LoggingProfile>) -> usize {
+    match default {
+        Some(LoggingProfile::All { .. }) => 0,
+        Some(LoggingProfile::Some { .. }) => 1,
+        Some(LoggingProfile::None) => 2,
+        None => 0,
+    }
+}
+
+fn logging_target(default: &LoggingProfile) -> Option<&LogTarget> {
+    match default {
+        LoggingProfile::All { target } | LoggingProfile::Some { target, .. } => Some(target),
+        LoggingProfile::None => None,
+    }
+}
+
+fn logging_events(default: &LoggingProfile) -> Option<&HashSet<AgenticEvent>> {
+    match default {
+        LoggingProfile::Some { events, .. } => Some(events),
+        _ => None,
+    }
+}
+
+fn log_target_starting_cursor(default: Option<&LogTarget>) -> usize {
+    match default {
+        Some(LogTarget::File {
+            path: None,
+            rotate_daily: true,
+        }) => 0,
+        Some(LogTarget::File {
+            path: Some(_),
+            rotate_daily: false,
+        }) => 1,
+        Some(LogTarget::Server { .. }) => 2,
+        _ => 0,
+    }
+}
+
+fn protect_posture_starting_cursor(default: Option<ProtectPosture>) -> usize {
+    match default.unwrap_or(ProtectPosture::Balanced) {
+        ProtectPosture::Balanced => 0,
+        ProtectPosture::Advisory => 1,
+        ProtectPosture::Strict => 2,
+    }
+}
+
+fn input_action_default_indices(defaults: Option<&[HookAction]>) -> Option<Vec<usize>> {
+    let defaults = defaults?;
+    let mut indices = Vec::new();
+    for action in defaults {
+        let index = match action {
+            HookAction::Speak { .. } => 0,
+            HookAction::SoundEffect { .. } => 1,
+            HookAction::FireAndForget { .. } | HookAction::Call { .. } => 2,
+            _ => continue,
+        };
+        if !indices.contains(&index) {
+            indices.push(index);
+        }
+    }
+    Some(indices)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logging_defaults_to_all_events_for_new_init() {
+        assert_eq!(logging_profile_starting_cursor(None), 0);
+    }
+
+    #[test]
+    fn logging_profile_cursor_reuses_previous_answer() {
+        assert_eq!(
+            logging_profile_starting_cursor(Some(&LoggingProfile::Some {
+                target: LogTarget::File {
+                    path: None,
+                    rotate_daily: true,
+                },
+                events: HashSet::new(),
+            })),
+            1
+        );
+        assert_eq!(logging_profile_starting_cursor(Some(&LoggingProfile::None)), 2);
+    }
+
+    #[test]
+    fn input_actions_defaults_follow_existing_actions() {
+        let defaults = vec![
+            HookAction::Speak {
+                message: "hello".to_string(),
+            },
+            HookAction::SoundEffect {
+                name: "ding".to_string(),
+                volume: 1.0,
+                speed: 1.0,
+            },
+            HookAction::FireAndForget {
+                command: "notify-send".to_string(),
+                args: None,
+            },
+        ];
+
+        assert_eq!(
+            input_action_default_indices(Some(&defaults)),
+            Some(vec![0, 1, 2])
+        );
+    }
 }

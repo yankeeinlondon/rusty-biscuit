@@ -26,6 +26,16 @@ pub(crate) fn claudine_command() -> String {
         .unwrap_or_else(|| "claudine".to_string())
 }
 
+/// Return a provider-bound builder for `claudine handle` shell commands.
+///
+/// The first call fixes the provider, and the returned closure receives
+/// the normalized event name to dispatch.
+pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> String {
+    let claudine_bin = claudine_command();
+    let provider = provider.as_slug().to_string();
+    move |event| format!("{claudine_bin} handle {event} --provider {provider}")
+}
+
 use crate::events::Provider;
 
 use claude::ClaudeConfigurator;

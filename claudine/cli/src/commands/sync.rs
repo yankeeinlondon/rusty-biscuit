@@ -12,6 +12,7 @@ use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_config
 use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
 
 use crate::log;
+use crate::provider_values::provider_value_parser;
 
 /// Arguments for the sync subcommand.
 #[derive(Args)]
@@ -20,7 +21,7 @@ pub struct SyncArgs {
     #[arg(long)]
     pub dry_run: bool,
     /// Sync only a specific provider.
-    #[arg(long)]
+    #[arg(long, value_parser = provider_value_parser())]
     pub provider: Option<String>,
     /// Remove unsupported events from config.
     ///

@@ -290,6 +290,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let packages = cli.command.as_ref().is_some_and(|c| c.packages());
     let package = cli.command.as_ref().is_some_and(|c| c.package());
     let package_area = cli.command.as_ref().is_some_and(|c| c.package_area());
+    let dirty_packages = cli.command.as_ref().is_some_and(|c| c.dirty_packages());
+    let dirty_package_areas = cli
+        .command
+        .as_ref()
+        .is_some_and(|c| c.dirty_package_areas());
     let ui = cli.command.as_ref().is_some_and(|c| c.ui());
     let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
 
@@ -311,6 +316,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             packages,
             package,
             package_area,
+            dirty_packages,
+            dirty_package_areas,
             ui,
             repo_filter,
             base_dir.as_deref(),

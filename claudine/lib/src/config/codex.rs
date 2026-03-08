@@ -8,7 +8,7 @@ use crate::events::{AgenticEvent, HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
-use super::claudine_command;
+use super::claudine_handle_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 
 /// Minimal valid config.toml for Codex CLI.
@@ -94,24 +94,12 @@ impl AgentConfigurator for CodexConfigurator {
             }
         });
 
-        let claudine_bin = claudine_command();
+        let wrapper_path = wrapper_script_path(config_dir);
+        create_wrapper_script(&wrapper_path, existing_notify.as_deref())?;
 
-        if let Some(original_cmd) = existing_notify {
-            // Need to create a wrapper script
-            let wrapper_path = wrapper_script_path(config_dir);
-            create_wrapper_script(&wrapper_path, &original_cmd, &claudine_bin)?;
-
-            // Set notify to the wrapper
-            let mut arr = toml_edit::Array::new();
-            arr.push(wrapper_path.to_string_lossy().to_string());
-            doc["notify"] = toml_edit::value(arr);
-        } else {
-            // No existing notify, set directly
-            let mut arr = toml_edit::Array::new();
-            arr.push(&claudine_bin);
-            arr.push("handle");
-            doc["notify"] = toml_edit::value(arr);
-        }
+        let mut arr = toml_edit::Array::new();
+        arr.push(wrapper_path.to_string_lossy().to_string());
+        doc["notify"] = toml_edit::value(arr);
 
         atomic_write(&toml_path, doc.to_string().as_bytes())?;
 
@@ -131,18 +119,7 @@ impl AgentConfigurator for CodexConfigurator {
         let mut doc: DocumentMut = content.parse()?;
 
         // Check if the notify points to our wrapper
-        let is_wrapper = doc
-            .get("notify")
-            .and_then(|v| {
-                if let Some(arr) = v.as_array() {
-                    arr.get(0)
-                        .and_then(|item| item.as_str())
-                        .map(|s| s.to_string())
-                } else {
-                    v.as_str().map(String::from)
-                }
-            })
-            .is_some_and(|cmd| cmd.contains("claudine"));
+        let is_wrapper = is_claudine_wrapper(&doc, config_dir);
 
         if is_wrapper {
             // Check if wrapper exists and extract original command
@@ -250,13 +227,20 @@ fn is_claudine_wrapper(doc: &DocumentMut, config_dir: Option<&Path>) -> bool {
 }
 
 /// Generate the wrapper script that calls both the original and claudine.
-fn create_wrapper_script(path: &Path, original_command: &str, claudine_bin: &str) -> Result<()> {
+fn create_wrapper_script(
+    path: &Path,
+    original_command: Option<&str>,
+) -> Result<()> {
+    let handle_command = claudine_handle_command(Provider::Codex)("turn_complete");
+    let original_line = original_command
+        .map(|command| format!("{command} \"$@\"\n"))
+        .unwrap_or_default();
     let script = format!(
         "#!/bin/bash\n\
          # Claudine wrapper for Codex notify\n\
-         # Calls both original and claudine\n\
-         {original_command} \"$@\"\n\
-         {claudine_bin} handle turn_complete \"$@\"\n"
+         # Codex appends the JSON payload as argv[1], so feed it to stdin.\n\
+         {original_line}\
+         printf '%s' \"$1\" | {handle_command}\n"
     );
 
     if let Some(parent) = path.parent() {
@@ -364,8 +348,10 @@ mod tests {
 
         let content = fs::read_to_string(&config).unwrap();
         assert!(content.contains("notify"));
-        assert!(content.contains("claudine"));
-        assert!(content.contains("handle"));
+        assert!(content.contains("codex-notify-wrapper.sh"));
+        let wrapper = fs::read_to_string(tmp.path().join("codex-notify-wrapper.sh")).unwrap();
+        assert!(wrapper.contains("handle turn_complete --provider codex"));
+        assert!(wrapper.contains("printf '%s' \"$1\""));
     }
 
     #[test]
@@ -407,8 +393,10 @@ mod tests {
         assert!(wrapper_path.exists());
 
         let script = fs::read_to_string(&wrapper_path).unwrap();
+        let handle_command = claudine_handle_command(Provider::Codex)("turn_complete");
         assert!(script.contains("my-tool done"));
-        assert!(script.contains("claudine handle turn_complete"));
+        assert!(script.contains(&handle_command));
+        assert!(script.contains("printf '%s' \"$1\""));
     }
 
     #[test]
@@ -453,12 +441,16 @@ mod tests {
     fn wrapper_script_is_valid_bash() {
         let tmp = TempDir::new().unwrap();
         let wrapper_path = tmp.path().join("wrapper.sh");
-        create_wrapper_script(&wrapper_path, "my-tool done", "claudine").unwrap();
+        create_wrapper_script(&wrapper_path, Some("my-tool done")).unwrap();
 
         let script = fs::read_to_string(&wrapper_path).unwrap();
+        let expected_pipeline = format!(
+            "printf '%s' \"$1\" | {}",
+            claudine_handle_command(Provider::Codex)("turn_complete")
+        );
         assert!(script.starts_with("#!/bin/bash"));
         assert!(script.contains("my-tool done \"$@\""));
-        assert!(script.contains("claudine handle turn_complete \"$@\""));
+        assert!(script.contains(&expected_pipeline));
     }
 
     #[test]

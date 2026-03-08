@@ -15,6 +15,7 @@ use claudine::reporting::{
 };
 
 use crate::log;
+use crate::provider_values::provider_value_parser;
 
 /// Query Claudine's SQLite-backed log reports.
 #[derive(Args)]
@@ -35,7 +36,7 @@ pub struct LogsArgs {
     pub to: Option<String>,
 
     /// Filter by provider.
-    #[arg(long)]
+    #[arg(long, value_parser = provider_value_parser())]
     pub provider: Option<String>,
 
     /// Filter by repo name or org/name.

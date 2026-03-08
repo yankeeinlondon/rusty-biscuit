@@ -1,0 +1,50 @@
+use clap::builder::{PossibleValue, PossibleValuesParser};
+use claudine::events::PROVIDERS_DISPLAY_ORDER;
+
+/// Return a Clap parser that advertises supported provider values and aliases.
+pub(crate) fn provider_value_parser() -> PossibleValuesParser {
+    let values = PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(|provider| {
+            let mut value = PossibleValue::new(provider.as_slug());
+            for alias in provider.cli_aliases() {
+                if *alias != provider.as_slug() {
+                    value = value.alias(alias);
+                }
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+
+    PossibleValuesParser::new(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{Arg, Command};
+
+    use super::*;
+
+    #[test]
+    fn parser_advertises_provider_values() {
+        let cmd = Command::new("claudine").arg(
+            Arg::new("provider")
+                .long("provider")
+                .value_parser(provider_value_parser()),
+        );
+
+        let arg = cmd
+            .get_arguments()
+            .find(|arg| arg.get_id() == "provider")
+            .unwrap();
+        let values = arg
+            .get_possible_values()
+            .into_iter()
+            .map(|value| value.get_name().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(values.contains(&"claude".to_string()));
+        assert!(values.contains(&"open_code".to_string()));
+        assert!(values.contains(&"qwen_code".to_string()));
+    }
+}

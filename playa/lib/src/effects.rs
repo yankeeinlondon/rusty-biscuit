@@ -1377,7 +1377,7 @@ impl SoundEffect {
 
         let playa = crate::Playa::from_bytes(self.as_bytes().to_vec())
             .map_err(|crate::InvalidAudio::Detection(e)| crate::PlaybackError::Detection(e))?
-            .with_options(*options);
+            .with_options(options.clone());
         playa.play()
     }
 

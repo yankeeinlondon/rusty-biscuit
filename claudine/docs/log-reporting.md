@@ -195,6 +195,7 @@ CREATE TABLE ingestion_state (
 ```
 
 **Ingestion runs** as a single-pass scan per JSONL file:
+
 1. Open file, seek to stored byte_offset (or 0 for new files)
 2. Parse each JSON line, extract fields
 3. Upsert into dimension tables (sessions) and increment aggregate tables (daily_summaries, tool_usage, etc.)

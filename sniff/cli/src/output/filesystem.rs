@@ -818,6 +818,134 @@ pub fn print_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str
     }
 }
 
+/// Collect package names that have uncommitted changes (dirty or untracked files).
+///
+/// Cross-references git status dirty/untracked file paths with package relative
+/// paths to determine which packages are affected.
+fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
+    let fs = match result.filesystem.as_ref() {
+        Some(fs) => fs,
+        None => return vec![],
+    };
+
+    let packages = match fs.repo.as_ref().and_then(|r| r.packages.as_ref()) {
+        Some(p) => p,
+        None => return vec![],
+    };
+
+    let git = match fs.git.as_ref() {
+        Some(g) => g,
+        None => return vec![],
+    };
+
+    // Collect all dirty file paths (relative to repo root)
+    let dirty_paths: Vec<&str> = git
+        .status
+        .dirty
+        .iter()
+        .map(|d| d.filepath.to_str().unwrap_or(""))
+        .chain(
+            git.status
+                .untracked
+                .iter()
+                .map(|u| u.filepath.to_str().unwrap_or("")),
+        )
+        .collect();
+
+    if dirty_paths.is_empty() {
+        return vec![];
+    }
+
+    let mut names: Vec<String> = packages
+        .iter()
+        .filter(|pkg| {
+            let prefix = &pkg.relative;
+            dirty_paths.iter().any(|path| {
+                if prefix.is_empty() {
+                    // Root package: file is dirty if it's not inside any other package
+                    !packages
+                        .iter()
+                        .any(|other| !other.relative.is_empty() && path.starts_with(&other.relative))
+                } else {
+                    path.starts_with(prefix)
+                }
+            })
+        })
+        .map(|pkg| pkg.name.clone())
+        .collect();
+
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Print package names with uncommitted changes as a comma-separated list.
+///
+/// Writes to stderr and exits if the repo is not a monorepo.
+pub fn print_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) {
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    match repo {
+        Some(repo) if repo.is_monorepo => {
+            let names = dirty_package_names(result);
+            let names: Vec<&str> = if let Some(filter_str) = repo_filter {
+                if let Some(ref packages) = repo.packages {
+                    let filtered = filter_packages(packages, Some(filter_str));
+                    let filtered_names: std::collections::HashSet<&str> =
+                        filtered.iter().map(|p| p.name.as_str()).collect();
+                    names
+                        .iter()
+                        .filter(|n| filtered_names.contains(n.as_str()))
+                        .map(|n| n.as_str())
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                names.iter().map(|n| n.as_str()).collect()
+            };
+            println!("{}", names.join(", "));
+        }
+        _ => {
+            eprintln!(
+                "- the \"--dirty-packages\" switch is only intended to be used in a monorepo"
+            );
+        }
+    }
+}
+
+/// Print package area names with uncommitted changes as a comma-separated list.
+///
+/// Writes to stderr and exits if the repo is not a monorepo.
+pub fn print_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Option<&str>) {
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    match repo {
+        Some(repo) if repo.is_monorepo => {
+            if let Some(ref packages) = repo.packages {
+                let dirty_names = dirty_package_names(result);
+                let dirty_set: std::collections::HashSet<&str> =
+                    dirty_names.iter().map(|n| n.as_str()).collect();
+
+                let filtered = filter_packages(packages, repo_filter);
+                let mut areas: Vec<&str> = filtered
+                    .iter()
+                    .filter(|p| dirty_set.contains(p.name.as_str()))
+                    .map(|p| p.package_area.as_str())
+                    .collect();
+                areas.sort();
+                areas.dedup();
+                println!("{}", areas.join(", "));
+            }
+        }
+        _ => {
+            eprintln!(
+                "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo"
+            );
+        }
+    }
+}
+
 /// Print the package name for the given directory, or exit 1 if not in a package.
 ///
 /// With `verbose >= 1`, appends the package root directory on the same line.

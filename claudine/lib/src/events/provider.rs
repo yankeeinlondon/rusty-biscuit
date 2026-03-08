@@ -370,10 +370,10 @@ impl Provider {
         if raw.get("hook_event_name").is_some() {
             return Some(Provider::Claude);
         }
-        if raw.get("type").is_some() && raw.get("thread_id").is_some() {
+        if looks_like_codex_payload(raw) {
             return Some(Provider::Codex);
         }
-        if raw.get("event_type").is_some() {
+        if raw.get("event_type").is_some() || raw.get("eventType").is_some() {
             return Some(Provider::OpenCode);
         }
         if raw.get("event_name").is_some() {
@@ -776,6 +776,42 @@ impl Provider {
             Provider::RooCode => ".roo",
         }
     }
+}
+
+fn looks_like_codex_payload(raw: &Value) -> bool {
+    if raw.get("thread_id").is_some() || raw.get("thread-id").is_some() {
+        return true;
+    }
+
+    if raw
+        .get("hook_event")
+        .and_then(|value| value.get("event_type"))
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "after_tool_use"))
+    {
+        return true;
+    }
+
+    raw.get("event_type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "after_tool_use"))
+        || raw
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| {
+                matches!(
+                    kind,
+                    "agent-turn-complete"
+                        | "thread.started"
+                        | "turn.started"
+                        | "turn.completed"
+                        | "turn.failed"
+                        | "item.started"
+                        | "item.updated"
+                        | "item.completed"
+                        | "error"
+                )
+            })
 }
 
 fn normalize_provider_input(input: &str) -> String {
@@ -1270,6 +1306,19 @@ mod tests {
             Provider::detect_from_payload(
                 &serde_json::json!({"type":"turn.completed","thread_id":"t-1"})
             ),
+            Some(Provider::Codex)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(
+                &serde_json::json!({"type":"agent-turn-complete","thread-id":"t-1"})
+            ),
+            Some(Provider::Codex)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({
+                "session_id":"ses_123",
+                "hook_event":{"event_type":"after_tool_use"}
+            })),
             Some(Provider::Codex)
         );
         assert_eq!(

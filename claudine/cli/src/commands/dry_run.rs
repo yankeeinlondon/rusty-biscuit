@@ -11,6 +11,7 @@ use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider, detect_e
 use claudine::services::{ProtectInput, ProtectService, ProviderProtectProfiles};
 
 use crate::log;
+use crate::provider_values::provider_value_parser;
 
 const DRY_RUN_SUPPORTED_PROVIDERS: &[Provider] = &[
     Provider::Claude,
@@ -46,7 +47,7 @@ pub struct DryRunArgs {
     /// Provider to simulate (default: claude).
     ///
     /// Supported: claude, codex, gemini, opencode
-    #[arg(long, default_value = "claude")]
+    #[arg(long, default_value = "claude", value_parser = provider_value_parser())]
     pub provider: String,
 
     /// Emit structured JSON output suitable for CI parsing.

@@ -1,0 +1,16 @@
+services:
+  sony-receiver-integration:
+    build:
+      context: ../..
+      dockerfile: homelab/sony-receiver-integration/Dockerfile
+    network_mode: host
+    environment:
+      SONY_HOST: ${SONY_HOST:?Set SONY_HOST to your Sony receiver IP}
+      SONY_PORT: ${SONY_PORT:-10000}
+      LISTEN_PORT: ${LISTEN_PORT:-9091}
+      DEVICE_NAME: ${DEVICE_NAME:-receiver}
+      TIMEOUT: ${TIMEOUT:-10}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+      UCR_INTEGRATION_TOKEN: ${UCR_INTEGRATION_TOKEN:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    restart: unless-stopped

@@ -215,6 +215,12 @@ pub enum Commands {
         /// Output the package area for the current directory
         #[arg(long)]
         package_area: bool,
+        /// Output only package names that have uncommitted changes
+        #[arg(long)]
+        dirty_packages: bool,
+        /// Output only package area names that have uncommitted changes
+        #[arg(long)]
+        dirty_package_areas: bool,
         /// Use visual (Mermaid) rendering for --deps instead of text
         #[arg(long)]
         ui: bool,
@@ -454,6 +460,28 @@ impl Commands {
             self,
             Commands::Repo {
                 package_area: true,
+                ..
+            }
+        )
+    }
+
+    /// Check if this is a repo command with `--dirty-packages` flag.
+    pub fn dirty_packages(&self) -> bool {
+        matches!(
+            self,
+            Commands::Repo {
+                dirty_packages: true,
+                ..
+            }
+        )
+    }
+
+    /// Check if this is a repo command with `--dirty-package-areas` flag.
+    pub fn dirty_package_areas(&self) -> bool {
+        matches!(
+            self,
+            Commands::Repo {
+                dirty_package_areas: true,
                 ..
             }
         )
@@ -845,6 +873,8 @@ mod tests {
                     packages: false,
                     package: false,
                     package_area: false,
+                    dirty_packages: false,
+                    dirty_package_areas: false,
                     ui: false,
                     filter: None,
                 }
@@ -922,6 +952,8 @@ mod tests {
                 packages: true,
                 package: true,
                 package_area: true,
+                dirty_packages: true,
+                dirty_package_areas: true,
                 ui: true,
                 filter: Some("biscuit".to_string()),
             };
@@ -930,6 +962,8 @@ mod tests {
             assert!(cmd.packages());
             assert!(cmd.package());
             assert!(cmd.package_area());
+            assert!(cmd.dirty_packages());
+            assert!(cmd.dirty_package_areas());
             assert!(cmd.ui());
             assert_eq!(cmd.repo_filter(), Some("biscuit"));
         }

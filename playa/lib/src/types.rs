@@ -64,7 +64,7 @@ pub enum ResourceUsage {
 }
 
 /// Options for controlling audio playback.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PlaybackOptions {
     /// Volume level (0.0 = silent, 1.0 = normal, >1.0 = amplified).
     /// Only applied if selected player supports volume control.
@@ -73,6 +73,10 @@ pub struct PlaybackOptions {
     /// Playback speed multiplier (1.0 = normal, <1.0 = slower, >1.0 = faster).
     /// Only applied if selected player supports speed control.
     pub speed: Option<f32>,
+
+    /// Specific output channel to use for playback, by name.
+    /// Only applied for native playback when `sfx-native` or `native-playback` features are enabled.
+    pub channel: Option<String>,
 }
 
 impl PlaybackOptions {
@@ -81,6 +85,7 @@ impl PlaybackOptions {
         Self {
             volume: None,
             speed: None,
+            channel: None,
         }
     }
 
@@ -93,6 +98,12 @@ impl PlaybackOptions {
     /// Set playback speed.
     pub const fn with_speed(mut self, speed: f32) -> Self {
         self.speed = Some(speed);
+        self
+    }
+
+    /// Set output channel.
+    pub fn with_channel(mut self, channel: impl Into<String>) -> Self {
+        self.channel = Some(channel.into());
         self
     }
 

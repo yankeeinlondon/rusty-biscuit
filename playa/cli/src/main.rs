@@ -158,6 +158,48 @@ impl clap::builder::TypedValueParser for VolumeParser {
     }
 }
 
+/// Value parser that suggests available native output channels for shell completion.
+#[derive(Clone)]
+struct ChannelParser;
+
+impl clap::builder::TypedValueParser for ChannelParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        value
+            .to_str()
+            .map(String::from)
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        #[cfg(feature = "sfx-native")]
+        {
+            if let Ok(channels) = playa::get_output_channels() {
+                let values = channels.into_iter().map(|c| {
+                    let mut help = c.name;
+                    if c.is_default_audio {
+                        help.push_str(" (default audio)");
+                    }
+                    if c.is_default_sfx {
+                        help.push_str(" (default sfx)");
+                    }
+                    let static_name: &'static str = Box::leak(c.id.into_boxed_str());
+                    let static_help: &'static str = Box::leak(help.into_boxed_str());
+                    PossibleValue::new(static_name).help(static_help)
+                });
+                return Some(Box::new(values));
+            }
+        }
+        None
+    }
+}
+
 /// Playback options shared between play and effect commands
 #[derive(Parser, Clone)]
 struct PlaybackOptions {
@@ -192,6 +234,10 @@ struct PlaybackOptions {
     /// Custom volume level (0.0 to 2.0)
     #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"], value_parser = VolumeParser)]
     volume: Option<f32>,
+
+    /// Specific output channel to use for playback, by name
+    #[arg(long, value_name = "CHANNEL", value_parser = ChannelParser)]
+    channel: Option<String>,
 
     /// Force host player playback (skip native decoder)
     #[arg(long)]
@@ -232,6 +278,10 @@ impl PlaybackOptions {
             opts = opts.with_volume(0.5);
         } else if self.loud {
             opts = opts.with_volume(1.5);
+        }
+
+        if let Some(channel) = &self.channel {
+            opts = opts.with_channel(channel.clone());
         }
 
         opts
@@ -1026,9 +1076,9 @@ fn list_output_channels() {
                 }
 
                 let text = if markers.is_empty() {
-                    styled_name
+                    format!("{} <dim>[{}]</dim>", styled_name, channel.id)
                 } else {
-                    format!("{} <dim>({})</dim>", styled_name, markers.join(", "))
+                    format!("{} <dim>[{}] ({})</dim>", styled_name, channel.id, markers.join(", "))
                 };
 
                 list.add(Prose::new(text));
@@ -1072,6 +1122,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            channel: None,
             force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
@@ -1099,6 +1150,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            channel: None,
             force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
@@ -1121,6 +1173,7 @@ mod tests {
             loud: false,
             speed: Some(0.9),
             volume: Some(0.3),
+            channel: None,
             force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
@@ -1143,6 +1196,7 @@ mod tests {
             loud: false,
             speed: None,
             volume: None,
+            channel: None,
             force_host: false,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
@@ -1178,6 +1232,7 @@ mod tests {
             audio_file: None,
             playback: PlaybackOptions {
                 background: true,
+                channel: None,
                 ..base_playback_options()
             },
         };

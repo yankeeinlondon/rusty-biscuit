@@ -29,7 +29,8 @@ pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_docs_section, print_filesystem_section, print_language_section, print_repo_deps_text,
+    print_dirty_package_areas, print_dirty_packages, print_docs_section,
+    print_filesystem_section, print_language_section, print_repo_deps_text,
     print_repo_deps_visual, print_repo_package, print_repo_package_area, print_repo_packages,
     print_repo_section,
 };
@@ -250,6 +251,8 @@ pub fn print_text(
     packages: bool,
     package: bool,
     package_area: bool,
+    dirty_packages: bool,
+    dirty_package_areas: bool,
     ui: bool,
     repo_filter: Option<&str>,
     base_dir: Option<&std::path::Path>,
@@ -337,6 +340,10 @@ pub fn print_text(
                 print_repo_package_area(result, base_dir);
             } else if packages {
                 print_repo_packages(result, repo_filter);
+            } else if dirty_packages {
+                print_dirty_packages(result, repo_filter);
+            } else if dirty_package_areas {
+                print_dirty_package_areas(result, repo_filter);
             } else if let Some(ref filesystem) = result.filesystem
                 && let Some(ref repo) = filesystem.repo
             {

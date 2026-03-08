@@ -31,31 +31,45 @@ COPY schematic/schema/ schematic/schema/
 COPY schematic/define/ schematic/define/
 COPY schematic/definitions/ schematic/definitions/
 
-RUN cargo build --release -p arcam-amp-integration && \
-    strip /build/target/release/arcam-amp-integration
+RUN cargo build --release -p eversolo-integration && \
+    strip /build/target/release/eversolo-integration
 
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /build/target/release/arcam-amp-integration /usr/local/bin/arcam-amp-integration
+COPY --from=builder /build/target/release/eversolo-integration /usr/local/bin/eversolo-integration
 
 RUN cat <<'EOF' > /entrypoint.sh
 #!/bin/sh
 set -eu
 
-exec /usr/local/bin/arcam-amp-integration \
-  --host "${ARCAM_HOST:?Set ARCAM_HOST to your Arcam amplifier IP}" \
-  --port "${ARCAM_PORT:-50000}" \
-  --listen "0.0.0.0:${LISTEN_PORT:-9090}" \
-  --device-name "${DEVICE_NAME:-amp}" \
-  --timeout "${TIMEOUT:-5}" \
+if [ -n "${EVERSOLO_MAC:-}" ]; then
+  exec /usr/local/bin/eversolo-integration \
+    --host "${EVERSOLO_HOST:?Set EVERSOLO_HOST to your Eversolo device IP}" \
+    --port "${EVERSOLO_PORT:-9529}" \
+    --listen "0.0.0.0:${LISTEN_PORT:-9092}" \
+    --device-name "${DEVICE_NAME:-streamer}" \
+    --mac "${EVERSOLO_MAC}" \
+    --wol-broadcast "${WOL_BROADCAST:-255.255.255.255}" \
+    --wol-port "${WOL_PORT:-9517}" \
+    --timeout "${TIMEOUT:-10}" \
+    --poll-interval "${POLL_INTERVAL:-5}" \
+    "$@"
+fi
+
+exec /usr/local/bin/eversolo-integration \
+  --host "${EVERSOLO_HOST:?Set EVERSOLO_HOST to your Eversolo device IP}" \
+  --port "${EVERSOLO_PORT:-9529}" \
+  --listen "0.0.0.0:${LISTEN_PORT:-9092}" \
+  --device-name "${DEVICE_NAME:-streamer}" \
+  --timeout "${TIMEOUT:-10}" \
   --poll-interval "${POLL_INTERVAL:-5}" \
   "$@"
 EOF
 
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 9090
+EXPOSE 9092
 
 ENTRYPOINT ["/entrypoint.sh"]

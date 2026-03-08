@@ -73,6 +73,14 @@ just -f homelab/justfile install-server
 just -f homelab/justfile server
 ```
 
+## Unfolded Circle Integrations
+
+Each Unfolded Circle integration directory now carries the same basic deployment surface:
+
+- `Dockerfile` for container builds
+- `docker-compose.yaml` for host-networked external deployment
+- `justfile` with `install`, `build-image`, `sanity-test`, and `sanity-test-mutate`
+
 ## Configuration
 
 Create `~/homey.json` to define your devices:
@@ -125,5 +133,7 @@ homey sony native zone
 - [Library](lib/README.md) — Module reference and Sony JSON-RPC lessons learned
 - [CLI](cli/README.md) — Complete command reference, environment variables, shell completions
 - [Server](server/README.md) — REST endpoints, error codes, usage examples
+- [Arcam Integration](arcam-amp-integration/README.md) — UC Remote external integration for Arcam amplifiers
+- [Sony Receiver Integration](sony-receiver-integration/README.md) — UC Remote external integration for Sony ES receivers
 - [Eversolo Integration](eversolo-integration/README.md) — UC Remote external integration for Eversolo
 - [Sony STR-AZ7000ES](docs/sony-str-az7000es.md) — Network API reference for the receiver

@@ -108,6 +108,71 @@ In the UC Web Configurator:
 3. If using authentication, enter the token
 4. The Remote connects and discovers the power switch and media player entities
 
+## Running with Docker
+
+The Docker packaging uses a two-stage build: Rust-on-Alpine for compilation, then a small Alpine runtime with an entrypoint that maps environment variables to the integration's CLI flags.
+
+### Docker Compose (Recommended)
+
+The checked-in [docker-compose.yaml](docker-compose.yaml) uses `network_mode: host` so the container can reach the receiver on your LAN and the UC Remote can connect back to the WebSocket server.
+
+```bash
+cd homelab/sony-receiver-integration
+
+# Minimum
+SONY_HOST=192.168.1.120 docker compose up -d
+
+# With all options
+SONY_HOST=192.168.1.120 \
+  DEVICE_NAME=living \
+  LISTEN_PORT=9091 \
+  SONY_PORT=10000 \
+  TIMEOUT=10 \
+  POLL_INTERVAL=5 \
+  UCR_INTEGRATION_TOKEN=my-secret \
+  RUST_LOG=debug \
+  docker compose up -d
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SONY_HOST` | *(required)* | Sony receiver IP or hostname |
+| `SONY_PORT` | `10000` | Sony JSON-RPC port |
+| `LISTEN_PORT` | `9091` | WebSocket listen port |
+| `DEVICE_NAME` | `receiver` | Name used in entity IDs |
+| `TIMEOUT` | `10` | Sony HTTP timeout (seconds) |
+| `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
+| `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
+| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+
+### Docker Build Only
+
+```bash
+# Recommended from the integration directory
+just build-image
+
+# Or manually from the monorepo root
+docker build -f homelab/sony-receiver-integration/Dockerfile -t sony-receiver-integration .
+
+# Run with host networking and env-based entrypoint defaults
+docker run --rm --network host sony-receiver-integration \
+  -e SONY_HOST=192.168.1.120 \
+  -e DEVICE_NAME=living
+```
+
+## Validation
+
+From `homelab/sony-receiver-integration/`:
+
+```bash
+just install
+just build-image
+just sanity-test
+just sanity-test-mutate
+```
+
+`sanity-test` requires `SONY_REAL_HOST` and optionally `SONY_REAL_PORT`. `sanity-test-mutate` additionally requires `SONY_REAL_ALLOW_DESTRUCTIVE=1`.
+
 ## Key Dependencies
 
 - `homelab` -- Sony receiver JSON-RPC and Native Web API implementation

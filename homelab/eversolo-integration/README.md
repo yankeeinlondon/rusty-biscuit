@@ -139,18 +139,63 @@ In the UC Web Configurator:
 3. If you set `UCR_INTEGRATION_TOKEN`, enter the same token on the Remote; otherwise leave auth unset
 4. Save the integration and let the Remote query entities
 
-## Validation
+## Running with Docker
 
-From the monorepo root:
+The Docker packaging uses a two-stage build: Rust-on-Alpine for compilation, then a small Alpine runtime with an entrypoint that maps environment variables to the integration's CLI flags.
+
+### Docker Compose (Recommended)
+
+The checked-in [docker-compose.yaml](docker-compose.yaml) uses `network_mode: host` so the container can reach the streamer on your LAN and the UC Remote can connect back to the WebSocket server.
 
 ```bash
-just -f homelab/justfile build --package eversolo-integration
-just -f homelab/justfile test --package eversolo-integration
+cd homelab/eversolo-integration
+
+# Minimum
+EVERSOLO_HOST=192.168.1.140 docker compose up -d
+
+# With Wake-on-LAN support
+EVERSOLO_HOST=192.168.1.140 \
+  EVERSOLO_MAC=AA:BB:CC:DD:EE:FF \
+  DEVICE_NAME=music \
+  WOL_BROADCAST=255.255.255.255 \
+  WOL_PORT=9517 \
+  UCR_INTEGRATION_TOKEN=my-secret \
+  RUST_LOG=debug \
+  docker compose up -d
 ```
 
-If you want to run the binary directly while iterating:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EVERSOLO_HOST` | *(required)* | Eversolo IP or hostname |
+| `EVERSOLO_PORT` | `9529` | Eversolo HTTP API port |
+| `LISTEN_PORT` | `9092` | WebSocket listen port |
+| `DEVICE_NAME` | `streamer` | Name used in entity IDs |
+| `EVERSOLO_MAC` | *(empty)* | Optional MAC used to enable Wake-on-LAN power on |
+| `WOL_BROADCAST` | `255.255.255.255` | WoL broadcast address |
+| `WOL_PORT` | `9517` | WoL UDP port |
+| `TIMEOUT` | `10` | Eversolo HTTP timeout (seconds) |
+| `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
+| `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
+| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+
+## Validation
+
+From `homelab/eversolo-integration/`:
 
 ```bash
+just install
+just build-image
+just sanity-test
+just sanity-test-mutate
+```
+
+`sanity-test` requires `EVERSOLO_REAL_HOST` and optionally `EVERSOLO_REAL_PORT`. `sanity-test-mutate` additionally requires `EVERSOLO_REAL_ALLOW_DESTRUCTIVE=1`.
+
+If you want to build or run the binary directly while iterating:
+
+```bash
+just build-image
+
 cargo run -p eversolo-integration -- \
   --host 192.168.1.140 \
   --mac AA:BB:CC:DD:EE:FF

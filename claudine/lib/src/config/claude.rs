@@ -8,7 +8,7 @@ use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
-use super::claudine_command;
+use super::claudine_handle_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 
 pub(crate) struct ClaudeConfigurator;
@@ -108,7 +108,7 @@ impl AgentConfigurator for ClaudeConfigurator {
         hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
 
         // Second pass: add/update hooks for events in config
-        let claudine_bin = claudine_command();
+        let handle_command = claudine_handle_command(Provider::Claude);
         let mut event_count = 0;
         for (event, binding) in &provider_config.events {
             // Skip disabled events
@@ -124,7 +124,7 @@ impl AgentConfigurator for ClaudeConfigurator {
             let hook_entry = json!([{
                 "hooks": [{
                     "type": "command",
-                    "command": format!("{claudine_bin} handle {snake}"),
+                    "command": handle_command(&snake),
                     "timeout": 30
                 }]
             }]);
@@ -285,8 +285,9 @@ fn is_claudine_hook_group(entry: &Value) -> bool {
 
 /// Extract the event name from a Claudine hook entry.
 ///
-/// Handles both short form ("claudine handle before_tool") and full path
-/// ("/path/to/claudine handle before_tool") -> "before_tool".
+/// Handles both short form ("claudine handle before_tool --provider claude")
+/// and full path ("/path/to/claudine handle before_tool --provider claude")
+/// -> "before_tool".
 fn extract_claudine_event(entry: &Value) -> Option<String> {
     entry
         .get("hooks")
@@ -459,7 +460,7 @@ mod tests {
         let settings = tmp.path().join("settings.json");
         fs::write(
             &settings,
-            r#"{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "claudine handle before_tool", "timeout": 30}]}]}}"#,
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "claudine handle before_tool --provider claude", "timeout": 30}]}]}}"#,
         )
         .unwrap();
 
@@ -480,7 +481,7 @@ mod tests {
         let initial = json!({
             "hooks": {
                 "PreToolUse": [
-                    {"hooks": [{"type": "command", "command": "claudine handle before_tool", "timeout": 30}]},
+                    {"hooks": [{"type": "command", "command": "claudine handle before_tool --provider claude", "timeout": 30}]},
                     {"hooks": [{"type": "command", "command": "other-tool check", "timeout": 10}]}
                 ]
             }
@@ -507,7 +508,7 @@ mod tests {
         let initial = json!({
             "hooks": {
                 "PreToolUse": [
-                    {"hooks": [{"type": "command", "command": "claudine handle before_tool", "timeout": 30}]}
+                    {"hooks": [{"type": "command", "command": "claudine handle before_tool --provider claude", "timeout": 30}]}
                 ]
             }
         });
@@ -527,7 +528,7 @@ mod tests {
         let settings = tmp.path().join("settings.json");
         fs::write(
             &settings,
-            r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "claudine handle turn_complete", "timeout": 30}]}]}}"#,
+            r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "claudine handle turn_complete --provider claude", "timeout": 30}]}]}}"#,
         )
         .unwrap();
 

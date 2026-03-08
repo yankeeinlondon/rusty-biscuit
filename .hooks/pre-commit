@@ -1,47 +1,23 @@
 #!/usr/bin/env bash
 #
-# Pre-commit hook: run doctests for any workspace crate that has staged .rs changes.
-# Catches broken doc examples before they land.
+# Pre-commit hook: run doctests for dirty package areas.
+# Delegates to `just doctest` with areas from `sniff repo --dirty-package-areas`.
 #
 set -euo pipefail
 
-# Collect package names from staged .rs files
-declare -A packages=()
-
-for file in $(git diff --cached --name-only --diff-filter=ACM -- '*.rs'); do
-    # Walk up from the file to find the nearest Cargo.toml
-    dir="$(dirname "$file")"
-    while [[ "$dir" != "." && "$dir" != "/" ]]; do
-        if [[ -f "$dir/Cargo.toml" ]]; then
-            # Extract package name from Cargo.toml
-            pkg=$(grep -m1 '^name' "$dir/Cargo.toml" | sed 's/.*= *"\(.*\)"/\1/')
-            if [[ -n "$pkg" ]]; then
-                packages["$pkg"]=1
-            fi
-            break
-        fi
-        dir="$(dirname "$dir")"
-    done
-done
-
-if [[ ${#packages[@]} -eq 0 ]]; then
+# Only run if staged .rs files exist
+if ! git diff --cached --name-only --diff-filter=ACM -- '*.rs' | grep -q .; then
     exit 0
 fi
 
-echo "Running doctests for changed crates: ${!packages[*]}"
+dirty=$(sniff repo --dirty-package-areas 2>/dev/null || true)
+if [[ -z "$dirty" ]]; then
+    exit 0
+fi
 
-for pkg in "${!packages[@]}"; do
-    output=$(cargo test --doc -p "$pkg" 2>&1) || status=$?
-    status=${status:-0}
-    if echo "$output" | grep -q "no library targets found"; then
-        echo "Skipping $pkg (no library target)"
-        continue
-    fi
-    if [[ $status -ne 0 ]]; then
-        echo "$output"
-        echo ""
-        echo "ERROR: doctests failed for $pkg"
-        echo "Fix the doc examples before committing."
-        exit 1
-    fi
-done
+echo "Running doctests for dirty areas: $dirty"
+just doctest $dirty || {
+    echo ""
+    echo "ERROR: doctests failed. Fix the doc examples before committing."
+    exit 1
+}

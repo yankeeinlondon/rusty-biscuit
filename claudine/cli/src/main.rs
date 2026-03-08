@@ -7,6 +7,7 @@ mod args;
 mod commands;
 mod log;
 mod output;
+mod provider_values;
 
 use args::{Cli, Commands};
 

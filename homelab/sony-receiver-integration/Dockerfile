@@ -31,31 +31,31 @@ COPY schematic/schema/ schematic/schema/
 COPY schematic/define/ schematic/define/
 COPY schematic/definitions/ schematic/definitions/
 
-RUN cargo build --release -p arcam-amp-integration && \
-    strip /build/target/release/arcam-amp-integration
+RUN cargo build --release -p sony-receiver-integration && \
+    strip /build/target/release/sony-receiver-integration
 
 FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /build/target/release/arcam-amp-integration /usr/local/bin/arcam-amp-integration
+COPY --from=builder /build/target/release/sony-receiver-integration /usr/local/bin/sony-receiver-integration
 
 RUN cat <<'EOF' > /entrypoint.sh
 #!/bin/sh
 set -eu
 
-exec /usr/local/bin/arcam-amp-integration \
-  --host "${ARCAM_HOST:?Set ARCAM_HOST to your Arcam amplifier IP}" \
-  --port "${ARCAM_PORT:-50000}" \
-  --listen "0.0.0.0:${LISTEN_PORT:-9090}" \
-  --device-name "${DEVICE_NAME:-amp}" \
-  --timeout "${TIMEOUT:-5}" \
+exec /usr/local/bin/sony-receiver-integration \
+  --host "${SONY_HOST:?Set SONY_HOST to your Sony receiver IP}" \
+  --port "${SONY_PORT:-10000}" \
+  --listen "0.0.0.0:${LISTEN_PORT:-9091}" \
+  --device-name "${DEVICE_NAME:-receiver}" \
+  --timeout "${TIMEOUT:-10}" \
   --poll-interval "${POLL_INTERVAL:-5}" \
   "$@"
 EOF
 
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 9090
+EXPOSE 9091
 
 ENTRYPOINT ["/entrypoint.sh"]

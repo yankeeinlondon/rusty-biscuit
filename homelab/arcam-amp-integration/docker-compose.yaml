@@ -1,0 +1,16 @@
+services:
+  arcam-amp-integration:
+    build:
+      context: ../..
+      dockerfile: homelab/arcam-amp-integration/Dockerfile
+    network_mode: host
+    environment:
+      ARCAM_HOST: ${ARCAM_HOST:?Set ARCAM_HOST to your Arcam amplifier IP}
+      ARCAM_PORT: ${ARCAM_PORT:-50000}
+      LISTEN_PORT: ${LISTEN_PORT:-9090}
+      DEVICE_NAME: ${DEVICE_NAME:-amp}
+      TIMEOUT: ${TIMEOUT:-5}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+      UCR_INTEGRATION_TOKEN: ${UCR_INTEGRATION_TOKEN:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    restart: unless-stopped

@@ -182,6 +182,29 @@ test *args="":
     done
     @playa crowd-applause-recital 2>/dev/null || exit 0
 
+# run doctests (all workspace crates, or specific areas: just doctest claudine playa)
+doctest *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{args}}" ]]; then
+        echo ""
+        echo "Running doctests for all workspace libraries..."
+        echo "------------------------------------------------"
+        echo ""
+        cargo test --doc --workspace
+    else
+        IFS=', ' read -ra areas <<< "{{args}}"
+        echo ""
+        echo "Running doctests for: ${areas[*]}"
+        echo "------------------------------------------------"
+        echo ""
+        pkg_args=""
+        for area in "${areas[@]}"; do
+            pkg_args="$pkg_args -p $area"
+        done
+        cargo test --doc $pkg_args
+    fi
+
 # install binaries from all areas that have an install target
 install:
     #!/usr/bin/env bash
@@ -296,6 +319,10 @@ lint:
 
 # commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
 commit:
+    @echo
+    @echo -e "Before committing we must make sure all doctests pass"
+    @echo
+    @just doctest $(sniff repo --dirty-package-areas 2>/dev/null) || ( just _speak "We have failing doc tests which must be fixed before we can commit!" && echo "We have failing doc tests which must be fixed before we can commit!" && exit 1 )
     @echo ""
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"

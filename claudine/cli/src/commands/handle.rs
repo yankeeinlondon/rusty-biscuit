@@ -7,13 +7,15 @@ use tracing::debug;
 
 use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider, detect_environment};
 
+use crate::provider_values::provider_value_parser;
+
 /// Arguments for the handle subcommand.
 #[derive(Args)]
 pub struct HandleArgs {
     /// Event name (used for logging, the actual event is in the JSON payload).
     pub event: String,
     /// Optional provider hint (auto-detected from payload if not given).
-    #[arg(long)]
+    #[arg(long, value_parser = provider_value_parser())]
     pub provider: Option<String>,
 
     /// Emit structured JSON output suitable for CI parsing.
@@ -63,15 +65,15 @@ fn read_stdin_json() -> Result<Value> {
 }
 
 fn resolve_provider(hint: Option<&str>, raw: &Value) -> Result<Provider> {
-    if let Some(name) = hint {
-        return parse_provider(name);
-    }
+    resolve_provider_inner(hint, raw, provider_from_wrapper_env())
+}
 
-    if let Some(provider) = Provider::detect_from_payload(raw) {
-        return Ok(provider);
-    }
-
-    bail!("Could not detect provider from payload. Use --provider to specify.")
+fn provider_from_wrapper_env() -> Option<Provider> {
+    std::env::var("AGENT")
+        .ok()
+        .or_else(|| std::env::var("Agent").ok())
+        .as_deref()
+        .and_then(parse_wrapper_env_provider)
 }
 
 fn parse_provider(name: &str) -> Result<Provider> {
@@ -85,4 +87,63 @@ fn parse_provider(name: &str) -> Result<Provider> {
         .collect::<Vec<_>>()
         .join(", ");
     bail!("Unknown provider: {name}. Supported: {supported}")
+}
+
+fn parse_wrapper_env_provider(value: &str) -> Option<Provider> {
+    Provider::parse_cli_name(value)
+}
+
+fn resolve_provider_inner(
+    hint: Option<&str>,
+    raw: &Value,
+    env_provider: Option<Provider>,
+) -> Result<Provider> {
+    if let Some(name) = hint {
+        return parse_provider(name);
+    }
+
+    if let Some(provider) = env_provider {
+        return Ok(provider);
+    }
+
+    if let Some(provider) = Provider::detect_from_payload(raw) {
+        return Ok(provider);
+    }
+
+    bail!("Could not detect provider from payload. Use --provider to specify.")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn resolve_provider_prefers_explicit_hint() {
+        let raw = json!({ "hook_event_name": "BeforeAgent" });
+        let provider = resolve_provider_inner(Some("codex"), &raw, Some(Provider::Gemini)).unwrap();
+        assert_eq!(provider, Provider::Codex);
+    }
+
+    #[test]
+    fn resolve_provider_uses_wrapper_env_before_payload_detection() {
+        let raw = json!({ "hook_event_name": "BeforeAgent" });
+        let provider = resolve_provider_inner(None, &raw, Some(Provider::Gemini)).unwrap();
+        assert_eq!(provider, Provider::Gemini);
+    }
+
+    #[test]
+    fn resolve_provider_falls_back_to_payload_detection() {
+        let raw = json!({ "type": "thread.started", "thread_id": "t-1" });
+        let provider = resolve_provider_inner(None, &raw, None).unwrap();
+        assert_eq!(provider, Provider::Codex);
+    }
+
+    #[test]
+    fn parse_wrapper_env_provider_accepts_aliases() {
+        assert_eq!(super::parse_wrapper_env_provider("open-code"), Some(Provider::OpenCode));
+        assert_eq!(super::parse_wrapper_env_provider("gemini"), Some(Provider::Gemini));
+        assert_eq!(super::parse_wrapper_env_provider("nope"), None);
+    }
 }

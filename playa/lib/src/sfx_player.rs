@@ -84,7 +84,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         // Fall through to default rodio path on error.
     }
 
-    let mut stream = open_sfx_stream()?;
+    let mut stream = open_sfx_stream(options)?;
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
@@ -107,7 +107,16 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
 /// On macOS with `sfx-native-macos`, attempts to route to the system sound
 /// device. Falls back to the default output device on all other platforms
 /// or if device lookup fails.
-pub(crate) fn open_sfx_stream() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+pub(crate) fn open_sfx_stream(
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    if let Some(channel_name) = &options.channel
+        && let Some(device) = crate::channels::find_device_by_id_or_name(channel_name)
+        && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+    {
+        return Ok(stream);
+    }
+
     #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
     {
         if let Ok(Some(device)) = macos::find_system_sound_device()

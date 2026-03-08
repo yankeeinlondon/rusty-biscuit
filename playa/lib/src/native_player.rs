@@ -106,12 +106,20 @@ fn play_from_file(
     play_source(source, options)
 }
 
-/// Play a decoded audio source through the default output device.
+/// Play a decoded audio source through the specified or default output device.
 fn play_source(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
-    let stream = DeviceSinkBuilder::open_default_sink()?;
+    let stream = if let Some(channel_name) = &options.channel {
+        if let Some(device) = crate::channels::find_device_by_id_or_name(channel_name) {
+            DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())?
+        } else {
+            DeviceSinkBuilder::open_default_sink()?
+        }
+    } else {
+        DeviceSinkBuilder::open_default_sink()?
+    };
     let player = Player::connect_new(stream.mixer());
 
     if let Some(vol) = options.volume {
