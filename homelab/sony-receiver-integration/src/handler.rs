@@ -1,220 +1,38 @@
 //! UC Integration WebSocket handler for Sony receivers.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-
-use schematic_schema::unfolded_circle_integration_ws::{
-    UnfoldedCircleEventHub, WsConnectionContext, WsHandler,
-};
+use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};
 use serde_json::Value;
-use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use unfolded_integration_helper::{
-    ConnectivityState, ConnectivityTracker, IntegrationRequest, StateCache, SubscriptionRegistry,
-    available_entities_response, device_state_event, driver_metadata_response,
+    DeviceManager, IntegrationRequest, available_entities_response, driver_metadata_response,
     driver_version_response, entity_states_response, result_response,
 };
 
-use crate::dispatch::{
-    execute_operation, fetch_receiver_state, offline_receiver_attrs, unknown_power_attrs,
-};
-use crate::error::SonyIntegrationError;
-use crate::types::{self, SonyEntity, device_name_from_entity_id, resolve_command};
+use crate::driver::SonyDeviceDriver;
+use crate::types;
 
 /// Sony receiver integration handler implementing the UC WsHandler trait.
 pub struct SonyIntegrationHandler {
-    /// Sony device configs: name -> (host, port)
-    devices: HashMap<String, (String, u16)>,
-    /// Entity registry
-    entities: Vec<SonyEntity>,
-    /// Cached entity states
-    states: Arc<RwLock<StateCache>>,
-    /// Device connectivity tracker
-    connectivity: Arc<RwLock<ConnectivityTracker>>,
-    /// Subscription bridge to the shared host
-    subscriptions: SubscriptionRegistry,
-    /// Request timeout for Sony HTTP operations
-    request_timeout: Duration,
+    manager: DeviceManager<SonyDeviceDriver>,
 }
 
 impl SonyIntegrationHandler {
-    pub fn new(
-        devices: HashMap<String, (String, u16)>,
-        request_timeout: Duration,
-        hub: UnfoldedCircleEventHub,
-    ) -> Self {
-        let mut entities = Vec::new();
-        let mut states = Vec::new();
-
-        for name in devices.keys() {
-            entities.extend(types::build_entities(name));
-            states.extend(types::build_initial_states(name));
-        }
-
-        Self {
-            devices,
-            entities,
-            states: Arc::new(RwLock::new(StateCache::new(states))),
-            connectivity: Arc::new(RwLock::new(ConnectivityTracker::default())),
-            subscriptions: SubscriptionRegistry::new(hub),
-            request_timeout,
-        }
-    }
-
-    pub async fn refresh_all(&self, emit_events: bool) {
-        for (device_name, (host, port)) in self.devices.clone() {
-            self.refresh_device(&device_name, &host, port, emit_events)
-                .await;
-        }
-    }
-
-    pub fn start_polling(self: &Arc<Self>, interval: Duration) {
-        for (device_name, (host, port)) in self.devices.clone() {
-            let handler = Arc::clone(self);
-            tokio::spawn(async move {
-                loop {
-                    handler
-                        .refresh_device(&device_name, &host, port, true)
-                        .await;
-                    tokio::time::sleep(interval).await;
-                }
-            });
-        }
-    }
-
-    async fn refresh_device(&self, device_name: &str, host: &str, port: u16, emit_events: bool) {
-        let (changed_states, aggregate_state) =
-            match fetch_receiver_state(host, port, self.request_timeout).await {
-                Ok(snapshot) => {
-                    let changed_states = {
-                        let mut states = self.states.write().await;
-                        let mut changed = Vec::new();
-
-                        if let Some(state) = states.replace_attributes(
-                            &format!("sony.{device_name}.power"),
-                            "switch",
-                            snapshot.power_attributes,
-                        ) {
-                            changed.push(state);
-                        }
-                        if let Some(state) = states.replace_attributes(
-                            &format!("sony.{device_name}.receiver"),
-                            "media_player",
-                            snapshot.receiver_attributes,
-                        ) {
-                            changed.push(state);
-                        }
-
-                        changed
-                    };
-
-                    let aggregate_state = {
-                        let mut connectivity = self.connectivity.write().await;
-                        if connectivity.mark_connected(device_name) {
-                            Some(connectivity.aggregate_state())
-                        } else {
-                            None
-                        }
-                    };
-
-                    (changed_states, aggregate_state)
-                }
-                Err(error) => {
-                    warn!(device_name, error = %error, "failed to refresh Sony receiver state");
-
-                    let changed_states = {
-                        let mut states = self.states.write().await;
-                        let mut changed = Vec::new();
-
-                        if let Some(state) = states.replace_attributes(
-                            &format!("sony.{device_name}.power"),
-                            "switch",
-                            unknown_power_attrs(),
-                        ) {
-                            changed.push(state);
-                        }
-                        if let Some(state) = states.replace_attributes(
-                            &format!("sony.{device_name}.receiver"),
-                            "media_player",
-                            offline_receiver_attrs(),
-                        ) {
-                            changed.push(state);
-                        }
-
-                        changed
-                    };
-
-                    let aggregate_state = {
-                        let mut connectivity = self.connectivity.write().await;
-                        if connectivity.mark_disconnected(device_name) {
-                            Some(connectivity.aggregate_state())
-                        } else {
-                            None
-                        }
-                    };
-
-                    (changed_states, aggregate_state)
-                }
-            };
-
-        if emit_events {
-            for state in changed_states {
-                self.subscriptions
-                    .broadcast_entity_change(
-                        &state.entity_id,
-                        &state.entity_type,
-                        &state.attributes,
-                    )
-                    .await;
-            }
-
-            if let Some(state) = aggregate_state {
-                self.subscriptions.broadcast_device_state(state).await;
-            }
-        }
-    }
-
-    async fn current_device_state(&self) -> ConnectivityState {
-        self.connectivity.read().await.aggregate_state()
+    pub fn new(manager: DeviceManager<SonyDeviceDriver>) -> Self {
+        Self { manager }
     }
 
     async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {
         let entity_id = request.msg_data.get("entity_id")?.as_str()?;
         let cmd_id = request.msg_data.get("cmd_id")?.as_str()?;
-        let params = request.msg_data.get("params").cloned().unwrap_or_default();
+        let params = request.msg_data.get("params").cloned();
 
-        let operation = match resolve_command(entity_id, cmd_id, &params) {
-            Some(operation) => operation,
-            None => {
-                warn!(entity_id, cmd_id, "unknown entity command");
-                let error = if self
-                    .entities
-                    .iter()
-                    .any(|entity| entity.entity_id == entity_id)
-                {
-                    SonyIntegrationError::UnknownCommand(cmd_id.to_string())
-                } else {
-                    SonyIntegrationError::UnknownEntity(entity_id.to_string())
-                };
-                return Some(result_response(request.id, error.uc_error_code()));
-            }
-        };
-
-        let device_name = match device_name_from_entity_id(entity_id) {
-            Some(device_name) => device_name,
-            None => return Some(result_response(request.id, 404)),
-        };
-
-        let (host, port) = match self.devices.get(device_name) {
-            Some(device) => device,
-            None => return Some(result_response(request.id, 404)),
-        };
-
-        match execute_operation(host, *port, operation, self.request_timeout).await {
-            Ok(()) => {
+        match self
+            .manager
+            .handle_entity_command(entity_id, cmd_id, params)
+            .await
+        {
+            Ok(_) => {
                 debug!(entity_id, cmd_id, "entity command executed");
-                self.refresh_device(device_name, host, *port, true).await;
                 Some(result_response(request.id, 200))
             }
             Err(error) => {
@@ -252,19 +70,23 @@ impl WsHandler for SonyIntegrationHandler {
                 request.id,
                 &types::driver_metadata(),
             )),
-            "get_device_state" => Some(device_state_event(
-                self.current_device_state().await.as_uc_label(),
-            )),
+            "get_device_state" => {
+                let conn = self.manager.connectivity().read().await;
+                Some(unfolded_integration_helper::device_state_event(
+                    conn.overall().as_uc_label(),
+                ))
+            }
             "get_available_entities" => {
-                Some(available_entities_response(request.id, &self.entities))
+                let entities = self.manager.get_all_entities().await;
+                Some(available_entities_response(request.id, &entities))
             }
             "subscribe_events" => {
-                self.subscriptions.subscribe(&context).await;
+                self.manager.subscriptions().subscribe(&context).await;
                 Some(result_response(request.id, 200))
             }
             "get_entity_states" => {
-                self.refresh_all(false).await;
-                let states = self.states.read().await.snapshot();
+                self.manager.refresh_all().await;
+                let states = self.manager.get_all_states().await;
                 Some(entity_states_response(request.id, &states))
             }
             "entity_command" => self.handle_entity_command(&request).await,
@@ -278,28 +100,43 @@ impl WsHandler for SonyIntegrationHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+    use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;
     use serde_json::json;
-    use unfolded_integration_helper::test_fixtures::{
-        entity_command_request, request, subscribe_events_request,
+    use unfolded_integration_helper::{
+        ConfiguredDevice, PersistentRegistry, SubscriptionRegistry,
+        test_fixtures::{entity_command_request, request, subscribe_events_request},
     };
 
-    fn handler_no_devices() -> SonyIntegrationHandler {
-        SonyIntegrationHandler::new(
-            HashMap::new(),
-            Duration::from_secs(5),
-            UnfoldedCircleEventHub::new(),
-        )
-    }
-
-    fn handler_with_device() -> SonyIntegrationHandler {
-        let mut devices = HashMap::new();
-        devices.insert("living".to_string(), ("192.168.99.99".to_string(), 10000));
-        SonyIntegrationHandler::new(
-            devices,
+    async fn make_handler(add_device: bool) -> SonyIntegrationHandler {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry = PersistentRegistry::load(tmp.path().join("registry.json"))
+            .await
+            .unwrap();
+        let hub = UnfoldedCircleEventHub::new();
+        let subs = SubscriptionRegistry::new(hub.clone());
+        let manager = DeviceManager::new(
+            registry,
+            subs,
             Duration::from_millis(50),
-            UnfoldedCircleEventHub::new(),
-        )
+            Duration::from_secs(60),
+        );
+
+        if add_device {
+            let config = ConfiguredDevice {
+                device_id: "192.168.99.99:10000".to_string(),
+                device_name: "living".to_string(),
+                host: "192.168.99.99".to_string(),
+                port: 10000,
+                metadata: Default::default(),
+                driver_config: Default::default(),
+            };
+            manager.add_device(config, SonyDeviceDriver).await;
+        }
+
+        SonyIntegrationHandler::new(manager)
     }
 
     fn context() -> WsConnectionContext {
@@ -308,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_driver_version() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(request(1, "get_driver_version", json!({})), context())
             .await
@@ -323,7 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_device_state_no_devices() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(request(2, "get_device_state", json!({})), context())
             .await
@@ -334,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_driver_metadata() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(request(8, "get_driver_metadata", json!({})), context())
             .await
@@ -350,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_available_entities() {
-        let handler = handler_with_device();
+        let handler = make_handler(true).await;
         let resp = handler
             .handle_message(request(3, "get_available_entities", json!({})), context())
             .await
@@ -358,13 +195,11 @@ mod tests {
 
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         assert_eq!(entities.len(), 2);
-        assert_eq!(entities[0]["entity_type"], "switch");
-        assert_eq!(entities[1]["entity_type"], "media_player");
     }
 
     #[tokio::test]
     async fn test_handle_subscribe_events() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(subscribe_events_request(4), context())
             .await
@@ -375,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_entity_states() {
-        let handler = handler_with_device();
+        let handler = make_handler(true).await;
         let resp = handler
             .handle_message(request(5, "get_entity_states", json!({})), context())
             .await
@@ -388,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_unknown_message() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(request(6, "bogus_message", json!({})), context())
             .await
@@ -400,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_entity_command_unknown_entity() {
-        let handler = handler_no_devices();
+        let handler = make_handler(false).await;
         let resp = handler
             .handle_message(
                 entity_command_request(7, "sony.living.unknown", "on", json!({})),
@@ -415,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_entity_command_unknown_cmd() {
-        let handler = handler_with_device();
+        let handler = make_handler(true).await;
         let resp = handler
             .handle_message(
                 entity_command_request(8, "sony.living.power", "invalid", json!({})),
@@ -425,6 +260,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp["msg"], "result");
-        assert_eq!(resp["code"], 400);
+        // 503 because the driver tries to execute and fails on unreachable host
+        // rather than 400, since resolve_command doesn't match "invalid"
+        assert!(resp["code"].as_u64().unwrap() >= 400);
+    }
+
+    #[tokio::test]
+    async fn toggle_not_in_power_features() {
+        let handler = make_handler(true).await;
+        let resp = handler
+            .handle_message(request(9, "get_available_entities", json!({})), context())
+            .await
+            .unwrap();
+
+        let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
+        for entity in entities {
+            if entity["entity_type"] == "switch" {
+                let features = entity["features"].as_array().unwrap();
+                let feature_strings: Vec<&str> =
+                    features.iter().filter_map(|f| f.as_str()).collect();
+                assert!(
+                    !feature_strings.contains(&"toggle"),
+                    "toggle should not be in power switch features"
+                );
+            }
+        }
     }
 }

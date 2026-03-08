@@ -101,7 +101,7 @@ pub fn build_entities(device_name: &str) -> Vec<SonyEntity> {
             entity_id: format!("sony.{device_name}.power"),
             entity_type: "switch".to_string(),
             name: HashMap::from([("en".to_string(), format!("{device_name} Power"))]),
-            features: vec!["on_off".to_string(), "toggle".to_string()],
+            features: vec!["on_off".to_string()],
             options: None,
         },
         SonyEntity {
