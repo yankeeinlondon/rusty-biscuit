@@ -48,6 +48,8 @@ Before making changes, inspect these files and use them as the baseline shape fo
 - `homelab/arcam-amp-integration/Cargo.toml`
 - `homelab/arcam-amp-integration/src/main.rs`
 - `homelab/arcam-amp-integration/src/handler.rs`
+- `homelab/arcam-amp-integration/src/driver.rs`
+- `homelab/arcam-amp-integration/src/discovery.rs`
 - `homelab/arcam-amp-integration/src/dispatch.rs`
 - `homelab/arcam-amp-integration/src/types.rs`
 - `homelab/arcam-amp-integration/src/error.rs`
@@ -58,8 +60,13 @@ The Arcam integration establishes the house pattern:
 - the integration driver is the **WebSocket server**
 - the UC Remote is the **WebSocket client**
 - transport-specific I/O is isolated from the UC protocol handler
-- `homelab/unfolded-integration-helper` owns UC envelope parsing/building, keyed state caching, and subscription helpers
+- `homelab/unfolded-integration-helper` owns UC envelope parsing/building, keyed state caching, device registry, discovery, setup flow, and subscription helpers
 - entity definitions and command resolution are kept in pure types/helpers
+- a `DeviceDriver` trait implementation in `driver.rs` bridges device-specific logic to the generic `DeviceManager`
+- a `DeviceDiscovery` trait implementation in `discovery.rs` enables network probing
+- `--host` is optional (seed hint); integrations can start with zero devices and accept remote-driven setup
+- `--data-dir` overrides the persistent registry location
+- `PersistentRegistry` persists device/remote state across restarts
 
 ---
 
@@ -124,6 +131,8 @@ Create or update the integration so that it includes, at minimum:
 - `homelab/<integration-name>-integration/docker-compose.yaml`
 - `homelab/<integration-name>-integration/src/main.rs`
 - `homelab/<integration-name>-integration/src/handler.rs`
+- `homelab/<integration-name>-integration/src/driver.rs`
+- `homelab/<integration-name>-integration/src/discovery.rs`
 - `homelab/<integration-name>-integration/src/dispatch.rs`
 - `homelab/<integration-name>-integration/src/types.rs`
 - `homelab/<integration-name>-integration/src/error.rs`
@@ -196,12 +205,25 @@ The package-local `justfile` must expose these recipe names:
 Your implementation should generally follow this structure:
 
 - `main.rs`
-    - parse CLI arguments with `clap`
+    - parse CLI arguments with `clap` (`--host` optional, `--data-dir` for persistence)
     - initialize tracing
-    - build config/device registry
+    - load `PersistentRegistry` from data dir
+    - create `DeviceManager` with registry + subscriptions
+    - seed from `--host` if provided, load persisted devices
     - create `UnfoldedCircleIntegrationWsHost::new_event_hub()`
-    - construct the handler with the shared hub
+    - construct the handler with the `DeviceManager`
     - start `UnfoldedCircleIntegrationWsHost::serve_addr_with_hub(...)`
+
+- `driver.rs`
+    - implement `DeviceDriver` trait from the helper crate
+    - `build_entities()` returns UC entities for a configured device
+    - `build_initial_states()` returns unknown/default states
+    - `fetch_snapshot()` polls the real device and returns entity updates
+    - `execute_command()` executes a command and returns updated state
+
+- `discovery.rs`
+    - implement `DeviceDiscovery` trait from the helper crate
+    - `validate_host()` probes a candidate address and returns device metadata
 
 - `types.rs`
     - driver constants
