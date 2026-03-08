@@ -9,7 +9,7 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 - a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
 - a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
 
-The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow.
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow. The schema follows the UC field contract (`select` with `options` and `value`) and degrades to host/name entry when discovery has not found any candidates yet.
 
 ## Entity Model
 
@@ -159,6 +159,7 @@ What to expect:
 
 - mDNS makes the driver discoverable on the local subnet
 - the configurator still opens the WebSocket connection and asks for `get_driver_metadata`
+- the `setup_data_schema` inside `driver_metadata` must use the documented UC field shapes; invalid setup fields can surface as a `Resource not found` style configurator failure before any setup request is logged
 - the setup flow can then validate a manual host or reuse discovered/known devices without restarting the process
 - if discovery works but metadata is missing or invalid, the integration can appear in the list but fail to open
 - mDNS does not cross VLANs or multicast-restricted network boundaries without additional network support
@@ -244,6 +245,15 @@ The driver runs a background poll loop per configured device. Each loop refreshe
 - dynamic source list metadata used by `select_source`
 
 This means front-panel changes, mobile-app commands, or other API clients can be reflected in the driver's cached state without waiting for a UC command path through this integration. When a client has successfully called `subscribe_events`, poll diffs are broadcast as `entity_change` / `device_state` events over the WebSocket host.
+
+## Setup Notes
+
+- Setup discovery now probes previously known devices plus the local IPv4 LAN instead of waiting for the registry to already contain candidates.
+- On very large subnets the scan is intentionally clamped to the interface's local `/24` slice so setup stays responsive on home networks.
+- Startup no longer globally activates every persisted device. The integration keeps configured devices in the registry and activates them lazily when a Remote assigns them or when a CLI seed hint is later bound through setup.
+- The initial setup metadata stays valid when discovery finds no Eversolo candidates by omitting the selector entirely and leaving manual host/device-name entry available.
+- The dynamic setup screen sends initialized `setup_data` for every rendered field so manual host entry works even when the selector is empty or unused.
+- When candidates exist, the selector uses the documented UC `select` field shape with `options` and `value`.
 
 ## mDNS and Logging Notes
 
