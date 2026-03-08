@@ -142,8 +142,14 @@ mod tests {
 
     #[test]
     fn parse_wrapper_env_provider_accepts_aliases() {
-        assert_eq!(super::parse_wrapper_env_provider("open-code"), Some(Provider::OpenCode));
-        assert_eq!(super::parse_wrapper_env_provider("gemini"), Some(Provider::Gemini));
+        assert_eq!(
+            super::parse_wrapper_env_provider("open-code"),
+            Some(Provider::OpenCode)
+        );
+        assert_eq!(
+            super::parse_wrapper_env_provider("gemini"),
+            Some(Provider::Gemini)
+        );
         assert_eq!(super::parse_wrapper_env_provider("nope"), None);
     }
 }

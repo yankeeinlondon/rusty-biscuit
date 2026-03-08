@@ -74,6 +74,10 @@ Process an incoming event from a provider hook. Reads JSON payload from stdin, a
 
 Test what would happen for an event without side effects. Accepts event names in multiple formats: canonical (`turn_complete`), native (`Stop`), PascalCase (`TurnComplete`), kebab-case (`turn-complete`) — all case-insensitive. When no stdin is provided, generates realistic mock payloads for the selected provider.
 
+### `claudine logs [subcommand] [flags]`
+
+Query the local reporting index built from JSONL hook logs. Shared filters include `--provider`, `--repo`, `--package-area`, and `--package`, and read commands perform a best-effort sync before querying.
+
 ### `claudine about`
 
 Renders rich help documentation using darkmatter markdown rendering with biscuit-terminal fallback.
@@ -113,6 +117,7 @@ Wrapper behavior:
 - Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
 - Reports removed env variable names to stderr (names only, sorted/unique).
 - Injects `AGENT`, `YOLO`, `AGENT_PARAMS`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- `claudine handle` records wrapper-provided `PACKAGE_AREA` / `PACKAGE` values into event logs so they can be used in reporting filters.
 - Runs child process with inherited stdio/cwd and propagates child exit code.
 
 ## Module Structure

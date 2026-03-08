@@ -110,7 +110,8 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     // Phase 3: Global Action Interview
     log::message("Phase 3: Action Defaults");
     log::message("-------------------------");
-    let action_profile = prompts::prompt_action_profile_with_defaults(defaults.action_profile.as_ref())?;
+    let action_profile =
+        prompts::prompt_action_profile_with_defaults(defaults.action_profile.as_ref())?;
 
     log::message("");
     log::message("Phase 4: Protect Defaults");
@@ -261,11 +262,20 @@ fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefa
             .map(|linking| linking.preference.clone())
             .unwrap_or_default(),
         action_profile: infer_action_profile(&config),
-        protect_posture: Some(config.settings.protect.as_ref().map(|protect| protect.posture)),
+        protect_posture: Some(
+            config
+                .settings
+                .protect
+                .as_ref()
+                .map(|protect| protect.posture),
+        ),
     }
 }
 
-fn load_existing_init_config(repo_scope: bool, repo_root: &std::path::Path) -> Option<HookerConfig> {
+fn load_existing_init_config(
+    repo_scope: bool,
+    repo_root: &std::path::Path,
+) -> Option<HookerConfig> {
     let home = dirs::home_dir()?;
     let user_config = home.join(".claudine").join("config.json");
     let repo_config = repo_root.join(".claudine").join("config.json");
@@ -664,10 +674,7 @@ mod tests {
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
-            providers: HashMap::from([(
-                provider,
-                ProviderConfig { events: event_map },
-            )]),
+            providers: HashMap::from([(provider, ProviderConfig { events: event_map })]),
         }
     }
 

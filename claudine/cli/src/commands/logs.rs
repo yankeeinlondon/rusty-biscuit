@@ -43,6 +43,14 @@ pub struct LogsArgs {
     #[arg(long)]
     pub repo: Option<String>,
 
+    /// Filter by monorepo package area.
+    #[arg(long = "package-area")]
+    pub package_area: Option<String>,
+
+    /// Filter by monorepo package.
+    #[arg(long)]
+    pub package: Option<String>,
+
     /// Emit machine-readable JSON.
     #[arg(long)]
     pub json: bool,
@@ -178,6 +186,8 @@ fn parse_filters(args: &LogsArgs) -> Result<ReportingFilters> {
     Ok(ReportingFilters {
         provider,
         repo: args.repo.clone(),
+        package_area: args.package_area.clone(),
+        package: args.package.clone(),
     })
 }
 

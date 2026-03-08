@@ -43,7 +43,11 @@ pub fn prompt_provider_preferences_with_defaults(
             .collect();
         let starting_cursor = defaults
             .get(idx)
-            .and_then(|provider| options.iter().position(|option| option == &provider.to_string()))
+            .and_then(|provider| {
+                options
+                    .iter()
+                    .position(|option| option == &provider.to_string())
+            })
             .unwrap_or(0);
         let selected = Select::new(prompt, options.clone())
             .with_help_message("Used for canonical provider ordering")
@@ -245,8 +249,8 @@ fn prompt_log_target(default: Option<&LogTarget>) -> Result<LogTarget> {
             }
         }
         "Remote server URL" => {
-            let mut prompt = Text::new("Enter server URL:")
-                .with_placeholder("https://example.com/events");
+            let mut prompt =
+                Text::new("Enter server URL:").with_placeholder("https://example.com/events");
             if let Some(LogTarget::Server { url, .. }) = default {
                 prompt = prompt.with_default(url);
             }
@@ -482,7 +486,10 @@ mod tests {
             })),
             1
         );
-        assert_eq!(logging_profile_starting_cursor(Some(&LoggingProfile::None)), 2);
+        assert_eq!(
+            logging_profile_starting_cursor(Some(&LoggingProfile::None)),
+            2
+        );
     }
 
     #[test]
