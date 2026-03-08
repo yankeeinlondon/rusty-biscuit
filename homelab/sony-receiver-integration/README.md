@@ -219,6 +219,15 @@ just sanity-test-mutate
 - **Power status quirk**: Uses the Native Web API (port 80) for power status because the JSON-RPC API is unreliable with Network Standby enabled.
 - **Volume step size**: Volume up/down increments by 1 unit per command. The receiver's volume range is 0-100.
 
+## Setup Notes
+
+- Setup discovery now probes previously known devices plus the local IPv4 LAN instead of only revalidating registry entries.
+- On very large subnets the scan is intentionally clamped to the interface's local `/24` slice so setup remains responsive.
+- Startup no longer activates every persisted device at process start. Configured receivers stay in the registry and are activated lazily when a Remote assigns them or when setup binds a seed hint.
+- The initial setup metadata stays valid when discovery returns no Sony candidates by omitting the selector and leaving manual host/device-name entry available.
+- The dynamic setup screen sends initialized `setup_data` for every rendered field so manual host entry remains valid when no device is selected.
+- When candidates exist, the selector uses the documented UC `select` field shape with `options` and `value`.
+
 ## Lessons Learned
 
 - The UC Integration protocol requires the **driver to be the WebSocket server** and the Remote to be the client.
