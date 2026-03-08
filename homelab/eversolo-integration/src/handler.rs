@@ -10,10 +10,10 @@ use tracing::{debug, info, warn};
 use unfolded_integration_helper::{
     ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
     KnownDevice, SetupSession, SetupSessions, SetupState, available_entities_response,
-    bounded_scan, build_candidate_list, device_selection_schema,
-    driver_metadata_response, driver_version_response, entity_states_response,
-    local_ipv4_candidates, remote_id_from_context, result_response, setup_driver_response,
-    setup_progress_event, setup_wait_user_action_event,
+    bounded_scan, build_candidate_list, device_selection_schema, driver_metadata_response,
+    driver_version_response, entity_states_response, envelope_kind, envelope_message_name,
+    local_ipv4_candidates, remote_id_from_context, remote_setup_abort_error, result_response,
+    setup_driver_response, setup_progress_event, setup_wait_user_action_event,
 };
 
 use crate::discovery::EversoloDiscovery;
@@ -375,6 +375,22 @@ impl EversoloIntegrationHandler {
 
 impl WsHandler for EversoloIntegrationHandler {
     async fn handle_message(&self, message: Value, context: WsConnectionContext) -> Option<Value> {
+        if let Some(error) = remote_setup_abort_error(&message) {
+            let remote_id = remote_id_from_context(&context);
+            self.sessions.clear(&remote_id).await;
+            warn!(remote_id, error, "UC Remote aborted Eversolo setup");
+            return None;
+        }
+
+        if envelope_kind(&message) != Some("req") {
+            debug!(
+                kind = ?envelope_kind(&message),
+                msg = ?envelope_message_name(&message),
+                "ignoring non-request message"
+            );
+            return None;
+        }
+
         let request = match IntegrationRequest::parse(message) {
             Ok(request) => request,
             Err(unfolded_integration_helper::EnvelopeError::UnexpectedKind(kind)) => {

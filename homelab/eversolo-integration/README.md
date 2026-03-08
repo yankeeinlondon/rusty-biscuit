@@ -9,7 +9,7 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 - a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
 - a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
 
-The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow. The schema follows the UC field contract (`select` with `options` and `value`) and degrades to host/name entry when discovery has not found any candidates yet.
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow. The schema follows the UC field contract (`dropdown` with `items`, item `id`, and selected `value`) and degrades to host/name entry when discovery has not found any candidates yet.
 
 ## Entity Model
 
@@ -254,8 +254,8 @@ This means front-panel changes, mobile-app commands, or other API clients can be
 - On very large subnets the scan is intentionally clamped to the interface's local `/24` slice so setup stays responsive on home networks.
 - Startup no longer globally activates every persisted device. The integration keeps configured devices in the registry and activates them lazily when a Remote assigns them or when a CLI seed hint is later bound through setup.
 - The initial setup metadata stays valid when discovery finds no Eversolo candidates by omitting the selector entirely and leaving manual host/device-name entry available.
-- The dynamic setup screen sends initialized `setup_data` for every rendered field so manual host entry works even when the selector is empty or unused.
-- When candidates exist, the selector uses the documented UC `select` field shape with `options` and `value`.
+- The dynamic setup screen must follow the AsyncAPI settings-page contract so manual host entry still works even when the selector is empty or unused.
+- When candidates exist, the selector uses the documented UC `dropdown` field shape with `items`, item `id`, and selected `value`.
 
 ## mDNS and Logging Notes
 
