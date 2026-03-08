@@ -6,7 +6,7 @@ Unfolded Circle integration driver for Arcam PA-series amplifiers (PA240, PA410,
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes Arcam amplifiers as switch entities for power and mute control.
 
-The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a fresh Remote can configure an amplifier through the integration protocol instead of relying on startup-only host seeding. The setup schema follows the UC field contract (`select` with `options` and `value`) and falls back to host/name text inputs when discovery has no candidates yet.
+The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a fresh Remote can configure an amplifier through the integration protocol instead of relying on startup-only host seeding. The setup schema follows the UC field contract (`dropdown` with `items`, item `id`, and selected `value`) and falls back to host/name text inputs when discovery has no candidates yet.
 
 ### Entities
 
@@ -186,8 +186,8 @@ just sanity-test-mutate
 - Setup discovery now probes previously known devices plus the local IPv4 LAN instead of only revalidating registry entries.
 - On very large subnets the scan is intentionally clamped to the interface's local `/24` slice so setup remains responsive.
 - The initial setup screen stays valid even when network discovery returns no Arcam candidates. In that case the configurator shows only manual host and device-name inputs instead of an empty selector.
-- The dynamic setup screen sends initialized `setup_data` for every rendered field so manual host entry remains valid when no device is selected.
-- When discovery finds candidates, the selector uses the documented UC `select` field shape with `options` and `value`, not custom dropdown keys.
+- The dynamic setup screen must follow the AsyncAPI settings-page contract so manual host entry remains valid when no device is selected.
+- When discovery finds candidates, the selector uses the documented UC `dropdown` field shape with `items`, item `id`, and selected `value`.
 
 ## Key Dependencies
 
