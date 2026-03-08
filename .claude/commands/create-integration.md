@@ -41,6 +41,9 @@ Treat the first whitespace-delimited token in `$ARGUMENTS` as the integration na
 Before making changes, inspect these files and use them as the baseline shape for the new integration:
 
 - `homelab/arcam-amp-integration/README.md`
+- `homelab/arcam-amp-integration/Dockerfile`
+- `homelab/arcam-amp-integration/docker-compose.yaml`
+- `homelab/arcam-amp-integration/justfile`
 - `homelab/unfolded-integration-helper/src/lib.rs`
 - `homelab/arcam-amp-integration/Cargo.toml`
 - `homelab/arcam-amp-integration/src/main.rs`
@@ -107,6 +110,9 @@ Create or update the integration so that it includes, at minimum:
 
 - `homelab/<integration-name>-integration/Cargo.toml`
 - `homelab/<integration-name>-integration/README.md`
+- `homelab/<integration-name>-integration/justfile`
+- `homelab/<integration-name>-integration/Dockerfile`
+- `homelab/<integration-name>-integration/docker-compose.yaml`
 - `homelab/<integration-name>-integration/src/main.rs`
 - `homelab/<integration-name>-integration/src/handler.rs`
 - `homelab/<integration-name>-integration/src/dispatch.rs`
@@ -116,7 +122,6 @@ Create or update the integration so that it includes, at minimum:
 Add these when needed:
 
 - `driver.json` for installed/local-mode packaging
-- `Dockerfile` and `docker-compose.yml` for external deployment
 - additional modules only when the protocol complexity warrants them
 
 ---
@@ -163,6 +168,19 @@ Default binary name:
 - `<integration-name>-integration`
 
 Follow the Arcam package shape unless there is a strong reason not to.
+
+Scaffold these operational files as part of the initial package, not as optional follow-up:
+
+- `Dockerfile`
+- `docker-compose.yaml`
+- `justfile`
+
+The package-local `justfile` must expose these recipe names:
+
+- `install`
+- `build-image`
+- `sanity-test`
+- `sanity-test-mutate`
 
 ### 4. Implement the Runtime
 
@@ -223,6 +241,7 @@ The README must include:
 - architecture summary
 - how state synchronization works, including how unsolicited external changes reach the remote
 - how to run it as an external integration
+- how to build and run it with the checked-in `Dockerfile` and `docker-compose.yaml`
 - configuration flags and environment variables
 - how to register it with the remote
 - installed/local-mode packaging steps only if implemented
