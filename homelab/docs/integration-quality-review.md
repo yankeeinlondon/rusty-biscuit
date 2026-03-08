@@ -18,8 +18,8 @@ This review combines:
 - source inspection of the integration packages, helper crate, and relevant `homelab` client/server code
 - local protocol documentation in `homelab/docs/unfolded-circle/`
 - live non-destructive validation against:
-  - Eversolo DMP-A8 at `192.168.20.90:9529`
-  - Arcam amplifier at `192.168.20.161:50000`
+    - Eversolo DMP-A8 at `192.168.20.90:9529`
+    - Arcam amplifier at `192.168.20.161:50000`
 - direct WebSocket probing of the current Eversolo and Arcam UC integration binaries against those real devices
 
 ## Executive Summary
@@ -66,35 +66,35 @@ That does **not** invalidate the larger review. Even when the current checkout r
 Direct HTTP validation against `192.168.20.90:9529` confirmed that the device exposes the richer capability set described by the user:
 
 - `GET /ZidooControlCenter/getModel`
-  - returned `model: "DMP-A8"`
-  - returned `firmware: "v1.5.62"`
-  - returned `ip: "192.168.20.90"`
-  - returned `net_mac: "80:0a:80:5c:84:ac"`
-  - returned `wif_mac: "02:00:00:00:00:00"`
-  - returned `ableRemoteBoot: true`
+    - returned `model: "DMP-A8"`
+    - returned `firmware: "v1.5.62"`
+    - returned `ip: "192.168.20.90"`
+    - returned `net_mac: "80:0a:80:5c:84:ac"`
+    - returned `wif_mac: "02:00:00:00:00:00"`
+    - returned `ableRemoteBoot: true`
 - `GET /ZidooMusicControl/v2/getState`
-  - returned current metadata for `"Twentieth Century Fox"`
-  - returned `state: 0`
-  - returned `position: 36240`
-  - returned `duration: 153925`
-  - returned `volumeData.currenttVolume: 160`
+    - returned current metadata for `"Twentieth Century Fox"`
+    - returned `state: 0`
+    - returned `position: 36240`
+    - returned `duration: 153925`
+    - returned `volumeData.currenttVolume: 160`
 - `GET /ZidooMusicControl/v2/getInputAndOutputList`
-  - returned 10 inputs
-  - returned 6 outputs
-  - included current input and output indices
+    - returned 10 inputs
+    - returned 6 outputs
+    - included current input and output indices
 - `GET /ZidooMusicControl/v2/getPowerOption`
-  - returned `poweroff`
-  - returned `reboot`
-  - returned `screen`
-  - returned `timeshutdown`
+    - returned `poweroff`
+    - returned `reboot`
+    - returned `screen`
+    - returned `timeshutdown`
 - `GET /SystemSettings/displaySettings/getScreenBrightness`
-  - returned `currentValue: 52`
+    - returned `currentValue: 52`
 - `GET /SystemSettings/displaySettings/getKnobBrightness`
-  - returned `currentValue: 40`
+    - returned `currentValue: 40`
 - `GET /SystemSettings/displaySettings/getVUModeList`
-  - returned 14 VU modes
+    - returned 14 VU modes
 - `GET /SystemSettings/displaySettings/getSpPlayModeList`
-  - returned 4 spectrum modes
+    - returned 4 spectrum modes
 
 I also ran the current `eversolo-integration` binary locally against that device and queried it over WebSocket. The current checkout responded with:
 
@@ -112,11 +112,11 @@ Direct non-destructive TCP validation against `192.168.20.161:50000` confirmed t
 - power query returned a valid response frame indicating standby/off
 - mute query returned a valid response frame indicating mute enabled
 - system status query returned:
-  - model `PA240`
-  - friendly name
-  - IP address `192.168.20.161`
-  - amplifier mode byte
-  - auto-shutdown and timeout fields
+    - model `PA240`
+    - friendly name
+    - IP address `192.168.20.161`
+    - amplifier mode byte
+    - auto-shutdown and timeout fields
 
 I also ran the current `arcam-amp-integration` binary locally against that device and queried it over WebSocket. The current checkout responded with:
 
@@ -271,14 +271,14 @@ Do not make `rustscan` a hard runtime dependency unless you specifically want it
 For the integration runtime itself, a bounded async TCP probe plus identity verification is usually enough:
 
 - Eversolo:
-  - probe TCP `9529`
-  - verify with `GET /ZidooControlCenter/getModel`
+    - probe TCP `9529`
+    - verify with `GET /ZidooControlCenter/getModel`
 - Arcam:
-  - probe TCP `50000`
-  - verify with power query or system-status query
+    - probe TCP `50000`
+    - verify with power query or system-status query
 - Sony:
-  - probe TCP `10000` and/or HTTP on `80`
-  - verify with JSON-RPC and native web status
+    - probe TCP `10000` and/or HTTP on `80`
+    - verify with JSON-RPC and native web status
 
 This keeps discovery deterministic and device-aware.
 
@@ -314,10 +314,10 @@ To support the desired architecture, the helper should gain:
 - discovery adapter traits
 - hint validation helpers
 - richer capability types for:
-  - enumerations
-  - numeric ranges/sliders
-  - read-only metadata resources
-  - action lists
+    - enumerations
+    - numeric ranges/sliders
+    - read-only metadata resources
+    - action lists
 - remote/device scoped subscription filtering
 
 Without this, each integration will keep re-implementing the same runtime behaviors.
@@ -510,13 +510,13 @@ Instead:
 - user provides host or selects discovered device
 - integration validates with `getModel`
 - integration stores:
-  - host
-  - model
-  - firmware
-  - `net_mac`
-  - `wif_mac`
-  - inferred active transport
-  - `ableRemoteBoot`
+    - host
+    - model
+    - firmware
+    - `net_mac`
+    - `wif_mac`
+    - inferred active transport
+    - `ableRemoteBoot`
 - WOL configuration is then derived automatically
 
 Manual MAC entry can remain only as an expert override.
@@ -774,11 +774,11 @@ This will let Eversolo, Sony, and future integrations expose richer capability w
 - auto-resolve MAC/identity
 - partial refresh refactor
 - capability expansion:
-  - routing
-  - power actions
-  - brightness
-  - display modes
-  - richer metadata
+    - routing
+    - power actions
+    - brightness
+    - display modes
+    - richer metadata
 
 ## Phase 4: Sony Retrofit
 
