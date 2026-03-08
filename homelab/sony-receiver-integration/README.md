@@ -6,20 +6,20 @@ Unfolded Circle integration driver for Sony ES AV receivers (STR-AZ7000ES and si
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes a Sony receiver as a power switch and a media player entity with volume, mute, and input source selection.
 
-The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That metadata is required even when the Remote first finds the driver through mDNS.
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a Remote can configure the receiver through the integration protocol after discovery.
 
 ### Entities
 
 | Entity ID | Type | Features | Commands |
 |-----------|------|----------|----------|
-| `sony.{name}.power` | switch | on_off, toggle | on, off, toggle |
+| `sony.{name}.power` | switch | on_off | on, off, toggle |
 | `sony.{name}.receiver` | media_player | volume, volume_up_down, mute, mute_toggle, select_source | volume_set, volume_up, volume_down, mute, unmute, mute_toggle, select_source |
 
-The `{name}` comes from the `--device-name` flag (default: `receiver`).
+The `{name}` comes from the configured device instance. `--device-name` is only a seed default for CLI hints (default: `receiver`).
 
 ### Source Categories
 
-The media player's `select_source` command accepts these categories, which map to the receiver's native input configuration:
+The media player's `select_source` command advertises only categories that resolve against the receiver's current native input configuration:
 
 | Category | Default Name | Description |
 |----------|-------------|-------------|
@@ -87,7 +87,7 @@ sony-receiver-integration --host 192.168.1.120 --device-name living
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--listen` | `0.0.0.0:9091` | WebSocket listen address |
-| `--host` | *(required)* | Sony receiver IP or hostname |
+| `--host` | *(optional seed hint)* | Sony receiver IP or hostname |
 | `--port` | `10000` | Sony JSON-RPC port |
 | `--device-name` | `receiver` | Name used in entity IDs |
 | `--timeout` | `10` | HTTP operation timeout (seconds) |
@@ -109,7 +109,7 @@ In the UC Web Configurator:
 1. Go to **Integrations & Docks** > **+** > **Add external integration**
 2. Enter the IP and port where the driver is running (e.g., `192.168.1.50:9091`)
 3. If using authentication, enter the token
-4. The Remote connects and discovers the power switch and media player entities
+4. The Remote completes the setup flow and binds the power switch and media player entities for the selected receiver
 
 ### mDNS Auto-Discovery
 
