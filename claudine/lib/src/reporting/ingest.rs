@@ -44,6 +44,8 @@ struct PreparedEvent {
     repo_org: Option<String>,
     branch: Option<String>,
     primary_language: Option<String>,
+    package_area: Option<String>,
+    package: Option<String>,
     tool_name: Option<String>,
     agent_type: Option<String>,
     notification_type: Option<String>,
@@ -387,6 +389,8 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
         repo_org: repo.and_then(|git| git.repo_org.clone()),
         branch: repo.and_then(|git| git.branch.clone()),
         primary_language: meta.env.primary_language.clone(),
+        package_area: meta.env.package_area.clone(),
+        package: meta.env.package.clone(),
         tool_name: meta.tool_name.clone(),
         agent_type: meta.agent_type.clone(),
         notification_type: meta.notification_type.clone(),
@@ -459,15 +463,16 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
         INSERT OR IGNORE INTO events (
             source_file, source_offset, source_date, timestamp, provider, event,
             session_key, session_id, cwd, repo_name, repo_org, branch, primary_language,
-            tool_name, agent_type, notification_type, notification_message, error, model,
-            permission_mode, head_sha, is_dirty, memory_available_bytes, hostname,
-            prompt_text, tool_input_json, tool_response_json, extra_json, env_json
+            package_area, package, tool_name, agent_type, notification_type,
+            notification_message, error, model, permission_mode, head_sha, is_dirty,
+            memory_available_bytes, hostname, prompt_text, tool_input_json,
+            tool_response_json, extra_json, env_json
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18, ?19,
-            ?20, ?21, ?22, ?23, ?24,
-            ?25, ?26, ?27, ?28, ?29
+            ?20, ?21, ?22, ?23, ?24, ?25,
+            ?26, ?27, ?28, ?29, ?30, ?31
         )
         "#,
         params![
@@ -484,6 +489,8 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
             row.repo_org,
             row.branch,
             row.primary_language,
+            row.package_area,
+            row.package,
             row.tool_name,
             row.agent_type,
             row.notification_type,
@@ -517,12 +524,13 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
         r#"
         INSERT INTO sessions (
             session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
-            branch, model, permission_mode, hostname, primary_language, event_count, turn_count,
-            tool_call_count, tool_error_count, turn_error_count, subagent_count
+            branch, package_area, package, model, permission_mode, hostname, primary_language,
+            event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
+            subagent_count
         ) VALUES (
             ?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7,
-            ?8, ?9, ?10, ?11, ?12, 1, ?13,
-            ?14, ?15, ?16, ?17
+            ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1,
+            ?15, ?16, ?17, ?18, ?19
         )
         ON CONFLICT(session_key) DO UPDATE SET
             session_id = COALESCE(excluded.session_id, sessions.session_id),
@@ -533,6 +541,8 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             repo_name = COALESCE(excluded.repo_name, sessions.repo_name),
             repo_org = COALESCE(excluded.repo_org, sessions.repo_org),
             branch = COALESCE(excluded.branch, sessions.branch),
+            package_area = COALESCE(excluded.package_area, sessions.package_area),
+            package = COALESCE(excluded.package, sessions.package),
             model = COALESCE(excluded.model, sessions.model),
             permission_mode = COALESCE(excluded.permission_mode, sessions.permission_mode),
             hostname = COALESCE(excluded.hostname, sessions.hostname),
@@ -553,6 +563,8 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             row.repo_name,
             row.repo_org,
             row.branch,
+            row.package_area,
+            row.package,
             row.model,
             row.permission_mode,
             row.hostname,
@@ -574,8 +586,9 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
         r#"
         INSERT INTO sessions (
             session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
-            branch, model, permission_mode, hostname, primary_language, event_count, turn_count,
-            tool_call_count, tool_error_count, turn_error_count, subagent_count
+            branch, package_area, package, model, permission_mode, hostname, primary_language,
+            event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
+            subagent_count
         )
         SELECT
             session_key,
@@ -587,6 +600,8 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             MAX(repo_name),
             MAX(repo_org),
             MAX(branch),
+            MAX(package_area),
+            MAX(package),
             MAX(model),
             MAX(permission_mode),
             MAX(hostname),

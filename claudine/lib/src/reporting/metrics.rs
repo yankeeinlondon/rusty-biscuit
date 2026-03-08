@@ -154,6 +154,8 @@ mod tests {
             repo_name: None,
             repo_org: None,
             branch: None,
+            package_area: None,
+            package: None,
             model: None,
             permission_mode: None,
             hostname: None,

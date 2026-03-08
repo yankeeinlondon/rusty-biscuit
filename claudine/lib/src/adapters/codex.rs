@@ -39,11 +39,19 @@ impl ProviderAdapter for CodexAdapter {
             tool_input: item
                 .and_then(|value| value.get("input"))
                 .cloned()
-                .or_else(|| hook_event.and_then(|value| value.get("tool_input")).cloned()),
+                .or_else(|| {
+                    hook_event
+                        .and_then(|value| value.get("tool_input"))
+                        .cloned()
+                }),
             tool_response: item
                 .and_then(|value| value.get("output"))
                 .cloned()
-                .or_else(|| hook_event.and_then(|value| value.get("output_preview")).cloned()),
+                .or_else(|| {
+                    hook_event
+                        .and_then(|value| value.get("output_preview"))
+                        .cloned()
+                }),
             error: raw
                 .get("error")
                 .and_then(|value| value.get("message"))
@@ -57,7 +65,13 @@ impl ProviderAdapter for CodexAdapter {
             env: EnvironmentContext::default(),
         };
 
-        for key in ["thread_id", "thread-id", "token_usage", "session_id", "triggered_at"] {
+        for key in [
+            "thread_id",
+            "thread-id",
+            "token_usage",
+            "session_id",
+            "triggered_at",
+        ] {
             if let Some(value) = raw.get(key) {
                 meta.extra.insert(key.to_string(), value.clone());
             }
@@ -178,7 +192,10 @@ fn event_kind(raw: &Value) -> Option<&str> {
     raw.get("type")
         .or_else(|| raw.get("event"))
         .or_else(|| raw.get("event_type"))
-        .or_else(|| raw.get("hook_event").and_then(|value| value.get("event_type")))
+        .or_else(|| {
+            raw.get("hook_event")
+                .and_then(|value| value.get("event_type"))
+        })
         .and_then(Value::as_str)
 }
 
@@ -270,7 +287,10 @@ mod tests {
         assert_eq!(meta.session_id.as_deref(), Some("ses_123"));
         assert_eq!(meta.tool_name.as_deref(), Some("local_shell"));
         assert_eq!(meta.tool_response, Some(json!("ok")));
-        assert_eq!(meta.extra["hook_event"]["event_type"], json!("after_tool_use"));
+        assert_eq!(
+            meta.extra["hook_event"]["event_type"],
+            json!("after_tool_use")
+        );
     }
 
     #[test]

@@ -795,23 +795,20 @@ fn looks_like_codex_payload(raw: &Value) -> bool {
     raw.get("event_type")
         .and_then(Value::as_str)
         .is_some_and(|kind| matches!(kind, "after_tool_use"))
-        || raw
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| {
-                matches!(
-                    kind,
-                    "agent-turn-complete"
-                        | "thread.started"
-                        | "turn.started"
-                        | "turn.completed"
-                        | "turn.failed"
-                        | "item.started"
-                        | "item.updated"
-                        | "item.completed"
-                        | "error"
-                )
-            })
+        || raw.get("type").and_then(Value::as_str).is_some_and(|kind| {
+            matches!(
+                kind,
+                "agent-turn-complete"
+                    | "thread.started"
+                    | "turn.started"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "item.started"
+                    | "item.updated"
+                    | "item.completed"
+                    | "error"
+            )
+        })
 }
 
 fn normalize_provider_input(input: &str) -> String {

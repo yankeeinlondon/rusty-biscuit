@@ -1,6 +1,8 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::Result;
+
+const SCHEMA_VERSION: &str = "2";
 
 /// Initialize the reporting schema if it does not exist yet.
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -13,10 +15,6 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
-
-        INSERT INTO schema_meta (key, value)
-        VALUES ('schema_version', '1')
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
         CREATE TABLE IF NOT EXISTS ingestion_state (
             source_file TEXT PRIMARY KEY,
@@ -42,6 +40,8 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             repo_org TEXT,
             branch TEXT,
             primary_language TEXT,
+            package_area TEXT,
+            package TEXT,
             tool_name TEXT,
             agent_type TEXT,
             notification_type TEXT,
@@ -71,6 +71,8 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             repo_name TEXT,
             repo_org TEXT,
             branch TEXT,
+            package_area TEXT,
+            package TEXT,
             model TEXT,
             permission_mode TEXT,
             hostname TEXT,
@@ -82,11 +84,31 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             turn_error_count INTEGER NOT NULL DEFAULT 0,
             subagent_count INTEGER NOT NULL DEFAULT 0
         );
+        "#,
+    )?;
 
+    let previous_version = schema_version(conn)?;
+    if previous_version.as_deref().unwrap_or("0") < SCHEMA_VERSION {
+        migrate_to_v2(conn)?;
+    }
+
+    conn.execute(
+        r#"
+        INSERT INTO schema_meta (key, value)
+        VALUES ('schema_version', ?1)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        [SCHEMA_VERSION],
+    )?;
+
+    conn.execute_batch(
+        r#"
         CREATE INDEX IF NOT EXISTS idx_events_source_date ON events(source_date);
         CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_provider_source_date ON events(provider, source_date);
         CREATE INDEX IF NOT EXISTS idx_events_repo_source_date ON events(repo_name, source_date);
+        CREATE INDEX IF NOT EXISTS idx_events_package_area_source_date ON events(package_area, source_date);
+        CREATE INDEX IF NOT EXISTS idx_events_package_source_date ON events(package, source_date);
         CREATE INDEX IF NOT EXISTS idx_events_session_timestamp ON events(session_key, timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_tool_source_date ON events(tool_name, source_date);
         CREATE INDEX IF NOT EXISTS idx_events_event_source_date ON events(event, source_date);
@@ -144,4 +166,199 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+fn schema_version(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn migrate_to_v2(conn: &Connection) -> Result<()> {
+    ensure_column(conn, "events", "package_area", "TEXT")?;
+    ensure_column(conn, "events", "package", "TEXT")?;
+    ensure_column(conn, "sessions", "package_area", "TEXT")?;
+    ensure_column(conn, "sessions", "package", "TEXT")?;
+
+    // The reporting database is a derived cache of JSONL logs, so clearing the
+    // indexed tables is the safest way to backfill newly-added columns.
+    conn.execute("DELETE FROM ingestion_state", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
+    conn.execute("DELETE FROM events", [])?;
+
+    Ok(())
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::*;
+
+    #[test]
+    fn initialize_migrates_v1_reporting_db_to_v2() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1');
+
+            CREATE TABLE ingestion_state (
+                source_file TEXT PRIMARY KEY,
+                file_size INTEGER NOT NULL,
+                modified_at INTEGER NOT NULL,
+                fingerprint TEXT NOT NULL,
+                byte_offset INTEGER NOT NULL,
+                last_event_timestamp TEXT,
+                last_synced_at TEXT NOT NULL
+            );
+            INSERT INTO ingestion_state (
+                source_file, file_size, modified_at, fingerprint, byte_offset, last_event_timestamp, last_synced_at
+            ) VALUES ('/tmp/2026-03-07.jsonl', 10, 11, 'abcd', 12, NULL, '2026-03-07T00:00:00Z');
+
+            CREATE TABLE events (
+                source_file TEXT NOT NULL,
+                source_offset INTEGER NOT NULL,
+                source_date TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                event TEXT NOT NULL,
+                session_key TEXT NOT NULL,
+                session_id TEXT,
+                cwd TEXT,
+                repo_name TEXT,
+                repo_org TEXT,
+                branch TEXT,
+                primary_language TEXT,
+                tool_name TEXT,
+                agent_type TEXT,
+                notification_type TEXT,
+                notification_message TEXT,
+                error TEXT,
+                model TEXT,
+                permission_mode TEXT,
+                head_sha TEXT,
+                is_dirty INTEGER,
+                memory_available_bytes INTEGER,
+                hostname TEXT,
+                prompt_text TEXT,
+                tool_input_json TEXT,
+                tool_response_json TEXT,
+                extra_json TEXT NOT NULL,
+                env_json TEXT NOT NULL,
+                PRIMARY KEY (source_file, source_offset)
+            );
+            INSERT INTO events (
+                source_file, source_offset, source_date, timestamp, provider, event, session_key,
+                session_id, cwd, repo_name, repo_org, branch, primary_language, tool_name,
+                agent_type, notification_type, notification_message, error, model,
+                permission_mode, head_sha, is_dirty, memory_available_bytes, hostname,
+                prompt_text, tool_input_json, tool_response_json, extra_json, env_json
+            ) VALUES (
+                '/tmp/2026-03-07.jsonl', 1, '2026-03-07', '2026-03-07T00:00:00Z', 'claude',
+                'session_start', 'claude:s-1', 's-1', '/tmp/repo', 'rusty-biscuit', 'ken',
+                'main', 'Rust', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0,
+                'host', NULL, NULL, NULL, '{}', '{}'
+            );
+
+            CREATE TABLE sessions (
+                session_key TEXT PRIMARY KEY,
+                session_id TEXT,
+                provider TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT NOT NULL,
+                cwd TEXT,
+                repo_name TEXT,
+                repo_org TEXT,
+                branch TEXT,
+                model TEXT,
+                permission_mode TEXT,
+                hostname TEXT,
+                primary_language TEXT,
+                event_count INTEGER NOT NULL DEFAULT 0,
+                turn_count INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                tool_error_count INTEGER NOT NULL DEFAULT 0,
+                turn_error_count INTEGER NOT NULL DEFAULT 0,
+                subagent_count INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO sessions (
+                session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
+                branch, model, permission_mode, hostname, primary_language, event_count,
+                turn_count, tool_call_count, tool_error_count, turn_error_count, subagent_count
+            ) VALUES (
+                'claude:s-1', 's-1', 'claude', '2026-03-07T00:00:00Z', '2026-03-07T00:01:00Z',
+                '/tmp/repo', 'rusty-biscuit', 'ken', 'main', NULL, NULL, 'host', 'Rust',
+                1, 0, 0, 0, 0, 0
+            );
+            "#,
+        )
+        .unwrap();
+
+        initialize(&conn).unwrap();
+
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let event_columns = table_columns(&conn, "events");
+        assert!(event_columns.contains(&"package_area".to_string()));
+        assert!(event_columns.contains(&"package".to_string()));
+
+        let session_columns = table_columns(&conn, "sessions");
+        assert!(session_columns.contains(&"package_area".to_string()));
+        assert!(session_columns.contains(&"package".to_string()));
+
+        let event_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+            .unwrap();
+        let session_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        let ingestion_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ingestion_state", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(event_count, 0);
+        assert_eq!(session_count, 0);
+        assert_eq!(ingestion_count, 0);
+    }
+
+    fn table_columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1)).unwrap();
+
+        rows.map(|row| row.unwrap()).collect()
+    }
 }

@@ -114,3 +114,102 @@ impl ReportingStore {
         queries::trends(&self.connection, range, filters, top_n)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use chrono::{TimeZone, Utc};
+    use tempfile::tempdir;
+
+    use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+
+    use super::*;
+
+    #[test]
+    fn reporting_filters_support_package_area_and_package() {
+        let workspace = tempdir().unwrap();
+        let logs_dir = workspace.path().join("logs");
+        let db_path = workspace.path().join("metrics.db");
+        fs::create_dir_all(&logs_dir).unwrap();
+
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 3, 7).unwrap();
+        let log_path = logs_dir.join("2026-03-07.jsonl");
+
+        let claudine_session = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: Utc.with_ymd_and_hms(2026, 3, 7, 18, 0, 0).unwrap(),
+            session_id: Some("claudine-session".to_string()),
+            cwd: Some("/Volumes/coding/personal/rusty-biscuit".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: Default::default(),
+            env: EnvironmentContext {
+                package_area: Some("claudine".to_string()),
+                package: Some("claudine-cli".to_string()),
+                ..EnvironmentContext::default()
+            },
+        };
+
+        let sniff_session = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: Utc.with_ymd_and_hms(2026, 3, 7, 19, 0, 0).unwrap(),
+            session_id: Some("sniff-session".to_string()),
+            cwd: Some("/Volumes/coding/personal/rusty-biscuit".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: Default::default(),
+            env: EnvironmentContext {
+                package_area: Some("sniff".to_string()),
+                package: Some("sniff-cli".to_string()),
+                ..EnvironmentContext::default()
+            },
+        };
+
+        fs::write(
+            &log_path,
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&claudine_session).unwrap(),
+                serde_json::to_string(&sniff_session).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let mut store = ReportingStore::open(&logs_dir, &db_path).unwrap();
+        store.sync(SyncRequest::All).unwrap();
+
+        let report = store
+            .sessions(
+                DateRange::single(date),
+                &ReportingFilters {
+                    package_area: Some("claudine".to_string()),
+                    package: Some("claudine-cli".to_string()),
+                    ..ReportingFilters::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(report.sessions.len(), 1);
+        assert_eq!(report.sessions[0].package_area.as_deref(), Some("claudine"));
+        assert_eq!(report.sessions[0].package.as_deref(), Some("claudine-cli"));
+        assert_eq!(
+            report.sessions[0].session_id.as_deref(),
+            Some("claudine-session")
+        );
+    }
+}

@@ -227,10 +227,7 @@ fn is_claudine_wrapper(doc: &DocumentMut, config_dir: Option<&Path>) -> bool {
 }
 
 /// Generate the wrapper script that calls both the original and claudine.
-fn create_wrapper_script(
-    path: &Path,
-    original_command: Option<&str>,
-) -> Result<()> {
+fn create_wrapper_script(path: &Path, original_command: Option<&str>) -> Result<()> {
     let handle_command = claudine_handle_command(Provider::Codex)("turn_complete");
     let original_line = original_command
         .map(|command| format!("{command} \"$@\"\n"))

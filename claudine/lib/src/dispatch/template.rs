@@ -609,6 +609,8 @@ mod tests {
                     packages: vec!["lib".to_string(), "cli".to_string()],
                 }),
                 primary_language: Some("Rust".to_string()),
+                package_area: Some("claudine".to_string()),
+                package: Some("claudine-cli".to_string()),
             },
         }
     }

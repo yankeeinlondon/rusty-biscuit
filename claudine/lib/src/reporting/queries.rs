@@ -45,6 +45,16 @@ impl WhereBuilder {
             self.params.push(SqlValue::Text(repo.to_string()));
         }
 
+        if let Some(package_area) = filters.package_area.as_deref() {
+            self.clauses.push("package_area = ?".to_string());
+            self.params.push(SqlValue::Text(package_area.to_string()));
+        }
+
+        if let Some(package) = filters.package.as_deref() {
+            self.clauses.push("package = ?".to_string());
+            self.params.push(SqlValue::Text(package.to_string()));
+        }
+
         self
     }
 
@@ -513,6 +523,8 @@ fn load_sessions(
             MAX(repo_name),
             MAX(repo_org),
             MAX(branch),
+            MAX(package_area),
+            MAX(package),
             MAX(model),
             MAX(permission_mode),
             MAX(hostname),
@@ -543,12 +555,14 @@ fn load_sessions(
             row.get::<_, Option<String>>(10)?,
             row.get::<_, Option<String>>(11)?,
             row.get::<_, Option<String>>(12)?,
-            row.get::<_, i64>(13)?,
-            row.get::<_, i64>(14)?,
+            row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<String>>(14)?,
             row.get::<_, i64>(15)?,
             row.get::<_, i64>(16)?,
             row.get::<_, i64>(17)?,
             row.get::<_, i64>(18)?,
+            row.get::<_, i64>(19)?,
+            row.get::<_, i64>(20)?,
         ))
     })?;
 
@@ -564,6 +578,8 @@ fn load_sessions(
             repo_name,
             repo_org,
             branch,
+            package_area,
+            package,
             model,
             permission_mode,
             hostname,
@@ -588,6 +604,8 @@ fn load_sessions(
             repo_name,
             repo_org,
             branch,
+            package_area,
+            package,
             model,
             permission_mode,
             hostname,

@@ -49,6 +49,7 @@ Every event is serialized as a single-line JSON record with these fields:
 | `env.git`   | `repo_root`, `branch`, `is_dirty`, `staged_count`, `unstaged_count`, `untracked_count`, `head_sha`, `head_message`, `user_name`, `user_email`, `remote_name`, `remote_url`, `hosting_provider`, `repo_name`, `repo_org` |
 | `env.repo`  | `is_monorepo`, `monorepo_tool`, `root`, `packages[]`                                                      |
 | `primary_language` | Top-level string field                                                                              |
+| wrapper package context | Top-level `package_area` and `package` fields populated from wrapper-provided `PACKAGE_AREA` / `PACKAGE` env vars when present |
 
 ### Event Types (16 normalized events)
 

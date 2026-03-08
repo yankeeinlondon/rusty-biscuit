@@ -27,6 +27,14 @@ pub struct EnvironmentContext {
     /// Primary programming language detected in the project.
     #[serde(default)]
     pub primary_language: Option<String>,
+
+    /// Monorepo package area inferred by the wrapper, if available.
+    #[serde(default)]
+    pub package_area: Option<String>,
+
+    /// Monorepo package inferred by the wrapper, if available.
+    #[serde(default)]
+    pub package: Option<String>,
 }
 
 /// Operating system identification.
@@ -266,13 +274,18 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             .and_then(|f| f.languages.as_ref())
             .and_then(|l| l.primary.clone());
 
-        EnvironmentContext {
+        let mut context = EnvironmentContext {
             os,
             hardware,
             git,
             repo,
             primary_language,
-        }
+            package_area: None,
+            package: None,
+        };
+
+        apply_wrapper_package_context(&mut context, &lookup_env_var);
+        context
     }
 }
 
@@ -298,6 +311,22 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
     EnvironmentContext::from(result)
 }
 
+fn apply_wrapper_package_context(
+    context: &mut EnvironmentContext,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) {
+    context.package_area = lookup("PACKAGE_AREA")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    context.package = lookup("PACKAGE")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+}
+
+fn lookup_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +343,8 @@ mod tests {
         assert!(ctx.git.is_none());
         assert!(ctx.repo.is_none());
         assert!(ctx.primary_language.is_none());
+        assert!(ctx.package_area.is_none());
+        assert!(ctx.package.is_none());
     }
 
     #[test]
@@ -324,6 +355,8 @@ mod tests {
         assert!(back.os.os_type.is_empty());
         assert!(back.git.is_none());
         assert!(back.repo.is_none());
+        assert!(back.package_area.is_none());
+        assert!(back.package.is_none());
     }
 
     #[test]
@@ -362,7 +395,9 @@ mod tests {
                 "root": "/tmp/repo",
                 "packages": ["lib", "cli"]
             },
-            "primary_language": "Rust"
+            "primary_language": "Rust",
+            "package_area": "claudine",
+            "package": "claudine-cli"
         });
         let ctx: EnvironmentContext = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.os.os_type, "macos");
@@ -381,6 +416,8 @@ mod tests {
         assert!(ctx.repo.as_ref().unwrap().is_monorepo);
         assert_eq!(ctx.repo.as_ref().unwrap().packages.len(), 2);
         assert_eq!(ctx.primary_language.as_deref(), Some("Rust"));
+        assert_eq!(ctx.package_area.as_deref(), Some("claudine"));
+        assert_eq!(ctx.package.as_deref(), Some("claudine-cli"));
     }
 
     #[test]
@@ -396,5 +433,33 @@ mod tests {
         assert!(ctx.hardware.arch.is_empty());
         assert!(ctx.git.is_none());
         assert!(ctx.repo.is_none());
+        assert!(ctx.package_area.is_none());
+        assert!(ctx.package.is_none());
+    }
+
+    #[test]
+    fn wrapper_package_context_uses_non_empty_env_values() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|name| match name {
+            "PACKAGE_AREA" => Some(" claudine ".to_string()),
+            "PACKAGE" => Some("cl-cli".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(ctx.package_area.as_deref(), Some("claudine"));
+        assert_eq!(ctx.package.as_deref(), Some("cl-cli"));
+    }
+
+    #[test]
+    fn wrapper_package_context_ignores_empty_values() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|name| match name {
+            "PACKAGE_AREA" => Some("   ".to_string()),
+            "PACKAGE" => Some(String::new()),
+            _ => None,
+        });
+
+        assert!(ctx.package_area.is_none());
+        assert!(ctx.package.is_none());
     }
 }

@@ -10,6 +10,10 @@ pub struct ReportingFilters {
     pub provider: Option<Provider>,
     /// Limit results to one repository name, or `org/name`.
     pub repo: Option<String>,
+    /// Limit results to one monorepo package area.
+    pub package_area: Option<String>,
+    /// Limit results to one monorepo package.
+    pub package: Option<String>,
 }
 
 /// Inclusive date range used by reporting queries.
@@ -151,6 +155,8 @@ pub struct SessionInfo {
     pub repo_name: Option<String>,
     pub repo_org: Option<String>,
     pub branch: Option<String>,
+    pub package_area: Option<String>,
+    pub package: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub hostname: Option<String>,
