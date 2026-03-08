@@ -10,10 +10,12 @@ mdns = ["dep:mdns-sd", "dep:tracing"]
 schematic-schema = { path = "../../schematic/schema" }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
+futures-util = "0.3"
+get_if_addrs = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.48", features = ["sync"] }
+tokio = { version = "1.48", features = ["rt", "sync", "time"] }
 tracing = { version = "0.1", optional = true }
 mdns-sd = { version = "0.12", optional = true }
 

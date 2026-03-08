@@ -29,13 +29,13 @@ Functionally, this crate owns ten shared concerns:
    `PersistentRegistry` stores known devices, configured devices, and remote assignments in a JSON file. Writes are atomic (write-to-tmp then rename). Supports auto-seeding from CLI `--host` hints.
 
 7. Device discovery infrastructure
-   `DeviceDiscovery` trait and `bounded_scan` utility enable each integration to implement device probing while the helper provides concurrency and timeout management.
+   `DeviceDiscovery` trait, `local_ipv4_candidates`, and `bounded_scan` let each integration probe persisted hosts plus the local LAN with bounded parallelism and timeout management.
 
 8. Multi-device runtime management
-   `DeviceManager` owns the lifecycle of multiple `DeviceDriver` instances, polling each independently, routing entity commands, enriching live capability metadata, and filtering served entities/state by assigned Remote.
+   `DeviceManager` owns the lifecycle of multiple `DeviceDriver` instances, polling each independently, routing entity commands, enriching live capability metadata, lazily activating devices as they become relevant, and filtering served entities/state by assigned Remote.
 
 9. Setup flow orchestration
-   `SetupState`, `SetupSessions`, and `device_selection_schema` implement the UC Remote-driven device configuration protocol, including per-connection setup state.
+   `SetupState`, `SetupSessions`, `device_selection_schema`, and `device_selection_setup_data` implement the UC Remote-driven device configuration protocol, including per-connection setup state and configurator-compatible `setup_data_schema` plus initialized `setup_data` payloads.
 
 10. Registry data model
     `KnownDevice`, `ConfiguredDevice`, `RemoteAssignment`, and `DeviceMetadata` types represent the full device lifecycle from discovery through configuration and remote binding.
@@ -100,6 +100,9 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - `--host` is optional; integrations start with zero devices and accept remote-driven setup
 - device state persists across restarts via `PersistentRegistry`
 - a single integration process manages multiple physical devices via `DeviceManager`
+- setup schemas must follow the documented UC field contract such as `select` plus `options` and `value`; ad hoc shapes like `dropdown` or `items` are not compatible with the configurator
+- initial setup metadata must remain valid even when discovery returns zero candidates, which means omitting device-selection controls that cannot yet be populated
+- dynamic setup screens must send initialized `setup_data` entries for every rendered field; sending only the schema can leave the configurator in an invalid state
 
 When the UC protocol rules change, this crate should be the first place to update so the integrations stay in sync.
 

@@ -77,6 +77,47 @@ pub fn device_selection_schema(
     remote_id: &str,
     assignments: &[RemoteAssignment],
 ) -> Value {
+    let options = device_selection_options(
+        discovered_devices,
+        configured_devices,
+        remote_id,
+        assignments,
+    );
+    device_selection_schema_from_options(&options)
+}
+
+/// Build initial `setup_data` values for the device selection screen.
+#[must_use]
+pub fn device_selection_setup_data(
+    discovered_devices: &[KnownDevice],
+    configured_devices: &[ConfiguredDevice],
+    remote_id: &str,
+    assignments: &[RemoteAssignment],
+) -> Value {
+    let options = device_selection_options(
+        discovered_devices,
+        configured_devices,
+        remote_id,
+        assignments,
+    );
+    let mut setup_data = serde_json::Map::from_iter([
+        ("device_host".to_string(), json!("")),
+        ("device_name".to_string(), json!("")),
+    ]);
+
+    if !options.is_empty() {
+        setup_data.insert("device_select".to_string(), json!(""));
+    }
+
+    Value::Object(setup_data)
+}
+
+fn device_selection_options(
+    discovered_devices: &[KnownDevice],
+    configured_devices: &[ConfiguredDevice],
+    remote_id: &str,
+    assignments: &[RemoteAssignment],
+) -> Vec<Value> {
     // Find device IDs already assigned to this Remote
     let assigned_ids: Vec<&str> = assignments
         .iter()
@@ -113,6 +154,10 @@ pub fn device_selection_schema(
         }
     }
 
+    options
+}
+
+fn device_selection_schema_from_options(options: &[Value]) -> Value {
     let mut settings = Vec::new();
 
     if !options.is_empty() {
@@ -279,6 +324,21 @@ mod tests {
         let settings = schema["settings"].as_array().unwrap();
         assert_eq!(settings.len(), 2);
         assert_eq!(settings[0]["id"], "device_host");
+    }
+
+    #[test]
+    fn setup_data_omits_select_when_no_candidates_exist() {
+        let setup_data = device_selection_setup_data(&[], &[], "remote-1", &[]);
+        assert!(setup_data.get("device_select").is_none());
+        assert_eq!(setup_data["device_host"], "");
+        assert_eq!(setup_data["device_name"], "");
+    }
+
+    #[test]
+    fn setup_data_includes_select_when_candidates_exist() {
+        let discovered = vec![sample_known("dev1", "192.168.1.10", "DMP-A8")];
+        let setup_data = device_selection_setup_data(&discovered, &[], "remote-1", &[]);
+        assert_eq!(setup_data["device_select"], "");
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub use std::collections::HashMap as StdHashMap;
 
 pub use connectivity::{ConnectivityState, ConnectivityTracker};
 pub use device_manager::{CommandResult, DeviceDriver, DeviceError, DeviceManager, Entity, EntityUpdate};
-pub use discovery::{DeviceDiscovery, bounded_scan, build_candidate_list};
+pub use discovery::{DeviceDiscovery, bounded_scan, build_candidate_list, local_ipv4_candidates};
 pub use envelope::{
     EnvelopeError, IntegrationRequest, RequestEnvelope, available_entities_response,
     device_state_event, driver_metadata_response, driver_version_response, entity_change_event,
@@ -34,8 +34,9 @@ pub use registry::{
     RemoteAssignment,
 };
 pub use setup::{
-    SetupSession, SetupSessions, SetupState, device_selection_schema, remote_id_from_context,
-    setup_driver_response, setup_progress_event,
+    SetupSession, SetupSessions, SetupState, device_selection_schema,
+    device_selection_setup_data, remote_id_from_context, setup_driver_response,
+    setup_progress_event,
 };
 pub use state_cache::{CachedEntityState, EntityState, StateCache};
 pub use subscriptions::SubscriptionRegistry;

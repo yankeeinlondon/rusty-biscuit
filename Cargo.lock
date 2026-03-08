@@ -8779,6 +8779,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs",
+ "futures-util",
+ "get_if_addrs",
  "mdns-sd",
  "schematic-schema",
  "serde",
