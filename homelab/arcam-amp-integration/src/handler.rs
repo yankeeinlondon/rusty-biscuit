@@ -1,24 +1,42 @@
 //! UC Integration WebSocket handler for Arcam amplifiers.
 
+use std::time::Duration;
+
 use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::{debug, warn};
 use unfolded_integration_helper::{
-    DeviceManager, IntegrationRequest, available_entities_response, driver_metadata_response,
-    driver_version_response, entity_states_response, result_response,
+    ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
+    KnownDevice, SetupSession, SetupSessions, SetupState, available_entities_response,
+    bounded_scan, device_selection_schema,
+    driver_metadata_response, driver_version_response, entity_states_response,
+    remote_id_from_context, result_response, setup_driver_response, setup_progress_event,
 };
 
+use crate::discovery::ArcamDiscovery;
 use crate::driver::ArcamDeviceDriver;
 use crate::types;
+
+const ARCAM_DEFAULT_PORT: u16 = 50000;
+const SETUP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
+const SETUP_VALIDATE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Arcam integration handler implementing the UC WsHandler trait.
 pub struct ArcamIntegrationHandler {
     manager: DeviceManager<ArcamDeviceDriver>,
+    driver: ArcamDeviceDriver,
+    discovery: ArcamDiscovery,
+    sessions: SetupSessions,
 }
 
 impl ArcamIntegrationHandler {
     pub fn new(manager: DeviceManager<ArcamDeviceDriver>) -> Self {
-        Self { manager }
+        Self {
+            manager,
+            driver: ArcamDeviceDriver,
+            discovery: ArcamDiscovery,
+            sessions: SetupSessions::default(),
+        }
     }
 
     async fn handle_entity_command(&self, request: &IntegrationRequest) -> Option<Value> {
@@ -41,6 +59,243 @@ impl ArcamIntegrationHandler {
             }
         }
     }
+
+    async fn handle_setup_driver(
+        &self,
+        request: &IntegrationRequest,
+        context: &WsConnectionContext,
+    ) -> Option<Value> {
+        let remote_id = remote_id_from_context(context);
+        let registry = self.manager.registry().clone();
+        let known_devices = registry.get_known_devices().await;
+        let configured_devices = registry.get_configured_devices().await;
+        let assignments = registry.get_assignments().await;
+
+        let candidates = self.discover_candidates(known_devices).await;
+        for device in &candidates {
+            registry.add_known_device(device.clone()).await;
+        }
+        if let Err(error) = registry.save().await {
+            warn!(error = %error, "failed to persist Arcam setup candidates");
+        }
+
+        self.sessions
+            .set(
+                remote_id.clone(),
+                SetupSession {
+                    state: Some(SetupState::DeviceSelection {
+                        candidates: candidates.clone(),
+                    }),
+                    candidates: candidates.clone(),
+                },
+            )
+            .await;
+
+        if let Err(error) = context
+            .send(setup_progress_event(&SetupState::Discovering))
+            .await
+        {
+            warn!(error = %error, "failed to send Arcam discovery progress");
+        }
+
+        let mut selection_event = setup_progress_event(&SetupState::DeviceSelection {
+            candidates: candidates.clone(),
+        });
+        selection_event["msg_data"]["setup_data_schema"] = device_selection_schema(
+            &candidates,
+            &configured_devices,
+            &remote_id,
+            &assignments,
+        );
+        if let Err(error) = context.send(selection_event).await {
+            warn!(error = %error, "failed to send Arcam setup selection");
+        }
+
+        Some(setup_driver_response(request.id, 200))
+    }
+
+    async fn handle_set_driver_user_data(
+        &self,
+        request: &IntegrationRequest,
+        context: &WsConnectionContext,
+    ) -> Option<Value> {
+        let remote_id = remote_id_from_context(context);
+        let Some(session) = self.sessions.get(&remote_id).await else {
+            return Some(result_response(request.id, 400));
+        };
+
+        let registry = self.manager.registry().clone();
+        let configured_devices = registry.get_configured_devices().await;
+        let selected_device_id = setup_string(&request.msg_data, "device_select");
+        let manual_host = setup_string(&request.msg_data, "device_host");
+        let requested_name = setup_string(&request.msg_data, "device_name");
+
+        let mut config = if let Some(device_id) = selected_device_id.as_deref().filter(|value| !value.is_empty())
+        {
+            if registry.is_assigned(&remote_id, device_id).await {
+                return self
+                    .setup_error(
+                        request.id,
+                        context,
+                        format!("device {device_id} is already assigned to this Remote"),
+                        409,
+                    )
+                    .await;
+            }
+
+            if let Some(existing) = configured_devices
+                .iter()
+                .find(|device| device.device_id == device_id)
+                .cloned()
+            {
+                existing
+            } else if let Some(known) = session
+                .candidates
+                .iter()
+                .find(|device| device.device_id == device_id)
+                .cloned()
+            {
+                ConfiguredDevice {
+                    device_id: known.device_id,
+                    device_name: requested_name
+                        .clone()
+                        .filter(|value| !value.is_empty())
+                        .or(known.metadata.friendly_name.clone())
+                        .unwrap_or_else(|| known.host.clone()),
+                    host: known.host,
+                    port: known.port,
+                    metadata: known.metadata,
+                    driver_config: Default::default(),
+                }
+            } else {
+                return self
+                    .setup_error(
+                        request.id,
+                        context,
+                        format!("unknown Arcam device selection {device_id}"),
+                        400,
+                    )
+                    .await;
+            }
+        } else if let Some(host) = manual_host.filter(|value| !value.is_empty()) {
+            let Some(metadata) = self
+                .discovery
+                .validate_host(&host, ARCAM_DEFAULT_PORT, SETUP_VALIDATE_TIMEOUT)
+                .await
+            else {
+                return self
+                    .setup_error(
+                        request.id,
+                        context,
+                        format!("unable to validate Arcam device at {host}"),
+                        400,
+                    )
+                    .await;
+            };
+
+            ConfiguredDevice {
+                device_id: metadata
+                    .mac_address
+                    .clone()
+                    .unwrap_or_else(|| format!("{host}:{ARCAM_DEFAULT_PORT}")),
+                device_name: requested_name
+                    .clone()
+                    .filter(|value| !value.is_empty())
+                    .or(metadata.friendly_name.clone())
+                    .unwrap_or_else(|| host.clone()),
+                host,
+                port: ARCAM_DEFAULT_PORT,
+                metadata,
+                driver_config: Default::default(),
+            }
+        } else {
+            return self
+                .setup_error(
+                    request.id,
+                    context,
+                    "no device selection or host provided".to_string(),
+                    400,
+                )
+                .await;
+        };
+
+        if let Some(name) = requested_name.filter(|value| !value.is_empty()) {
+            config.device_name = name;
+        }
+
+        let known = KnownDevice {
+            device_id: config.device_id.clone(),
+            source: DiscoverySource::RemoteSetup,
+            host: config.host.clone(),
+            port: config.port,
+            metadata: config.metadata.clone(),
+            last_validated: None,
+        };
+
+        registry.add_known_device(known).await;
+        registry.add_configured_device(config.clone()).await;
+        if let Err(error) = registry.assign_device(&remote_id, &config.device_id).await {
+            return self
+                .setup_error(request.id, context, error.to_string(), 409)
+                .await;
+        }
+        if let Err(error) = registry.save().await {
+            return self
+                .setup_error(request.id, context, error.to_string(), 503)
+                .await;
+        }
+        if let Err(error) = self.manager.add_device(config, self.driver.clone()).await {
+            return self
+                .setup_error(request.id, context, error.to_string(), 503)
+                .await;
+        }
+
+        self.sessions.clear(&remote_id).await;
+        if let Err(error) = context.send(setup_progress_event(&SetupState::Complete)).await {
+            warn!(error = %error, "failed to send Arcam setup completion");
+        }
+
+        Some(result_response(request.id, 200))
+    }
+
+    async fn discover_candidates(&self, known_devices: Vec<KnownDevice>) -> Vec<KnownDevice> {
+        if known_devices.is_empty() {
+            return Vec::new();
+        }
+
+        let scanned = bounded_scan(
+            &self.discovery,
+            known_devices
+                .iter()
+                .map(|device| (device.host.clone(), device.port))
+                .collect(),
+            Duration::from_secs(3),
+            SETUP_DISCOVERY_TIMEOUT,
+        )
+        .await;
+
+        if scanned.is_empty() {
+            known_devices
+        } else {
+            scanned
+        }
+    }
+
+    async fn setup_error(
+        &self,
+        req_id: u64,
+        context: &WsConnectionContext,
+        message: String,
+        code: u16,
+    ) -> Option<Value> {
+        if let Err(error) = context
+            .send(setup_progress_event(&SetupState::Error(message.clone())))
+            .await
+        {
+            warn!(error = %error, "failed to send Arcam setup error");
+        }
+        Some(result_response(req_id, code))
+    }
 }
 
 impl WsHandler for ArcamIntegrationHandler {
@@ -58,6 +313,7 @@ impl WsHandler for ArcamIntegrationHandler {
         };
 
         debug!(msg = %request.msg, req_id = request.id, "handling request");
+        let remote_id = remote_id_from_context(&context);
 
         match request.msg.as_str() {
             "get_driver_version" => Some(driver_version_response(
@@ -77,7 +333,10 @@ impl WsHandler for ArcamIntegrationHandler {
                 ))
             }
             "get_available_entities" => {
-                let entities = self.manager.get_all_entities().await;
+                self.manager
+                    .ensure_assigned_devices_active(&remote_id, self.driver.clone())
+                    .await;
+                let entities = self.manager.get_entities_for_remote(&remote_id).await;
                 Some(available_entities_response(request.id, &entities))
             }
             "subscribe_events" => {
@@ -85,11 +344,16 @@ impl WsHandler for ArcamIntegrationHandler {
                 Some(result_response(request.id, 200))
             }
             "get_entity_states" => {
-                self.manager.refresh_all().await;
-                let states = self.manager.get_all_states().await;
+                self.manager
+                    .ensure_assigned_devices_active(&remote_id, self.driver.clone())
+                    .await;
+                self.manager.refresh_remote(&remote_id).await;
+                let states = self.manager.get_states_for_remote(&remote_id).await;
                 Some(entity_states_response(request.id, &states))
             }
             "entity_command" => self.handle_entity_command(&request).await,
+            "setup_driver" => self.handle_setup_driver(&request, &context).await,
+            "set_driver_user_data" => self.handle_set_driver_user_data(&request, &context).await,
             _ => {
                 warn!(msg = %request.msg, "unknown message type");
                 Some(result_response(request.id, 400))
@@ -100,11 +364,8 @@ impl WsHandler for ArcamIntegrationHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleEventHub;
-    use serde_json::json;
     use unfolded_integration_helper::{
         ConfiguredDevice, PersistentRegistry, SubscriptionRegistry,
         test_fixtures::{entity_command_request, request, subscribe_events_request},
@@ -133,7 +394,8 @@ mod tests {
                 metadata: Default::default(),
                 driver_config: Default::default(),
             };
-            manager.add_device(config, ArcamDeviceDriver).await;
+            manager.registry().add_configured_device(config.clone()).await;
+            manager.add_device(config, ArcamDeviceDriver).await.unwrap();
         }
 
         ArcamIntegrationHandler::new(manager)
@@ -181,12 +443,18 @@ mod tests {
         assert_eq!(resp["msg"], "driver_metadata");
         assert_eq!(resp["code"], 200);
         assert_eq!(resp["msg_data"]["driver_id"], "arcam-amplifier");
-        assert_eq!(resp["msg_data"]["developer"]["name"], "Ken Snyder");
+        assert!(resp["msg_data"]["setup_data_schema"].is_object());
     }
 
     #[tokio::test]
     async fn test_handle_get_available_entities() {
         let handler = make_handler(true).await;
+        handler
+            .manager
+            .registry()
+            .assign_device("connection-1", "192.168.99.99:50000")
+            .await
+            .unwrap();
         let resp = handler
             .handle_message(request(3, "get_available_entities", json!({})), context())
             .await
@@ -210,6 +478,12 @@ mod tests {
     #[tokio::test]
     async fn test_handle_get_entity_states() {
         let handler = make_handler(true).await;
+        handler
+            .manager
+            .registry()
+            .assign_device("connection-1", "192.168.99.99:50000")
+            .await
+            .unwrap();
         let resp = handler
             .handle_message(request(5, "get_entity_states", json!({})), context())
             .await
@@ -259,14 +533,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp["msg"], "result");
-        // 503 because the driver tries to execute and fails on unreachable host
-        // rather than 400, since resolve_command doesn't match "invalid"
         assert!(resp["code"].as_u64().unwrap() >= 400);
     }
 
     #[tokio::test]
     async fn toggle_not_in_features() {
         let handler = make_handler(true).await;
+        handler
+            .manager
+            .registry()
+            .assign_device("connection-1", "192.168.99.99:50000")
+            .await
+            .unwrap();
         let resp = handler
             .handle_message(request(9, "get_available_entities", json!({})), context())
             .await
@@ -275,12 +553,39 @@ mod tests {
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         for entity in entities {
             let features = entity["features"].as_array().unwrap();
-            let feature_strings: Vec<&str> =
-                features.iter().filter_map(|f| f.as_str()).collect();
+            let feature_strings: Vec<&str> = features.iter().filter_map(|f| f.as_str()).collect();
             assert!(
                 !feature_strings.contains(&"toggle"),
                 "toggle should not be in features"
             );
         }
+    }
+
+    #[test]
+    fn setup_string_reads_nested_values() {
+        assert_eq!(
+            super::setup_string(&json!({"user_data": {"device_name": {"value": "office"}}}), "device_name")
+                .as_deref(),
+            Some("office")
+        );
+    }
+}
+
+fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
+    msg_data
+        .get("user_data")
+        .and_then(|value| value.get(key))
+        .or_else(|| msg_data.get(key))
+        .and_then(setup_value_to_string)
+}
+
+fn setup_value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Object(map) => map
+            .get("value")
+            .and_then(setup_value_to_string)
+            .or_else(|| map.get("id").and_then(setup_value_to_string)),
+        _ => None,
     }
 }
