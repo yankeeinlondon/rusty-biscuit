@@ -118,6 +118,13 @@ When creating the new integration, explicitly account for these lessons from the
    - document that malformed mDNS packets from unrelated LAN devices can appear in logs and are not automatically integration bugs
    - when setting default logging filters, prefer suppressing noisy third-party mDNS parser spam while still allowing opt-in debugging via `RUST_LOG`
 
+8. Treat `setup_data_schema` as a strict protocol contract, not an ad hoc UI blob:
+   - use the documented UC field types and property names such as `select` with `options` and `value`
+   - do not invent alternate shapes such as `dropdown`, `items`, or option `id`
+   - make sure the initial schema remains valid when discovery returns zero candidates, usually by omitting empty selectors and leaving manual host/name inputs available
+   - when sending a dynamic `driver_setup_change` screen, include initialized `setup_data` entries for every rendered field rather than sending schema alone
+   - if the integration is discoverable over mDNS but the configurator shows `Resource not found`, inspect `get_driver_metadata` and its setup schema before chasing discovery transport issues
+
 ---
 
 ## Required Output
@@ -209,7 +216,8 @@ Your implementation should generally follow this structure:
     - initialize tracing
     - load `PersistentRegistry` from data dir
     - create `DeviceManager` with registry + subscriptions
-    - seed from `--host` if provided, load persisted devices
+    - seed from `--host` if provided without clobbering persisted config
+    - do not eagerly activate every persisted device at startup; let the runtime activate devices lazily when setup or remote assignment requires them
     - create `UnfoldedCircleIntegrationWsHost::new_event_hub()`
     - construct the handler with the `DeviceManager`
     - start `UnfoldedCircleIntegrationWsHost::serve_addr_with_hub(...)`
@@ -224,6 +232,7 @@ Your implementation should generally follow this structure:
 - `discovery.rs`
     - implement `DeviceDiscovery` trait from the helper crate
     - `validate_host()` probes a candidate address and returns device metadata
+    - include a real discovery candidate source such as persisted devices plus local IPv4 subnet probing; do not label pure re-validation of known hosts as subnet scanning
 
 - `types.rs`
     - driver constants
@@ -272,6 +281,7 @@ The README must include:
 - architecture summary
 - whether it supports mDNS discovery and how to enable it
 - the distinction between mDNS discovery and the required configurator handshake, especially `get_driver_metadata`
+- any `setup_data_schema` constraints that matter for configurator compatibility, especially when discovered candidates are absent
 - how state synchronization works, including how unsolicited external changes reach the remote
 - how to run it as an external integration
 - how to build and run it with the checked-in `Dockerfile` and `docker-compose.yaml`
