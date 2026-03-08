@@ -81,6 +81,14 @@ Each Unfolded Circle integration directory now carries the same basic deployment
 - `docker-compose.yaml` for host-networked external deployment
 - `justfile` with `install`, `build-image`, `sanity-test`, and `sanity-test-mutate`
 
+All external integrations in `homelab/` now follow the same configurator compatibility rules:
+
+- `mDNS` advertises the driver as `_uc-integration._tcp.local.` so the Remote can discover it on the local LAN
+- discovery alone is not enough; the driver must still answer `get_driver_metadata` with a valid `driver_metadata` response or the configurator will show the integration but fail to open it
+- `driver_metadata` is what populates fields like developer name, description, and home page in the configurator
+- mDNS is link-local. Cross-VLAN or filtered multicast networks may still require manual host/port entry even when the integration itself is healthy
+- malformed incoming mDNS packets are common on busy LANs; they are discovery noise, not necessarily a fault in the integration
+
 ## Configuration
 
 Create `~/homey.json` to define your devices:
