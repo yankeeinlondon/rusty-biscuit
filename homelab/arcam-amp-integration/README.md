@@ -94,8 +94,10 @@ arcam-amp-integration --host 192.168.1.102 --device-name office --mdns
 Important behavior:
 
 - mDNS discovery only publishes presence and connection coordinates
+- the visible discovery label and developer line come from the mDNS TXT record, so publishing only the raw driver ID or omitting the developer TXT field will show `arcam-amplifier` and `Unknown developer`
 - the configurator still requires a valid `driver_metadata` response after opening the WebSocket session
 - the `setup_data_schema` inside `driver_metadata` must use the documented UC field shapes; an invalid setup schema can cause the integration tile to open with a `Resource not found` style error before setup begins
+- `setup_driver` must be acknowledged before the driver spends time scanning the LAN or validating a device; otherwise the configurator can time out before it receives the discovery selector
 - if the integration is visible in discovery but cannot be opened, treat `get_driver_metadata` compatibility as part of the debugging path
 - multicast filtering or VLAN boundaries can prevent discovery even though manual host/port registration still works
 
