@@ -92,13 +92,13 @@ pub fn build_entities(device_name: &str) -> Vec<ArcamEntity> {
             entity_id: format!("arcam.{device_name}.power"),
             entity_type: "switch".to_string(),
             name: HashMap::from([("en".to_string(), format!("{device_name} Power"))]),
-            features: vec!["on_off".to_string(), "toggle".to_string()],
+            features: vec!["on_off".to_string()],
         },
         ArcamEntity {
             entity_id: format!("arcam.{device_name}.mute"),
             entity_type: "switch".to_string(),
             name: HashMap::from([("en".to_string(), format!("{device_name} Mute"))]),
-            features: vec!["on_off".to_string(), "toggle".to_string()],
+            features: vec!["on_off".to_string()],
         },
     ]
 }
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(entities.len(), 2);
         assert_eq!(entities[0].entity_id, "arcam.office.power");
         assert_eq!(entities[0].entity_type, "switch");
-        assert_eq!(entities[0].features, vec!["on_off", "toggle"]);
+        assert_eq!(entities[0].features, vec!["on_off"]);
         assert_eq!(entities[1].entity_id, "arcam.office.mute");
     }
 

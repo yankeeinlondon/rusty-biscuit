@@ -3,12 +3,16 @@
 //! Standalone WebSocket server that speaks the UC Integration protocol,
 //! exposing Arcam PA-series amplifiers as switch entities (power, mute).
 
+#[allow(dead_code)]
 mod dispatch;
+mod discovery;
+mod driver;
+#[allow(dead_code)]
 mod error;
 mod handler;
+#[allow(dead_code)]
 mod types;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +23,9 @@ use tracing_subscriber::EnvFilter;
 use handler::ArcamIntegrationHandler;
 use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost;
 use types::{DRIVER_ID, DRIVER_VERSION, MIN_CORE_API};
+use unfolded_integration_helper::{DeviceManager, PersistentRegistry, SubscriptionRegistry};
+
+use crate::driver::ArcamDeviceDriver;
 
 /// Arcam amplifier integration driver for Unfolded Circle remotes.
 #[derive(Parser, Debug)]
@@ -28,9 +35,9 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0:9090")]
     listen: String,
 
-    /// Arcam device host (IP or hostname)
+    /// Arcam device host (IP or hostname). Optional seed hint.
     #[arg(long)]
-    host: String,
+    host: Option<String>,
 
     /// Arcam device TCP port
     #[arg(long, default_value_t = 50000)]
@@ -39,6 +46,10 @@ struct Args {
     /// Device name used in entity IDs (e.g., "office" -> arcam.office.power)
     #[arg(long, default_value = "amp")]
     device_name: String,
+
+    /// Override default persistence directory
+    #[arg(long)]
+    data_dir: Option<String>,
 
     /// Timeout in seconds for Arcam TCP operations
     #[arg(long, default_value_t = 5)]
@@ -64,17 +75,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
 
-    let mut devices = HashMap::new();
-    devices.insert(args.device_name.clone(), (args.host.clone(), args.port));
+    // Load or create registry
+    let registry_path = args
+        .data_dir
+        .as_ref()
+        .map(|d| std::path::PathBuf::from(d).join("registry.json"))
+        .unwrap_or_else(|| PersistentRegistry::default_path(DRIVER_ID));
+
+    let registry = PersistentRegistry::load(&registry_path).await?;
 
     let hub = UnfoldedCircleIntegrationWsHost::new_event_hub();
-    let handler = Arc::new(ArcamIntegrationHandler::new(
-        devices,
+    let subscriptions = SubscriptionRegistry::new(hub.clone());
+    let manager = DeviceManager::new(
+        registry.clone(),
+        subscriptions,
         Duration::from_secs(args.timeout),
-        hub.clone(),
-    ));
-    handler.refresh_all(false).await;
-    handler.start_polling(Duration::from_secs(args.poll_interval));
+        Duration::from_secs(args.poll_interval),
+    );
+
+    // Seed from --host if provided
+    if let Some(ref host) = args.host {
+        let config = registry
+            .seed_from_cli_hint(host, args.port, &args.device_name)
+            .await;
+        manager.add_device(config, ArcamDeviceDriver).await;
+        registry.save().await?;
+    }
+
+    // Load any persisted configured devices
+    for device in registry.get_configured_devices().await {
+        // Skip if already added via --host seed
+        if args
+            .host
+            .as_ref()
+            .is_some_and(|h| device.host == *h && device.port == args.port)
+        {
+            continue;
+        }
+        manager.add_device(device, ArcamDeviceDriver).await;
+    }
+
+    let handler = Arc::new(ArcamIntegrationHandler::new(manager));
 
     let _mdns = if args.mdns {
         let ws_port = args
@@ -94,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         listen = %args.listen,
-        host = %args.host,
+        host = ?args.host,
         port = args.port,
         device_name = %args.device_name,
         poll_interval = args.poll_interval,
