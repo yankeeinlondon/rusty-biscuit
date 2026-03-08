@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use unfolded_integration_helper::EntityState;
+use unfolded_integration_helper::{EntityState, device_selection_schema};
 
 /// Driver metadata constants.
 pub const DRIVER_ID: &str = "eversolo-streamer";
@@ -35,6 +35,8 @@ pub struct DriverMetadata {
     pub developer: Option<DriverDeveloper>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub home_page: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_data_schema: Option<Value>,
 }
 
 /// Build the metadata payload required by the UC configurator.
@@ -53,6 +55,7 @@ pub fn driver_metadata() -> DriverMetadata {
             url: Some("https://github.com/yankeeinlondon".to_string()),
         }),
         home_page: Some("https://github.com/yankeeinlondon/rusty-biscuit".to_string()),
+        setup_data_schema: Some(device_selection_schema(&[], &[], "", &[])),
     }
 }
 

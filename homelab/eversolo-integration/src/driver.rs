@@ -1,5 +1,6 @@
 //! Eversolo device driver implementing the `DeviceDriver` trait.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -46,9 +47,48 @@ fn device_config(device: &ConfiguredDevice) -> DeviceConfig {
 }
 
 impl DeviceDriver for EversoloDeviceDriver {
+    async fn prepare_device(
+        &self,
+        mut device: ConfiguredDevice,
+        timeout: Duration,
+    ) -> Result<ConfiguredDevice, DeviceError> {
+        if let Ok(snapshot) = dispatch::fetch_snapshot(&device_config(&device), timeout).await {
+            device.driver_config.extend(HashMap::from([
+                (
+                    "source_list".to_string(),
+                    serde_json::json!(snapshot.catalog.source_list),
+                ),
+                (
+                    "volume_steps".to_string(),
+                    serde_json::json!(snapshot.catalog.volume_steps),
+                ),
+            ]));
+        }
+
+        Ok(device)
+    }
+
     fn build_entities(&self, device: &ConfiguredDevice) -> Vec<Entity> {
         let name = &device.device_name;
-        types::build_entities(name, &[], DEFAULT_VOLUME_STEPS)
+        let source_list = device
+            .driver_config
+            .get("source_list")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let volume_steps = device
+            .driver_config
+            .get("volume_steps")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32)
+            .unwrap_or(DEFAULT_VOLUME_STEPS);
+
+        types::build_entities(name, &source_list, volume_steps)
             .into_iter()
             .map(|e| Entity {
                 entity_id: e.entity_id,

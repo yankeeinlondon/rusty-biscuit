@@ -13,7 +13,6 @@ mod handler;
 #[allow(dead_code)]
 mod types;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,11 +24,7 @@ use tracing_subscriber::EnvFilter;
 use handler::EversoloIntegrationHandler;
 use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationWsHost;
 use types::{DRIVER_ID, DRIVER_VERSION, MIN_CORE_API};
-use unfolded_integration_helper::{
-    ConfiguredDevice, DeviceManager, PersistentRegistry, SubscriptionRegistry,
-};
-
-use crate::driver::EversoloDeviceDriver;
+use unfolded_integration_helper::{DeviceManager, PersistentRegistry, SubscriptionRegistry};
 
 /// Eversolo integration driver for Unfolded Circle remotes.
 #[derive(Parser, Debug)]
@@ -111,37 +106,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Seed from --host if provided
     if let Some(ref host) = args.host {
-        let mut driver_config = HashMap::new();
+        let mut config = registry
+            .seed_from_cli_hint(host, args.port, &args.device_name)
+            .await;
+
         if let Some(ref mac) = args.mac {
-            driver_config.insert("mac".to_string(), json!(mac));
+            config
+                .driver_config
+                .entry("mac".to_string())
+                .or_insert_with(|| json!(mac));
         }
-        driver_config.insert("wol_broadcast".to_string(), json!(args.wol_broadcast));
-        driver_config.insert("wol_port".to_string(), json!(args.wol_port));
+        config
+            .driver_config
+            .entry("wol_broadcast".to_string())
+            .or_insert_with(|| json!(args.wol_broadcast));
+        config
+            .driver_config
+            .entry("wol_port".to_string())
+            .or_insert_with(|| json!(args.wol_port));
 
-        let config = ConfiguredDevice {
-            device_id: format!("{host}:{}", args.port),
-            device_name: args.device_name.clone(),
-            host: host.clone(),
-            port: args.port,
-            metadata: Default::default(),
-            driver_config,
-        };
-        registry.add_configured_device(config.clone()).await;
-        manager.add_device(config, EversoloDeviceDriver).await;
+        registry.add_configured_device(config).await;
         registry.save().await?;
-    }
-
-    // Load any persisted configured devices
-    for device in registry.get_configured_devices().await {
-        // Skip if already added via --host seed
-        if args
-            .host
-            .as_ref()
-            .is_some_and(|h| device.host == *h && device.port == args.port)
-        {
-            continue;
-        }
-        manager.add_device(device, EversoloDeviceDriver).await;
     }
 
     let handler = Arc::new(EversoloIntegrationHandler::new(manager));
