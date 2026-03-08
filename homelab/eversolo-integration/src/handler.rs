@@ -4,14 +4,14 @@ use std::time::Duration;
 
 use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};
 use serde_json::{Value, json};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use unfolded_integration_helper::{
     ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
     KnownDevice, SetupSession, SetupSessions, SetupState, available_entities_response,
-    bounded_scan, build_candidate_list, device_selection_schema, device_selection_setup_data,
+    bounded_scan, build_candidate_list, device_selection_schema,
     driver_metadata_response, driver_version_response, entity_states_response,
     local_ipv4_candidates, remote_id_from_context, result_response, setup_driver_response,
-    setup_progress_event,
+    setup_progress_event, setup_wait_user_action_event,
 };
 
 use crate::discovery::EversoloDiscovery;
@@ -67,12 +67,19 @@ impl EversoloIntegrationHandler {
         context: &WsConnectionContext,
     ) -> Option<Value> {
         let remote_id = remote_id_from_context(context);
+        info!(remote_id, req_id = request.id, "Eversolo setup started");
         let registry = self.manager.registry().clone();
         let known_devices = registry.get_known_devices().await;
         let configured_devices = registry.get_configured_devices().await;
         let assignments = registry.get_assignments().await;
 
         let candidates = self.discover_candidates(known_devices).await;
+        info!(
+            remote_id,
+            req_id = request.id,
+            candidate_count = candidates.len(),
+            "Eversolo setup discovery finished"
+        );
         for device in &candidates {
             registry.add_known_device(device.clone()).await;
         }
@@ -99,20 +106,18 @@ impl EversoloIntegrationHandler {
             warn!(error = %error, "failed to send Eversolo discovery progress");
         }
 
-        let mut selection_event = setup_progress_event(&SetupState::DeviceSelection {
-            candidates: candidates.clone(),
-        });
-        selection_event["msg_data"]["setup_data_schema"] = device_selection_schema(
+        let selection_schema = device_selection_schema(
             &candidates,
             &configured_devices,
             &remote_id,
             &assignments,
         );
-        selection_event["msg_data"]["setup_data"] = device_selection_setup_data(
-            &candidates,
-            &configured_devices,
-            &remote_id,
-            &assignments,
+        let selection_event = setup_wait_user_action_event(
+            &selection_schema["title"],
+            selection_schema["settings"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
         );
         if let Err(error) = context.send(selection_event).await {
             warn!(error = %error, "failed to send Eversolo setup selection");
@@ -136,6 +141,15 @@ impl EversoloIntegrationHandler {
         let selected_device_id = setup_string(&request.msg_data, "device_select");
         let manual_host = setup_string(&request.msg_data, "device_host");
         let requested_name = setup_string(&request.msg_data, "device_name");
+        info!(
+            remote_id,
+            req_id = request.id,
+            selected_device_id,
+            manual_host,
+            requested_name,
+            candidate_count = session.candidates.len(),
+            "Eversolo setup user data received"
+        );
 
         let mut config = if let Some(device_id) = selected_device_id.as_deref().filter(|value| !value.is_empty())
         {
@@ -258,6 +272,14 @@ impl EversoloIntegrationHandler {
         }
 
         self.sessions.clear(&remote_id).await;
+        info!(
+            remote_id,
+            req_id = request.id,
+            device_id = config.device_id,
+            host = config.host,
+            device_name = config.device_name,
+            "Eversolo setup completed"
+        );
         if let Err(error) = context.send(setup_progress_event(&SetupState::Complete)).await {
             warn!(error = %error, "failed to send Eversolo setup completion");
         }
@@ -294,6 +316,14 @@ impl EversoloIntegrationHandler {
         message: String,
         code: u16,
     ) -> Option<Value> {
+        let remote_id = remote_id_from_context(context);
+        info!(
+            remote_id,
+            req_id,
+            code,
+            error = %message,
+            "Eversolo setup failed"
+        );
         if let Err(error) = context
             .send(setup_progress_event(&SetupState::Error(message)))
             .await
@@ -546,8 +576,9 @@ mod tests {
 
 fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
     msg_data
-        .get("setup_data")
+        .get("input_values")
         .and_then(|value| value.get(key))
+        .or_else(|| msg_data.get("setup_data").and_then(|value| value.get(key)))
         .or_else(|| msg_data.get("user_data").and_then(|value| value.get(key)))
         .or_else(|| msg_data.get(key))
         .and_then(setup_value_to_string)
