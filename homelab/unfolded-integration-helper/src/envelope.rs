@@ -113,19 +113,37 @@ impl RequestEnvelope {
     }
 }
 
+#[must_use]
+pub fn envelope_kind(value: &Value) -> Option<&str> {
+    value.get("kind").and_then(Value::as_str)
+}
+
+#[must_use]
+pub fn envelope_message_name(value: &Value) -> Option<&str> {
+    value.get("msg").and_then(Value::as_str)
+}
+
+#[must_use]
+pub fn remote_setup_abort_error(value: &Value) -> Option<&str> {
+    if envelope_kind(value) == Some("event")
+        && envelope_message_name(value) == Some("abort_driver_setup")
+    {
+        value.get("msg_data")
+            .and_then(|msg_data| msg_data.get("error"))
+            .and_then(Value::as_str)
+    } else {
+        None
+    }
+}
+
 fn response(req_id: u64, msg: &str, code: u16, msg_data: Option<Value>) -> Value {
-    let mut response = json!({
+    json!({
         "kind": "resp",
         "req_id": req_id,
         "msg": msg,
         "code": code,
-    });
-
-    if let Some(msg_data) = msg_data {
-        response["msg_data"] = msg_data;
-    }
-
-    response
+        "msg_data": msg_data.unwrap_or_else(|| json!({})),
+    })
 }
 
 fn event(msg: &str, cat: &str, msg_data: Value) -> Value {
@@ -236,7 +254,7 @@ mod tests {
 
         assert_eq!(response["req_id"], 7);
         assert_eq!(response["code"], 200);
-        assert!(response.get("msg_data").is_none());
+        assert_eq!(response["msg_data"], json!({}));
     }
 
     #[test]
@@ -255,5 +273,21 @@ mod tests {
             error,
             EnvelopeError::UnexpectedKind(IntegrationWsEnvelopeKind::Event)
         ));
+    }
+
+    #[test]
+    fn abort_setup_event_extracts_remote_error() {
+        let message = json!({
+            "kind": "event",
+            "msg": "abort_driver_setup",
+            "cat": "DEVICE",
+            "msg_data": {
+                "error": "TIMEOUT"
+            }
+        });
+
+        assert_eq!(envelope_kind(&message), Some("event"));
+        assert_eq!(envelope_message_name(&message), Some("abort_driver_setup"));
+        assert_eq!(remote_setup_abort_error(&message), Some("TIMEOUT"));
     }
 }

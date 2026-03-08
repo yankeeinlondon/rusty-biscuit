@@ -100,9 +100,8 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - `--host` is optional; integrations start with zero devices and accept remote-driven setup
 - device state persists across restarts via `PersistentRegistry`
 - a single integration process manages multiple physical devices via `DeviceManager`
-- setup schemas must follow the documented UC field contract such as `select` plus `options` and `value`; ad hoc shapes like `dropdown` or `items` are not compatible with the configurator
+- setup schemas must follow the documented UC field contract such as `dropdown` plus `items`, item `id`, and selected `value`
 - initial setup metadata must remain valid even when discovery returns zero candidates, which means omitting device-selection controls that cannot yet be populated
-- dynamic setup screens must send initialized `setup_data` entries for every rendered field; sending only the schema can leave the configurator in an invalid state
 - long-running setup operations must acknowledge `setup_driver` / `set_driver_user_data` first, then send `driver_setup_change` progress or follow-up input events; delaying the ack can make the configurator time out before it renders the next screen
 - inbound UC frames must be classified by `kind` before enforcing request-only fields such as top-level `id`, because setup flows can emit event messages like `abort_driver_setup`
 

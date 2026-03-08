@@ -125,7 +125,7 @@ fn device_selection_options(
         .flat_map(|a| a.device_ids.iter().map(String::as_str))
         .collect();
 
-    // Build select options from discovered + configured, excluding already-assigned
+    // Build dropdown items from discovered + configured, excluding already-assigned
     let mut options = Vec::new();
 
     for device in discovered_devices {
@@ -138,18 +138,18 @@ fn device_selection_options(
                 .unwrap_or(&device.host);
             options.push(json!({
                 "label": { "en": format!("{label} ({host})", host = device.host) },
-                "value": device.device_id,
+                "id": device.device_id,
             }));
         }
     }
 
     for device in configured_devices {
         if !assigned_ids.contains(&device.device_id.as_str())
-            && !options.iter().any(|o| o["value"] == device.device_id)
+            && !options.iter().any(|o| o["id"] == device.device_id)
         {
             options.push(json!({
                 "label": { "en": format!("{} ({})", device.device_name, device.host) },
-                "value": device.device_id,
+                "id": device.device_id,
             }));
         }
     }
@@ -165,9 +165,9 @@ fn device_selection_schema_from_options(options: &[Value]) -> Value {
             "id": "device_select",
             "label": { "en": "Select device" },
             "field": {
-                "select": {
+                "dropdown": {
                     "value": "",
-                    "options": options,
+                    "items": options,
                 }
             }
         }));
@@ -271,6 +271,7 @@ pub fn setup_driver_response(req_id: u64, code: u16) -> Value {
         "req_id": req_id,
         "msg": "result",
         "code": code,
+        "msg_data": {},
     })
 }
 
@@ -317,9 +318,9 @@ mod tests {
         }];
 
         let schema = device_selection_schema(&discovered, &configured, "remote-1", &assignments);
-        let items = &schema["settings"][0]["field"]["select"]["options"];
+        let items = &schema["settings"][0]["field"]["dropdown"]["items"];
         assert_eq!(items.as_array().unwrap().len(), 1);
-        assert_eq!(items[0]["value"], "dev2");
+        assert_eq!(items[0]["id"], "dev2");
     }
 
     #[test]
@@ -329,7 +330,7 @@ mod tests {
         let assignments = vec![];
 
         let schema = device_selection_schema(&discovered, &configured, "remote-1", &assignments);
-        let items = &schema["settings"][0]["field"]["select"]["options"];
+        let items = &schema["settings"][0]["field"]["dropdown"]["items"];
         assert_eq!(items.as_array().unwrap().len(), 2);
     }
 
