@@ -360,10 +360,21 @@ init: _ensure-build-deps
     @cd playa >/dev/null && just install
     @cd biscuit-speaks >/dev/null  && just install
 
-# ensure C compiler and linker are available for building Rust crates
+# ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Check for Rust and cargo
+    if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
+        echo -e "{{RED}}Missing Rust toolchain{{RESET}} (rustc/cargo not found)"
+        echo "Installing Rust via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+        echo "Rust toolchain installed."
+    fi
+
+    # Check for C compiler/linker
     if command -v cc &> /dev/null; then
         exit 0
     fi
