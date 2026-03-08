@@ -69,11 +69,14 @@ When creating the new integration, explicitly account for these lessons from the
 
 1. The integration must implement the required Unfolded Circle request flow:
    - `get_driver_version`
+   - `get_driver_metadata`
    - `get_device_state`
    - `get_available_entities`
    - `subscribe_events`
    - `get_entity_states`
    - `entity_command`
+
+   Do not treat mDNS discovery as sufficient by itself. A driver that advertises on the network but does not answer `get_driver_metadata` correctly can appear in the configurator and still fail to open.
 
 2. Keep the transport adapter separate from the UC protocol layer:
    - device or service communication belongs in `dispatch.rs` or a similarly focused module
@@ -101,6 +104,12 @@ When creating the new integration, explicitly account for these lessons from the
 6. Model entities from user value, not protocol convenience:
    - expose only controls and states the target device can reliably support
    - prefer a smaller accurate entity set over a larger speculative one
+
+7. Treat mDNS as an optional discovery layer, not as the integration contract:
+   - if you expose an `--mdns` flag, document exactly what service type is advertised and how to enable it
+   - explain that mDNS is link-local and may fail across VLANs or multicast-filtered networks
+   - document that malformed mDNS packets from unrelated LAN devices can appear in logs and are not automatically integration bugs
+   - when setting default logging filters, prefer suppressing noisy third-party mDNS parser spam while still allowing opt-in debugging via `RUST_LOG`
 
 ---
 
@@ -239,6 +248,8 @@ The README must include:
 - what the integration controls
 - entity table
 - architecture summary
+- whether it supports mDNS discovery and how to enable it
+- the distinction between mDNS discovery and the required configurator handshake, especially `get_driver_metadata`
 - how state synchronization works, including how unsolicited external changes reach the remote
 - how to run it as an external integration
 - how to build and run it with the checked-in `Dockerfile` and `docker-compose.yaml`
