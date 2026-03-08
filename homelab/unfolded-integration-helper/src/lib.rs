@@ -33,7 +33,10 @@ pub use registry::{
     ConfiguredDevice, DeviceMetadata, DiscoverySource, KnownDevice, RegistryData,
     RemoteAssignment,
 };
-pub use setup::{SetupState, device_selection_schema, setup_driver_response, setup_progress_event};
+pub use setup::{
+    SetupSession, SetupSessions, SetupState, device_selection_schema, remote_id_from_context,
+    setup_driver_response, setup_progress_event,
+};
 pub use state_cache::{CachedEntityState, EntityState, StateCache};
 pub use subscriptions::SubscriptionRegistry;
 pub type SubscriptionManager = SubscriptionRegistry;

@@ -3,7 +3,7 @@
 //! [`DeviceManager`] owns the lifecycle of multiple [`DeviceDriver`] instances,
 //! polling each independently and routing entity commands to the correct device.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,6 +74,16 @@ pub struct Entity {
 /// Each integration implements this trait to define how entities are built,
 /// state is fetched, and commands are executed for a specific device type.
 pub trait DeviceDriver: Send + Sync + 'static {
+    /// Enrich a configured device with any live capability metadata needed to
+    /// advertise truthful entities.
+    fn prepare_device(
+        &self,
+        device: ConfiguredDevice,
+        _timeout: Duration,
+    ) -> impl std::future::Future<Output = Result<ConfiguredDevice, DeviceError>> + Send {
+        async move { Ok(device) }
+    }
+
     /// Build entities for this device.
     fn build_entities(&self, device: &ConfiguredDevice) -> Vec<Entity>;
 
@@ -136,7 +146,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
     }
 
     /// Add a device, create its driver, register entities, and start polling.
-    pub async fn add_device(&self, config: ConfiguredDevice, driver: D) {
+    pub async fn add_device(&self, config: ConfiguredDevice, driver: D) -> Result<(), DeviceError> {
+        let config = driver.prepare_device(config, self.request_timeout).await?;
         let device_id = config.device_id.clone();
 
         // Register initial states
@@ -163,10 +174,16 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
             poll_handle: Some(poll_handle),
         };
 
-        self.devices.write().await.insert(device_id, active);
+        if let Some(mut previous) = self.devices.write().await.insert(device_id, active) {
+            if let Some(handle) = previous.poll_handle.take() {
+                handle.abort();
+            }
+        }
 
         // Broadcast connectivity state
         self.broadcast_connectivity().await;
+
+        Ok(())
     }
 
     /// Remove a device, stop its polling, and remove its entities.
@@ -214,9 +231,33 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
             .collect()
     }
 
+    /// Get entities assigned to a specific Remote.
+    pub async fn get_entities_for_remote(&self, remote_id: &str) -> Vec<Entity> {
+        let assigned_ids = self.assigned_device_ids(remote_id).await;
+        let devices = self.devices.read().await;
+
+        devices
+            .iter()
+            .filter(|(device_id, _)| assigned_ids.contains(device_id.as_str()))
+            .flat_map(|(_, device)| device.driver.build_entities(&device.config))
+            .collect()
+    }
+
     /// Get all entity states.
     pub async fn get_all_states(&self) -> Vec<EntityState> {
         self.states.read().await.snapshot()
+    }
+
+    /// Get entity states assigned to a specific Remote.
+    pub async fn get_states_for_remote(&self, remote_id: &str) -> Vec<EntityState> {
+        let entity_ids = self.entity_ids_for_remote(remote_id).await;
+        self.states
+            .read()
+            .await
+            .snapshot()
+            .into_iter()
+            .filter(|state| entity_ids.contains(state.entity_id.as_str()))
+            .collect()
     }
 
     /// Handle an entity command by routing to the correct device.
@@ -286,6 +327,24 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         let device_ids: Vec<String> = self.devices.read().await.keys().cloned().collect();
         for id in device_ids {
             let _ = self.refresh_device(&id).await;
+        }
+    }
+
+    /// Refresh only devices assigned to a specific Remote.
+    pub async fn refresh_remote(&self, remote_id: &str) {
+        let device_ids: Vec<String> = self.assigned_device_ids(remote_id).await.into_iter().collect();
+        for id in device_ids {
+            let _ = self.refresh_device(&id).await;
+        }
+    }
+
+    /// Ensure every device assigned to this Remote is active in the runtime.
+    pub async fn ensure_assigned_devices_active(&self, remote_id: &str, driver: D) {
+        let assigned_devices = self.registry.get_assigned_devices(remote_id).await;
+        for config in assigned_devices {
+            if !self.devices.read().await.contains_key(&config.device_id) {
+                let _ = self.add_device(config, driver.clone()).await;
+            }
         }
     }
 
@@ -402,5 +461,32 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         let state = conn.overall();
         self.subscriptions
             .broadcast_raw(device_state_event(state.as_uc_state())).await;
+    }
+
+    async fn assigned_device_ids(&self, remote_id: &str) -> HashSet<String> {
+        self.registry
+            .get_assigned_devices(remote_id)
+            .await
+            .into_iter()
+            .map(|device| device.device_id)
+            .collect()
+    }
+
+    async fn entity_ids_for_remote(&self, remote_id: &str) -> HashSet<String> {
+        let assigned_ids = self.assigned_device_ids(remote_id).await;
+        let devices = self.devices.read().await;
+
+        devices
+            .iter()
+            .filter(|(device_id, _)| assigned_ids.contains(device_id.as_str()))
+            .flat_map(|(_, device)| {
+                device
+                    .driver
+                    .build_entities(&device.config)
+                    .into_iter()
+                    .map(|entity| entity.entity_id)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 }

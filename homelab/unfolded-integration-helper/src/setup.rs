@@ -4,7 +4,13 @@
 //! discovery, presents candidates to the user, validates the selection,
 //! and persists the configuration.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde_json::{Value, json};
+use tokio::sync::RwLock;
+
+use schematic_schema::unfolded_circle_integration_ws::WsConnectionContext;
 
 use crate::registry::{ConfiguredDevice, KnownDevice, RemoteAssignment};
 
@@ -23,6 +29,42 @@ pub enum SetupState {
     Complete,
     /// Setup failed.
     Error(String),
+}
+
+/// Per-connection setup session data.
+#[derive(Debug, Clone, Default)]
+pub struct SetupSession {
+    pub state: Option<SetupState>,
+    pub candidates: Vec<KnownDevice>,
+}
+
+/// Shared in-memory setup-session store keyed by connection-derived Remote id.
+#[derive(Debug, Clone, Default)]
+pub struct SetupSessions {
+    inner: Arc<RwLock<HashMap<String, SetupSession>>>,
+}
+
+impl SetupSessions {
+    /// Replace the setup session for a Remote.
+    pub async fn set(&self, remote_id: impl Into<String>, session: SetupSession) {
+        self.inner.write().await.insert(remote_id.into(), session);
+    }
+
+    /// Get the current setup session for a Remote.
+    pub async fn get(&self, remote_id: &str) -> Option<SetupSession> {
+        self.inner.read().await.get(remote_id).cloned()
+    }
+
+    /// Remove the current setup session for a Remote.
+    pub async fn clear(&self, remote_id: &str) {
+        self.inner.write().await.remove(remote_id);
+    }
+}
+
+/// Derive a Remote identifier from the current WebSocket connection context.
+#[must_use]
+pub fn remote_id_from_context(context: &WsConnectionContext) -> String {
+    format!("connection-{}", context.connection_id())
 }
 
 /// Build `setup_data_schema` for device selection/entry.

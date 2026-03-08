@@ -257,6 +257,12 @@ impl PersistentRegistry {
         inner.data.known_devices.clone()
     }
 
+    /// Get all remote assignments.
+    pub async fn get_assignments(&self) -> Vec<RemoteAssignment> {
+        let inner = self.inner.read().await;
+        inner.data.assignments.clone()
+    }
+
     /// Create a seed entry from a CLI `--host` hint.
     ///
     /// If no device with this host exists in the registry, creates both a
