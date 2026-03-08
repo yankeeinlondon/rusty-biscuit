@@ -8,9 +8,10 @@ use tracing::{debug, warn};
 use unfolded_integration_helper::{
     ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
     KnownDevice, SetupSession, SetupSessions, SetupState, available_entities_response,
-    bounded_scan, device_selection_schema,
+    bounded_scan, build_candidate_list, device_selection_schema, device_selection_setup_data,
     driver_metadata_response, driver_version_response, entity_states_response,
-    remote_id_from_context, result_response, setup_driver_response, setup_progress_event,
+    local_ipv4_candidates, remote_id_from_context, result_response, setup_driver_response,
+    setup_progress_event,
 };
 
 use crate::discovery::ArcamDiscovery;
@@ -102,6 +103,12 @@ impl ArcamIntegrationHandler {
             candidates: candidates.clone(),
         });
         selection_event["msg_data"]["setup_data_schema"] = device_selection_schema(
+            &candidates,
+            &configured_devices,
+            &remote_id,
+            &assignments,
+        );
+        selection_event["msg_data"]["setup_data"] = device_selection_setup_data(
             &candidates,
             &configured_devices,
             &remote_id,
@@ -259,16 +266,15 @@ impl ArcamIntegrationHandler {
     }
 
     async fn discover_candidates(&self, known_devices: Vec<KnownDevice>) -> Vec<KnownDevice> {
-        if known_devices.is_empty() {
-            return Vec::new();
-        }
+        let candidates = build_candidate_list(
+            &known_devices,
+            &[],
+            &local_ipv4_candidates(ARCAM_DEFAULT_PORT),
+        );
 
         let scanned = bounded_scan(
             &self.discovery,
-            known_devices
-                .iter()
-                .map(|device| (device.host.clone(), device.port))
-                .collect(),
+            candidates,
             Duration::from_secs(3),
             SETUP_DISCOVERY_TIMEOUT,
         )
@@ -568,13 +574,19 @@ mod tests {
                 .as_deref(),
             Some("office")
         );
+        assert_eq!(
+            super::setup_string(&json!({"setup_data": {"device_name": "office"}}), "device_name")
+                .as_deref(),
+            Some("office")
+        );
     }
 }
 
 fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
     msg_data
-        .get("user_data")
+        .get("setup_data")
         .and_then(|value| value.get(key))
+        .or_else(|| msg_data.get("user_data").and_then(|value| value.get(key)))
         .or_else(|| msg_data.get(key))
         .and_then(setup_value_to_string)
 }

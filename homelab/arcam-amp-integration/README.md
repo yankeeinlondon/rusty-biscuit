@@ -6,7 +6,7 @@ Unfolded Circle integration driver for Arcam PA-series amplifiers (PA240, PA410,
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes Arcam amplifiers as switch entities for power and mute control.
 
-The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a fresh Remote can configure an amplifier through the integration protocol instead of relying on startup-only host seeding.
+The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a fresh Remote can configure an amplifier through the integration protocol instead of relying on startup-only host seeding. The setup schema follows the UC field contract (`select` with `options` and `value`) and falls back to host/name text inputs when discovery has no candidates yet.
 
 ### Entities
 
@@ -95,6 +95,7 @@ Important behavior:
 
 - mDNS discovery only publishes presence and connection coordinates
 - the configurator still requires a valid `driver_metadata` response after opening the WebSocket session
+- the `setup_data_schema` inside `driver_metadata` must use the documented UC field shapes; an invalid setup schema can cause the integration tile to open with a `Resource not found` style error before setup begins
 - if the integration is visible in discovery but cannot be opened, treat `get_driver_metadata` compatibility as part of the debugging path
 - multicast filtering or VLAN boundaries can prevent discovery even though manual host/port registration still works
 
@@ -177,6 +178,14 @@ just sanity-test-mutate
 - `get_entity_states` runs a fresh power + mute query against the amplifier and updates the cache before responding.
 - A background poll loop diffs refreshed state against the cache and broadcasts `entity_change` to subscribed clients when power or mute changes outside the UC Remote.
 - `device_state` reflects actual amplifier reachability, not just configuration presence. When the amplifier cannot be queried, cached entity states move to `UNKNOWN` and the integration emits a `DISCONNECTED` device-state event.
+
+## Setup Notes
+
+- Setup discovery now probes previously known devices plus the local IPv4 LAN instead of only revalidating registry entries.
+- On very large subnets the scan is intentionally clamped to the interface's local `/24` slice so setup remains responsive.
+- The initial setup screen stays valid even when network discovery returns no Arcam candidates. In that case the configurator shows only manual host and device-name inputs instead of an empty selector.
+- The dynamic setup screen sends initialized `setup_data` for every rendered field so manual host entry remains valid when no device is selected.
+- When discovery finds candidates, the selector uses the documented UC `select` field shape with `options` and `value`, not custom dropdown keys.
 
 ## Key Dependencies
 
