@@ -36,7 +36,7 @@ pub use registry::{
 pub use setup::{
     SetupSession, SetupSessions, SetupState, device_selection_schema,
     device_selection_setup_data, remote_id_from_context, setup_driver_response,
-    setup_progress_event,
+    setup_progress_event, setup_wait_user_action_event,
 };
 pub use state_cache::{CachedEntityState, EntityState, StateCache};
 pub use subscriptions::SubscriptionRegistry;

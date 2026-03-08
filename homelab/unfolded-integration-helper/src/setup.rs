@@ -215,15 +215,10 @@ pub fn setup_progress_event(state: &SetupState) -> Value {
                 "state": "SETUP",
             }
         }),
-        SetupState::DeviceSelection { .. } => json!({
-            "kind": "event",
-            "msg": "driver_setup_change",
-            "cat": "DEVICE",
-            "msg_data": {
-                "event_type": "SETUP",
-                "state": "WAIT_USER_ACTION",
-            }
-        }),
+        SetupState::DeviceSelection { .. } => setup_wait_user_action_event(
+            &json!({ "en": "Device Configuration" }),
+            &[],
+        ),
         SetupState::Complete => json!({
             "kind": "event",
             "msg": "driver_setup_change",
@@ -246,6 +241,26 @@ pub fn setup_progress_event(state: &SetupState) -> Value {
         }),
         _ => json!(null),
     }
+}
+
+/// Build a setup event requesting user input.
+#[must_use]
+pub fn setup_wait_user_action_event(title: &Value, settings: &[Value]) -> Value {
+    json!({
+        "kind": "event",
+        "msg": "driver_setup_change",
+        "cat": "DEVICE",
+        "msg_data": {
+            "event_type": "SETUP",
+            "state": "WAIT_USER_ACTION",
+            "require_user_action": {
+                "input": {
+                    "title": title,
+                    "settings": settings,
+                }
+            }
+        }
+    })
 }
 
 /// Build a `setup_driver` response acknowledging the setup request.
