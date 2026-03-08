@@ -18,6 +18,8 @@ pub const MIN_CORE_API: &str = "0.14.0";
 pub struct DriverDeveloper {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
@@ -28,6 +30,8 @@ pub struct DriverMetadata {
     pub name: HashMap<String, String>,
     pub version: String,
     pub min_core_api: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,12 +49,14 @@ pub fn driver_metadata() -> DriverMetadata {
         name: HashMap::from([("en".to_string(), "Sony Receiver".to_string())]),
         version: DRIVER_VERSION.to_string(),
         min_core_api: MIN_CORE_API.to_string(),
+        icon: Some("uc:integration".to_string()),
         description: Some(HashMap::from([(
             "en".to_string(),
             "Control Sony ES receivers over the local network.".to_string(),
         )])),
         developer: Some(DriverDeveloper {
             name: "Ken Snyder".to_string(),
+            email: Some("ken@yankeeinlondon.com".to_string()),
             url: Some("https://github.com/yankeeinlondon".to_string()),
         }),
         home_page: Some("https://github.com/yankeeinlondon/rusty-biscuit".to_string()),
