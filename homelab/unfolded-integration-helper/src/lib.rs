@@ -7,6 +7,8 @@
 
 pub mod connectivity;
 pub mod envelope;
+#[cfg(feature = "mdns")]
+pub mod mdns;
 pub mod state_cache;
 pub mod subscriptions;
 pub mod test_fixtures;
