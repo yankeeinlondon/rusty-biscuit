@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use homelab::network::parse_host;
 use homelab::sony_receiver::SonyReceiver;
+use serde_json::json;
 use unfolded_integration_helper::{DeviceDiscovery, DeviceMetadata};
 
 /// Sony receiver discovery implementation.
@@ -24,11 +25,25 @@ impl DeviceDiscovery for SonyDiscovery {
         let sony = SonyReceiver::new(sony_host, port);
 
         let result = tokio::time::timeout(timeout, async {
-            // Probe by requesting power state - validates the device speaks Sony protocol
-            let _power = sony.get_power_status().await.ok()?;
+            let info = sony.get_system_information().await.ok()?;
             Some(DeviceMetadata {
-                model: Some("Sony ES Receiver".to_string()),
-                friendly_name: Some(format!("Sony @ {host}")),
+                model: Some(info.model.clone()),
+                friendly_name: info.name.or_else(|| Some(format!("Sony @ {host}"))),
+                firmware: Some(info.version.clone()),
+                mac_address: Some(info.mac_addr.clone()),
+                extras: [
+                    ("serial".to_string(), info.serial.map(|value| json!(value))),
+                    (
+                        "wireless_mac_addr".to_string(),
+                        info.wireless_mac_addr.map(|value| json!(value)),
+                    ),
+                    ("generation".to_string(), info.generation.map(|value| json!(value))),
+                    ("region".to_string(), info.region.map(|value| json!(value))),
+                    ("product".to_string(), info.product.map(|value| json!(value))),
+                ]
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|value| (key, value)))
+                .collect(),
                 ..Default::default()
             })
         })

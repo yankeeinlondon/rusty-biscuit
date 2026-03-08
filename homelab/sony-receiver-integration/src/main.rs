@@ -26,8 +26,6 @@ use schematic_schema::unfolded_circle_integration_ws::UnfoldedCircleIntegrationW
 use types::{DRIVER_ID, DRIVER_VERSION, MIN_CORE_API};
 use unfolded_integration_helper::{DeviceManager, PersistentRegistry, SubscriptionRegistry};
 
-use crate::driver::SonyDeviceDriver;
-
 /// Sony receiver integration driver for Unfolded Circle remotes.
 #[derive(Parser, Debug)]
 #[command(name = "sony-receiver-integration", version)]
@@ -96,24 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Seed from --host if provided
     if let Some(ref host) = args.host {
-        let config = registry
+        let _ = registry
             .seed_from_cli_hint(host, args.port, &args.device_name)
             .await;
-        manager.add_device(config, SonyDeviceDriver).await;
         registry.save().await?;
-    }
-
-    // Load any persisted configured devices
-    for device in registry.get_configured_devices().await {
-        // Skip if already added via --host seed
-        if args
-            .host
-            .as_ref()
-            .is_some_and(|h| device.host == *h && device.port == args.port)
-        {
-            continue;
-        }
-        manager.add_device(device, SonyDeviceDriver).await;
     }
 
     let handler = Arc::new(SonyIntegrationHandler::new(manager));

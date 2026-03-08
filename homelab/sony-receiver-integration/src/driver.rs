@@ -1,6 +1,5 @@
 //! Sony device driver implementing the `DeviceDriver` trait.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -16,36 +15,49 @@ use crate::types;
 pub struct SonyDeviceDriver;
 
 impl DeviceDriver for SonyDeviceDriver {
+    async fn prepare_device(
+        &self,
+        mut device: ConfiguredDevice,
+        timeout: Duration,
+    ) -> Result<ConfiguredDevice, DeviceError> {
+        if let Ok(source_list) = dispatch::fetch_source_list(&device.host, device.port, timeout).await
+        {
+            device
+                .driver_config
+                .insert("source_list".to_string(), serde_json::json!(source_list));
+        }
+
+        Ok(device)
+    }
+
     fn build_entities(&self, device: &ConfiguredDevice) -> Vec<Entity> {
-        let name = &device.device_name;
-        vec![
-            Entity {
-                entity_id: format!("sony.{name}.power"),
-                entity_type: "switch".to_string(),
-                name: Some(HashMap::from([("en".to_string(), format!("{name} Power"))])),
-                features: Some(vec!["on_off".to_string()]),
-                options: None,
-            },
-            Entity {
-                entity_id: format!("sony.{name}.receiver"),
-                entity_type: "media_player".to_string(),
-                name: Some(HashMap::from([(
-                    "en".to_string(),
-                    format!("{name} Receiver"),
-                )])),
-                features: Some(vec![
-                    "volume".to_string(),
-                    "volume_up_down".to_string(),
-                    "mute".to_string(),
-                    "mute_toggle".to_string(),
-                    "select_source".to_string(),
-                ]),
-                options: Some(HashMap::from([(
-                    "source_list".to_string(),
-                    serde_json::json!(types::SOURCE_CATEGORIES),
-                )])),
-            },
-        ]
+        let source_list = device
+            .driver_config
+            .get("source_list")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| {
+                types::SOURCE_CATEGORIES
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect()
+            });
+
+        types::build_entities(&device.device_name, &source_list)
+            .into_iter()
+            .map(|entity| Entity {
+                entity_id: entity.entity_id,
+                entity_type: entity.entity_type,
+                name: Some(entity.name),
+                features: Some(entity.features),
+                options: entity.options,
+            })
+            .collect()
     }
 
     fn build_initial_states(&self, device: &ConfiguredDevice) -> Vec<EntityState> {

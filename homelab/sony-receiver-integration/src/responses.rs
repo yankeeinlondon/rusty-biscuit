@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_available_entities_response() {
-        let entities = types::build_entities("living");
+        let entities = types::build_entities("living", &["GAME".to_string(), "TV".to_string()]);
         let resp = available_entities_response(2, &entities);
         let avail = &resp["msg_data"]["available_entities"];
         assert_eq!(avail.as_array().unwrap().len(), 2);
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_available_entities_includes_options() {
-        let entities = types::build_entities("living");
+        let entities = types::build_entities("living", &["GAME".to_string(), "TV".to_string()]);
         let resp = available_entities_response(2, &entities);
         let media = &resp["msg_data"]["available_entities"][1];
         assert!(media["options"]["source_list"].is_array());

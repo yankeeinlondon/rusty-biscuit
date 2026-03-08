@@ -4,8 +4,9 @@
 //! entity representations. No IO.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
-use unfolded_integration_helper::EntityState;
+use unfolded_integration_helper::{EntityState, device_selection_schema};
 
 /// Driver metadata constants
 pub const DRIVER_ID: &str = "sony-receiver";
@@ -33,6 +34,8 @@ pub struct DriverMetadata {
     pub developer: Option<DriverDeveloper>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub home_page: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_data_schema: Option<Value>,
 }
 
 /// Build the metadata payload required by the UC configurator.
@@ -51,6 +54,7 @@ pub fn driver_metadata() -> DriverMetadata {
             url: Some("https://github.com/yankeeinlondon".to_string()),
         }),
         home_page: Some("https://github.com/yankeeinlondon/rusty-biscuit".to_string()),
+        setup_data_schema: Some(device_selection_schema(&[], &[], "", &[])),
     }
 }
 
@@ -95,7 +99,7 @@ pub enum SonyOperation {
 pub const SOURCE_CATEGORIES: &[&str] = &["GAME", "STB", "BD", "SAT", "VIDEO", "AUX", "TV", "CD"];
 
 /// Build the available entities for a given Sony receiver device name.
-pub fn build_entities(device_name: &str) -> Vec<SonyEntity> {
+pub fn build_entities(device_name: &str, source_list: &[String]) -> Vec<SonyEntity> {
     vec![
         SonyEntity {
             entity_id: format!("sony.{device_name}.power"),
@@ -117,7 +121,7 @@ pub fn build_entities(device_name: &str) -> Vec<SonyEntity> {
             ],
             options: Some(HashMap::from([(
                 "source_list".to_string(),
-                serde_json::json!(SOURCE_CATEGORIES),
+                serde_json::json!(source_list),
             )])),
         },
     ]
@@ -187,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_build_entities() {
-        let entities = build_entities("living");
+        let entities = build_entities("living", &["GAME".to_string(), "TV".to_string()]);
         assert_eq!(entities.len(), 2);
         assert_eq!(entities[0].entity_id, "sony.living.power");
         assert_eq!(entities[0].entity_type, "switch");
@@ -195,6 +199,10 @@ mod tests {
         assert_eq!(entities[1].entity_type, "media_player");
         assert!(entities[1].features.contains(&"volume".to_string()));
         assert!(entities[1].features.contains(&"select_source".to_string()));
+        assert_eq!(
+            entities[1].options.as_ref().unwrap()["source_list"],
+            serde_json::json!(["GAME", "TV"])
+        );
     }
 
     #[test]

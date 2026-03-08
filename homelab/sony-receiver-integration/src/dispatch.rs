@@ -146,6 +146,28 @@ pub async fn fetch_receiver_state(
     }
 }
 
+/// Fetch the currently valid source categories for entity advertisement.
+pub async fn fetch_source_list(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<Vec<String>, SonyIntegrationError> {
+    let sony_host = parse_host(host).map_err(|e| SonyIntegrationError::InvalidHost(e.0))?;
+    let sony = SonyReceiver::new(sony_host, port);
+
+    let result = tokio::time::timeout(timeout, async {
+        let (native, inputs) = tokio::try_join!(sony.get_native_inputs(), sony.list_inputs())?;
+        Ok::<_, homelab::sony_receiver::SonyError>(available_source_categories(&native, &inputs))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(source_list)) => Ok(source_list),
+        Ok(Err(e)) => Err(SonyIntegrationError::Sony(e)),
+        Err(_) => Err(SonyIntegrationError::Timeout),
+    }
+}
+
 /// Resolve a source category (e.g. "GAME") to a Sony input URI.
 fn resolve_category_to_uri(
     native: &[homelab::sony_receiver::NativeInputConfig],
@@ -224,6 +246,36 @@ fn resolve_uri_to_category(
             None
         }
     })
+}
+
+fn available_source_categories(native: &[NativeInputConfig], inputs: &[InputSource]) -> Vec<String> {
+    let mut source_list = Vec::new();
+
+    for item in native {
+        if !item.visible {
+            continue;
+        }
+
+        if resolve_category_to_uri(native, inputs, &item.category).is_ok()
+            && !source_list.contains(&item.category)
+        {
+            source_list.push(item.category.clone());
+        }
+    }
+
+    for input in inputs {
+        if let Some(category) = SOURCE_CATEGORIES
+            .iter()
+            .find(|category| input.title.eq_ignore_ascii_case(category))
+            .map(|category| (*category).to_string())
+        {
+            if !source_list.contains(&category) {
+                source_list.push(category);
+            }
+        }
+    }
+
+    source_list
 }
 
 /// Extract HDMI port number from native API hdmi_assign value.
@@ -364,6 +416,68 @@ mod tests {
             resolve_uri_to_category(&native, &inputs, &current).as_deref(),
             Some("GAME")
         );
+    }
+
+    #[test]
+    fn test_available_source_categories_only_includes_visible_resolvable_inputs() {
+        let native = vec![
+            NativeInputConfig {
+                category: "GAME".to_string(),
+                name: "Game".to_string(),
+                hdmi_assign: "in1".to_string(),
+                icon: "game".to_string(),
+                visible: true,
+                sound_field: String::new(),
+                digital_assign: String::new(),
+                input_mode: String::new(),
+                subwoofer_level: String::new(),
+                subwoofer_lpf: String::new(),
+                in_ceiling_mode: false,
+                trigger_1: false,
+                trigger_2: false,
+                trigger_3: false,
+                preset_gain: String::new(),
+                av_sync: String::new(),
+            },
+            NativeInputConfig {
+                category: "SAT".to_string(),
+                name: "Sat".to_string(),
+                hdmi_assign: "in2".to_string(),
+                icon: "sat".to_string(),
+                visible: false,
+                sound_field: String::new(),
+                digital_assign: String::new(),
+                input_mode: String::new(),
+                subwoofer_level: String::new(),
+                subwoofer_lpf: String::new(),
+                in_ceiling_mode: false,
+                trigger_1: false,
+                trigger_2: false,
+                trigger_3: false,
+                preset_gain: String::new(),
+                av_sync: String::new(),
+            },
+        ];
+        let inputs = vec![
+            InputSource {
+                title: "HDMI 1".to_string(),
+                uri: "extInput:hdmi?port=1".to_string(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+            InputSource {
+                title: "TV".to_string(),
+                uri: "tv:dvbt".to_string(),
+                icon_url: None,
+                connection: None,
+                label: None,
+                active: None,
+            },
+        ];
+
+        assert_eq!(available_source_categories(&native, &inputs), vec!["GAME", "TV"]);
     }
 
     fn sony_real_target() -> Option<(String, u16)> {
