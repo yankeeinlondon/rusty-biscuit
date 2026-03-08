@@ -6,7 +6,7 @@ This crate exists to hold the integration concerns that are the same across the 
 
 ## What It Handles
 
-Functionally, this crate owns five shared concerns:
+Functionally, this crate owns ten shared concerns:
 
 1. Parsing incoming Unfolded Circle request envelopes
    It normalizes the UC request shape into a small `IntegrationRequest` / `RequestEnvelope` API so handlers can work with top-level `id`, `msg`, and `msg_data` consistently.
@@ -25,20 +25,45 @@ Functionally, this crate owns five shared concerns:
 5. Managing event subscriptions
    `SubscriptionRegistry` bridges integration handlers to the shared WebSocket host so `subscribe_events` registration and subscriber-only broadcasts stay consistent across drivers.
 
+6. Persistent device registry
+   `PersistentRegistry` stores known devices, configured devices, and remote assignments in a JSON file. Writes are atomic (write-to-tmp then rename). Supports auto-seeding from CLI `--host` hints.
+
+7. Device discovery infrastructure
+   `DeviceDiscovery` trait and `bounded_scan` utility enable each integration to implement device probing while the helper provides concurrency and timeout management.
+
+8. Multi-device runtime management
+   `DeviceManager` owns the lifecycle of multiple `DeviceDriver` instances, polling each independently, routing entity commands, and broadcasting state changes.
+
+9. Setup flow orchestration
+   `SetupState` machine and `device_selection_schema` builder implement the UC Remote-driven device configuration protocol.
+
+10. Registry data model
+    `KnownDevice`, `ConfiguredDevice`, `RemoteAssignment`, and `DeviceMetadata` types represent the full device lifecycle from discovery through configuration and remote binding.
+
 It also includes `test_fixtures` for generating realistic UC request payloads in handler tests.
 
 ## Modules
 
 - `envelope`
   Request parsing plus response/event builders for the UC Integration WebSocket protocol.
-- `mdns`
-  Optional mDNS/DNS-SD advertisement support for external integrations via the `_uc-integration._tcp.local.` service type.
+- `registry`
+  Data model types: `KnownDevice`, `ConfiguredDevice`, `RemoteAssignment`, `DeviceMetadata`, `DiscoverySource`.
+- `persistent_registry`
+  JSON-file-backed persistent storage for the registry with atomic writes and thread-safe access.
+- `device_manager`
+  Multi-device runtime with `DeviceDriver` trait, per-device polling, entity command routing, and connectivity tracking.
+- `discovery`
+  `DeviceDiscovery` trait and `bounded_scan` for async device probing with concurrency and timeout bounds.
+- `setup`
+  Setup flow state machine and schema builder for UC Remote-driven device configuration.
 - `state_cache`
   Keyed entity-state storage and diff-friendly update helpers.
 - `connectivity`
   Per-device and aggregate connectivity state handling.
 - `subscriptions`
   Thin helper around `UnfoldedCircleEventHub` and `WsConnectionContext`.
+- `mdns`
+  Optional mDNS/DNS-SD advertisement support for external integrations via the `_uc-integration._tcp.local.` service type.
 - `test_fixtures`
   Small builders for common request payloads used in unit tests.
 
@@ -48,12 +73,9 @@ This crate is intentionally not the place for:
 
 - device transport code
 - vendor-specific command mapping
-- polling loops
-- CLI argument parsing
-- driver setup UX
 - integration-specific entity definitions
 
-Those responsibilities stay inside the concrete integration crates.
+Those responsibilities stay inside the concrete integration crates, each implementing `DeviceDriver` and optionally `DeviceDiscovery`.
 
 ## Current Consumers
 
@@ -75,6 +97,9 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - configurator compatibility depends on both `driver_version` and `driver_metadata`
 - `subscribe_events` controls unsolicited broadcasts
 - `entity_change` and `device_state` events are emitted in one consistent shape
+- `--host` is optional; integrations start with zero devices and accept remote-driven setup
+- device state persists across restarts via `PersistentRegistry`
+- a single integration process manages multiple physical devices via `DeviceManager`
 
 When the UC protocol rules change, this crate should be the first place to update so the integrations stay in sync.
 
