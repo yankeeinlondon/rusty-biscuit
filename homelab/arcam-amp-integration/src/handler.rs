@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use schematic_schema::unfolded_circle_integration_ws::{WsConnectionContext, WsHandler};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use tracing::{debug, info, warn};
 use unfolded_integration_helper::{
     ConfiguredDevice, DeviceDiscovery, DeviceManager, DiscoverySource, IntegrationRequest,
