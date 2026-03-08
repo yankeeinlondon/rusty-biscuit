@@ -84,7 +84,7 @@ pub fn device_selection_schema(
         .flat_map(|a| a.device_ids.iter().map(String::as_str))
         .collect();
 
-    // Build dropdown options from discovered + configured, excluding already-assigned
+    // Build select options from discovered + configured, excluding already-assigned
     let mut options = Vec::new();
 
     for device in discovered_devices {
@@ -96,55 +96,64 @@ pub fn device_selection_schema(
                 .or(device.metadata.model.as_deref())
                 .unwrap_or(&device.host);
             options.push(json!({
-                "id": device.device_id,
                 "label": { "en": format!("{label} ({host})", host = device.host) },
+                "value": device.device_id,
             }));
         }
     }
 
     for device in configured_devices {
         if !assigned_ids.contains(&device.device_id.as_str())
-            && !options.iter().any(|o| o["id"] == device.device_id)
+            && !options.iter().any(|o| o["value"] == device.device_id)
         {
             options.push(json!({
-                "id": device.device_id,
                 "label": { "en": format!("{} ({})", device.device_name, device.host) },
+                "value": device.device_id,
             }));
         }
     }
 
-    json!({
-        "title": { "en": "Device Configuration" },
-        "settings": [
-            {
-                "id": "device_select",
-                "label": { "en": "Select device" },
-                "field": {
-                    "dropdown": {
-                        "value": "",
-                        "items": options,
-                    }
-                }
-            },
-            {
-                "id": "device_host",
-                "label": { "en": "Or enter host address" },
-                "field": {
-                    "text": {
-                        "value": "",
-                    }
-                }
-            },
-            {
-                "id": "device_name",
-                "label": { "en": "Device name" },
-                "field": {
-                    "text": {
-                        "value": "",
-                    }
+    let mut settings = Vec::new();
+
+    if !options.is_empty() {
+        settings.push(json!({
+            "id": "device_select",
+            "label": { "en": "Select device" },
+            "field": {
+                "select": {
+                    "value": "",
+                    "options": options,
                 }
             }
-        ]
+        }));
+    }
+
+    settings.push(json!({
+        "id": "device_host",
+        "label": { "en": "Device host address" },
+        "field": {
+            "text": {
+                "value": "",
+                "required": false,
+                "placeholder": "192.168.1.50",
+            }
+        }
+    }));
+
+    settings.push(json!({
+        "id": "device_name",
+        "label": { "en": "Device name" },
+        "field": {
+            "text": {
+                "value": "",
+                "required": false,
+            }
+        }
+    }));
+
+    json!({
+        "title": { "en": "Device Configuration" },
+        "settings": settings,
     })
 }
 
@@ -248,9 +257,9 @@ mod tests {
         }];
 
         let schema = device_selection_schema(&discovered, &configured, "remote-1", &assignments);
-        let items = &schema["settings"][0]["field"]["dropdown"]["items"];
+        let items = &schema["settings"][0]["field"]["select"]["options"];
         assert_eq!(items.as_array().unwrap().len(), 1);
-        assert_eq!(items[0]["id"], "dev2");
+        assert_eq!(items[0]["value"], "dev2");
     }
 
     #[test]
@@ -260,8 +269,16 @@ mod tests {
         let assignments = vec![];
 
         let schema = device_selection_schema(&discovered, &configured, "remote-1", &assignments);
-        let items = &schema["settings"][0]["field"]["dropdown"]["items"];
+        let items = &schema["settings"][0]["field"]["select"]["options"];
         assert_eq!(items.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn schema_omits_select_when_no_candidates_exist() {
+        let schema = device_selection_schema(&[], &[], "remote-1", &[]);
+        let settings = schema["settings"].as_array().unwrap();
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0]["id"], "device_host");
     }
 
     #[test]
