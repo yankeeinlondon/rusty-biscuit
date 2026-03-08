@@ -29,10 +29,9 @@ pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_dirty_package_areas, print_dirty_packages, print_docs_section,
-    print_filesystem_section, print_language_section, print_repo_deps_text,
-    print_repo_deps_visual, print_repo_package, print_repo_package_area, print_repo_packages,
-    print_repo_section,
+    print_dirty_package_areas, print_dirty_packages, print_docs_section, print_filesystem_section,
+    print_language_section, print_repo_deps_text, print_repo_deps_visual, print_repo_package,
+    print_repo_package_area, print_repo_packages, print_repo_section,
 };
 pub(crate) use hardware::{
     print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,

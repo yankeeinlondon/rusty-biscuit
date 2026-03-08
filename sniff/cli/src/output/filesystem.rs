@@ -863,9 +863,9 @@ fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
             dirty_paths.iter().any(|path| {
                 if prefix.is_empty() {
                     // Root package: file is dirty if it's not inside any other package
-                    !packages
-                        .iter()
-                        .any(|other| !other.relative.is_empty() && path.starts_with(&other.relative))
+                    !packages.iter().any(|other| {
+                        !other.relative.is_empty() && path.starts_with(&other.relative)
+                    })
                 } else {
                     path.starts_with(prefix)
                 }

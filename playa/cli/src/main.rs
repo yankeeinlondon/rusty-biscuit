@@ -1078,7 +1078,12 @@ fn list_output_channels() {
                 let text = if markers.is_empty() {
                     format!("{} <dim>[{}]</dim>", styled_name, channel.id)
                 } else {
-                    format!("{} <dim>[{}] ({})</dim>", styled_name, channel.id, markers.join(", "))
+                    format!(
+                        "{} <dim>[{}] ({})</dim>",
+                        styled_name,
+                        channel.id,
+                        markers.join(", ")
+                    )
                 };
 
                 list.add(Prose::new(text));

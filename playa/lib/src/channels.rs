@@ -1,5 +1,8 @@
 #[cfg(feature = "sfx-native")]
-use rodio::cpal::{self, traits::{DeviceTrait, HostTrait}};
+use rodio::cpal::{
+    self,
+    traits::{DeviceTrait, HostTrait},
+};
 
 /// Information about a native output channel (audio device).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +42,9 @@ pub(crate) fn slugify(s: &str) -> String {
 pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::Error>> {
     let host = cpal::default_host();
     let default_output = host.default_output_device();
-    let default_audio_name = default_output.as_ref().and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
+    let default_audio_name = default_output
+        .as_ref()
+        .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
 
     #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
     let sfx_device_name = crate::sfx_player::macos::find_system_sound_device()
@@ -51,7 +56,8 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
     let sfx_device_name = default_audio_name.clone();
 
     let mut channels = Vec::new();
-    let mut name_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut name_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let devices = host.output_devices()?;
 
     for device in devices {
@@ -59,7 +65,7 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
             let base_name = desc.name().to_string();
             let count = name_counts.entry(base_name.clone()).or_insert(0);
             *count += 1;
-            
+
             let name = if *count > 1 {
                 format!("{} ({})", base_name, count)
             } else {
@@ -88,13 +94,14 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
 pub fn find_device_by_id_or_name(id_or_name: &str) -> Option<rodio::Device> {
     let host = cpal::default_host();
     if let Ok(devices) = host.output_devices() {
-        let mut name_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut name_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for device in devices {
             if let Ok(desc) = device.description() {
                 let base_name = desc.name().to_string();
                 let count = name_counts.entry(base_name.clone()).or_insert(0);
                 *count += 1;
-                
+
                 let current_name = if *count > 1 {
                     format!("{} ({})", base_name, count)
                 } else {
@@ -102,7 +109,7 @@ pub fn find_device_by_id_or_name(id_or_name: &str) -> Option<rodio::Device> {
                 };
 
                 let current_id = slugify(&current_name);
-                
+
                 if current_id == id_or_name || current_name == id_or_name {
                     return Some(device);
                 }
