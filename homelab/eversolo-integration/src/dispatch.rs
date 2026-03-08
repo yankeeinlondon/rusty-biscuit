@@ -416,6 +416,7 @@ fn available_source_names(routing: &InputOutputListResponse) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn offline_power_attributes() -> HashMap<String, Value> {
     power_attrs(false)
 }

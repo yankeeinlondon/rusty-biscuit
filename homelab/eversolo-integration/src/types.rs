@@ -106,7 +106,7 @@ pub fn build_entities(
             entity_id: format!("eversolo.{device_name}.power"),
             entity_type: "switch".to_string(),
             name: HashMap::from([("en".to_string(), format!("{device_name} Power"))]),
-            features: vec!["on_off".to_string(), "toggle".to_string()],
+            features: vec!["on_off".to_string()],
             options: None,
         },
         EversoloEntity {
