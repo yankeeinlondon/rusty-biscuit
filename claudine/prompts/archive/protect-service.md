@@ -21,6 +21,7 @@ We have gathered a lot of research on each of the Agentic CLI's which we support
     - Normal mode
 
 > **NOTE:** In phases _after_ the first implementation of **Protect** we will be adding the ability for Claudine to "wrap" the execution of each of these Agentic CLI's. By doing this we can do things like:
+>
 > - sanitizing the ENV variables which are provided to the Agent
 > - provide some contextual ENV variables to help decisioning
 > - We may be able to sniff out events better and do more in the event model
