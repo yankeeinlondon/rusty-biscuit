@@ -119,11 +119,13 @@ When creating the new integration, explicitly account for these lessons from the
    - when setting default logging filters, prefer suppressing noisy third-party mDNS parser spam while still allowing opt-in debugging via `RUST_LOG`
 
 8. Treat `setup_data_schema` as a strict protocol contract, not an ad hoc UI blob:
-   - use the documented UC field types and property names such as `select` with `options` and `value`
-   - do not invent alternate shapes such as `dropdown`, `items`, or option `id`
+   - use the documented UC field types and property names such as `dropdown` with `items`, item `id`, and selected `value`
+   - do not invent alternate shapes such as `select`, `options`, or option `value` identifiers
    - make sure the initial schema remains valid when discovery returns zero candidates, usually by omitting empty selectors and leaving manual host/name inputs available
-   - when sending a dynamic `driver_setup_change` screen, include initialized `setup_data` entries for every rendered field rather than sending schema alone
+   - acknowledge `setup_driver` and `set_driver_user_data` before you start any subnet scan, validation probe, or other slow work; send `driver_setup_change` progress and follow-up input events after the ack
+   - inspect inbound UC frames by `kind` before deserializing them as request envelopes, because setup flows can send event messages such as `abort_driver_setup` without a request `id`
    - if the integration is discoverable over mDNS but the configurator shows `Resource not found`, inspect `get_driver_metadata` and its setup schema before chasing discovery transport issues
+   - if the integration tile shows a raw driver ID or `Unknown developer`, inspect the mDNS TXT record first and publish UC-compatible `name`, `ver`, and `developer` values
 
 ---
 
