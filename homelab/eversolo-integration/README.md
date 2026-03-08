@@ -158,9 +158,11 @@ eversolo-integration \
 What to expect:
 
 - mDNS makes the driver discoverable on the local subnet
+- the configurator list view uses the mDNS TXT record for the visible integration name and developer, so the advertisement must publish a human-facing `name` and `developer`, not only the driver ID
 - the configurator still opens the WebSocket connection and asks for `get_driver_metadata`
 - the `setup_data_schema` inside `driver_metadata` must use the documented UC field shapes; invalid setup fields can surface as a `Resource not found` style configurator failure before any setup request is logged
 - the setup flow can then validate a manual host or reuse discovered/known devices without restarting the process
+- `setup_driver` and `set_driver_user_data` must be acknowledged before slow discovery or validation work begins, or the configurator can time out while waiting for the next setup screen
 - if discovery works but metadata is missing or invalid, the integration can appear in the list but fail to open
 - mDNS does not cross VLANs or multicast-restricted network boundaries without additional network support
 
