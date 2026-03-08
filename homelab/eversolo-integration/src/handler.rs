@@ -25,6 +25,7 @@ const SETUP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 const SETUP_VALIDATE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Eversolo integration handler implementing the UC WsHandler trait.
+#[derive(Clone)]
 pub struct EversoloIntegrationHandler {
     manager: DeviceManager<EversoloDeviceDriver>,
     driver: EversoloDeviceDriver,
@@ -68,6 +69,15 @@ impl EversoloIntegrationHandler {
         request: &IntegrationRequest,
         context: &WsConnectionContext,
     ) -> Option<Value> {
+        if let Err(error) = context.send(setup_driver_response(request.id, 200)).await {
+            warn!(
+                error = %error,
+                req_id = request.id,
+                "failed to acknowledge Eversolo setup start"
+            );
+            return None;
+        }
+
         let remote_id = remote_id_from_context(context);
         info!(remote_id, req_id = request.id, "Eversolo setup started");
         let registry = self.manager.registry().clone();
@@ -125,7 +135,7 @@ impl EversoloIntegrationHandler {
             warn!(error = %error, "failed to send Eversolo setup selection");
         }
 
-        Some(setup_driver_response(request.id, 200))
+        None
     }
 
     async fn handle_set_driver_user_data(
@@ -133,9 +143,26 @@ impl EversoloIntegrationHandler {
         request: &IntegrationRequest,
         context: &WsConnectionContext,
     ) -> Option<Value> {
+        if let Err(error) = context.send(result_response(request.id, 200)).await {
+            warn!(
+                error = %error,
+                req_id = request.id,
+                "failed to acknowledge Eversolo setup user data"
+            );
+            return None;
+        }
+
         let remote_id = remote_id_from_context(context);
         let Some(session) = self.sessions.get(&remote_id).await else {
-            return Some(result_response(request.id, 400));
+            let _ = self
+                .setup_error(
+                    request.id,
+                    context,
+                    "setup session not found".to_string(),
+                    400,
+                )
+                .await;
+            return None;
         };
 
         let registry = self.manager.registry().clone();
@@ -163,7 +190,8 @@ impl EversoloIntegrationHandler {
                         format!("device {device_id} is already assigned to this Remote"),
                         409,
                     )
-                    .await;
+                    .await
+                    .and(None);
             }
 
             if let Some(existing) = configured_devices
@@ -198,7 +226,8 @@ impl EversoloIntegrationHandler {
                         format!("unknown Eversolo device selection {device_id}"),
                         400,
                     )
-                    .await;
+                    .await
+                    .and(None);
             }
         } else if let Some(host) = manual_host.filter(|value| !value.is_empty()) {
             let Some(metadata) = self
@@ -213,7 +242,8 @@ impl EversoloIntegrationHandler {
                         format!("unable to validate Eversolo device at {host}"),
                         400,
                     )
-                    .await;
+                    .await
+                    .and(None);
             };
 
             ConfiguredDevice {
@@ -239,7 +269,8 @@ impl EversoloIntegrationHandler {
                     "no device selection or host provided".to_string(),
                     400,
                 )
-                .await;
+                .await
+                .and(None);
         };
 
         if let Some(name) = requested_name.filter(|value| !value.is_empty()) {
@@ -260,12 +291,14 @@ impl EversoloIntegrationHandler {
         if let Err(error) = registry.assign_device(&remote_id, &config.device_id).await {
             return self
                 .setup_error(request.id, context, error.to_string(), 409)
-                .await;
+                .await
+                .and(None);
         }
         if let Err(error) = registry.save().await {
             return self
                 .setup_error(request.id, context, error.to_string(), 503)
-                .await;
+                .await
+                .and(None);
         }
         let completed_device_id = config.device_id.clone();
         let completed_host = config.host.clone();
@@ -273,7 +306,8 @@ impl EversoloIntegrationHandler {
         if let Err(error) = self.manager.add_device(config, self.driver.clone()).await {
             return self
                 .setup_error(request.id, context, error.to_string(), 503)
-                .await;
+                .await
+                .and(None);
         }
 
         self.sessions.clear(&remote_id).await;
@@ -289,7 +323,7 @@ impl EversoloIntegrationHandler {
             warn!(error = %error, "failed to send Eversolo setup completion");
         }
 
-        Some(result_response(request.id, 200))
+        None
     }
 
     async fn discover_candidates(&self, known_devices: Vec<KnownDevice>) -> Vec<KnownDevice> {

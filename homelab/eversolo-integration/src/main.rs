@@ -130,6 +130,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let handler = Arc::new(EversoloIntegrationHandler::new(manager));
+    let metadata = types::driver_metadata();
+    let published_name = metadata
+        .name
+        .get("en")
+        .cloned()
+        .unwrap_or_else(|| DRIVER_ID.to_string());
+    let developer_name = metadata
+        .developer
+        .as_ref()
+        .map(|developer| developer.name.clone())
+        .unwrap_or_else(|| "Unknown developer".to_string());
 
     let _mdns = if args.mdns {
         let ws_port = args
@@ -139,6 +150,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("--listen must contain a valid port (e.g. 0.0.0.0:9092)");
         Some(unfolded_integration_helper::mdns::MdnsAdvertiser::new(
             DRIVER_ID,
+            &published_name,
+            &developer_name,
             DRIVER_VERSION,
             MIN_CORE_API,
             ws_port,
