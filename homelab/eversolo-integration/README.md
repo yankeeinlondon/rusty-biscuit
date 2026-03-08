@@ -9,16 +9,16 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 - a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
 - a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
 
-The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That matters for both manual registration and mDNS discovery: discovery can surface the driver in the UI, but the configurator still requires `driver_metadata` before it can open the integration details successfully.
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow.
 
 ## Entity Model
 
 | Entity ID | Type | Features | Commands |
 |-----------|------|----------|----------|
-| `eversolo.{name}.power` | switch | on_off, toggle | on, off, toggle |
+| `eversolo.{name}.power` | switch | on_off | on, off, toggle |
 | `eversolo.{name}.player` | media_player | volume, volume_up_down, mute, unmute, mute_toggle, play_pause, next, previous, select_source, media_duration, media_position, media_title, media_artist, media_album | volume_set, volume_up, volume_down, mute, unmute, mute_toggle, play_pause, next, previous, select_source |
 
-The `{name}` comes from `--device-name` and defaults to `streamer`.
+The `{name}` comes from the configured device instance. `--device-name` is only a seed default and defaults to `streamer`.
 
 ### State Attributes
 
@@ -113,7 +113,7 @@ eversolo-integration \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--listen` | `0.0.0.0:9092` | WebSocket listen address |
-| `--host` | *(required)* | Eversolo IP or hostname |
+| `--host` | *(optional seed hint)* | Eversolo IP or hostname |
 | `--port` | `9529` | Eversolo HTTP API port |
 | `--device-name` | `streamer` | Name used in entity IDs |
 | `--mac` | *(optional but recommended)* | Wired MAC used for Wake-on-LAN power on |
@@ -140,7 +140,7 @@ In the UC Web Configurator:
 1. Go to **Integrations & Docks** > **+** > **Add external integration**
 2. Enter the host and port where the driver is running, for example `192.168.1.50:9092`
 3. If you set `UCR_INTEGRATION_TOKEN`, enter the same token on the Remote; otherwise leave auth unset
-4. Save the integration and let the Remote query entities
+4. Save the integration, complete the setup flow, and let the Remote bind the discovered streamer entities to that Remote
 
 ### mDNS Auto-Discovery
 
@@ -159,6 +159,7 @@ What to expect:
 
 - mDNS makes the driver discoverable on the local subnet
 - the configurator still opens the WebSocket connection and asks for `get_driver_metadata`
+- the setup flow can then validate a manual host or reuse discovered/known devices without restarting the process
 - if discovery works but metadata is missing or invalid, the integration can appear in the list but fail to open
 - mDNS does not cross VLANs or multicast-restricted network boundaries without additional network support
 
