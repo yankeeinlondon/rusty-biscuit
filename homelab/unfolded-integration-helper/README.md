@@ -103,6 +103,8 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - setup schemas must follow the documented UC field contract such as `select` plus `options` and `value`; ad hoc shapes like `dropdown` or `items` are not compatible with the configurator
 - initial setup metadata must remain valid even when discovery returns zero candidates, which means omitting device-selection controls that cannot yet be populated
 - dynamic setup screens must send initialized `setup_data` entries for every rendered field; sending only the schema can leave the configurator in an invalid state
+- long-running setup operations must acknowledge `setup_driver` / `set_driver_user_data` first, then send `driver_setup_change` progress or follow-up input events; delaying the ack can make the configurator time out before it renders the next screen
+- inbound UC frames must be classified by `kind` before enforcing request-only fields such as top-level `id`, because setup flows can emit event messages like `abort_driver_setup`
 
 When the UC protocol rules change, this crate should be the first place to update so the integrations stay in sync.
 
@@ -110,7 +112,7 @@ When the UC protocol rules change, this crate should be the first place to updat
 
 The optional `mdns` feature exists for external integrations that want zero-config discovery from the UC configurator.
 
-- The helper advertises `_uc-integration._tcp.local.` with the driver name, driver version, and API version in TXT properties.
+- The helper advertises `_uc-integration._tcp.local.` with UC-compatible TXT properties. The visible configurator label and developer line come from mDNS TXT fields, so publish human-facing `name`, `ver`, and `developer` values.
 - mDNS only helps the Remote find the driver. After discovery, the configurator still opens the WebSocket connection and asks for protocol data such as `get_driver_metadata`.
 - If a driver advertises over mDNS but does not implement `get_driver_metadata`, the integration can appear in discovery lists but fail to open in the configurator with a conflict-style error.
 - mDNS traffic on a home LAN can include malformed or partial packets from unrelated devices. Those parser errors are usually observational noise, not proof that the UC integration advertisement is broken.
