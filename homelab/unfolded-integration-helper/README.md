@@ -32,10 +32,10 @@ Functionally, this crate owns ten shared concerns:
    `DeviceDiscovery` trait and `bounded_scan` utility enable each integration to implement device probing while the helper provides concurrency and timeout management.
 
 8. Multi-device runtime management
-   `DeviceManager` owns the lifecycle of multiple `DeviceDriver` instances, polling each independently, routing entity commands, and broadcasting state changes.
+   `DeviceManager` owns the lifecycle of multiple `DeviceDriver` instances, polling each independently, routing entity commands, enriching live capability metadata, and filtering served entities/state by assigned Remote.
 
 9. Setup flow orchestration
-   `SetupState` machine and `device_selection_schema` builder implement the UC Remote-driven device configuration protocol.
+   `SetupState`, `SetupSessions`, and `device_selection_schema` implement the UC Remote-driven device configuration protocol, including per-connection setup state.
 
 10. Registry data model
     `KnownDevice`, `ConfiguredDevice`, `RemoteAssignment`, and `DeviceMetadata` types represent the full device lifecycle from discovery through configuration and remote binding.
