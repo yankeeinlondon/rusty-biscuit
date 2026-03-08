@@ -265,6 +265,9 @@ impl ArcamIntegrationHandler {
                 .setup_error(request.id, context, error.to_string(), 503)
                 .await;
         }
+        let completed_device_id = config.device_id.clone();
+        let completed_host = config.host.clone();
+        let completed_name = config.device_name.clone();
         if let Err(error) = self.manager.add_device(config, self.driver.clone()).await {
             return self
                 .setup_error(request.id, context, error.to_string(), 503)
@@ -275,9 +278,9 @@ impl ArcamIntegrationHandler {
         info!(
             remote_id,
             req_id = request.id,
-            device_id = config.device_id,
-            host = config.host,
-            device_name = config.device_name,
+            device_id = completed_device_id,
+            host = completed_host,
+            device_name = completed_name,
             "Arcam setup completed"
         );
         if let Err(error) = context.send(setup_progress_event(&SetupState::Complete)).await {
