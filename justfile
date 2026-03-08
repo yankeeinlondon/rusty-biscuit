@@ -350,15 +350,19 @@ cp:
 
 # install rusty-biscuit CLI's which are used in devops
 init: _ensure-build-deps
-    @echo -e "Initializing the {{RED}}rusty-biscuit{{RESET}} monorepo"
-    @echo
-    @echo -e "First step is to ensure CLI's used for devops are installed"
-    @echo
-    @cd biscuit-terminal >/dev/null && just install
-    @cd darkmatter >/dev/null && just install
-    @cd sniff >/dev/null && just install
-    @cd playa >/dev/null && just install
-    @cd biscuit-speaks >/dev/null  && just install
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Source cargo env in case _ensure-build-deps just installed Rust
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    echo -e "Initializing the {{RED}}rusty-biscuit{{RESET}} monorepo"
+    echo
+    echo -e "First step is to ensure CLI's used for devops are installed"
+    echo
+    (cd biscuit-terminal && just install)
+    (cd darkmatter && just install)
+    (cd sniff && just install)
+    (cd playa && just install)
+    (cd biscuit-speaks && just install)
 
 # ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
