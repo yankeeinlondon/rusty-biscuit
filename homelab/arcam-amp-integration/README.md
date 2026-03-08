@@ -6,6 +6,8 @@ Unfolded Circle integration driver for Arcam PA-series amplifiers (PA240, PA410,
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes Arcam amplifiers as switch entities for power and mute control.
 
+The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That metadata step is required even when the Remote discovers the integration over mDNS.
+
 ### Entities
 
 | Entity ID | Type | Features | Commands |
@@ -62,6 +64,7 @@ arcam-amp-integration --host 192.168.1.102 --device-name office
 | `--device-name` | `amp` | Name used in entity IDs |
 | `--timeout` | `5` | Arcam TCP operation timeout (seconds) |
 | `--poll-interval` | `5` | Background poll interval in seconds |
+| `--mdns` | `false` | Advertise `_uc-integration._tcp.local.` for UC auto-discovery |
 
 ### Authentication
 
@@ -79,6 +82,21 @@ In the UC Web Configurator:
 2. Enter the IP and port where the driver is running (e.g., `192.168.1.50:9090`)
 3. If using authentication, enter the token
 4. The Remote connects and discovers the power/mute switch entities
+
+### mDNS Auto-Discovery
+
+If you start the driver with `--mdns`, it advertises itself via `_uc-integration._tcp.local.` so the configurator can discover it automatically on the local subnet.
+
+```bash
+arcam-amp-integration --host 192.168.1.102 --device-name office --mdns
+```
+
+Important behavior:
+
+- mDNS discovery only publishes presence and connection coordinates
+- the configurator still requires a valid `driver_metadata` response after opening the WebSocket session
+- if the integration is visible in discovery but cannot be opened, treat `get_driver_metadata` compatibility as part of the debugging path
+- multicast filtering or VLAN boundaries can prevent discovery even though manual host/port registration still works
 
 ## Running with Docker
 
@@ -113,7 +131,15 @@ ARCAM_HOST=192.168.1.102 \
 | `TIMEOUT` | `5` | Arcam TCP timeout (seconds) |
 | `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
 | `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
-| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `RUST_LOG` | `info,mdns_sd::service_daemon=off` | Log filter override |
+
+To enable mDNS in Docker, pass `--mdns` as an extra argument because the entrypoint forwards trailing args to the binary:
+
+```bash
+docker compose run --service-ports arcam-amp-integration --mdns
+```
+
+or set a `command: ["--mdns"]` override in your compose file.
 
 ### Docker Build Only
 
@@ -164,3 +190,5 @@ just sanity-test-mutate
 
 - The UC Integration protocol requires the **driver to be the WebSocket server** and the Remote to be the client. This is the opposite of most hub-based protocols.
 - `entity_command` returns a synchronous UC `result` envelope. Actual state changes are pushed later through `entity_change` events when the cache changes.
+- mDNS discovery is not a replacement for the protocol handshake. A discoverable driver still needs `driver_metadata` for the configurator to render integration details.
+- Default logs suppress noisy malformed-packet messages from unrelated LAN mDNS traffic; re-enable `mdns_sd::service_daemon` in `RUST_LOG` only when actively debugging discovery.

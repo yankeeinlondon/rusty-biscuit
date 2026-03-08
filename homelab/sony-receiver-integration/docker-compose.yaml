@@ -12,5 +12,5 @@ services:
       TIMEOUT: ${TIMEOUT:-10}
       POLL_INTERVAL: ${POLL_INTERVAL:-5}
       UCR_INTEGRATION_TOKEN: ${UCR_INTEGRATION_TOKEN:-}
-      RUST_LOG: ${RUST_LOG:-info}
+      RUST_LOG: ${RUST_LOG:-info,mdns_sd::service_daemon=off}
     restart: unless-stopped

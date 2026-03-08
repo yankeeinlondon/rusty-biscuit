@@ -13,7 +13,8 @@ Functionally, this crate owns five shared concerns:
 
 2. Building outgoing UC responses and events
    It provides helpers for the common response and event shapes used by the integrations, including:
-   `driver_version`, `available_entities`, `entity_states`, `result`, `entity_change`, and `device_state`.
+   `driver_version`, `driver_metadata`, `available_entities`, `entity_states`, `result`,
+   `entity_change`, and `device_state`.
 
 3. Tracking entity state snapshots
    `StateCache` keeps a keyed snapshot of UC entity state, detects meaningful changes, and supports replace/merge workflows so integrations can diff poll results before broadcasting updates.
@@ -30,6 +31,8 @@ It also includes `test_fixtures` for generating realistic UC request payloads in
 
 - `envelope`
   Request parsing plus response/event builders for the UC Integration WebSocket protocol.
+- `mdns`
+  Optional mDNS/DNS-SD advertisement support for external integrations via the `_uc-integration._tcp.local.` service type.
 - `state_cache`
   Keyed entity-state storage and diff-friendly update helpers.
 - `connectivity`
@@ -69,7 +72,18 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - requests use top-level `id`
 - responses use top-level `req_id`
 - responses use top-level `code`
+- configurator compatibility depends on both `driver_version` and `driver_metadata`
 - `subscribe_events` controls unsolicited broadcasts
 - `entity_change` and `device_state` events are emitted in one consistent shape
 
 When the UC protocol rules change, this crate should be the first place to update so the integrations stay in sync.
+
+## mDNS Notes
+
+The optional `mdns` feature exists for external integrations that want zero-config discovery from the UC configurator.
+
+- The helper advertises `_uc-integration._tcp.local.` with the driver name, driver version, and API version in TXT properties.
+- mDNS only helps the Remote find the driver. After discovery, the configurator still opens the WebSocket connection and asks for protocol data such as `get_driver_metadata`.
+- If a driver advertises over mDNS but does not implement `get_driver_metadata`, the integration can appear in discovery lists but fail to open in the configurator with a conflict-style error.
+- mDNS traffic on a home LAN can include malformed or partial packets from unrelated devices. Those parser errors are usually observational noise, not proof that the UC integration advertisement is broken.
+- Because mDNS is link-local multicast, VLAN boundaries, multicast filtering, or router policy can prevent discovery even when direct WebSocket connectivity works.

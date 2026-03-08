@@ -12,8 +12,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use unfolded_integration_helper::{
     ConnectivityState, ConnectivityTracker, IntegrationRequest, StateCache, SubscriptionRegistry,
-    available_entities_response, device_state_event, driver_version_response,
-    entity_states_response, result_response,
+    available_entities_response, device_state_event, driver_metadata_response,
+    driver_version_response, entity_states_response, result_response,
 };
 
 use crate::dispatch::{
@@ -297,6 +297,10 @@ impl WsHandler for EversoloIntegrationHandler {
                 types::DRIVER_VERSION,
                 types::MIN_CORE_API,
             )),
+            "get_driver_metadata" => Some(driver_metadata_response(
+                request.id,
+                &types::driver_metadata(),
+            )),
             "get_device_state" => Some(device_state_event(
                 self.handle_get_device_state().await.as_uc_label(),
             )),
@@ -378,6 +382,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp["msg_data"]["state"], "DISCONNECTED");
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_driver_metadata() {
+        let handler = handler_no_devices();
+        let resp = handler
+            .handle_message(request(8, "get_driver_metadata", json!({})), context())
+            .await
+            .unwrap();
+
+        assert_eq!(resp["kind"], "resp");
+        assert_eq!(resp["req_id"], 8);
+        assert_eq!(resp["msg"], "driver_metadata");
+        assert_eq!(resp["code"], 200);
+        assert_eq!(resp["msg_data"]["driver_id"], "eversolo-streamer");
+        assert_eq!(resp["msg_data"]["developer"]["name"], "Ken Snyder");
     }
 
     #[tokio::test]

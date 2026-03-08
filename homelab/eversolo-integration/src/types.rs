@@ -14,6 +14,48 @@ pub const DRIVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MIN_CORE_API: &str = "0.14.0";
 pub const DEFAULT_VOLUME_STEPS: u32 = 200;
 
+/// Developer details presented in the UC configurator.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriverDeveloper {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Driver metadata returned to the UC configurator.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriverMetadata {
+    pub driver_id: String,
+    pub name: HashMap<String, String>,
+    pub version: String,
+    pub min_core_api: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub developer: Option<DriverDeveloper>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub home_page: Option<String>,
+}
+
+/// Build the metadata payload required by the UC configurator.
+pub fn driver_metadata() -> DriverMetadata {
+    DriverMetadata {
+        driver_id: DRIVER_ID.to_string(),
+        name: HashMap::from([("en".to_string(), "Eversolo Streamer".to_string())]),
+        version: DRIVER_VERSION.to_string(),
+        min_core_api: MIN_CORE_API.to_string(),
+        description: Some(HashMap::from([(
+            "en".to_string(),
+            "Control Eversolo streamers over the local network.".to_string(),
+        )])),
+        developer: Some(DriverDeveloper {
+            name: "Ken Snyder".to_string(),
+            url: Some("https://github.com/yankeeinlondon".to_string()),
+        }),
+        home_page: Some("https://github.com/yankeeinlondon/rusty-biscuit".to_string()),
+    }
+}
+
 /// Eversolo connection details used by the transport layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceConfig {
@@ -245,5 +287,15 @@ mod tests {
         assert!(entity_exists("eversolo.living.player"));
         assert!(!entity_exists("eversolo.living.output"));
         assert!(!entity_exists("sony.living.power"));
+    }
+
+    #[test]
+    fn test_driver_metadata() {
+        let metadata = driver_metadata();
+        assert_eq!(metadata.driver_id, DRIVER_ID);
+        assert_eq!(metadata.name["en"], "Eversolo Streamer");
+        assert_eq!(metadata.version, DRIVER_VERSION);
+        assert_eq!(metadata.min_core_api, MIN_CORE_API);
+        assert_eq!(metadata.developer.as_ref().unwrap().name, "Ken Snyder");
     }
 }

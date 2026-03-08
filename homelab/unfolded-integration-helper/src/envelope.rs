@@ -160,6 +160,11 @@ pub fn driver_version_response(
 }
 
 #[must_use]
+pub fn driver_metadata_response<T: Serialize>(req_id: u64, metadata: &T) -> Value {
+    response(req_id, "driver_metadata", 200, Some(to_value(metadata)))
+}
+
+#[must_use]
 pub fn available_entities_response<T: Serialize>(req_id: u64, entities: &T) -> Value {
     response(
         req_id,

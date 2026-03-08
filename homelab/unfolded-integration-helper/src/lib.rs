@@ -18,8 +18,8 @@ pub use std::collections::HashMap as StdHashMap;
 pub use connectivity::{ConnectivityState, ConnectivityTracker};
 pub use envelope::{
     EnvelopeError, IntegrationRequest, RequestEnvelope, available_entities_response,
-    device_state_event, driver_version_response, entity_change_event, entity_states_response,
-    result_response,
+    device_state_event, driver_metadata_response, driver_version_response, entity_change_event,
+    entity_states_response, result_response,
 };
 pub use state_cache::{CachedEntityState, EntityState, StateCache};
 pub use subscriptions::SubscriptionRegistry;

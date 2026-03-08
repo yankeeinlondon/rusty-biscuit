@@ -6,6 +6,8 @@ Unfolded Circle integration driver for Sony ES AV receivers (STR-AZ7000ES and si
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes a Sony receiver as a power switch and a media player entity with volume, mute, and input source selection.
 
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That metadata is required even when the Remote first finds the driver through mDNS.
+
 ### Entities
 
 | Entity ID | Type | Features | Commands |
@@ -90,6 +92,7 @@ sony-receiver-integration --host 192.168.1.120 --device-name living
 | `--device-name` | `receiver` | Name used in entity IDs |
 | `--timeout` | `10` | HTTP operation timeout (seconds) |
 | `--poll-interval` | `5` | Background poll interval in seconds |
+| `--mdns` | `false` | Advertise `_uc-integration._tcp.local.` for UC auto-discovery |
 
 ### Authentication
 
@@ -107,6 +110,21 @@ In the UC Web Configurator:
 2. Enter the IP and port where the driver is running (e.g., `192.168.1.50:9091`)
 3. If using authentication, enter the token
 4. The Remote connects and discovers the power switch and media player entities
+
+### mDNS Auto-Discovery
+
+If you start the driver with `--mdns`, it advertises `_uc-integration._tcp.local.` so the UC configurator can discover it on the local subnet.
+
+```bash
+sony-receiver-integration --host 192.168.1.120 --device-name living --mdns
+```
+
+Discovery notes:
+
+- mDNS makes the integration visible to the configurator
+- the configurator still opens the WebSocket session and asks for `driver_metadata`
+- a driver can therefore appear in the discovery list but still fail to open if its metadata flow is incomplete
+- multicast-restricted networks may require manual host/port registration even though the integration itself is healthy
 
 ## Running with Docker
 
@@ -143,7 +161,15 @@ SONY_HOST=192.168.1.120 \
 | `TIMEOUT` | `10` | Sony HTTP timeout (seconds) |
 | `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
 | `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
-| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `RUST_LOG` | `info,mdns_sd::service_daemon=off` | Log filter override |
+
+To enable mDNS in Docker, pass `--mdns` as an extra argument because the entrypoint forwards trailing args to the binary:
+
+```bash
+docker compose run --service-ports sony-receiver-integration --mdns
+```
+
+or set a `command: ["--mdns"]` override in your compose file.
 
 ### Docker Build Only
 
@@ -198,3 +224,5 @@ just sanity-test-mutate
 - The UC Integration protocol requires the **driver to be the WebSocket server** and the Remote to be the client.
 - `entity_command` returns a synchronous UC `result` envelope. Cache diffs are pushed separately as `entity_change` events.
 - Sony receivers need `pool_max_idle_per_host(0)` to prevent connection conflicts.
+- mDNS discovery and configurator compatibility are separate concerns. Discovery advertises the driver; `driver_metadata` is what lets the configurator open it cleanly.
+- Default logs suppress malformed-packet noise from unrelated mDNS traffic on the LAN; restore `mdns_sd::service_daemon` logging in `RUST_LOG` only when debugging discovery.

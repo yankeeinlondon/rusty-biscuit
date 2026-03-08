@@ -9,6 +9,8 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 - a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
 - a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
 
+The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That matters for both manual registration and mDNS discovery: discovery can surface the driver in the UI, but the configurator still requires `driver_metadata` before it can open the integration details successfully.
+
 ## Entity Model
 
 | Entity ID | Type | Features | Commands |
@@ -119,6 +121,7 @@ eversolo-integration \
 | `--wol-port` | `9517` | WoL UDP port |
 | `--timeout` | `10` | HTTP operation timeout in seconds |
 | `--poll-interval` | `5` | Background poll interval in seconds |
+| `--mdns` | `false` | Advertise `_uc-integration._tcp.local.` for UC auto-discovery |
 
 ### Authentication
 
@@ -138,6 +141,26 @@ In the UC Web Configurator:
 2. Enter the host and port where the driver is running, for example `192.168.1.50:9092`
 3. If you set `UCR_INTEGRATION_TOKEN`, enter the same token on the Remote; otherwise leave auth unset
 4. Save the integration and let the Remote query entities
+
+### mDNS Auto-Discovery
+
+If you start the driver with `--mdns`, it advertises itself via `_uc-integration._tcp.local.` so the UC configurator can discover it without manually entering host and port.
+
+```bash
+UCR_INTEGRATION_TOKEN=my-secret \
+eversolo-integration \
+  --host 192.168.1.140 \
+  --mac AA:BB:CC:DD:EE:FF \
+  --device-name music \
+  --mdns
+```
+
+What to expect:
+
+- mDNS makes the driver discoverable on the local subnet
+- the configurator still opens the WebSocket connection and asks for `get_driver_metadata`
+- if discovery works but metadata is missing or invalid, the integration can appear in the list but fail to open
+- mDNS does not cross VLANs or multicast-restricted network boundaries without additional network support
 
 ## Running with Docker
 
@@ -176,7 +199,15 @@ EVERSOLO_HOST=192.168.1.140 \
 | `TIMEOUT` | `10` | Eversolo HTTP timeout (seconds) |
 | `POLL_INTERVAL` | `5` | Background poll interval (seconds) |
 | `UCR_INTEGRATION_TOKEN` | *(empty)* | Auth token for UC Remote |
-| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `RUST_LOG` | `info,mdns_sd::service_daemon=off` | Log filter override |
+
+If you want Docker deployment with mDNS enabled, pass `--mdns` as an extra container argument because the entrypoint forwards trailing args to the binary:
+
+```bash
+docker compose run --service-ports eversolo-integration --mdns
+```
+
+or set a `command: ["--mdns"]` override in your compose file.
 
 ## Validation
 
@@ -212,6 +243,12 @@ The driver runs a background poll loop per configured device. Each loop refreshe
 - dynamic source list metadata used by `select_source`
 
 This means front-panel changes, mobile-app commands, or other API clients can be reflected in the driver's cached state without waiting for a UC command path through this integration. When a client has successfully called `subscribe_events`, poll diffs are broadcast as `entity_change` / `device_state` events over the WebSocket host.
+
+## mDNS and Logging Notes
+
+- The integration uses `mdns-sd` only for advertisement. It does not depend on parsing third-party AirPlay, printer, or IoT advertisements correctly.
+- Busy LANs often emit malformed or truncated mDNS packets from unrelated devices. Those messages are not specific to Eversolo or UC discovery.
+- The default log filter now suppresses `mdns_sd::service_daemon` parser noise. Set `RUST_LOG=mdns_sd::service_daemon=debug,...` if you need to inspect raw discovery behavior while debugging.
 
 ## Limitations
 
