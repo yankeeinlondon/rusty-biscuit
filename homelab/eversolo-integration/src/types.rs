@@ -57,7 +57,7 @@ pub fn driver_metadata() -> DriverMetadata {
         )])),
         developer: Some(DriverDeveloper {
             name: "Ken Snyder".to_string(),
-            email: Some("ken@yankeeinlondon.com".to_string()),
+            email: Some("ken@ken.net".to_string()),
             url: Some("https://github.com/yankeeinlondon".to_string()),
         }),
         home_page: Some("https://github.com/yankeeinlondon/rusty-biscuit".to_string()),
