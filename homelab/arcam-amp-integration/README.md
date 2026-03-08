@@ -6,16 +6,16 @@ Unfolded Circle integration driver for Arcam PA-series amplifiers (PA240, PA410,
 
 This is a standalone WebSocket server that speaks the [Unfolded Circle Integration protocol](https://unfoldedcircle.github.io/core-api/integration/). When a UC Remote Two or Remote 3 connects, the driver exposes Arcam amplifiers as switch entities for power and mute control.
 
-The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`). That metadata step is required even when the Remote discovers the integration over mDNS.
+The driver also implements the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so a fresh Remote can configure an amplifier through the integration protocol instead of relying on startup-only host seeding.
 
 ### Entities
 
 | Entity ID | Type | Features | Commands |
 |-----------|------|----------|----------|
-| `arcam.{name}.power` | switch | on_off, toggle | on, off, toggle |
-| `arcam.{name}.mute` | switch | on_off, toggle | on, off, toggle |
+| `arcam.{name}.power` | switch | on_off | on, off, toggle |
+| `arcam.{name}.mute` | switch | on_off | on, off, toggle |
 
-The `{name}` comes from the `--device-name` flag (default: `amp`). Entity state is `ON`, `OFF`, or `UNKNOWN` while the amplifier is unreachable.
+The `{name}` comes from the configured device instance. `--device-name` is only a seed default for CLI-driven hints. Entity state is `ON`, `OFF`, or `UNKNOWN` while the amplifier is unreachable.
 
 ### How It Works
 
@@ -59,7 +59,7 @@ arcam-amp-integration --host 192.168.1.102 --device-name office
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--listen` | `0.0.0.0:9090` | WebSocket listen address |
-| `--host` | *(required)* | Arcam amplifier IP or hostname |
+| `--host` | *(optional seed hint)* | Arcam amplifier IP or hostname |
 | `--port` | `50000` | Arcam TCP port |
 | `--device-name` | `amp` | Name used in entity IDs |
 | `--timeout` | `5` | Arcam TCP operation timeout (seconds) |
@@ -81,7 +81,7 @@ In the UC Web Configurator:
 1. Go to **Integrations & Docks** > **+** > **Add external integration**
 2. Enter the IP and port where the driver is running (e.g., `192.168.1.50:9090`)
 3. If using authentication, enter the token
-4. The Remote connects and discovers the power/mute switch entities
+4. The Remote opens the setup flow, validates or discovers the amplifier, and then binds the power/mute switch entities to that Remote
 
 ### mDNS Auto-Discovery
 
@@ -173,7 +173,7 @@ just sanity-test-mutate
 
 ## State Synchronization
 
-- The driver performs a startup refresh before it begins serving the WebSocket API, so the first `get_entity_states` call is not a hard-coded all-`OFF` guess.
+- Startup no longer blindly activates every persisted device. Devices are activated lazily when a Remote has assigned them through setup or when a CLI seed hint is later assigned.
 - `get_entity_states` runs a fresh power + mute query against the amplifier and updates the cache before responding.
 - A background poll loop diffs refreshed state against the cache and broadcasts `entity_change` to subscribed clients when power or mute changes outside the UC Remote.
 - `device_state` reflects actual amplifier reachability, not just configuration presence. When the amplifier cannot be queried, cached entity states move to `UNKNOWN` and the integration emits a `DISCONNECTED` device-state event.
