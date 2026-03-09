@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -132,6 +133,24 @@ impl McpServer {
 
         let serialized = serde_json::to_string(&canonical).expect("fingerprint serialization");
         biscuit_hash::blake3_hash(&serialized)
+    }
+
+    /// Return provider-specific override data as an object, if present.
+    pub fn provider_override_object(&self, provider_slug: &str) -> Option<&Map<String, Value>> {
+        self.provider_overrides
+            .get(provider_slug)
+            .and_then(Value::as_object)
+    }
+
+    /// Set a provider-specific override field, creating the provider object.
+    pub fn set_provider_override(&mut self, provider_slug: &str, key: &str, value: Value) {
+        let entry = self
+            .provider_overrides
+            .entry(provider_slug.to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+
+        let object = entry.as_object_mut().expect("provider override object");
+        object.insert(key.to_string(), value);
     }
 }
 

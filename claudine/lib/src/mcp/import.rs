@@ -3,7 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use serde_json::Value;
+use serde::Serialize;
+use serde_json::{Value, json};
 
 use crate::error::Result;
 use crate::events::Provider;
@@ -19,7 +20,7 @@ use super::types::{
 // ---------------------------------------------------------------------------
 
 /// A server that was newly added to the catalog.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ImportedEntry {
     pub catalog_id: String,
     pub provider: Provider,
@@ -27,7 +28,7 @@ pub struct ImportedEntry {
 }
 
 /// A server that matched an existing catalog entry by fingerprint.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct MergedEntry {
     pub catalog_id: String,
     pub provider: Provider,
@@ -36,7 +37,7 @@ pub struct MergedEntry {
 }
 
 /// A naming conflict (same name, different fingerprint).
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ConflictEntry {
     pub name: String,
     pub provider: Provider,
@@ -44,7 +45,7 @@ pub struct ConflictEntry {
 }
 
 /// A server that was skipped (already tracked).
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SkippedEntry {
     pub catalog_id: String,
     pub provider: Provider,
@@ -52,7 +53,7 @@ pub struct SkippedEntry {
 }
 
 /// An error during import of a single server.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ImportError {
     pub provider: Provider,
     pub native_name: String,
@@ -60,7 +61,7 @@ pub struct ImportError {
 }
 
 /// Report summarizing an import operation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct ImportReport {
     pub imported: Vec<ImportedEntry>,
     pub merged: Vec<MergedEntry>,
@@ -254,11 +255,23 @@ fn discover_provider_configs(provider: Provider, repo_root: Option<&Path>) -> Ve
             if user_config.exists() {
                 configs.push((user_config, Scope::User));
             }
+            for plugin_config in discover_claude_plugin_configs(&home.join(".claude").join("plugins")) {
+                configs.push((plugin_config, Scope::User));
+            }
             // Repo: .mcp.json
             if let Some(root) = repo_root {
                 let repo_config = root.join(".mcp.json");
                 if repo_config.exists() {
                     configs.push((repo_config, Scope::Repo(root.to_path_buf())));
+                }
+                let local_config = root.join(".claude").join("settings.local.json");
+                if local_config.exists() {
+                    configs.push((local_config, Scope::Repo(root.to_path_buf())));
+                }
+                for plugin_config in
+                    discover_claude_plugin_configs(&root.join(".claude").join("plugins"))
+                {
+                    configs.push((plugin_config, Scope::Repo(root.to_path_buf())));
                 }
             }
         }
@@ -325,6 +338,29 @@ fn discover_provider_configs(provider: Provider, repo_root: Option<&Path>) -> Ve
     configs
 }
 
+fn discover_claude_plugin_configs(plugin_root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(plugin_root) else {
+        return Vec::new();
+    };
+
+    let mut configs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        for file_name in [".mcp.json", "plugin.json"] {
+            let candidate = path.join(file_name);
+            if candidate.exists() {
+                configs.push(candidate);
+            }
+        }
+    }
+
+    configs
+}
+
 // ---------------------------------------------------------------------------
 // Per-provider parsers
 // ---------------------------------------------------------------------------
@@ -376,7 +412,7 @@ fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             .map(PathBuf::from);
         let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
 
-        let server = McpServer {
+        let mut server = McpServer {
             id: slugify(name),
             aliases: Vec::new(),
             transport,
@@ -398,6 +434,19 @@ fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             },
             provider_overrides: HashMap::new(),
         };
+
+        if config_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "settings.local.json")
+        {
+            server.set_provider_override("claude", "scope", json!("local"));
+        } else if config_path
+            .components()
+            .any(|component| component.as_os_str() == "plugins")
+        {
+            server.set_provider_override("claude", "scope", json!("plugin"));
+        }
 
         result.push((name.clone(), server));
     }
@@ -472,7 +521,7 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             }
         }
 
-        let server = McpServer {
+        let mut server = McpServer {
             id: slugify(name),
             aliases: Vec::new(),
             transport,
@@ -494,6 +543,72 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             },
             provider_overrides: HashMap::new(),
         };
+
+        if let Some(env_vars) = table
+            .get("env_vars")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            && !env_vars.is_empty()
+        {
+            server.set_provider_override("codex", "env_vars", json!(env_vars));
+        }
+        if let Some(value) = table
+            .get("bearer_token_env_var")
+            .and_then(|v| v.as_str())
+        {
+            server.set_provider_override("codex", "bearer_token_env_var", json!(value));
+        }
+        if let Some(value) = table.get("env_http_headers").and_then(|v| v.as_table()) {
+            let headers = value
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.to_string(), v.to_string())))
+                .collect::<HashMap<_, _>>();
+            if !headers.is_empty() {
+                server.set_provider_override("codex", "env_http_headers", json!(headers));
+            }
+        }
+        if let Some(value) = table.get("enabled").and_then(|v| v.as_bool()) {
+            server.set_provider_override("codex", "enabled", json!(value));
+        }
+        if let Some(value) = table
+            .get("startup_timeout_sec")
+            .and_then(|v| v.as_integer())
+        {
+            server.set_provider_override("codex", "startup_timeout_sec", json!(value));
+        }
+        if let Some(value) = table
+            .get("tool_timeout_sec")
+            .and_then(|v| v.as_integer())
+        {
+            server.set_provider_override("codex", "tool_timeout_sec", json!(value));
+        }
+
+        server.required = table
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        server.enabled_tools = table
+            .get("enabled_tools")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        server.disabled_tools = table
+            .get("disabled_tools")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         result.push((name.to_string(), server));
     }
@@ -528,7 +643,7 @@ fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
         let enabled_tools = parse_string_array(def.get("include-tools"));
         let disabled_tools = parse_string_array(def.get("exclude-tools"));
 
-        let server = McpServer {
+        let mut server = McpServer {
             id: slugify(name),
             aliases: Vec::new(),
             transport,
@@ -550,6 +665,12 @@ fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             },
             provider_overrides: HashMap::new(),
         };
+
+        for field in ["description", "timeout", "trust"] {
+            if let Some(value) = def.get(field).cloned() {
+                server.set_provider_override("gemini", field, value);
+            }
+        }
 
         result.push((name.clone(), server));
     }
@@ -578,17 +699,17 @@ fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             McpTransport::Stdio
         };
 
-        let command = def.get("command").and_then(|v| v.as_str()).map(String::from);
+        let (command, args) = parse_command_and_args(def.get("command"));
         let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
         let env = parse_string_map(def.get("environment"));
         let headers = parse_string_map(def.get("headers"));
 
-        let server = McpServer {
+        let mut server = McpServer {
             id: slugify(name),
             aliases: Vec::new(),
             transport,
             command,
-            args: Vec::new(),
+            args,
             cwd: None,
             env,
             url,
@@ -605,6 +726,12 @@ fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             },
             provider_overrides: HashMap::new(),
         };
+
+        for field in ["enabled", "oauth", "timeout"] {
+            if let Some(value) = def.get(field).cloned() {
+                server.set_provider_override("opencode", field, value);
+            }
+        }
 
         result.push((name.clone(), server));
     }
@@ -692,6 +819,19 @@ fn parse_string_map(value: Option<&Value>) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
+fn parse_command_and_args(value: Option<&Value>) -> (Option<String>, Vec<String>) {
+    match value {
+        Some(Value::String(command)) => (Some(command.clone()), Vec::new()),
+        Some(Value::Array(parts)) => {
+            let mut parts = parts.iter().filter_map(|part| part.as_str().map(str::to_string));
+            let command = parts.next();
+            let args = parts.collect();
+            (command, args)
+        }
+        _ => (None, Vec::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
@@ -757,6 +897,62 @@ GOOGLE_TOKEN = "secret-123"
     }
 
     #[test]
+    fn parse_codex_mcp_preserves_known_provider_fields() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        fs::write(
+            &config,
+            r#"
+[mcp_servers.calendar]
+command = "npx"
+args = ["-y", "@google/calendar-mcp"]
+env_vars = ["GOOGLE_TOKEN"]
+bearer_token_env_var = "CALENDAR_BEARER"
+enabled = false
+required = true
+startup_timeout_sec = 15
+tool_timeout_sec = 45
+enabled_tools = ["list_events"]
+disabled_tools = ["delete_event"]
+
+[mcp_servers.calendar.env_http_headers]
+Authorization = "AUTH_TOKEN"
+"#,
+        )
+        .unwrap();
+
+        let servers = parse_codex_mcp(&config).unwrap();
+        let server = &servers[0].1;
+        assert!(server.required);
+        assert_eq!(server.enabled_tools, vec!["list_events"]);
+        assert_eq!(server.disabled_tools, vec!["delete_event"]);
+        assert_eq!(
+            server
+                .provider_override_object("codex")
+                .unwrap()
+                .get("env_vars")
+                .unwrap(),
+            &json!(["GOOGLE_TOKEN"])
+        );
+        assert_eq!(
+            server
+                .provider_override_object("codex")
+                .unwrap()
+                .get("bearer_token_env_var")
+                .unwrap(),
+            &json!("CALENDAR_BEARER")
+        );
+        assert_eq!(
+            server
+                .provider_override_object("codex")
+                .unwrap()
+                .get("enabled")
+                .unwrap(),
+            &json!(false)
+        );
+    }
+
+    #[test]
     fn parse_gemini_mcp_basic() {
         let tmp = TempDir::new().unwrap();
         let config = tmp.path().join("settings.json");
@@ -799,6 +995,40 @@ GOOGLE_TOKEN = "secret-123"
         let servers = parse_opencode_mcp(&config).unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].1.transport, McpTransport::Stdio);
+    }
+
+    #[test]
+    fn parse_opencode_mcp_command_array_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("opencode.json");
+        fs::write(
+            &config,
+            r#"{
+                "mcp": {
+                    "github": {
+                        "type": "local",
+                        "command": ["npx", "-y", "@company/github-mcp"],
+                        "enabled": true,
+                        "timeout": 5000,
+                        "oauth": {}
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let servers = parse_opencode_mcp(&config).unwrap();
+        let server = &servers[0].1;
+        assert_eq!(server.command.as_deref(), Some("npx"));
+        assert_eq!(server.args, vec!["-y", "@company/github-mcp"]);
+        assert_eq!(
+            server
+                .provider_override_object("opencode")
+                .unwrap()
+                .get("timeout")
+                .unwrap(),
+            &json!(5000)
+        );
     }
 
     #[test]

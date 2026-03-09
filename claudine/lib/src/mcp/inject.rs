@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use crate::config::atomic::atomic_write;
-use crate::error::Result;
+use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
 use super::types::{McpServer, McpTransport};
@@ -72,10 +72,10 @@ impl McpInjector for OpenCodeInjector {
                 McpTransport::Stdio => {
                     entry.insert("type".into(), json!("local"));
                     if let Some(ref cmd) = server.command {
-                        entry.insert("command".into(), json!(cmd));
-                    }
-                    if !server.args.is_empty() {
-                        entry.insert("args".into(), json!(server.args));
+                        let command = std::iter::once(cmd.clone())
+                            .chain(server.args.iter().cloned())
+                            .collect::<Vec<_>>();
+                        entry.insert("command".into(), json!(command));
                     }
                 }
                 McpTransport::Http | McpTransport::Sse => {
@@ -90,6 +90,11 @@ impl McpInjector for OpenCodeInjector {
             }
             if !server.headers.is_empty() {
                 entry.insert("headers".into(), json!(server.headers));
+            }
+            for field in ["enabled", "oauth", "timeout"] {
+                if let Some(value) = provider_override_value(server, "opencode", field) {
+                    entry.insert(field.to_string(), value.clone());
+                }
             }
             mcp_config.insert(server.id.clone(), serde_json::Value::Object(entry));
         }
@@ -133,11 +138,20 @@ impl McpInjector for CodexInjector {
         _env: &mut HashMap<String, String>,
         shadow_home: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.unwrap_or_else(|| Path::new("."));
+        let home = shadow_home.ok_or_else(|| ClaudineError::ConfigValidation(
+            "Codex runtime MCP injection requires a shadow HOME".into(),
+        ))?;
         let config_dir = home.join(".codex");
         let config_path = config_dir.join("config.toml");
 
-        let mut doc = toml_edit::DocumentMut::new();
+        let mut doc = if config_path.exists() {
+            fs::read_to_string(&config_path)?
+                .parse()
+                .map_err(ClaudineError::TomlParse)?
+        } else {
+            toml_edit::DocumentMut::new()
+        };
+
         doc["mcp_servers"] = toml_edit::Item::Table(toml_edit::Table::new());
 
         let mcp_table = doc["mcp_servers"].as_table_mut().unwrap();
@@ -169,6 +183,56 @@ impl McpInjector for CodexInjector {
             if let Some(ref cwd) = server.cwd {
                 table["cwd"] = toml_edit::value(cwd.to_string_lossy().as_ref());
             }
+            if !server.headers.is_empty() {
+                let mut header_table = toml_edit::Table::new();
+                let mut sorted: Vec<_> = server.headers.iter().collect();
+                sorted.sort_by_key(|(k, _)| k.as_str());
+                for (k, v) in sorted {
+                    header_table[k.as_str()] = toml_edit::value(v.as_str());
+                }
+                table["http_headers"] = toml_edit::Item::Table(header_table);
+            }
+            if !server.enabled_tools.is_empty() {
+                table["enabled_tools"] = toml_edit::value(to_toml_array(&server.enabled_tools));
+            }
+            if !server.disabled_tools.is_empty() {
+                table["disabled_tools"] = toml_edit::value(to_toml_array(&server.disabled_tools));
+            }
+            if server.required {
+                table["required"] = toml_edit::value(true);
+            }
+            if let Some(enabled) = provider_override_bool(server, "codex", "enabled") {
+                table["enabled"] = toml_edit::value(enabled);
+            }
+            if let Some(env_vars) = provider_override_string_array(server, "codex", "env_vars")
+                && !env_vars.is_empty()
+            {
+                table["env_vars"] = toml_edit::value(to_toml_array(&env_vars));
+            }
+            if let Some(value) =
+                provider_override_string(server, "codex", "bearer_token_env_var")
+            {
+                table["bearer_token_env_var"] = toml_edit::value(value.as_str());
+            }
+            if let Some(headers) =
+                provider_override_string_map(server, "codex", "env_http_headers")
+                && !headers.is_empty()
+            {
+                let mut header_table = toml_edit::Table::new();
+                let mut sorted: Vec<_> = headers.iter().collect();
+                sorted.sort_by_key(|(k, _)| k.as_str());
+                for (k, v) in sorted {
+                    header_table[k.as_str()] = toml_edit::value(v.as_str());
+                }
+                table["env_http_headers"] = toml_edit::Item::Table(header_table);
+            }
+            if let Some(value) = provider_override_i64(server, "codex", "startup_timeout_sec") {
+                table["startup_timeout_sec"] = toml_edit::value(value);
+            }
+            if let Some(value) = provider_override_i64(server, "codex", "tool_timeout_sec") {
+                table["tool_timeout_sec"] = toml_edit::value(value);
+            }
+
             mcp_table[&server.id] = toml_edit::Item::Table(table);
         }
 
@@ -212,10 +276,20 @@ impl McpInjector for GeminiInjector {
         _env: &mut HashMap<String, String>,
         shadow_home: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.unwrap_or_else(|| Path::new("."));
+        let home = shadow_home.ok_or_else(|| ClaudineError::ConfigValidation(
+            "Gemini runtime MCP injection requires a shadow HOME".into(),
+        ))?;
         let config_dir = home.join(".gemini");
         let config_path = config_dir.join("settings.json");
 
+        materialize_json_copy_if_exists(&config_dir.join("mcp-server-enablement.json"))?;
+        materialize_json_copy_if_exists(&config_dir.join("mcp-oauth-tokens.json"))?;
+
+        let mut doc = if config_path.exists() {
+            serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&config_path)?)?
+        } else {
+            json!({})
+        };
         let mut mcp_servers = serde_json::Map::new();
 
         for server in servers {
@@ -238,10 +312,16 @@ impl McpInjector for GeminiInjector {
             if !server.disabled_tools.is_empty() {
                 entry.insert("exclude-tools".into(), json!(server.disabled_tools));
             }
+            for field in ["description", "timeout", "trust"] {
+                if let Some(value) = provider_override_value(server, "gemini", field) {
+                    entry.insert(field.to_string(), value.clone());
+                }
+            }
             mcp_servers.insert(server.id.clone(), serde_json::Value::Object(entry));
         }
 
-        let doc = json!({ "mcpServers": mcp_servers });
+        let root = doc.as_object_mut().expect("gemini settings object");
+        root.insert("mcpServers".into(), serde_json::Value::Object(mcp_servers));
         let content = serde_json::to_string_pretty(&doc)?;
         atomic_write(&config_path, content.as_bytes())?;
 
@@ -287,6 +367,83 @@ pub fn injector_for_provider(provider: Provider) -> Option<Box<dyn McpInjector>>
         Provider::Gemini => Some(Box::new(GeminiInjector)),
         _ => None,
     }
+}
+
+fn provider_override_value<'a>(
+    server: &'a McpServer,
+    provider_slug: &str,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    server
+        .provider_override_object(provider_slug)
+        .and_then(|map| map.get(key))
+}
+
+fn provider_override_bool(server: &McpServer, provider_slug: &str, key: &str) -> Option<bool> {
+    provider_override_value(server, provider_slug, key).and_then(serde_json::Value::as_bool)
+}
+
+fn provider_override_i64(server: &McpServer, provider_slug: &str, key: &str) -> Option<i64> {
+    provider_override_value(server, provider_slug, key).and_then(serde_json::Value::as_i64)
+}
+
+fn provider_override_string(
+    server: &McpServer,
+    provider_slug: &str,
+    key: &str,
+) -> Option<String> {
+    provider_override_value(server, provider_slug, key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn provider_override_string_array(
+    server: &McpServer,
+    provider_slug: &str,
+    key: &str,
+) -> Option<Vec<String>> {
+    provider_override_value(server, provider_slug, key).map(|value| {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
+}
+
+fn provider_override_string_map(
+    server: &McpServer,
+    provider_slug: &str,
+    key: &str,
+) -> Option<HashMap<String, String>> {
+    provider_override_value(server, provider_slug, key).map(|value| {
+        value
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+            .collect()
+    })
+}
+
+fn materialize_json_copy_if_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(path)?;
+    let value: serde_json::Value = serde_json::from_str(&content)?;
+    let content = serde_json::to_string_pretty(&value)?;
+    atomic_write(path, content.as_bytes())
+}
+
+fn to_toml_array(values: &[String]) -> toml_edit::Array {
+    let mut arr = toml_edit::Array::new();
+    for value in values {
+        arr.push(value.as_str());
+    }
+    arr
 }
 
 #[cfg(test)]
@@ -362,6 +519,24 @@ mod tests {
     }
 
     #[test]
+    fn codex_preserves_existing_non_mcp_settings() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("config.toml"), "model = \"gpt-5\"\n").unwrap();
+
+        let injector = CodexInjector;
+        let servers = vec![make_server("slack")];
+        let mut env = HashMap::new();
+        injector.inject(&servers, &mut env, Some(tmp.path())).unwrap();
+
+        let content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
+        let doc: toml_edit::DocumentMut = content.parse().unwrap();
+        assert_eq!(doc["model"].as_str(), Some("gpt-5"));
+        assert!(doc["mcp_servers"]["slack"].is_table());
+    }
+
+    #[test]
     fn gemini_creates_json_in_shadow_home() {
         let tmp = TempDir::new().unwrap();
         let injector = GeminiInjector;
@@ -381,6 +556,49 @@ mod tests {
 
         // Should include extra args for allowed server names
         assert!(result.extra_args.contains(&"--allowed-mcp-server-names".to_string()));
+    }
+
+    #[test]
+    fn gemini_preserves_existing_settings_and_sidecars() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".gemini");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("settings.json"),
+            r#"{"theme":"dark","mcpServers":{"old":{"command":"noop"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            config_dir.join("mcp-server-enablement.json"),
+            r#"{"old":false}"#,
+        )
+        .unwrap();
+
+        let injector = GeminiInjector;
+        let servers = vec![make_server("linear")];
+        let mut env = HashMap::new();
+        injector.inject(&servers, &mut env, Some(tmp.path())).unwrap();
+
+        let settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(settings["theme"], "dark");
+        assert!(settings["mcpServers"]["linear"].is_object());
+
+        let enablement: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(config_dir.join("mcp-server-enablement.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(enablement["old"], false);
+    }
+
+    #[test]
+    fn file_backed_injectors_require_shadow_home() {
+        let mut env = HashMap::new();
+        let servers = vec![make_server("linear")];
+
+        assert!(CodexInjector.inject(&servers, &mut env, None).is_err());
+        assert!(GeminiInjector.inject(&servers, &mut env, None).is_err());
     }
 
     #[test]

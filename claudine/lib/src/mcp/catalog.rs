@@ -5,6 +5,23 @@ use crate::error::{ClaudineError, Result};
 
 use super::types::{McpCatalog, McpServer, catalog_path};
 
+/// The tier a query resolved through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchTier {
+    ExactId,
+    ExactAlias,
+    Normalized,
+    Prefix,
+    Substring,
+}
+
+/// A resolved server plus the tier that matched it.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedMatch<'a> {
+    pub server: &'a McpServer,
+    pub tier: MatchTier,
+}
+
 /// Catalog store for MCP server definitions.
 ///
 /// All CRUD operations go through this struct to ensure consistent
@@ -140,100 +157,93 @@ impl McpCatalogStore {
     ///
     /// Returns `McpAmbiguousMatch` if multiple candidates match at the same tier.
     pub fn resolve(&self, query: &str) -> Result<&McpServer> {
-        // Tier 1: exact ID
+        self.resolve_match(query).map(|resolved| resolved.server)
+    }
+
+    /// Resolve a query and return both the matched server and match tier.
+    pub fn resolve_match(&self, query: &str) -> Result<ResolvedMatch<'_>> {
         if let Some(server) = self.catalog.servers.get(query) {
-            return Ok(server);
+            return Ok(ResolvedMatch {
+                server,
+                tier: MatchTier::ExactId,
+            });
         }
 
-        // Tier 2: exact alias
-        let alias_matches: Vec<&McpServer> = self
-            .catalog
-            .servers
-            .values()
-            .filter(|s| s.aliases.iter().any(|a| a == query))
-            .collect();
-        if alias_matches.len() == 1 {
-            return Ok(alias_matches[0]);
-        }
-        if alias_matches.len() > 1 {
-            return Err(ClaudineError::McpAmbiguousMatch {
-                query: query.into(),
-                candidates: alias_matches.iter().map(|s| s.id.clone()).collect(),
+        if let Some(server) = resolve_match_list(
+            query,
+            self.catalog
+                .servers
+                .values()
+                .filter(|s| s.aliases.iter().any(|a| a == query))
+                .collect(),
+        )? {
+            return Ok(ResolvedMatch {
+                server,
+                tier: MatchTier::ExactAlias,
             });
         }
 
         let normalized = normalize_for_match(query);
 
-        // Tier 3: normalized match
-        let norm_matches: Vec<&McpServer> = self
-            .catalog
-            .servers
-            .iter()
-            .filter(|(id, s)| {
-                normalize_for_match(id) == normalized
-                    || s.aliases.iter().any(|a| normalize_for_match(a) == normalized)
-            })
-            .map(|(_, s)| s)
-            .collect();
-        if norm_matches.len() == 1 {
-            return Ok(norm_matches[0]);
-        }
-        if norm_matches.len() > 1 {
-            return Err(ClaudineError::McpAmbiguousMatch {
-                query: query.into(),
-                candidates: norm_matches.iter().map(|s| s.id.clone()).collect(),
+        if let Some(server) = resolve_match_list(
+            query,
+            self.catalog
+                .servers
+                .iter()
+                .filter(|(id, s)| {
+                    normalize_for_match(id) == normalized
+                        || s.aliases.iter().any(|a| normalize_for_match(a) == normalized)
+                })
+                .map(|(_, s)| s)
+                .collect(),
+        )? {
+            return Ok(ResolvedMatch {
+                server,
+                tier: MatchTier::Normalized,
             });
         }
 
-        // Tier 4: prefix match
-        let prefix_matches: Vec<&McpServer> = self
-            .catalog
-            .servers
-            .iter()
-            .filter(|(id, s)| {
-                normalize_for_match(id).starts_with(&normalized)
-                    || s.aliases
-                        .iter()
-                        .any(|a| normalize_for_match(a).starts_with(&normalized))
-            })
-            .map(|(_, s)| s)
-            .collect();
-        if prefix_matches.len() == 1 {
-            return Ok(prefix_matches[0]);
-        }
-        if prefix_matches.len() > 1 {
-            return Err(ClaudineError::McpAmbiguousMatch {
-                query: query.into(),
-                candidates: prefix_matches.iter().map(|s| s.id.clone()).collect(),
+        if let Some(server) = resolve_match_list(
+            query,
+            self.catalog
+                .servers
+                .iter()
+                .filter(|(id, s)| {
+                    normalize_for_match(id).starts_with(&normalized)
+                        || s.aliases
+                            .iter()
+                            .any(|a| normalize_for_match(a).starts_with(&normalized))
+                })
+                .map(|(_, s)| s)
+                .collect(),
+        )? {
+            return Ok(ResolvedMatch {
+                server,
+                tier: MatchTier::Prefix,
             });
         }
 
-        // Tier 5: substring match
-        let sub_matches: Vec<&McpServer> = self
-            .catalog
-            .servers
-            .iter()
-            .filter(|(id, s)| {
-                normalize_for_match(id).contains(&normalized)
-                    || s.aliases
-                        .iter()
-                        .any(|a| normalize_for_match(a).contains(&normalized))
-            })
-            .map(|(_, s)| s)
-            .collect();
-        if sub_matches.len() == 1 {
-            return Ok(sub_matches[0]);
-        }
-        if sub_matches.len() > 1 {
-            return Err(ClaudineError::McpAmbiguousMatch {
-                query: query.into(),
-                candidates: sub_matches.iter().map(|s| s.id.clone()).collect(),
+        if let Some(server) = resolve_match_list(
+            query,
+            self.catalog
+                .servers
+                .iter()
+                .filter(|(id, s)| {
+                    normalize_for_match(id).contains(&normalized)
+                        || s.aliases
+                            .iter()
+                            .any(|a| normalize_for_match(a).contains(&normalized))
+                })
+                .map(|(_, s)| s)
+                .collect(),
+        )? {
+            return Ok(ResolvedMatch {
+                server,
+                tier: MatchTier::Substring,
             });
         }
 
-        Err(ClaudineError::McpServerNotFound {
-            id: query.into(),
-        })
+        Err(ClaudineError::McpServerNotFound { id: query.into() })
     }
 
     /// List all servers in the catalog.
@@ -252,6 +262,21 @@ impl McpCatalogStore {
     pub fn catalog_mut(&mut self) -> &mut McpCatalog {
         &mut self.catalog
     }
+}
+
+fn resolve_match_list<'a>(query: &str, matches: Vec<&'a McpServer>) -> Result<Option<&'a McpServer>> {
+    if matches.len() == 1 {
+        return Ok(matches.into_iter().next());
+    }
+
+    if matches.len() > 1 {
+        return Err(ClaudineError::McpAmbiguousMatch {
+            query: query.into(),
+            candidates: matches.iter().map(|server| server.id.clone()).collect(),
+        });
+    }
+
+    Ok(None)
 }
 
 /// Normalize a string for matching: lowercase, replace `_` with `-`.

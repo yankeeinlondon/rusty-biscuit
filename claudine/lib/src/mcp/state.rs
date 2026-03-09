@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 
@@ -8,8 +8,7 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::types::{
-    McpOrigin, McpProviderState, McpScope, ProviderScopeEntries, ProviderStateEntry,
-    provider_state_path,
+    McpOrigin, McpProviderState, ProviderScopeEntries, ProviderStateEntry, provider_state_path,
 };
 
 /// Scope for state operations — either user-global or a specific repo.
@@ -60,7 +59,7 @@ impl McpProviderStateStore {
         entry: ProviderStateEntry,
     ) {
         let entries = self.get_or_create_entries(provider, scope);
-        Self::upsert_entry(entries, entry, McpScope::User, scope);
+        Self::upsert_entry(entries, entry, scope);
     }
 
     /// Record a managed entry (origin = Managed).
@@ -71,7 +70,7 @@ impl McpProviderStateStore {
         entry: ProviderStateEntry,
     ) {
         let entries = self.get_or_create_entries(provider, scope);
-        Self::upsert_entry(entries, entry, McpScope::User, scope);
+        Self::upsert_entry(entries, entry, scope);
     }
 
     /// Get all entries for a provider at a given scope.
@@ -85,10 +84,9 @@ impl McpProviderStateStore {
                 .map(|e| e.user.iter().collect())
                 .unwrap_or_default(),
             Scope::Repo(path) => {
-                let path_str = path.to_string_lossy();
-                self.state
-                    .repos
-                    .get(path_str.as_ref())
+                self.resolve_repo_key(path)
+                    .as_ref()
+                    .and_then(|key| self.state.repos.get(key))
                     .and_then(|repo| repo.providers.get(slug))
                     .map(|e| e.repo.iter().collect())
                     .unwrap_or_default()
@@ -108,6 +106,18 @@ impl McpProviderStateStore {
             .collect()
     }
 
+    /// Get a single entry for a provider/scope pair by catalog ID.
+    pub fn entry_for_catalog_id(
+        &self,
+        provider: Provider,
+        scope: &Scope,
+        catalog_id: &str,
+    ) -> Option<&ProviderStateEntry> {
+        self.entries_for_provider(provider, scope)
+            .into_iter()
+            .find(|entry| entry.catalog_id == catalog_id)
+    }
+
     /// Remove a specific entry by catalog_id.
     pub fn remove_entry(
         &mut self,
@@ -123,8 +133,8 @@ impl McpProviderStateStore {
                 }
             }
             Scope::Repo(path) => {
-                let path_str = path.to_string_lossy().to_string();
-                if let Some(repo) = self.state.repos.get_mut(&path_str)
+                if let Some(repo_key) = self.resolve_repo_key(path)
+                    && let Some(repo) = self.state.repos.get_mut(&repo_key)
                     && let Some(entries) = repo.providers.get_mut(slug)
                 {
                     entries.repo.retain(|e| e.catalog_id != catalog_id);
@@ -151,7 +161,9 @@ impl McpProviderStateStore {
                 .entry(slug)
                 .or_default(),
             Scope::Repo(path) => {
-                let path_str = path.to_string_lossy().to_string();
+                let path_str = self
+                    .resolve_repo_key(path)
+                    .unwrap_or_else(|| Self::preferred_repo_key(path));
                 let repo = self
                     .state
                     .repos
@@ -165,7 +177,6 @@ impl McpProviderStateStore {
     fn upsert_entry(
         entries: &mut ProviderScopeEntries,
         mut entry: ProviderStateEntry,
-        _mcp_scope: McpScope,
         scope: &Scope,
     ) {
         entry.last_seen = Utc::now();
@@ -173,11 +184,61 @@ impl McpProviderStateStore {
             Scope::User => &mut entries.user,
             Scope::Repo(_) => &mut entries.repo,
         };
+
         if let Some(existing) = vec.iter_mut().find(|e| e.catalog_id == entry.catalog_id) {
+            if existing.origin == McpOrigin::Managed && entry.origin == McpOrigin::Imported {
+                entry.origin = McpOrigin::Managed;
+            }
             *existing = entry;
-        } else {
-            vec.push(entry);
+            return;
         }
+
+        if let Some(existing) = vec.iter_mut().find(|e| e.native_name == entry.native_name) {
+            if existing.origin == McpOrigin::Managed && entry.origin == McpOrigin::Imported {
+                entry.origin = McpOrigin::Managed;
+            }
+            *existing = entry;
+            return;
+        }
+
+        vec.push(entry);
+    }
+
+    fn resolve_repo_key(&self, path: &Path) -> Option<String> {
+        let raw = path.to_string_lossy().to_string();
+        if self.state.repos.contains_key(&raw) {
+            return Some(raw);
+        }
+
+        if let Some(canonical) = Self::canonical_repo_key(path)
+            && self.state.repos.contains_key(&canonical)
+        {
+            return Some(canonical);
+        }
+
+        let requested_canonical = Self::canonical_repo_path(path);
+        self.state.repos.keys().find_map(|candidate| {
+            let candidate_path = PathBuf::from(candidate);
+            let matches = candidate_path == path
+                || requested_canonical
+                    .as_ref()
+                    .zip(Self::canonical_repo_path(&candidate_path).as_ref())
+                    .is_some_and(|(requested, candidate)| candidate == requested);
+            matches.then(|| candidate.clone())
+        })
+    }
+
+    fn preferred_repo_key(path: &Path) -> String {
+        Self::canonical_repo_key(path).unwrap_or_else(|| path.to_string_lossy().to_string())
+    }
+
+    fn canonical_repo_key(path: &Path) -> Option<String> {
+        Self::canonical_repo_path(path)
+            .map(|canonical| canonical.to_string_lossy().to_string())
+    }
+
+    fn canonical_repo_path(path: &Path) -> Option<PathBuf> {
+        fs::canonicalize(path).ok()
     }
 }
 
@@ -237,6 +298,43 @@ mod tests {
         let entries = store.entries_for_provider(Provider::Gemini, &scope);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].catalog_id, "github");
+    }
+
+    #[test]
+    fn repo_scope_lookup_matches_canonical_and_noncanonical_paths() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path().join("repo");
+        let nested = repo_root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+
+        let mut store =
+            McpProviderStateStore::load_from(std::path::Path::new("/nonexistent")).unwrap();
+
+        store.record_managed(
+            Provider::Codex,
+            &Scope::Repo(repo_root.clone()),
+            ProviderStateEntry {
+                catalog_id: "calendar".into(),
+                native_name: "calendar-native".into(),
+                source: repo_root
+                    .join(".codex/config.toml")
+                    .display()
+                    .to_string(),
+                origin: McpOrigin::Managed,
+                last_seen: Utc::now(),
+            },
+        );
+
+        let lookup_scope = Scope::Repo(nested.join(".."));
+        let entry = store
+            .entry_for_catalog_id(Provider::Codex, &lookup_scope, "calendar")
+            .expect("repo entry should resolve across path variants");
+        assert_eq!(entry.native_name, "calendar-native");
+
+        store.remove_entry(Provider::Codex, &lookup_scope, "calendar");
+        assert!(store
+            .entries_for_provider(Provider::Codex, &Scope::Repo(repo_root))
+            .is_empty());
     }
 
     #[test]

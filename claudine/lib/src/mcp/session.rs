@@ -1,24 +1,11 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::error::Result;
 
-use super::catalog::McpCatalogStore;
+use super::catalog::{MatchTier, McpCatalogStore};
 use super::defaults::effective_defaults;
 use super::types::McpServer;
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/// The tier at which a tag was resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MatchTier {
-    ExactId,
-    ExactAlias,
-    Normalized,
-    Prefix,
-    Substring,
-}
 
 /// A tag and how it was resolved.
 #[derive(Debug, Clone)]
@@ -63,15 +50,14 @@ pub fn compute_session_set(
 ) -> Result<SessionSet> {
     let mut warnings = Vec::new();
     let mut resolved_tags = Vec::new();
-    let mut seen_ids = Vec::new();
+    let mut seen_ids = HashSet::new();
     let mut servers = Vec::new();
 
     // 1. Effective defaults
     let defaults = effective_defaults(repo_root, catalog)?;
     for id in &defaults {
         if let Ok(server) = catalog.resolve(id) {
-            if !seen_ids.contains(&server.id) {
-                seen_ids.push(server.id.clone());
+            if seen_ids.insert(server.id.clone()) {
                 servers.push(server.clone());
             }
         } else {
@@ -82,8 +68,7 @@ pub fn compute_session_set(
     // 2. Explicit --use
     for id in explicit_use {
         if let Ok(server) = catalog.resolve(id) {
-            if !seen_ids.contains(&server.id) {
-                seen_ids.push(server.id.clone());
+            if seen_ids.insert(server.id.clone()) {
                 servers.push(server.clone());
             }
         } else {
@@ -93,17 +78,15 @@ pub fn compute_session_set(
 
     // 3. Tags
     for tag in prompt_tags {
-        match catalog.resolve(tag) {
-            Ok(server) => {
-                let tier = determine_match_tier(catalog, tag, &server.id);
+        match catalog.resolve_match(tag) {
+            Ok(resolved) => {
                 resolved_tags.push(ResolvedTag {
                     tag: tag.clone(),
-                    resolved_to: server.id.clone(),
-                    match_tier: tier,
+                    resolved_to: resolved.server.id.clone(),
+                    match_tier: resolved.tier,
                 });
-                if !seen_ids.contains(&server.id) {
-                    seen_ids.push(server.id.clone());
-                    servers.push(server.clone());
+                if seen_ids.insert(resolved.server.id.clone()) {
+                    servers.push(resolved.server.clone());
                 }
             }
             Err(e) => {
@@ -169,34 +152,6 @@ pub fn extract_tags(prompt: &str, catalog: &McpCatalogStore) -> (String, Vec<Str
     }
 
     (cleaned.trim().to_string(), tags)
-}
-
-/// Determine which match tier was used for a resolved tag.
-fn determine_match_tier(catalog: &McpCatalogStore, query: &str, resolved_id: &str) -> MatchTier {
-    // Exact ID
-    if query == resolved_id {
-        return MatchTier::ExactId;
-    }
-
-    // Exact alias
-    if let Some(server) = catalog.get_server(resolved_id)
-        && server.aliases.iter().any(|a| a == query)
-    {
-        return MatchTier::ExactAlias;
-    }
-
-    let normalized_query = query.to_ascii_lowercase().replace('_', "-");
-    let normalized_id = resolved_id.to_ascii_lowercase().replace('_', "-");
-
-    if normalized_query == normalized_id {
-        return MatchTier::Normalized;
-    }
-
-    if normalized_id.starts_with(&normalized_query) {
-        return MatchTier::Prefix;
-    }
-
-    MatchTier::Substring
 }
 
 #[cfg(test)]
