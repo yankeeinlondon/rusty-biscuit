@@ -1,0 +1,346 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+PACKAGE := "Messenger"
+LIB_NAME := PACKAGE + " Library"
+CLI_NAME := PACKAGE + " CLI"
+LIBRARY := lowercase(PACKAGE)
+CLI := lowercase(PACKAGE) + "-cli"
+CLI_PATH := "./cli"
+DOCS := ""
+
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+    echo "======================================================================================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+# play a sound effect if `playa` CLI is installed (never errors)
+_play effect background="":
+    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+
+_notify message title=PACKAGE:
+    #!/usr/bin/env bash
+    if command -v osascript &> /dev/null; then
+        osascript -e 'display notification "message" with title "{{title}}"'
+    elif command -v notify-send &> /dev/null; then
+        notify-send '{{message}}'
+    fi
+
+_ask_opencode prompt:
+    #!/usr/bin/env bash
+    if command -v opencode &> /dev/null; then
+        local MODEL
+        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
+        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
+        echo
+        opencode run "{{prompt}}" --model "$MODEL"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_claude prompt:
+    #!/usr/bin/env bash
+    if command -v claude &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+_ask_codex prompt:
+    #!/usr/bin/env bash
+    if command -v codex &> /dev/null; then
+        echo
+        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
+        echo
+
+        codex exec "{{prompt}}"  || (
+            echo
+            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
+            echo
+            just _ask_claude "{{prompt}}"
+        )
+    else
+        echo
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
+        echo
+        exit 1
+    fi
+
+
+# use an AI agent to respond to a question (uses `AGENT`)
+ask prompt:
+    #!/usr/bin/env bash
+    if [[ "${AGENT,,}" == "opencode" ]]; then
+        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    elif [[ "${AGENT,,}" == "codex"  ]]; then
+        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
+    else
+        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
+    fi
+
+# Ask Claude Code in a non-interactive session
+_claude PROMPT:
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p \'{{PROMPT}}\'
+
+# Ask Claude Code via a prompt file in a non-interactive session
+_claude_file PROMPT_FILE:
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p "$(cat {{PROMPT_FILE}})"
+
+# Build the library and CLI
+build *args="":
+    @echo -e "Building {{LIB_NAME}}"
+    @echo
+    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
+    @echo
+    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
+    @echo
+    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
+    @echo
+    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
+    @echo
+
+# Test both library and CLI
+test:
+    @echo
+    @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo test -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    @echo
+    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
+    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    @cargo test -p "{{CLI}}" || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" )
+    @echo
+    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+
+# Lint both the library and CLI
+lint:
+    @echo
+    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo clippy -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
+    @echo
+    @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+
+_fix_lint_ai:
+
+_fix_lint_autofix:
+    @echo
+    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @just lint --fix || ( just _speak "The {{CLI_NAME}} has failing lints which couldn't be fixed automatically. Will try fixing with AI." && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" &&  _speak "There are lint errors in (())" && just _fix_lint_ai)
+
+# Lint (and fix) both the library and CLI
+fix-lint:
+    @echo
+    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @just lint || ( just _speak "The {{LIB_NAME}} has failing lints; will try to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && just _fix_lint_autofix )
+    @echo
+
+
+_lint_fix_library ERR_FILE:
+    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    @echo "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
+    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
+    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+
+_lint_fix_cli ERR_FILE:
+    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    @echo "/{{CLI}} Fix the lint errors in {{CLI_NAME}}:" > "/tmp/{{CLI}}_claude_prompt.txt"
+    @echo "" >> "/tmp/{{CLI}}_claude_prompt.txt"
+    @cat {{ERR_FILE}} >> "/tmp/{{CLI}}_claude_prompt.txt"
+    @just _claude_file "/tmp/{{CLI}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} are now fixed"
+    @just _speak "Claude Code believes it has fixed all lint errors in {{CLI_NAME}}"
+    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+    @echo -e "✅ It has been confirmed that all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} have been fixed"
+
+# Fix lint errors with AI
+lint-fix-ai:
+    @echo
+    @echo -e "Checking {{BOLD}}{{LIB_NAME}}{{RESET}} for lint errors"
+    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || just _lint_fix_library "/tmp/{{LIBRARY}}_clippy_errors.txt"
+    @echo -e "✅ No lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @echo -e "Checking {{BOLD}}{{CLI_NAME}}{{RESET}} for lint errors"
+    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || just _lint_fix_cli "/tmp/{{CLI}}_clippy_errors.txt"
+    @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @just _speak "No lint errors were found in {{PACKAGE}}"
+
+# commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
+commit:
+    @echo
+    @echo -e "Before committing we must make sure all doctests pass"
+    @echo
+    @cd .. && just doctest $(sniff repo --dirty-package-areas 2>/dev/null) || ( just _speak "We have failing doc tests which must be fixed before we can commit!" && echo "We have failing doc tests which must be fixed before we can commit!" && exit 1 )
+    @echo ""
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
+    @echo ""
+    @claudine opencode -n "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, perf, test, ci) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message. Note: there are two cases where it's ok to have no 'scope' (aka, package) associated to a commit message:\n1. If the change appears to have no relationship to any particular package in the monorepo.\n2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code then it's possible to group them all into one commit which has no scope specified. Note: the action 'refactor' should be reserved for commits which have at least some source code files.\nIf no files are staged for commit then communicate this to the user and exit. Note: make sure NOT to commit everything as one commit. You are committing files in groups. IMPORTANT: remember that you are running in a non-interactive mode so you can not ask the user questions and expect a reply! DO NOT PUSH COMMITS TO THE ORIGIN."
+    @just _speak "git commits completed in rusty-biscuit monorepo"
+    @sniff git 2>/dev/null || exit 0
+
+# Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)
+install *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
+    echo
+    cargo build -p {{LIBRARY}} --release || ( playa effect error-2 2>/dev/null; exit 1 )
+    echo
+    echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
+    echo
+    # Platform-specific feature selection:
+    # - macOS/Windows: native playback always works (system audio APIs are built-in)
+    # - Linux: native playback requires libasound2-dev; fall back to host players if missing
+    EXTRA_FEATURES=""
+    INSTALL_FLAGS=""
+    case "$(uname)" in
+        Darwin)
+            EXTRA_FEATURES="--features sfx-native-macos"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            EXTRA_FEATURES="--features sfx-native-windows"
+            ;;
+        Linux)
+            if pkg-config --exists alsa 2>/dev/null; then
+                echo -e "{{DIM}}ALSA detected — enabling native playback{{RESET}}"
+                EXTRA_FEATURES="--features sfx-native-linux"
+            else
+                echo -e "{{DIM}}ALSA not found — using host player fallback (install libasound2-dev for native playback){{RESET}}"
+                INSTALL_FLAGS="--no-default-features"
+            fi
+            ;;
+    esac
+    cargo install --path {{CLI_PATH}} $INSTALL_FLAGS $EXTRA_FEATURES {{args}} || ( playa effect error-2 2>/dev/null; exit 1 )
+    echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    echo
+    playa effect drop-4 2>/dev/null || true
+
+# stages all files in package area and then commits and pushes
+cp:
+    @echo ""
+    @echo "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo ""
+    @git add .
+    @echo ""
+    @echo "Files have been added"
+    @echo ""
+    @just commit
+    @echo ""
+    @git push
+    @echo ""
+    @just _play select-4
+    @echo "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{LIBRARY}} -p {{CLI}}
+
+# Run the latest debug build of the Claudine CLI
+cli *args="":
+    @cargo run -p {{CLI}} {{args}}
+
+# Open Opencode in yolo mode
+oc *args="":
+    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
+
+# Open Claude Code in YOLO mode
+cc *args="":
+    @claudine claude --yolo {{args}}
+
+# Open codex in YOLO mode
+codex *args="":
+    @claudine codex --yolo {{args}}
+
+# Open Claude Code
+gem *args="":
+    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
+
+# Show the dependencies for this package
+deps:
+    @echo "Dependencies:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
+
+# review this package using the Codex CLI
+review *args="":
+    @clear
+    @echo -e "Performing a code review on the {{BOLD}}{{LIB_NAME}}{{RESET}} package"
+    @echo ""
+    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
+    @echo
+    @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
+    @just _speak "Review for {{LIB_NAME}} package has completed."
+
+# fix documentation drift, refresh the skill, and review CLAUDE.md
+drift *args="":
+    @echo
+    @printf "%b\n" "Running drift workflow for {{BOLD}}{{LIBRARY}}{{RESET}} via Rust drift script"
+    @echo
+    @echo "- step 1: update package docs for code drift"
+    @echo "- step 2: refresh package skill from updated docs"
+    @echo "- step 3: review CLAUDE.md for needed updates"
+    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
+    @echo
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
+    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
