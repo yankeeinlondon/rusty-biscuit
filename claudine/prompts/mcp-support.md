@@ -1,115 +1,405 @@
 # MCP Support
 
-Currently Claudine provides no MCP support but in this specification we will start adding it.
+## Summary
 
-## Features
+Claudine should treat MCP the same way it treats hooks, skills, and commands: as a cross-provider capability with a Claudine-owned abstraction layer, not as eight unrelated vendor configurations.
 
-- `claudine mcp init` - cross platform configuration detection and ingestion
-    - this will allow us to have a single file which represents a catalog of _all_ MCP servers the user has ever used:
-        - `~/.claudine/mcp.json` 
-    - we will have a _mapping_ file for each scope (user, repo) to map the default MCP configuration for each environment
-        - `~/.claudine/user-mapping.json`
-        - `~/.claudine/project-mapping.json`
+The current draft has the right product instinct, but it assumes more runtime control than the providers actually expose. The design needs three explicit constraints:
 
-    - this command can be run more than once but it's objectives are always the same ... to chronicle the full inventory of MCP servers and to map this catalog to various Agentic CLI's to indicate the platform's configuration
+1. Claudine can own the **catalog** of known MCP servers.
+2. Claudine can own **session composition** when the provider exposes a safe runtime injection path.
+3. Claudine must fall back to **sync/export** when a provider cannot be cleanly wrapped at runtime.
 
-- `claudine mcp default`
-    - Allows a user to specify which MCP servers should -- _by default_ -- be active for both:
-        - User scope
-        - Repo scope
-    - Repo scope -- _when defined_ -- fully replaces User scope while in the directory tree of that 
+That gives us a practical design that works now, instead of a universal `--mcp` promise that only some providers can honor.
 
-- `claudine <agent> --mcp`
-    - We can already wrap calls to agentic CLI's with commands like:
-        - `claudine codex`, 
-        - `claudine opencode`, etc. 
-    - but when we add the `--mcp` flag we move away from each vendor's and repo's separate configurations and into the **claudine** based MCP configuration world.
+## Goals
 
-## Claudine MCP Configuration
+- Maintain one normalized catalog of MCP servers across providers.
+- Default to zero active servers so context remains intentional.
+- Import native provider configs without destructive edits.
+- Allow repo-specific defaults that can replace user defaults for a given repo.
+- Support ephemeral runtime MCP activation for providers that can be wrapped safely.
+- Preserve provider-native behavior when Claudine MCP mode is not in use.
 
-When we are in claudine's MCP mode by using the `--mcp` flag -- both when running non-interactive prompts or wrapping an Agent interactively -- the configuration for MCP becomes identical immediately because we are no longer using the provider's MCP configuration but Claudine's instead.
+## Non-Goals
 
-By default both the **user** and **repo** scoped MCP servers are empty in Claudine. This allows for the maximum context window to be given to the current problem you're trying to solve.
+- Dynamically changing the active MCP set in the middle of an already-running interactive session in v1.
+- Shipping runtime MCP support for all 8 providers before the research is complete.
+- Solving secret storage beyond what current providers already do in v1.
 
-### Intentionality
+## Rollout
 
-- too often we setup MCP servers with the intention of using them only to find that 90% of the time we're just reducing the context window and the tool is not going to be used on the particular problem we have
-- by defaulting to _nothing_ we can then allow a shorthand way of adding in an MCP server anytime we need it
-- adding in an MCP server when we need it is done with an inline `#` and then the name of the MCP server you want to use
-    - if I wrote the following prompt:
+The research in `claudine/docs/mcp` is not complete enough to justify an all-providers day-one implementation. The runtime feature should ship in phases.
 
-        "What is my first meeting today #google-calendar"
+| Provider | Import Into Catalog | `--mcp` Runtime Mode | Initial Strategy |
+| --- | --- | --- | --- |
+| OpenCode | Yes | Yes | Inject generated config through `OPENCODE_CONFIG_CONTENT` |
+| Codex | Yes | Yes | Generate temporary `config.toml` in a shadow `HOME` |
+| Gemini | Yes | Yes | Generate temporary `settings.json` in a shadow `HOME`, optionally gate with `--allowed-mcp-server-names` |
+| Claude | Yes | Not in phase 1 | Import/sync only until local/project/plugin precedence is modeled cleanly |
+| Roo Code | Yes | Not applicable | Sync/export only; Roo is not a standalone CLI wrapper target |
+| Qwen Code | Later | Later | Blocked on incomplete MCP research |
+| Goose | Later | Later | Blocked on missing MCP research doc |
+| Kimi Code | Later | Later | Blocked on missing MCP research doc |
 
-    - This would activate the Google Calendar MCP server (assuming you've configured it before)
-    - Where the `#google-calendar` shows up in the prompt doesn't matter because when we detect the tag syntax we will use it to match to an MCP server in the catalog and then
-        - add configuration for the matched MCP server to make it active in the current session
-        - the `#tag` will be stripped out of the prompt as it's utility has been realized by activating the MCP server and is not an actual part of the prompt you want the Agent to see
+The important decision is that **provider parity is gated by verified design**, not by the fact that Claudine already knows about the provider elsewhere.
 
-### Tag Matching
+## Command Surface
 
-Every MCP server has a name assigned to it and when a user adds a `#tag` syntax to their preliminary prompt then we will try for an exact match but we then immediately follow with a fuzzy finder that ignores case, allows `-` instead of `_` (and visa-versa) etc. 
+The current feature set is missing one critical command: a way to materialize Claudine-managed MCP config back into native provider config for providers that cannot be wrapped. The command surface should be:
 
-- If all we get is partial (aka, substring) matches, and there is more than one, then we interactively ask the user to clarify which one they intended.
-- If there is a single partial match we'll use that
+- `claudine mcp init`
+    - Scan native provider MCP configs and import them into the Claudine catalog.
+- `claudine mcp`
+    - List catalog entries, aliases, defaults, and provider presence.
+- `claudine mcp show <id>`
+    - Show the normalized server definition and import provenance.
+- `claudine mcp default [ids...]`
+    - Set user-scope defaults.
+- `claudine mcp default --repo [ids...]`
+    - Set repo-scope defaults for the current repo.
+- `claudine mcp alias add <id> <alias>`
+    - Add an alias for an existing catalog entry.
+- `claudine mcp alias remove <alias>`
+    - Remove an alias.
+- `claudine mcp remove <id>`
+    - Remove a catalog server after confirmation.
+- `claudine mcp sync <provider> [--scope user|repo] [--apply]`
+    - Write the effective Claudine-managed MCP set back into the provider's native config.
+- `claudine <agent> --mcp [--use <id-or-alias>[,<id-or-alias>...]]`
+    - Launch a wrapped agent using Claudine-owned MCP session composition.
 
-Finally, for users who are using zsh completions we will also be able to autocomplete valid `#tag` values.
+`claudine mcp sync` is necessary because Roo Code cannot be wrapped and Claude may not be safe to wrap in phase 1.
 
-### Managing Tags
+## Storage Model
 
-1. A user can always get a **list** of the available MCP tags available to them by running `claudine mcp`.
+The current `user-mapping.json` / `project-mapping.json` idea is too thin. Arrays of names are not enough to support dedupe, rename tracking, provenance, or sync ownership. Claudine should separate four concerns:
 
-2. If there is a particular tag which a user uses a lot or where the MCP server's name is annoyingly long, the user can specify an **alias** with:
+### 1. Global Catalog
 
-    ```sh
-    claudine mcp alias [tag] [alias]
-    ```
+Path:
 
-    If we ran `claudine mcp foobar foo` then we'd have an alias `#foo` which could be used synonymously to `#foobar`.
+- `~/.claudine/mcp/catalog.json`
 
-    - aliases assigned will be shown in a highlighted color when `claudine mcp` is run.
+This is the source of truth for normalized MCP definitions.
 
-3. If an alias is no longer wanted then it can be easily removed with:
+Example shape:
 
-    ```sh
-    claudine mcp remove alias [alias]
-    ```
+```json
+{
+  "version": 1,
+  "servers": {
+    "google-calendar": {
+      "id": "google-calendar",
+      "aliases": ["calendar", "gcal"],
+      "transport": "stdio",
+      "command": "/opt/homebrew/bin/uvx",
+      "args": ["mcp-server-google-calendar"],
+      "cwd": null,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/ken/.config/gcal.json"
+      },
+      "url": null,
+      "headers": {},
+      "enabled_tools": [],
+      "disabled_tools": [],
+      "required": false,
+      "metadata": {
+        "description": "Google Calendar MCP server",
+        "created_from": "codex:user",
+        "fingerprint": "sha256:..."
+      },
+      "provider_overrides": {}
+    }
+  }
+}
+```
 
-4. In similar fashion if I want to remove an entire catalog MCP server, you can do that too with a similar syntax:
+### 2. User Defaults
 
-    ```sh
-    claudine mcp remove server [tag]
-    ```
+Path:
 
-    Because this operation has greater impact then just removing an alias we will always present the user with a confirmation challenge before actually removing the MCP server.
+- `~/.claudine/mcp/defaults.json`
 
-> **Note:**
->
-> - An **alias** may not take a name that is in direct conflict with a MCP server's name
-> - Once an **alias** has been defined, new MCP server's added must avoid name conflicts with other MCP servers as well as aliased names.
+This file contains the user's default active set.
 
+```json
+{
+  "version": 1,
+  "defaults": ["sequential-thinking", "slack"]
+}
+```
 
-## MCP Catalog
+### 3. Repo Defaults
 
-### Schema for Catalog
+Path:
 
-We need to have a `struct` which acts as the schema for our MCP Server. It should include:
+- `<repo>/.claudine/mcp.json`
 
-- `type` - stdio | http | sse
-- `command` - the executable command to run the server
-- `args` - command line arguments for the server
-- `env` - ENV variables
-- `cwd` = the working directory for the server process
+This file contains the repo's desired defaults and intentionally stores only catalog IDs, not full server definitions or secrets.
 
-The above properties are nothing more than what Claude Code defines today. If we need to add more during the design or implementation we are at the liberty to do so.
+```json
+{
+  "version": 1,
+  "defaults": ["github", "linear"]
+}
+```
 
-**Note:** 
+If a repo references a catalog ID the current user does not have, Claudine should warn and continue.
 
-- the **command** is typically better save as a fully qualified filepath; some clients tend to fail when we assume the executable path will be available inside the Agentic CLI's environment
+### 4. Provider State
 
-### Mapping Schemas
+Path:
 
-Currently the plan is to create user and repo-based mappings between the MCP servers and the provider's configuration. If we can do these lookups quickly then we might not need the mapping files.
+- `~/.claudine/mcp/provider-state.json`
 
-- nothing is needed to have the provider's MCP configs behave normally because we're not removing or modifying their native configs
-- instead, when we are using the MCP mode with the `--mcp` switch then we use must modify the environment in such a way that no MCP configuration is available as a baseline
-    - we will probably use a technique similar to what we use for `--repo` flag to mask out all skills, agents, and commands from the user scope while maintaining the repo's assets 
+This is local machine state, not a user-facing config file. It tracks what Claudine has seen in native provider configs and what Claudine itself has written back.
+
+Example shape:
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "codex": {
+      "user": [
+        {
+          "catalog_id": "google-calendar",
+          "native_name": "calendar",
+          "source": "~/.codex/config.toml",
+          "origin": "imported",
+          "last_seen": "2026-03-09T02:14:00Z"
+        }
+      ]
+    }
+  },
+  "repos": {
+    "/Volumes/coding/personal/rusty-biscuit": {
+      "providers": {
+        "gemini": {
+          "repo": [
+            {
+              "catalog_id": "linear",
+              "native_name": "linear",
+              "source": ".gemini/settings.json",
+              "origin": "managed",
+              "last_seen": "2026-03-09T02:15:00Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+This is the key design change: the mapping/state file must be rich enough to answer:
+
+- Which native server became which catalog entry?
+- Was it imported from the provider, or written there by Claudine?
+- Which repo did a repo-scoped import belong to?
+- Which native name should be updated or removed during sync?
+
+## Normalized Server Schema
+
+The catalog cannot only mirror Claude Code's MCP schema. Codex and OpenCode already require additional fields. The normalized schema should include:
+
+- `transport`: `stdio | http | sse`
+- `command`: executable for `stdio`
+- `args`: command arguments for `stdio`
+- `cwd`: optional working directory
+- `env`: environment variables for `stdio`
+- `url`: endpoint for `http` or `sse`
+- `headers`: static HTTP headers
+- `enabled_tools`: allow-list of tool names
+- `disabled_tools`: deny-list of tool names
+- `required`: whether session startup should fail if the server is unavailable
+- `metadata`: description, provenance, import timestamps, fingerprint
+- `provider_overrides`: escape hatch for provider-specific fields we cannot normalize yet
+
+Design rule: prefer a normalized superset first, and only use `provider_overrides` for fields that do not generalize cleanly.
+
+## Import Design
+
+`claudine mcp init` should be idempotent. Its job is to inventory native provider MCP servers and merge them into the Claudine catalog, not to mutate provider config.
+
+The import algorithm should be:
+
+1. Discover supported provider config files for the current machine and current repo.
+2. Parse each provider's MCP definitions into the normalized schema.
+3. Compute a stable fingerprint from the normalized server definition.
+4. If the fingerprint already exists in the catalog:
+   - Reuse the existing catalog entry.
+   - Add the provider's native name as an alias if useful.
+5. If the fingerprint is new:
+   - Create a new catalog entry with a stable slug ID.
+6. Record provenance in `provider-state.json`.
+7. Print a report showing imported, merged, conflicted, and skipped entries.
+
+### Conflict Rules
+
+- Same fingerprint, different names: merge into one catalog entry and preserve native names as aliases.
+- Same name, different fingerprint: create a new catalog ID and flag the ambiguity to the user.
+- Alias collisions with existing IDs: reject the alias and require explicit rename.
+
+## Defaults and Effective Session Set
+
+The current draft is directionally right: defaults should start empty.
+
+The effective MCP set for a session should be computed as:
+
+1. Start with user defaults.
+2. If repo defaults exist for the current repo, replace the user defaults with repo defaults.
+3. Add any explicit `--use` values from the command line.
+4. Add any `#tag` values extracted from the prompt, if the prompt is passing through Claudine.
+5. De-duplicate the final set.
+
+Repo defaults should replace user defaults rather than merge with them. That keeps repo behavior intentional and mirrors Claudine's broader repo-isolation posture.
+
+## `#tag` Activation
+
+The `#tag` concept is good, but the current draft overstates where it can work.
+
+### What Works
+
+`#tag` activation works when Claudine sees the prompt text **before** the provider processes it:
+
+- non-interactive wrapped execution
+- prompt-bearing CLI invocations
+- any future Claudine command that accepts a prompt directly
+
+When a `#tag` is detected:
+
+- resolve it to a catalog ID or alias
+- add that server to the session set
+- remove the tag token from the outgoing prompt
+
+### What Does Not Work in v1
+
+For a long-running interactive wrapped session like:
+
+```sh
+claudine codex --mcp
+```
+
+Claudine does **not** see later prompts typed inside Codex, Gemini, or OpenCode. That means it cannot reliably hot-add MCP servers in the middle of the session unless the provider supports dynamic reloading and Claudine has a provider-specific control path.
+
+So the v1 rule should be:
+
+- `#tag` is a launch-time composition feature, not a mid-session mutation feature.
+- fully interactive sessions without an initial prompt should use `--use`
+
+Example:
+
+```sh
+claudine codex --mcp --use google-calendar,slack
+```
+
+This is a necessary constraint, not a nice-to-have clarification.
+
+## Tag Matching
+
+Resolution order should be deterministic:
+
+1. exact catalog ID
+2. exact alias
+3. normalized exact match (case-insensitive, `-` and `_` treated as equivalent)
+4. prefix match
+5. substring match
+
+If more than one result exists at the same rank:
+
+- in an interactive TTY: prompt the user to choose
+- in non-interactive mode: fail with a concise ambiguity error and show the candidates
+
+Never silently choose among multiple partial matches.
+
+## Runtime Injection Strategy
+
+There is no single cross-provider injection mechanism. Claudine should use a strategy table per provider.
+
+### OpenCode
+
+- Preferred path: inject generated config through `OPENCODE_CONFIG_CONTENT`
+- Benefit: no file edits, no shadow-home complexity, truly session-scoped
+- Phase: 1
+
+### Codex
+
+- Preferred path: create a temporary `~/.codex/config.toml` inside a shadow `HOME`
+- Reason: Codex already fits Claudine's existing shadow-home model
+- Caveat: project config layering and trusted-project behavior must be tested carefully
+- Phase: 1
+
+### Gemini
+
+- Preferred path: create a temporary `~/.gemini/settings.json` inside a shadow `HOME`
+- Optional reinforcement: use `--allowed-mcp-server-names` to gate the launched session
+- Caveat: sidecar enablement and OAuth files may need mirroring into the shadow home
+- Phase: 1
+
+### Claude
+
+- Preferred eventual path: temporary user/local overlay in a shadow `HOME`
+- Caveat: user, project, local, plugin, and managed scopes all exist, which makes true isolation more subtle
+- Phase: import/sync first, runtime later
+
+### Roo Code
+
+- No wrapper runtime mode
+- Support only import and sync
+
+### Qwen, Goose, Kimi
+
+- No runtime design should be committed until `claudine/docs/mcp` contains completed research docs for them
+
+## Sync / Export Design
+
+`claudine mcp sync` should materialize the effective Claudine-managed set into a provider's native config. This is how we support non-wrapper providers and team workflows that still want native provider config populated.
+
+Rules:
+
+- Sync only touches the provider's MCP section, never unrelated config.
+- Sync only removes entries previously marked as `origin = "managed"` in `provider-state.json`.
+- Imported foreign/native entries that Claudine did not create are preserved.
+- Sync always makes a backup before writing.
+
+This gives Claudine a safe coexistence story instead of an all-or-nothing takeover.
+
+## Native Config Coexistence
+
+Without `--mcp`:
+
+- the provider behaves exactly as it does today
+- Claudine does not mask or rewrite MCP configuration
+
+With `--mcp`:
+
+- the active session is composed from Claudine defaults plus explicit session additions
+- provider-native MCP config is not treated as the session source of truth
+- provider-specific runtime strategy decides whether that composition is injected ephemerally or must be materialized via sync first
+
+That distinction should stay explicit throughout the implementation.
+
+## Secrets and Output Safety
+
+v1 should not introduce a new secret management abstraction. Claudine should:
+
+- preserve imported env/header values as-is in the catalog
+- never duplicate secrets into defaults or provider-state files
+- redact sensitive values in `claudine mcp` and `claudine mcp show` output by default
+
+If secret-manager integration is added later, it should layer onto the catalog rather than block v1.
+
+## Design Summary
+
+The refined design is:
+
+- one global Claudine catalog
+- explicit user and repo default sets
+- structured provider-state instead of thin provider-to-name mappings
+- launch-time `#tag` activation only
+- runtime `--mcp` only where the provider has a credible session injection strategy
+- sync/export for the providers that do not
+
+That keeps the feature cohesive while staying honest about what the underlying platforms can actually support.
