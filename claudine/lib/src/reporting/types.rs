@@ -172,7 +172,7 @@ pub struct SessionsReport {
     pub metrics: DerivedMetrics,
 }
 
-/// Error/event record with short context.
+/// Error/event record with full payloads for machine-oriented output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorRecord {
     pub timestamp: DateTime<Utc>,
@@ -182,7 +182,9 @@ pub struct ErrorRecord {
     pub repo_name: Option<String>,
     pub tool_name: Option<String>,
     pub error: String,
-    pub context: Option<String>,
+    pub prompt: Option<String>,
+    pub tool_input_json: Option<String>,
+    pub notification_message: Option<String>,
 }
 
 /// Error list wrapper for JSON output.

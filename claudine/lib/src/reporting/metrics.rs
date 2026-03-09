@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::events::AgenticEvent;
 
@@ -83,8 +83,10 @@ fn error_recovery_rate(total_tool_errors: u64, events: &[RecoveryEvent]) -> Opti
         return None;
     }
 
+    // Track open error counts per (session, tool) key and count each individual
+    // recovery event rather than collapsing to unique (session, tool) pairs.
     let mut open_errors: HashMap<(String, Option<String>), u64> = HashMap::new();
-    let mut recovered: HashSet<(String, Option<String>)> = HashSet::new();
+    let mut recovered_count: u64 = 0;
 
     for event in events {
         let key = (event.session_key.clone(), event.tool_name.clone());
@@ -97,14 +99,14 @@ fn error_recovery_rate(total_tool_errors: u64, events: &[RecoveryEvent]) -> Opti
                     && *count > 0
                 {
                     *count -= 1;
-                    recovered.insert(key);
+                    recovered_count += 1;
                 }
             }
             _ => {}
         }
     }
 
-    ratio(recovered.len() as u64, total_tool_errors)
+    ratio(recovered_count, total_tool_errors)
 }
 
 #[cfg(test)]

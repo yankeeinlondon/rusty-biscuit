@@ -27,6 +27,7 @@ struct FileSyncStats {
     inserted: u64,
     skipped: u64,
     anonymous_session_fallbacks: u64,
+    line_failures: Vec<SyncFailure>,
 }
 
 #[derive(Debug)]
@@ -84,6 +85,8 @@ pub(crate) fn sync(
                 summary.events_inserted += stats.inserted;
                 summary.events_skipped += stats.skipped;
                 summary.anonymous_session_fallbacks += stats.anonymous_session_fallbacks;
+                summary.parse_failures += stats.line_failures.len() as u64;
+                summary.failures.extend(stats.line_failures);
             }
             Err(failure) => {
                 summary.parse_failures += 1;
@@ -129,16 +132,20 @@ fn discover_log_files(logs_dir: &Path, request: SyncRequest) -> Result<Vec<PathB
     Ok(files)
 }
 
-fn sync_file(
-    conn: &mut Connection,
-    path: &Path,
-) -> std::result::Result<FileSyncStats, SyncFailure> {
-    let metadata = std::fs::metadata(path).map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+fn sync_file(conn: &mut Connection, path: &Path) -> std::result::Result<FileSyncStats, SyncFailure> {
+    let source_file_str = path.display().to_string();
 
+    macro_rules! fail {
+        ($line:expr, $error:expr) => {
+            SyncFailure {
+                source_file: source_file_str.clone(),
+                line_number: $line,
+                message: $error.to_string(),
+            }
+        };
+    }
+
+    let metadata = std::fs::metadata(path).map_err(|e| fail!(0, e))?;
     let file_size = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
     let modified_at = metadata
         .modified()
@@ -146,21 +153,13 @@ fn sync_file(
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
         .unwrap_or_default();
-    let fingerprint = file_fingerprint(path).map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+    let fingerprint = file_fingerprint(path).map_err(|e| fail!(0, e))?;
 
-    let state = load_state(conn, path).map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+    let state = load_state(conn, path).map_err(|e| fail!(0, e))?;
 
-    let rebuild = state
-        .as_ref()
-        .is_some_and(|state| file_size < state.file_size || fingerprint != state.fingerprint);
+    let rebuild = state.as_ref().is_some_and(|state| {
+        file_size < state.file_size || fingerprint != state.fingerprint
+    });
     let start_offset = if rebuild {
         0
     } else {
@@ -179,35 +178,19 @@ fn sync_file(
         ..FileSyncStats::default()
     };
 
-    let tx = conn.transaction().map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+    let tx = conn.transaction().map_err(|e| fail!(0, e))?;
 
     if rebuild {
         tx.execute(
             "DELETE FROM events WHERE source_file = ?1",
-            params![path.display().to_string()],
+            params![source_file_str],
         )
-        .map_err(|error| SyncFailure {
-            source_file: path.display().to_string(),
-            line_number: 0,
-            message: error.to_string(),
-        })?;
+        .map_err(|e| fail!(0, e))?;
     }
 
-    let mut file = BufReader::new(File::open(path).map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?);
+    let mut file = BufReader::new(File::open(path).map_err(|e| fail!(0, e))?);
     file.seek(SeekFrom::Start(start_offset as u64))
-        .map_err(|error| SyncFailure {
-            source_file: path.display().to_string(),
-            line_number: 0,
-            message: error.to_string(),
-        })?;
+        .map_err(|e| fail!(0, e))?;
 
     let mut source_offset = start_offset as u64;
     let mut buffer = Vec::new();
@@ -218,11 +201,7 @@ fn sync_file(
         buffer.clear();
         let bytes_read = file
             .read_until(b'\n', &mut buffer)
-            .map_err(|error| SyncFailure {
-                source_file: path.display().to_string(),
-                line_number,
-                message: error.to_string(),
-            })?;
+            .map_err(|e| fail!(line_number, e))?;
         if bytes_read == 0 {
             break;
         }
@@ -235,35 +214,44 @@ fn sync_file(
             continue;
         }
 
-        let meta: EventMeta = serde_json::from_str(line).map_err(|error| SyncFailure {
-            source_file: path.display().to_string(),
-            line_number,
-            message: error.to_string(),
-        })?;
+        // Treat malformed lines as per-line failures: skip the line, record
+        // the failure, and continue ingesting the rest of the file.
+        let meta: EventMeta = match serde_json::from_str(line) {
+            Ok(meta) => meta,
+            Err(error) => {
+                stats.line_failures.push(SyncFailure {
+                    source_file: source_file_str.clone(),
+                    line_number,
+                    message: error.to_string(),
+                });
+                source_offset += bytes_read as u64;
+                line_number += 1;
+                continue;
+            }
+        };
 
-        let prepared =
-            prepare_event(path, source_offset as i64, meta).map_err(|error| SyncFailure {
-                source_file: path.display().to_string(),
-                line_number,
-                message: error.to_string(),
-            })?;
+        let prepared = match prepare_event(path, source_offset as i64, meta) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                stats.line_failures.push(SyncFailure {
+                    source_file: source_file_str.clone(),
+                    line_number,
+                    message: error.to_string(),
+                });
+                source_offset += bytes_read as u64;
+                line_number += 1;
+                continue;
+            }
+        };
 
-        let inserted = insert_event(&tx, &prepared).map_err(|error| SyncFailure {
-            source_file: path.display().to_string(),
-            line_number,
-            message: error.to_string(),
-        })?;
+        let inserted = insert_event(&tx, &prepared).map_err(|e| fail!(line_number, e))?;
 
         if inserted {
             stats.inserted += 1;
             stats.anonymous_session_fallbacks += u64::from(prepared.anonymous_session_fallback);
 
             if !rebuild {
-                upsert_session(&tx, &prepared).map_err(|error| SyncFailure {
-                    source_file: path.display().to_string(),
-                    line_number,
-                    message: error.to_string(),
-                })?;
+                upsert_session(&tx, &prepared).map_err(|e| fail!(line_number, e))?;
             }
         } else {
             stats.skipped += 1;
@@ -275,11 +263,7 @@ fn sync_file(
     }
 
     if rebuild {
-        rebuild_sessions(&tx).map_err(|error| SyncFailure {
-            source_file: path.display().to_string(),
-            line_number: 0,
-            message: error.to_string(),
-        })?;
+        rebuild_sessions(&tx).map_err(|e| fail!(0, e))?;
     }
 
     save_state(
@@ -291,17 +275,9 @@ fn sync_file(
         source_offset as i64,
         last_event_timestamp.as_deref(),
     )
-    .map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+    .map_err(|e| fail!(0, e))?;
 
-    tx.commit().map_err(|error| SyncFailure {
-        source_file: path.display().to_string(),
-        line_number: 0,
-        message: error.to_string(),
-    })?;
+    tx.commit().map_err(|e| fail!(0, e))?;
 
     Ok(stats)
 }
@@ -592,20 +568,20 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
         )
         SELECT
             session_key,
-            MAX(session_id),
-            MAX(provider),
+            MIN(session_id),
+            MIN(provider),
             MIN(timestamp),
             MAX(timestamp),
-            MAX(cwd),
-            MAX(repo_name),
-            MAX(repo_org),
-            MAX(branch),
-            MAX(package_area),
-            MAX(package),
+            MIN(cwd),
+            MIN(repo_name),
+            MIN(repo_org),
+            MIN(branch),
+            MIN(package_area),
+            MIN(package),
             MAX(model),
             MAX(permission_mode),
-            MAX(hostname),
-            MAX(primary_language),
+            MIN(hostname),
+            MIN(primary_language),
             COUNT(*),
             SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END),
             SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END),

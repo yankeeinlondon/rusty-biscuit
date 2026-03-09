@@ -91,7 +91,8 @@ pub(crate) fn daily_summary(
     let range = DateRange::single(date);
     let totals = load_totals(conn, range, filters)?;
     let sessions = load_sessions(conn, range, filters)?;
-    let tools = load_tool_stats(conn, range, filters, 5)?;
+    let top_tools = load_tool_stats(conn, range, filters, 5)?;
+    let all_tools = load_all_tool_stats(conn, range, filters)?;
     let recovery_events = load_recovery_events(conn, range, filters)?;
 
     Ok(DailySummary {
@@ -109,7 +110,7 @@ pub(crate) fn daily_summary(
         provider_count: totals.provider_count,
         repo_count: totals.repo_count,
         providers: load_provider_split(conn, range, filters)?,
-        top_tools: tools.clone(),
+        top_tools,
         permission_modes: load_labeled_counts(conn, "permission_mode", range, filters)?,
         models: load_labeled_counts(conn, "model", range, filters)?,
         metrics: summarize_metrics(
@@ -118,7 +119,7 @@ pub(crate) fn daily_summary(
             totals.total_tool_errors,
             totals.total_compactions,
             &sessions,
-            &tools,
+            &all_tools,
             &recovery_events,
         ),
     })
@@ -133,7 +134,7 @@ pub(crate) fn sessions(
 
     let sessions = load_sessions(conn, range, filters)?;
     let totals = load_totals(conn, range, filters)?;
-    let tools = load_tool_stats(conn, range, filters, 25)?;
+    let all_tools = load_all_tool_stats(conn, range, filters)?;
     let recovery_events = load_recovery_events(conn, range, filters)?;
 
     Ok(SessionsReport {
@@ -144,7 +145,7 @@ pub(crate) fn sessions(
             totals.total_tool_errors,
             totals.total_compactions,
             &sessions,
-            &tools,
+            &all_tools,
             &recovery_events,
         ),
         sessions,
@@ -159,7 +160,8 @@ pub(crate) fn tools(
 ) -> Result<ToolsReport> {
     validate_range(range)?;
 
-    let tools = load_tool_stats(conn, range, filters, top_n)?;
+    let top_tools = load_tool_stats(conn, range, filters, top_n)?;
+    let all_tools = load_all_tool_stats(conn, range, filters)?;
     let sessions = load_sessions(conn, range, filters)?;
     let totals = load_totals(conn, range, filters)?;
     let recovery_events = load_recovery_events(conn, range, filters)?;
@@ -172,10 +174,10 @@ pub(crate) fn tools(
             totals.total_tool_errors,
             totals.total_compactions,
             &sessions,
-            &tools,
+            &all_tools,
             &recovery_events,
         ),
-        tools,
+        tools: top_tools,
     })
 }
 
@@ -203,10 +205,6 @@ pub(crate) fn errors(
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
-        let prompt: Option<String> = row.get(7)?;
-        let tool_input_json: Option<String> = row.get(8)?;
-        let notification_message: Option<String> = row.get(9)?;
-
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -215,13 +213,26 @@ pub(crate) fn errors(
             row.get::<_, Option<String>>(4)?,
             row.get::<_, Option<String>>(5)?,
             row.get::<_, String>(6)?,
-            short_context(prompt, tool_input_json, notification_message),
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
         ))
     })?;
 
     let mut errors = Vec::new();
     for row in rows {
-        let (timestamp, provider, event, session_key, repo_name, tool_name, error, context) = row?;
+        let (
+            timestamp,
+            provider,
+            event,
+            session_key,
+            repo_name,
+            tool_name,
+            error,
+            prompt,
+            tool_input_json,
+            notification_message,
+        ) = row?;
         errors.push(ErrorRecord {
             timestamp: parse_timestamp(&timestamp)?,
             provider: parse_provider(&provider)?,
@@ -229,8 +240,10 @@ pub(crate) fn errors(
             session_key,
             repo_name,
             tool_name,
-            error: truncate(&error, 120),
-            context,
+            error,
+            prompt,
+            tool_input_json,
+            notification_message,
         });
     }
 
@@ -269,6 +282,7 @@ pub(crate) fn repos(
 
     #[derive(Default)]
     struct RepoAccumulator {
+        repo_name: String,
         repo_org: Option<String>,
         event_count: u64,
         sessions: HashSet<String>,
@@ -278,11 +292,17 @@ pub(crate) fn repos(
         branches: BTreeMap<String, u64>,
     }
 
+    // Key repos by org/name composite to avoid conflating org-a/foo and org-b/foo.
     let mut repos: HashMap<String, RepoAccumulator> = HashMap::new();
     for row in rows {
         let (_, repo_name, repo_org, branch, head_sha, is_dirty, session_key) = row?;
-        let entry = repos.entry(repo_name).or_default();
+        let repo_key = match &repo_org {
+            Some(org) => format!("{org}/{repo_name}"),
+            None => repo_name.clone(),
+        };
+        let entry = repos.entry(repo_key).or_default();
         entry.event_count += 1;
+        entry.repo_name = repo_name;
         entry.repo_org = entry.repo_org.clone().or(repo_org);
         entry.sessions.insert(session_key);
 
@@ -307,8 +327,8 @@ pub(crate) fn repos(
 
     let mut items = repos
         .into_iter()
-        .map(|(repo_name, accumulator)| RepoActivity {
-            repo_name,
+        .map(|(_, accumulator)| RepoActivity {
+            repo_name: accumulator.repo_name,
             repo_org: accumulator.repo_org,
             event_count: accumulator.event_count,
             session_count: accumulator.sessions.len() as u64,
@@ -414,7 +434,7 @@ fn load_totals(conn: &Connection, range: DateRange, filters: &ReportingFilters) 
         r#"
         SELECT
             COUNT(*) AS total_events,
-            COUNT(DISTINCT session_key) AS session_count,
+            COALESCE(SUM(CASE WHEN event = 'session_start' THEN 1 ELSE 0 END), 0) AS session_count,
             COALESCE(SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END), 0) AS turn_count,
             COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0) AS tool_call_count,
             COALESCE(SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END), 0) AS tool_error_count,
@@ -424,7 +444,7 @@ fn load_totals(conn: &Connection, range: DateRange, filters: &ReportingFilters) 
             COALESCE(SUM(CASE WHEN event = 'permission_request' THEN 1 ELSE 0 END), 0) AS permission_request_count,
             COALESCE(SUM(CASE WHEN event = 'human_in_the_loop' THEN 1 ELSE 0 END), 0) AS human_in_loop_count,
             COUNT(DISTINCT provider) AS provider_count,
-            COUNT(DISTINCT repo_name) AS repo_count
+            COUNT(DISTINCT CASE WHEN repo_org IS NOT NULL THEN repo_org || '/' || repo_name ELSE repo_name END) AS repo_count
         FROM events
         "#,
     );
@@ -511,24 +531,27 @@ fn load_sessions(
     let builder = WhereBuilder::default()
         .with_range(range)
         .with_filters(filters);
+    // Use MIN for identity fields (first seen) and last-seen for mutable fields
+    // to give meaningful labels when sessions cross branches/repos/models.
     let sql = builder.finish(
         r#"
         SELECT
             session_key,
-            MAX(session_id),
-            MAX(provider),
+            MIN(session_id),
+            MIN(provider),
             MIN(timestamp),
             MAX(timestamp),
-            MAX(cwd),
-            MAX(repo_name),
-            MAX(repo_org),
-            MAX(branch),
-            MAX(package_area),
-            MAX(package),
+            MIN(cwd),
+            MIN(repo_name),
+            MIN(repo_org),
+            MIN(branch),
+            MIN(package_area),
+            MIN(package),
+            -- model and permission_mode use MAX (last seen) since they can change mid-session
             MAX(model),
             MAX(permission_mode),
-            MAX(hostname),
-            MAX(primary_language),
+            MIN(hostname),
+            MIN(primary_language),
             COUNT(*),
             COALESCE(SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0),
@@ -620,6 +643,51 @@ fn load_sessions(
     }
 
     Ok(sessions)
+}
+
+/// Load all tool stats without a row limit, for accurate derived metrics.
+fn load_all_tool_stats(
+    conn: &Connection,
+    range: DateRange,
+    filters: &ReportingFilters,
+) -> Result<Vec<DailyToolStat>> {
+    let builder = WhereBuilder::default()
+        .with_range(range)
+        .with_filters(filters);
+    let sql = builder.finish(
+        r#"
+        SELECT
+            tool_name,
+            COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0) AS call_count,
+            COALESCE(SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END), 0) AS error_count
+        FROM events
+        "#,
+    ) + " AND tool_name IS NOT NULL AND event IN ('before_tool', 'tool_error')
+         GROUP BY tool_name
+         HAVING COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0) > 0
+             OR COALESCE(SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END), 0) > 0
+         ORDER BY call_count DESC, error_count DESC, tool_name ASC";
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(builder.params.iter()), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+
+    let mut tools = Vec::new();
+    for row in rows {
+        let (tool_name, call_count, error_count) = row?;
+        tools.push(DailyToolStat {
+            classification: classify_tool(&tool_name),
+            tool_name,
+            call_count: call_count.max(0) as u64,
+            error_count: error_count.max(0) as u64,
+        });
+    }
+    Ok(tools)
 }
 
 fn load_tool_stats(
@@ -747,25 +815,3 @@ fn parse_timestamp(raw: &str) -> Result<DateTime<Utc>> {
     Ok(DateTime::parse_from_rfc3339(raw)?.with_timezone(&Utc))
 }
 
-fn short_context(
-    prompt: Option<String>,
-    tool_input_json: Option<String>,
-    notification_message: Option<String>,
-) -> Option<String> {
-    prompt
-        .map(|value| truncate(&value, 120))
-        .or_else(|| tool_input_json.map(|value| truncate(&value, 120)))
-        .or_else(|| notification_message.map(|value| truncate(&value, 120)))
-}
-
-fn truncate(value: &str, limit: usize) -> String {
-    if value.chars().count() <= limit {
-        return value.to_string();
-    }
-
-    value
-        .chars()
-        .take(limit.saturating_sub(1))
-        .collect::<String>()
-        + "…"
-}

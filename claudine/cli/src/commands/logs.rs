@@ -338,13 +338,7 @@ fn render_daily_summary(summary: &DailySummary) {
         ));
     }
 
-    render_metrics_line(
-        summary.metrics.autonomy_ratio,
-        summary.metrics.research_vs_action_ratio,
-        summary.metrics.error_recovery_rate,
-        summary.metrics.session_efficiency,
-        summary.metrics.context_pressure_index,
-    );
+    render_metrics_line(&summary.metrics);
 
     if summary.top_tools.is_empty() {
         return;
@@ -379,13 +373,7 @@ fn render_sessions_report(report: &SessionsReport) {
         ))
         .render(&term),
     );
-    render_metrics_line(
-        report.metrics.autonomy_ratio,
-        report.metrics.research_vs_action_ratio,
-        report.metrics.error_recovery_rate,
-        report.metrics.session_efficiency,
-        report.metrics.context_pressure_index,
-    );
+    render_metrics_line(&report.metrics);
 
     let mut table = base_table(vec![
         TableColumn::new("Started"),
@@ -434,13 +422,7 @@ fn render_tools_report(report: &ToolsReport) {
         ))
         .render(&term),
     );
-    render_metrics_line(
-        report.metrics.autonomy_ratio,
-        report.metrics.research_vs_action_ratio,
-        report.metrics.error_recovery_rate,
-        report.metrics.session_efficiency,
-        report.metrics.context_pressure_index,
-    );
+    render_metrics_line(&report.metrics);
 
     let mut table = base_table(vec![
         TableColumn::new("Tool"),
@@ -489,6 +471,13 @@ fn render_errors_report(report: &ErrorsReport) {
     ]);
 
     for item in &report.errors {
+        let context = item
+            .prompt
+            .as_deref()
+            .or(item.tool_input_json.as_deref())
+            .or(item.notification_message.as_deref())
+            .map(|value| truncate_str(value, 120))
+            .unwrap_or_else(|| "—".to_string());
         table.add_row(vec![
             item.timestamp.format("%Y-%m-%d %H:%M").to_string().into(),
             item.provider.to_string().into(),
@@ -500,11 +489,8 @@ fn render_errors_report(report: &ErrorsReport) {
                 .clone()
                 .unwrap_or_else(|| "—".to_string())
                 .into(),
-            item.error.clone().into(),
-            item.context
-                .clone()
-                .unwrap_or_else(|| "—".to_string())
-                .into(),
+            truncate_str(&item.error, 120).into(),
+            context.into(),
         ]);
     }
 
@@ -634,6 +620,17 @@ fn repo_label(repo_org: Option<&str>, repo_name: Option<&str>) -> String {
     }
 }
 
+fn truncate_str(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_string();
+    }
+    value
+        .chars()
+        .take(limit.saturating_sub(1))
+        .collect::<String>()
+        + "…"
+}
+
 fn format_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
     let hours = seconds / 3600;
@@ -645,19 +642,26 @@ fn format_duration(seconds: i64) -> String {
     }
 }
 
-fn render_metrics_line(
-    autonomy_ratio: Option<f64>,
-    research_vs_action_ratio: Option<f64>,
-    error_recovery_rate: Option<f64>,
-    session_efficiency: Option<f64>,
-    context_pressure_index: Option<f64>,
-) {
+fn render_metrics_line(metrics: &claudine::reporting::DerivedMetrics) {
     let items = [
-        autonomy_ratio.map(|value| format!("autonomy {value:.2}")),
-        research_vs_action_ratio.map(|value| format!("research/action {value:.2}")),
-        error_recovery_rate.map(|value| format!("recovery {:.0}%", value * 100.0)),
-        session_efficiency.map(|value| format!("turns/hr {value:.1}")),
-        context_pressure_index.map(|value| format!("compactions/session {value:.2}")),
+        metrics
+            .autonomy_ratio
+            .map(|value| format!("autonomy {value:.2}")),
+        metrics
+            .research_vs_action_ratio
+            .map(|value| format!("research/action {value:.2}")),
+        metrics
+            .delegation_ratio
+            .map(|value| format!("delegation {value:.2}")),
+        metrics
+            .error_recovery_rate
+            .map(|value| format!("recovery {:.0}%", value * 100.0)),
+        metrics
+            .session_efficiency
+            .map(|value| format!("turns/hr {value:.1}")),
+        metrics
+            .context_pressure_index
+            .map(|value| format!("compactions/session {value:.2}")),
     ]
     .into_iter()
     .flatten()

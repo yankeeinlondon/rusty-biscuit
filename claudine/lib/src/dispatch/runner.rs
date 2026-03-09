@@ -37,7 +37,7 @@ pub async fn execute_actions(
                 let target = resolve_log_target(target, settings);
                 execute_log(target, meta).await?
             }
-            HookAction::Report { handler } => execute_report(handler.as_ref(), meta),
+            HookAction::Report { handler } => execute_report(handler.as_ref(), meta, can_block),
             HookAction::FireAndForget { command, args } => {
                 execute_fire_and_forget(command, args.as_deref(), meta)
             }
@@ -356,7 +356,7 @@ async fn post_to_server(
     }
 }
 
-fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta) {
+fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, blocking: bool) {
     let output = match handler {
         Some(handler) => format_report(handler, meta),
         None => format!(
@@ -366,7 +366,13 @@ fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta) {
             meta.provider
         ),
     };
-    println!("{output}");
+    // Route report output to stderr on blocking events to avoid corrupting
+    // the machine-facing provider response payload on stdout.
+    if blocking {
+        eprintln!("{output}");
+    } else {
+        println!("{output}");
+    }
 }
 
 fn terminal_meta_json(meta: &EventMeta) -> String {
