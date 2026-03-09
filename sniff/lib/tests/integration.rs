@@ -94,6 +94,20 @@ fn test_detect_pnpm_workspace() {
     assert_eq!(repo.monorepo_tool, Some(sniff::filesystem::MonorepoTool::PnpmWorkspaces));
 }
 
+#[test]
+fn test_detect_language_uses_package_boundary_from_nested_workspace() {
+    let (_dir, path) = fixtures::create_mixed_nested_workspace();
+    let config = SniffConfig::new().base_dir(path.join("server"));
+    let result = detect_with_config(config).unwrap();
+    let filesystem = result.filesystem.unwrap();
+    let languages = filesystem.languages.unwrap();
+
+    assert_eq!(languages.primary.as_deref(), Some("Rust"));
+    assert_eq!(languages.total_files, 2);
+    assert!(languages.languages.iter().any(|lang| lang.language == "Rust"));
+    assert!(!languages.languages.iter().any(|lang| lang.language == "TypeScript"));
+}
+
 // === Regression tests for JSON serialization of partial results ===
 // Bug: Skipped sections were serialized as empty objects instead of being omitted.
 //

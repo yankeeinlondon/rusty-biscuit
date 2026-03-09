@@ -130,7 +130,7 @@ pub(crate) fn detect_languages_with_exclusions(
         .git_ignore(true) // Respect .gitignore
         .git_global(true) // Respect global gitignore
         .git_exclude(true) // Respect .git/info/exclude
-        .filter_entry(|e| !is_excluded_entry(e, &exclude_roots))
+        .filter_entry(move |e| !is_excluded_entry(e, &exclude_roots))
         .build();
 
     for entry in walker
@@ -280,6 +280,7 @@ mod tests {
     #[test]
     fn test_excludes_nested_package_roots() {
         let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
         fs::create_dir_all(dir.path().join("frontend/src")).unwrap();
         fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
         fs::write(dir.path().join("frontend/src/index.ts"), "console.log('hi')").unwrap();

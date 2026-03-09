@@ -1,4 +1,3 @@
-use super::languages::detect_languages;
 use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
@@ -372,12 +371,16 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
     }
 
     let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
-    packages.extend(discover_packages_from_manifests(
-        root,
-        MonorepoTool::Unknown,
-        &lock_versions,
-        PackageDiscoverySource::ManifestScan,
-    ));
+    let workspace_packages = packages.clone();
+    for package in &workspace_packages {
+        packages.extend(discover_packages_from_manifests_in_tree(
+            &package.path,
+            root,
+            MonorepoTool::Unknown,
+            &lock_versions,
+            PackageDiscoverySource::ManifestScan,
+        ));
+    }
 
     let mut packages = merge_packages(packages);
     refresh_package_boundaries(&mut packages);
@@ -987,12 +990,22 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
 
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(root, MonorepoTool::Nx, &lock_versions)
+        discover_packages_from_manifests(
+            root,
+            MonorepoTool::Nx,
+            &lock_versions,
+            PackageDiscoverySource::Nx,
+        )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(root, MonorepoTool::Nx, &lock_versions);
+        packages = discover_packages_from_manifests(
+            root,
+            MonorepoTool::Nx,
+            &lock_versions,
+            PackageDiscoverySource::Nx,
+        );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
@@ -1019,12 +1032,22 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
     let patterns = collect_default_workspace_patterns(root);
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(root, MonorepoTool::Turborepo, &lock_versions)
+        discover_packages_from_manifests(
+            root,
+            MonorepoTool::Turborepo,
+            &lock_versions,
+            PackageDiscoverySource::Turborepo,
+        )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(root, MonorepoTool::Turborepo, &lock_versions);
+        packages = discover_packages_from_manifests(
+            root,
+            MonorepoTool::Turborepo,
+            &lock_versions,
+            PackageDiscoverySource::Turborepo,
+        );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
@@ -1054,12 +1077,22 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
 
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(root, MonorepoTool::Lerna, &lock_versions)
+        discover_packages_from_manifests(
+            root,
+            MonorepoTool::Lerna,
+            &lock_versions,
+            PackageDiscoverySource::Lerna,
+        )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(root, MonorepoTool::Lerna, &lock_versions);
+        packages = discover_packages_from_manifests(
+            root,
+            MonorepoTool::Lerna,
+            &lock_versions,
+            PackageDiscoverySource::Lerna,
+        );
     }
     packages = dedupe_packages(packages);
     resolve_internal_deps(&mut packages);
@@ -1684,7 +1717,6 @@ fn merge_package_into(existing: &mut Package, incoming: Package) {
     }
 
     existing.is_excluded |= incoming.is_excluded;
-    existing.discovery_sources.sort_by_key(|source| *source as u8);
     existing.package_managers.sort();
     existing.features.sort();
 }
@@ -1701,6 +1733,7 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
 }
 
 fn refresh_package_boundaries(packages: &mut [Package]) {
+    let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
     let package_roots: Vec<PathBuf> = packages.iter().map(|pkg| canonicalize_path(&pkg.path)).collect();
     let package_names: Vec<String> = packages.iter().map(|pkg| pkg.name.clone()).collect();
 
@@ -1715,7 +1748,7 @@ fn refresh_package_boundaries(packages: &mut [Package]) {
             }
 
             if other_root.starts_with(package_root) {
-                nested_roots.push(packages[other_index].path.clone());
+                nested_roots.push(package_paths[other_index].clone());
                 nested_packages.push(package_names[other_index].clone());
             }
         }
@@ -1736,10 +1769,22 @@ fn discover_packages_from_manifests(
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
 ) -> Vec<Package> {
+    discover_packages_from_manifests_in_tree(root, root, tool, lock_versions, discovery_source)
+}
+
+fn discover_packages_from_manifests_in_tree(
+    search_root: &Path,
+    repo_root: &Path,
+    tool: MonorepoTool,
+    lock_versions: &Option<CargoLockVersions>,
+    discovery_source: PackageDiscoverySource,
+) -> Vec<Package> {
     let mut discovered_dirs = HashSet::new();
 
-    let walker =
-        walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_entry(|entry| {
+    let walker = walkdir::WalkDir::new(search_root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
             if !entry.file_type().is_dir() {
                 return true;
             }
@@ -1770,7 +1815,7 @@ fn discover_packages_from_manifests(
         let Some(parent) = entry.path().parent() else {
             continue;
         };
-        if parent == root {
+        if parent == search_root {
             continue;
         }
         discovered_dirs.insert(parent.to_path_buf());
@@ -1780,7 +1825,7 @@ fn discover_packages_from_manifests(
     dirs.sort();
 
     dirs.iter()
-        .map(|path| create_package(path, root, tool, lock_versions, discovery_source))
+        .map(|path| create_package(path, repo_root, tool, lock_versions, discovery_source))
         .collect()
 }
 
@@ -2351,7 +2396,7 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         fs::write(dir.path().join("lib.rs"), "pub fn foo() {}").unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path());
+        let (primary, languages) = detect_package_languages(dir.path(), &[]);
         assert_eq!(primary, Some("Rust".to_string()));
         assert!(languages.contains(&"Rust".to_string()));
     }
@@ -2361,7 +2406,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("index.js"), "console.log('hello')").unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path());
+        let (primary, languages) = detect_package_languages(dir.path(), &[]);
         assert_eq!(primary, Some("JavaScript".to_string()));
         assert!(languages.contains(&"JavaScript".to_string()));
     }
@@ -2370,7 +2415,7 @@ mod tests {
     fn test_detect_package_languages_empty() {
         let dir = TempDir::new().unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path());
+        let (primary, languages) = detect_package_languages(dir.path(), &[]);
         assert!(primary.is_none());
         assert!(languages.is_empty());
     }
@@ -2834,5 +2879,86 @@ version = "1.0.128"
 
         let bar = packages.iter().find(|p| p.relative == "bar").unwrap();
         assert_eq!(bar.package_area, "root");
+    }
+
+    #[test]
+    fn test_detect_repo_merges_workspace_tools_and_nested_packages() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"server\"]\n").unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'server/frontend'\n")
+            .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"private": true}"#).unwrap();
+
+        let server_dir = dir.path().join("server");
+        fs::create_dir_all(server_dir.join("src")).unwrap();
+        fs::write(
+            server_dir.join("Cargo.toml"),
+            "[package]\nname = \"homelab-server\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(server_dir.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let frontend_dir = server_dir.join("frontend");
+        fs::create_dir_all(frontend_dir.join("src")).unwrap();
+        fs::write(
+            frontend_dir.join("package.json"),
+            r#"{"name":"homelab-frontend","version":"0.1.0"}"#,
+        )
+        .unwrap();
+        fs::write(frontend_dir.join("src/index.ts"), "console.log('frontend')").unwrap();
+
+        let result = detect_repo(dir.path()).unwrap().unwrap();
+        assert_eq!(result.monorepo_tool, Some(MonorepoTool::CargoWorkspace));
+        assert_eq!(
+            result.workspace_tools,
+            vec![MonorepoTool::CargoWorkspace, MonorepoTool::PnpmWorkspaces]
+        );
+
+        let packages = result.packages.unwrap();
+        assert_eq!(packages.len(), 2);
+
+        let server = packages.iter().find(|pkg| pkg.name == "homelab-server").unwrap();
+        assert_eq!(server.ecosystem, PackageEcosystem::Cargo);
+        assert_eq!(server.primary_language.as_deref(), Some("Rust"));
+        assert!(!server.languages.iter().any(|language| language == "TypeScript"));
+        assert_eq!(server.nested_packages, vec!["homelab-frontend".to_string()]);
+        assert!(server.discovery_sources.contains(&PackageDiscoverySource::CargoWorkspace));
+
+        let frontend = packages.iter().find(|pkg| pkg.name == "homelab-frontend").unwrap();
+        assert_eq!(frontend.ecosystem, PackageEcosystem::Node);
+        assert_eq!(frontend.primary_language.as_deref(), Some("TypeScript"));
+        assert!(frontend.discovery_sources.contains(&PackageDiscoverySource::PnpmWorkspace));
+        assert!(frontend.discovery_sources.contains(&PackageDiscoverySource::ManifestScan));
+    }
+
+    #[test]
+    fn test_package_for_dir_prefers_most_specific_nested_package() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"server\"]\n").unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'server/frontend'\n")
+            .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"private": true}"#).unwrap();
+
+        let server_dir = dir.path().join("server");
+        fs::create_dir_all(server_dir.join("src")).unwrap();
+        fs::write(
+            server_dir.join("Cargo.toml"),
+            "[package]\nname = \"homelab-server\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(server_dir.join("src/lib.rs"), "pub fn server() {}").unwrap();
+
+        let frontend_dir = server_dir.join("frontend");
+        fs::create_dir_all(frontend_dir.join("src")).unwrap();
+        fs::write(
+            frontend_dir.join("package.json"),
+            r#"{"name":"homelab-frontend","version":"0.1.0"}"#,
+        )
+        .unwrap();
+        fs::write(frontend_dir.join("src/index.ts"), "console.log('frontend')").unwrap();
+
+        let repo = detect_repo(dir.path()).unwrap().unwrap();
+        let package = repo.package_for_dir(&frontend_dir.join("src")).unwrap();
+        assert_eq!(package.name, "homelab-frontend");
     }
 }
