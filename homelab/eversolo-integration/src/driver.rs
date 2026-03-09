@@ -1,6 +1,5 @@
 //! Eversolo device driver implementing the `DeviceDriver` trait.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -9,7 +8,7 @@ use unfolded_integration_helper::{
 };
 
 use crate::dispatch;
-use crate::types::{self, DEFAULT_VOLUME_STEPS, DeviceConfig};
+use crate::types::{self, DeviceConfig, EntityCatalog};
 
 /// Eversolo streamer device driver.
 #[derive(Debug, Clone)]
@@ -17,11 +16,14 @@ pub struct EversoloDeviceDriver;
 
 /// Extract a `DeviceConfig` from the generic `ConfiguredDevice` fields.
 fn device_config(device: &ConfiguredDevice) -> DeviceConfig {
+    let catalog = catalog_from_device(device);
     let mac_address = device
         .driver_config
         .get("mac")
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .map(String::from)
+        .or_else(|| device.metadata.mac_address.clone())
+        .or_else(|| catalog.identity.net_mac.clone());
 
     let wol_broadcast = device
         .driver_config
@@ -43,7 +45,18 @@ fn device_config(device: &ConfiguredDevice) -> DeviceConfig {
         mac_address,
         wol_broadcast,
         wol_port,
+        screen_brightness_max: catalog.screen_brightness_max,
+        knob_brightness_max: catalog.knob_brightness_max,
     }
+}
+
+fn catalog_from_device(device: &ConfiguredDevice) -> EntityCatalog {
+    device
+        .driver_config
+        .get("catalog")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
 }
 
 impl DeviceDriver for EversoloDeviceDriver {
@@ -53,16 +66,10 @@ impl DeviceDriver for EversoloDeviceDriver {
         timeout: Duration,
     ) -> Result<ConfiguredDevice, DeviceError> {
         if let Ok(snapshot) = dispatch::fetch_snapshot(&device_config(&device), timeout).await {
-            device.driver_config.extend(HashMap::from([
-                (
-                    "source_list".to_string(),
-                    serde_json::json!(snapshot.catalog.source_list),
-                ),
-                (
-                    "volume_steps".to_string(),
-                    serde_json::json!(snapshot.catalog.volume_steps),
-                ),
-            ]));
+            device.driver_config.insert(
+                "catalog".to_string(),
+                serde_json::to_value(snapshot.catalog).unwrap_or_default(),
+            );
         }
 
         Ok(device)
@@ -70,25 +77,9 @@ impl DeviceDriver for EversoloDeviceDriver {
 
     fn build_entities(&self, device: &ConfiguredDevice) -> Vec<Entity> {
         let name = &device.device_name;
-        let source_list = device
-            .driver_config
-            .get("source_list")
-            .and_then(|value| value.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let volume_steps = device
-            .driver_config
-            .get("volume_steps")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as u32)
-            .unwrap_or(DEFAULT_VOLUME_STEPS);
+        let catalog = catalog_from_device(device);
 
-        types::build_entities(name, &source_list, volume_steps)
+        types::build_entities(name, &catalog)
             .into_iter()
             .map(|e| Entity {
                 entity_id: e.entity_id,
@@ -101,7 +92,7 @@ impl DeviceDriver for EversoloDeviceDriver {
     }
 
     fn build_initial_states(&self, device: &ConfiguredDevice) -> Vec<EntityState> {
-        types::build_initial_states(&device.device_name)
+        types::build_initial_states(&device.device_name, &catalog_from_device(device))
     }
 
     async fn fetch_snapshot(
@@ -113,18 +104,15 @@ impl DeviceDriver for EversoloDeviceDriver {
         let name = &device.device_name;
 
         match dispatch::fetch_snapshot(&config, timeout).await {
-            Ok(snapshot) => Ok(vec![
-                EntityUpdate {
-                    entity_id: format!("eversolo.{name}.power"),
-                    entity_type: "switch".to_string(),
-                    attributes: snapshot.power_attributes,
-                },
-                EntityUpdate {
-                    entity_id: format!("eversolo.{name}.player"),
-                    entity_type: "media_player".to_string(),
-                    attributes: snapshot.player_attributes,
-                },
-            ]),
+            Ok(snapshot) => Ok(snapshot
+                .updates
+                .into_iter()
+                .map(|update| EntityUpdate {
+                    entity_id: format!("eversolo.{name}.{}", update.entity_kind),
+                    entity_type: update.entity_type.to_string(),
+                    attributes: update.attributes,
+                })
+                .collect()),
             Err(e) => Err(DeviceError::Communication(e.to_string())),
         }
     }

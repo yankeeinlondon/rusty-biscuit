@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use homelab::eversolo::{
-    EffectivePowerState, Eversolo, GetStateResponse, InputOutputListResponse,
-    infer_effective_power_state, is_actively_playing,
+    DisplayModeListResponse, EffectivePowerState, Eversolo, GetModelResponse,
+    GetStateResponse, InputOutputListResponse, PowerOptionsResponse, infer_effective_power_state,
+    is_actively_playing,
 };
 use homelab::network::parse_host;
 use homelab::wol::send_magic_packet;
@@ -13,20 +14,15 @@ use schematic_schema::eversolo::VolumeData;
 use serde_json::{Value, json};
 
 use crate::error::EversoloIntegrationError;
-use crate::types::{DEFAULT_VOLUME_STEPS, DeviceConfig, EversoloOperation};
-
-/// Dynamic entity catalog metadata fetched from the device.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntityCatalog {
-    pub source_list: Vec<String>,
-    pub volume_steps: u32,
-}
+use crate::types::{
+    BrightnessCommand, DEFAULT_VOLUME_STEPS, DeviceConfig, DeviceIdentity, EntityCatalog,
+    EversoloOperation, NamedOption, SelectionCommand,
+};
 
 /// Full device snapshot used to populate UC entity state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceSnapshot {
-    pub power_attributes: HashMap<String, Value>,
-    pub player_attributes: HashMap<String, Value>,
+    pub updates: Vec<EntityUpdate>,
     pub catalog: EntityCatalog,
 }
 
@@ -50,20 +46,166 @@ pub async fn fetch_snapshot(
     timeout: Duration,
 ) -> Result<DeviceSnapshot, EversoloIntegrationError> {
     let client = build_client(config)?;
-    let playback = fetch_playback_context(&client, timeout).await?;
-    let routing = run_with_timeout(timeout, client.get_inputs_outputs()).await?;
-    ensure_status(routing.status)?;
+    let (
+        model_result,
+        state_result,
+        routing_result,
+        power_options_result,
+        screen_brightness_result,
+        knob_brightness_result,
+        vu_modes_result,
+        spectrum_modes_result,
+    ) = tokio::join!(
+        run_with_timeout(timeout, client.get_model()),
+        run_with_timeout(timeout, client.get_state()),
+        run_with_timeout(timeout, client.get_inputs_outputs()),
+        run_with_timeout(timeout, client.get_power_options()),
+        run_with_timeout(timeout, client.get_screen_brightness()),
+        run_with_timeout(timeout, client.get_knob_brightness()),
+        run_with_timeout(timeout, client.get_vu_modes()),
+        run_with_timeout(timeout, client.get_spectrum_modes()),
+    );
+
+    let mut first_error = None;
+
+    let model = optional_domain(model_result, |response| ensure_status(response.status), &mut first_error);
+    let state =
+        optional_domain(state_result, |response| ensure_optional_status(response.status), &mut first_error);
+    let routing = optional_domain(routing_result, |response| ensure_status(response.status), &mut first_error);
+    let power_options =
+        optional_domain(power_options_result, |response| ensure_status(response.status), &mut first_error);
+    let screen_brightness = optional_domain(
+        screen_brightness_result,
+        |response| ensure_optional_status(response.status),
+        &mut first_error,
+    );
+    let knob_brightness = optional_domain(
+        knob_brightness_result,
+        |response| ensure_optional_status(response.status),
+        &mut first_error,
+    );
+    let vu_modes = optional_domain(vu_modes_result, |response| ensure_status(response.status), &mut first_error);
+    let spectrum_modes =
+        optional_domain(spectrum_modes_result, |response| ensure_status(response.status), &mut first_error);
+
+    let effective_power_state = state.as_ref().map(|playback_state| {
+        infer_effective_power_state(
+            playback_state.state,
+            screen_brightness.as_ref().map(|response| response.current_value),
+        )
+    });
 
     let catalog = EntityCatalog {
-        source_list: available_source_names(&routing),
-        volume_steps: volume_steps_from_state(&playback.state),
+        source_list: routing
+            .as_ref()
+            .map(available_source_names)
+            .unwrap_or_default(),
+        output_list: routing
+            .as_ref()
+            .map(available_output_names)
+            .unwrap_or_default(),
+        power_options: power_options
+            .as_ref()
+            .map(power_option_list)
+            .unwrap_or_default(),
+        vu_modes: vu_modes.as_ref().map(mode_titles).unwrap_or_default(),
+        spectrum_modes: spectrum_modes
+            .as_ref()
+            .map(mode_titles)
+            .unwrap_or_default(),
+        volume_steps: state
+            .as_ref()
+            .map(volume_steps_from_state)
+            .unwrap_or(DEFAULT_VOLUME_STEPS),
+        screen_brightness_max: screen_brightness.as_ref().and_then(|response| response.max),
+        knob_brightness_max: knob_brightness.as_ref().and_then(|response| response.max),
+        identity: model
+            .as_ref()
+            .map(identity_from_model)
+            .unwrap_or_default(),
     };
 
-    Ok(DeviceSnapshot {
-        power_attributes: effective_power_attrs(playback.effective_power_state),
-        player_attributes: player_attrs(&playback.state, &routing, playback.effective_power_state),
-        catalog,
-    })
+    let mut updates = Vec::new();
+
+    if let (Some(state), Some(effective_power_state)) = (state.as_ref(), effective_power_state) {
+        updates.push(EntityUpdate {
+            entity_kind: "power",
+            entity_type: "switch",
+            attributes: effective_power_attrs(effective_power_state),
+        });
+        updates.push(EntityUpdate {
+            entity_kind: "player",
+            entity_type: "media_player",
+            attributes: player_attrs(state, routing.as_ref(), effective_power_state),
+        });
+    }
+
+    if let Some(routing) = routing.as_ref() {
+        updates.push(EntityUpdate {
+            entity_kind: "input_select",
+            entity_type: "select",
+            attributes: select_attrs(
+                current_input_name(routing).unwrap_or_default(),
+                available_source_names(routing),
+            ),
+        });
+        updates.push(EntityUpdate {
+            entity_kind: "output_select",
+            entity_type: "select",
+            attributes: select_attrs(
+                current_output_name(routing).unwrap_or_default(),
+                available_output_names(routing),
+            ),
+        });
+    }
+
+    if let Some(screen_brightness) = screen_brightness.as_ref() {
+        updates.push(EntityUpdate {
+            entity_kind: "screen_brightness",
+            entity_type: "light",
+            attributes: light_attrs(screen_brightness.current_value, screen_brightness.max),
+        });
+    }
+
+    if let Some(knob_brightness) = knob_brightness.as_ref() {
+        updates.push(EntityUpdate {
+            entity_kind: "knob_brightness",
+            entity_type: "light",
+            attributes: light_attrs(knob_brightness.current_value, knob_brightness.max),
+        });
+    }
+
+    if let Some(vu_modes) = vu_modes.as_ref() {
+        updates.push(EntityUpdate {
+            entity_kind: "vu_mode_select",
+            entity_type: "select",
+            attributes: select_attrs(
+                current_mode_title(vu_modes).unwrap_or_default(),
+                mode_titles(vu_modes),
+            ),
+        });
+    }
+
+    if let Some(spectrum_modes) = spectrum_modes.as_ref() {
+        updates.push(EntityUpdate {
+            entity_kind: "spectrum_mode_select",
+            entity_type: "select",
+            attributes: select_attrs(
+                current_mode_title(spectrum_modes).unwrap_or_default(),
+                mode_titles(spectrum_modes),
+            ),
+        });
+    }
+
+    if let Some(model) = model.as_ref() {
+        updates.extend(identity_updates(model));
+    }
+
+    if updates.is_empty() {
+        return Err(first_error.unwrap_or(EversoloIntegrationError::Timeout));
+    }
+
+    Ok(DeviceSnapshot { updates, catalog })
 }
 
 /// Execute an Eversolo operation and return updated entity state attributes.
@@ -102,6 +244,13 @@ pub async fn execute_operation(
         EversoloOperation::Previous => {
             let client = build_client(config)?;
             let resp = run_with_timeout(timeout, client.play_previous()).await?;
+            ensure_status(resp.status)?;
+            snapshot_updates(config, timeout).await
+        }
+        EversoloOperation::Seek(position_seconds) => {
+            let client = build_client(config)?;
+            let position_ms = position_seconds.saturating_mul(1000);
+            let resp = run_with_timeout(timeout, client.seek_to(position_ms)).await?;
             ensure_status(resp.status)?;
             snapshot_updates(config, timeout).await
         }
@@ -190,6 +339,30 @@ pub async fn execute_operation(
             ensure_status(resp.status)?;
             snapshot_updates(config, timeout).await
         }
+        EversoloOperation::SelectInput(selection) => {
+            select_input(config, selection, timeout).await
+        }
+        EversoloOperation::SelectOutput(selection) => {
+            select_output(config, selection, timeout).await
+        }
+        EversoloOperation::SelectVuMode(selection) => {
+            select_display_mode(config, selection, DisplayModeTarget::Vu, timeout).await
+        }
+        EversoloOperation::SelectSpectrumMode(selection) => {
+            select_display_mode(config, selection, DisplayModeTarget::Spectrum, timeout).await
+        }
+        EversoloOperation::PowerAction(tag) => {
+            let client = build_client(config)?;
+            let resp = run_with_timeout(timeout, client.set_power_option(&tag)).await?;
+            ensure_status(resp.status)?;
+            snapshot_updates(config, timeout).await
+        }
+        EversoloOperation::ScreenBrightness(command) => {
+            set_brightness(config, BrightnessTarget::Screen, command, timeout).await
+        }
+        EversoloOperation::KnobBrightness(command) => {
+            set_brightness(config, BrightnessTarget::Knob, command, timeout).await
+        }
     }
 }
 
@@ -260,18 +433,7 @@ async fn snapshot_updates(
     timeout: Duration,
 ) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
     let snapshot = fetch_snapshot(config, timeout).await?;
-    Ok(vec![
-        EntityUpdate {
-            entity_kind: "power",
-            entity_type: "switch",
-            attributes: snapshot.power_attributes,
-        },
-        EntityUpdate {
-            entity_kind: "player",
-            entity_type: "media_player",
-            attributes: snapshot.player_attributes,
-        },
-    ])
+    Ok(snapshot.updates)
 }
 
 fn build_client(config: &DeviceConfig) -> Result<Eversolo, EversoloIntegrationError> {
@@ -352,7 +514,7 @@ fn player_power_attrs(on: bool) -> HashMap<String, Value> {
 
 fn player_attrs(
     state: &GetStateResponse,
-    routing: &InputOutputListResponse,
+    routing: Option<&InputOutputListResponse>,
     effective_power_state: EffectivePowerState,
 ) -> HashMap<String, Value> {
     let mut attrs = HashMap::from([(
@@ -365,16 +527,16 @@ fn player_attrs(
         attrs.insert("muted".to_string(), json!(volume_data.is_mute));
     }
 
-    if let Some(source) = current_input_name(routing) {
+    if let Some(source) = routing.and_then(current_input_name) {
         attrs.insert("source".to_string(), json!(source));
     }
 
     if let Some(position) = state.position {
-        attrs.insert("media_position".to_string(), json!(position));
+        attrs.insert("media_position".to_string(), json!(position / 1000));
     }
 
     if let Some(duration) = state.duration {
-        attrs.insert("media_duration".to_string(), json!(duration));
+        attrs.insert("media_duration".to_string(), json!(duration / 1000));
     }
 
     if let Some(track) = &state.playing_music {
@@ -398,6 +560,7 @@ fn playback_state_label(state: i32, effective_power_state: EffectivePowerState) 
         EffectivePowerState::Active => match state {
             1 => "PLAYING",
             2 => "PAUSED",
+            0 => "STOPPED",
             _ => "ON",
         },
     }
@@ -414,6 +577,109 @@ fn available_source_names(routing: &InputOutputListResponse) -> Vec<String> {
         .iter()
         .map(|item| item.name.clone())
         .collect()
+}
+
+fn current_output_name(routing: &InputOutputListResponse) -> Option<String> {
+    let index = usize::try_from(routing.output_index?).ok()?;
+    routing.output_data.get(index).map(|item| item.name.clone())
+}
+
+fn available_output_names(routing: &InputOutputListResponse) -> Vec<String> {
+    let selected_name = current_output_name(routing);
+    routing
+        .output_data
+        .iter()
+        .filter(|item| item.enable || selected_name.as_deref() == Some(item.name.as_str()))
+        .map(|item| item.name.clone())
+        .collect()
+}
+
+fn select_attrs(current_option: String, options: Vec<String>) -> HashMap<String, Value> {
+    HashMap::from([
+        ("current_option".to_string(), json!(current_option)),
+        ("options".to_string(), json!(options)),
+    ])
+}
+
+fn light_attrs(current_value: i32, max: Option<i32>) -> HashMap<String, Value> {
+    HashMap::from([
+        (
+            "state".to_string(),
+            json!(if current_value > 0 { "ON" } else { "OFF" }),
+        ),
+        (
+            "brightness".to_string(),
+            json!(uc_brightness_from_device(current_value, max)),
+        ),
+    ])
+}
+
+fn power_option_list(response: &PowerOptionsResponse) -> Vec<NamedOption> {
+    response
+        .data
+        .iter()
+        .map(|option| NamedOption {
+            label: option.name.clone(),
+            value: option.tag.clone(),
+        })
+        .collect()
+}
+
+fn mode_titles(response: &DisplayModeListResponse) -> Vec<String> {
+    response.data.iter().map(|mode| mode.title.clone()).collect()
+}
+
+fn current_mode_title(response: &DisplayModeListResponse) -> Option<String> {
+    let index = usize::try_from(response.current_index?).ok()?;
+    response.data.get(index).map(|mode| mode.title.clone())
+}
+
+fn identity_from_model(model: &GetModelResponse) -> DeviceIdentity {
+    DeviceIdentity {
+        model: Some(model.model.clone()),
+        firmware: Some(model.firmware.clone()),
+        ip: Some(model.ip.clone()),
+        net_mac: Some(model.net_mac.clone()),
+        able_remote_boot: model.able_remote_boot,
+    }
+}
+
+fn identity_updates(model: &GetModelResponse) -> Vec<EntityUpdate> {
+    vec![
+        EntityUpdate {
+            entity_kind: "model_sensor",
+            entity_type: "sensor",
+            attributes: sensor_attrs(model.model.clone()),
+        },
+        EntityUpdate {
+            entity_kind: "firmware_sensor",
+            entity_type: "sensor",
+            attributes: sensor_attrs(model.firmware.clone()),
+        },
+        EntityUpdate {
+            entity_kind: "network_address_sensor",
+            entity_type: "sensor",
+            attributes: sensor_attrs(model.ip.clone()),
+        },
+        EntityUpdate {
+            entity_kind: "mac_sensor",
+            entity_type: "sensor",
+            attributes: sensor_attrs(model.net_mac.clone()),
+        },
+        EntityUpdate {
+            entity_kind: "remote_boot_sensor",
+            entity_type: "sensor",
+            attributes: sensor_attrs(if model.able_remote_boot.unwrap_or(false) {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
+        },
+    ]
+}
+
+fn sensor_attrs(value: String) -> HashMap<String, Value> {
+    HashMap::from([("value".to_string(), json!(value))])
 }
 
 #[allow(dead_code)]
@@ -460,6 +726,242 @@ fn resolve_input_tag(routing: &InputOutputListResponse, source: &str) -> Option<
             item.name.eq_ignore_ascii_case(source) || item.tag.eq_ignore_ascii_case(source)
         })
         .map(|item| item.tag.clone())
+}
+
+fn resolve_output_tag(routing: &InputOutputListResponse, output: &str) -> Option<String> {
+    routing
+        .output_data
+        .iter()
+        .filter(|item| item.enable || current_output_name(routing).as_deref() == Some(item.name.as_str()))
+        .find(|item| item.name.eq_ignore_ascii_case(output) || item.tag.eq_ignore_ascii_case(output))
+        .map(|item| item.tag.clone())
+}
+
+fn resolve_mode_index(response: &DisplayModeListResponse, mode: &str) -> Option<i32> {
+    response
+        .data
+        .iter()
+        .find(|entry| {
+            entry.title.eq_ignore_ascii_case(mode)
+                || entry
+                    .tag
+                    .as_deref()
+                    .is_some_and(|tag| tag.eq_ignore_ascii_case(mode))
+        })
+        .and_then(|entry| entry.index)
+}
+
+fn apply_selection_command(
+    options: &[String],
+    current: Option<String>,
+    command: &SelectionCommand,
+) -> Option<String> {
+    match command {
+        SelectionCommand::Option(value) => options
+            .iter()
+            .find(|option| option.eq_ignore_ascii_case(value))
+            .cloned(),
+        SelectionCommand::First => options.first().cloned(),
+        SelectionCommand::Last => options.last().cloned(),
+        SelectionCommand::Next => {
+            let current = current?;
+            let index = options
+                .iter()
+                .position(|option| option.eq_ignore_ascii_case(&current))?;
+            options.get((index + 1).min(options.len().saturating_sub(1))).cloned()
+        }
+        SelectionCommand::Previous => {
+            let current = current?;
+            let index = options
+                .iter()
+                .position(|option| option.eq_ignore_ascii_case(&current))?;
+            options.get(index.saturating_sub(1)).cloned()
+        }
+    }
+}
+
+fn optional_domain<T>(
+    result: Result<T, EversoloIntegrationError>,
+    validate: impl FnOnce(&T) -> Result<(), EversoloIntegrationError>,
+    first_error: &mut Option<EversoloIntegrationError>,
+) -> Option<T> {
+    match result {
+        Ok(value) => match validate(&value) {
+            Ok(()) => Some(value),
+            Err(error) => {
+                if first_error.is_none() {
+                    *first_error = Some(error);
+                }
+                None
+            }
+        },
+        Err(error) => {
+            if first_error.is_none() {
+                *first_error = Some(error);
+            }
+            None
+        }
+    }
+}
+
+fn uc_brightness_from_device(current_value: i32, max: Option<i32>) -> i32 {
+    let max = max.unwrap_or(255).max(1);
+    ((current_value.clamp(0, max) as f64 / f64::from(max)) * 255.0).round() as i32
+}
+
+fn device_brightness_from_uc(level: u8, max: i32) -> i32 {
+    ((f64::from(level) / 255.0) * f64::from(max.max(1))).round() as i32
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrightnessTarget {
+    Screen,
+    Knob,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayModeTarget {
+    Vu,
+    Spectrum,
+}
+
+async fn select_input(
+    config: &DeviceConfig,
+    selection: SelectionCommand,
+    timeout: Duration,
+) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+    let client = build_client(config)?;
+    let routing = run_with_timeout(timeout, client.get_inputs_outputs()).await?;
+    ensure_status(routing.status)?;
+
+    let selected = apply_selection_command(
+        &available_source_names(&routing),
+        current_input_name(&routing),
+        &selection,
+    )
+    .ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter("unable to resolve input selection".to_string())
+    })?;
+    let tag = resolve_input_tag(&routing, &selected).ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter(format!(
+            "unknown input source \"{selected}\""
+        ))
+    })?;
+    let resp = run_with_timeout(timeout, client.set_input(&tag)).await?;
+    ensure_status(resp.status)?;
+    snapshot_updates(config, timeout).await
+}
+
+async fn select_output(
+    config: &DeviceConfig,
+    selection: SelectionCommand,
+    timeout: Duration,
+) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+    let client = build_client(config)?;
+    let routing = run_with_timeout(timeout, client.get_inputs_outputs()).await?;
+    ensure_status(routing.status)?;
+
+    let selected = apply_selection_command(
+        &available_output_names(&routing),
+        current_output_name(&routing),
+        &selection,
+    )
+    .ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter("unable to resolve output selection".to_string())
+    })?;
+    let tag = resolve_output_tag(&routing, &selected).ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter(format!(
+            "unknown output route \"{selected}\""
+        ))
+    })?;
+    let resp = run_with_timeout(timeout, client.set_output(&tag)).await?;
+    ensure_status(resp.status)?;
+    snapshot_updates(config, timeout).await
+}
+
+async fn select_display_mode(
+    config: &DeviceConfig,
+    selection: SelectionCommand,
+    target: DisplayModeTarget,
+    timeout: Duration,
+) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+    let client = build_client(config)?;
+    let response = match target {
+        DisplayModeTarget::Vu => run_with_timeout(timeout, client.get_vu_modes()).await?,
+        DisplayModeTarget::Spectrum => run_with_timeout(timeout, client.get_spectrum_modes()).await?,
+    };
+    ensure_status(response.status)?;
+
+    let selected = apply_selection_command(
+        &mode_titles(&response),
+        current_mode_title(&response),
+        &selection,
+    )
+    .ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter("unable to resolve display mode".to_string())
+    })?;
+    let index = resolve_mode_index(&response, &selected).ok_or_else(|| {
+        EversoloIntegrationError::InvalidParameter(format!(
+            "unknown display mode \"{selected}\""
+        ))
+    })?;
+    let resp = match target {
+        DisplayModeTarget::Vu => run_with_timeout(timeout, client.set_vu_mode(i64::from(index))).await?,
+        DisplayModeTarget::Spectrum => {
+            run_with_timeout(timeout, client.set_spectrum_mode(i64::from(index))).await?
+        }
+    };
+    ensure_status(resp.status)?;
+    snapshot_updates(config, timeout).await
+}
+
+async fn set_brightness(
+    config: &DeviceConfig,
+    target: BrightnessTarget,
+    command: BrightnessCommand,
+    timeout: Duration,
+) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
+    let client = build_client(config)?;
+    let response = match target {
+        BrightnessTarget::Screen => run_with_timeout(timeout, client.get_screen_brightness()).await?,
+        BrightnessTarget::Knob => run_with_timeout(timeout, client.get_knob_brightness()).await?,
+    };
+    ensure_optional_status(response.status)?;
+
+    let fallback_max = match target {
+        BrightnessTarget::Screen => config.screen_brightness_max,
+        BrightnessTarget::Knob => config.knob_brightness_max,
+    };
+    let max = response.max.or(fallback_max).unwrap_or(255).max(1);
+    let target_index = match command {
+        BrightnessCommand::On(Some(level)) => device_brightness_from_uc(level, max),
+        BrightnessCommand::On(None) => {
+            if response.current_value > 0 {
+                response.current_value
+            } else {
+                max
+            }
+        }
+        BrightnessCommand::Off => 0,
+        BrightnessCommand::Toggle => {
+            if response.current_value > 0 {
+                0
+            } else {
+                max
+            }
+        }
+    };
+
+    let resp = match target {
+        BrightnessTarget::Screen => {
+            run_with_timeout(timeout, client.set_screen_brightness(i64::from(target_index))).await?
+        }
+        BrightnessTarget::Knob => {
+            run_with_timeout(timeout, client.set_knob_brightness(i64::from(target_index))).await?
+        }
+    };
+    ensure_status(resp.status)?;
+    snapshot_updates(config, timeout).await
 }
 
 #[cfg(test)]
@@ -524,6 +1026,15 @@ mod tests {
         }
     }
 
+    fn update_attrs<'a>(snapshot: &'a DeviceSnapshot, kind: &str) -> &'a HashMap<String, Value> {
+        &snapshot
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == kind)
+            .unwrap_or_else(|| panic!("missing update for {kind}"))
+            .attributes
+    }
+
     #[test]
     fn test_playback_state_label() {
         assert_eq!(
@@ -534,7 +1045,7 @@ mod tests {
             playback_state_label(2, EffectivePowerState::Active),
             "PAUSED"
         );
-        assert_eq!(playback_state_label(0, EffectivePowerState::Active), "ON");
+        assert_eq!(playback_state_label(0, EffectivePowerState::Active), "STOPPED");
         assert_eq!(
             playback_state_label(0, EffectivePowerState::Standby),
             "STANDBY"
@@ -582,6 +1093,8 @@ mod tests {
             mac_address: None,
             wol_broadcast: "255.255.255.255".to_string(),
             wol_port: 9517,
+            screen_brightness_max: None,
+            knob_brightness_max: None,
         })
     }
 
@@ -629,9 +1142,9 @@ mod tests {
             .await
             .expect("real Eversolo snapshot fetch should succeed");
 
-        assert!(snapshot.power_attributes.contains_key("state"));
-        assert!(snapshot.player_attributes.contains_key("state"));
-        assert!(snapshot.player_attributes.contains_key("source"));
+        assert!(update_attrs(&snapshot, "power").contains_key("state"));
+        assert!(update_attrs(&snapshot, "player").contains_key("state"));
+        assert!(update_attrs(&snapshot, "player").contains_key("source"));
         assert!(snapshot.catalog.volume_steps >= 2);
     }
 
@@ -645,7 +1158,11 @@ mod tests {
             .await
             .expect("initial Eversolo snapshot should succeed");
         let current = before
-            .player_attributes
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == "player")
+            .expect("player update should be present")
+            .attributes
             .get("volume")
             .and_then(Value::as_i64)
             .expect("volume should be present") as i32;
@@ -664,7 +1181,11 @@ mod tests {
             .await
             .expect("post-volume snapshot should succeed");
         let observed = changed
-            .player_attributes
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == "player")
+            .expect("player update should be present")
+            .attributes
             .get("volume")
             .and_then(Value::as_i64)
             .expect("volume should be present") as i32;
@@ -685,7 +1206,11 @@ mod tests {
             .await
             .expect("initial Eversolo snapshot should succeed");
         if before
-            .player_attributes
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == "player")
+            .expect("player update should be present")
+            .attributes
             .get("state")
             .and_then(Value::as_str)
             == Some("OFF")
@@ -695,11 +1220,15 @@ mod tests {
         }
 
         let Some(current_source) = before
-            .player_attributes
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == "player")
+            .expect("player update should be present")
+            .attributes
             .get("source")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(str::to_string)
+            .map(ToOwned::to_owned)
         else {
             eprintln!(
                 "Skipping Eversolo destructive source test because the current source is unknown"
@@ -731,7 +1260,11 @@ mod tests {
             .await
             .expect("post-source snapshot should succeed");
         let observed = changed
-            .player_attributes
+            .updates
+            .iter()
+            .find(|update| update.entity_kind == "player")
+            .expect("player update should be present")
+            .attributes
             .get("source")
             .and_then(Value::as_str)
             .expect("source should be present");
@@ -750,7 +1283,7 @@ mod tests {
     fn test_player_attrs() {
         let attrs = player_attrs(
             &sample_state(),
-            &sample_routing(),
+            Some(&sample_routing()),
             EffectivePowerState::Active,
         );
         assert_eq!(attrs["state"], "PLAYING");
@@ -764,7 +1297,7 @@ mod tests {
         let mut state = sample_state();
         state.state = 0;
 
-        let attrs = player_attrs(&state, &sample_routing(), EffectivePowerState::Standby);
+        let attrs = player_attrs(&state, Some(&sample_routing()), EffectivePowerState::Standby);
         assert_eq!(attrs["state"], "STANDBY");
     }
 

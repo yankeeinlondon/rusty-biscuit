@@ -553,7 +553,15 @@ mod tests {
             .unwrap();
 
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
-        assert_eq!(entities.len(), 2);
+        assert_eq!(entities.len(), 10);
+        assert!(entities.iter().any(|entity| entity["entity_id"] == "eversolo.living.power"));
+        assert!(entities.iter().any(|entity| entity["entity_id"] == "eversolo.living.player"));
+        assert!(entities
+            .iter()
+            .any(|entity| entity["entity_id"] == "eversolo.living.power_on_button"));
+        assert!(entities
+            .iter()
+            .any(|entity| entity["entity_id"] == "eversolo.living.input_select"));
     }
 
     #[tokio::test]
@@ -583,7 +591,15 @@ mod tests {
 
         assert_eq!(resp["msg"], "entity_states");
         let states = resp["msg_data"].as_array().unwrap();
-        assert_eq!(states.len(), 2);
+        assert_eq!(states.len(), 8);
+        assert!(states.iter().any(|state| state["entity_id"] == "eversolo.living.power"));
+        assert!(states.iter().any(|state| state["entity_id"] == "eversolo.living.player"));
+        assert!(states
+            .iter()
+            .any(|state| state["entity_id"] == "eversolo.living.screen_brightness"));
+        assert!(states
+            .iter()
+            .any(|state| state["entity_id"] == "eversolo.living.vu_mode_select"));
     }
 
     #[tokio::test]

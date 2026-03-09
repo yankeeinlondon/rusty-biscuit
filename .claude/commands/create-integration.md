@@ -126,6 +126,8 @@ When creating the new integration, explicitly account for these lessons from the
    - inspect inbound UC frames by `kind` before deserializing them as request envelopes, because setup flows can send event messages such as `abort_driver_setup` without a request `id`
    - if the integration is discoverable over mDNS but the configurator shows `Resource not found`, inspect `get_driver_metadata` and its setup schema before chasing discovery transport issues
    - if the integration tile shows a raw driver ID or `Unknown developer`, inspect the mDNS TXT record first and publish UC-compatible `name`, `ver`, and `developer` values
+   - when mapping entities, use the documented UC command/state semantics instead of local aliases:
+     `button` commands are `push`, `select` state is `current_option` plus `options`, and media-player volume uses `cmd_id: volume`
 
 ---
 

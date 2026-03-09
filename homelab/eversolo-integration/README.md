@@ -8,6 +8,11 @@ This is a standalone WebSocket server that speaks the [Unfolded Circle Integrati
 
 - a user-facing power switch where `off` enters effective standby and `on` wakes standby or falls back to Wake-on-LAN when the device is truly off
 - a media player entity for playback, volume, mute, metadata, input selection, and effective standby detection
+- discrete power buttons plus device power-action buttons
+- routing selectors for input and output
+- brightness controls for the screen and knob LEDs
+- VU and spectrum mode selectors
+- read-only identity sensors for model, firmware, network address, MAC, and remote-boot support
 
 The integration also answers the configurator metadata flow (`get_driver_version` and `get_driver_metadata`) including `setup_data_schema`, so discovery or manual registration can lead directly into a Remote-driven setup flow. The schema follows the UC field contract (`dropdown` with `items`, item `id`, and selected `value`) and degrades to host/name entry when discovery has not found any candidates yet.
 
@@ -15,8 +20,22 @@ The integration also answers the configurator metadata flow (`get_driver_version
 
 | Entity ID | Type | Features | Commands |
 |-----------|------|----------|----------|
-| `eversolo.{name}.power` | switch | on_off | on, off, toggle |
-| `eversolo.{name}.player` | media_player | volume, volume_up_down, mute, unmute, mute_toggle, play_pause, next, previous, select_source, media_duration, media_position, media_title, media_artist, media_album | volume_set, volume_up, volume_down, mute, unmute, mute_toggle, play_pause, next, previous, select_source |
+| `eversolo.{name}.power` | switch | on_off, toggle | on, off, toggle |
+| `eversolo.{name}.player` | media_player | volume, volume_up_down, mute, unmute, mute_toggle, play_pause, next, previous, seek, select_source, media_duration, media_position, media_title, media_artist, media_album | volume, volume_up, volume_down, mute, unmute, mute_toggle, play_pause, next, previous, seek, select_source |
+| `eversolo.{name}.power_on_button` | button | press | push |
+| `eversolo.{name}.power_off_button` | button | press | push |
+| `eversolo.{name}.power_action_{tag}` | button | press | push |
+| `eversolo.{name}.input_select` | select | *(none)* | select_option, select_first, select_last, select_next, select_previous |
+| `eversolo.{name}.output_select` | select | *(none)* | select_option, select_first, select_last, select_next, select_previous |
+| `eversolo.{name}.screen_brightness` | light | on_off, toggle, dim | on, off, toggle |
+| `eversolo.{name}.knob_brightness` | light | on_off, toggle, dim | on, off, toggle |
+| `eversolo.{name}.vu_mode_select` | select | *(none)* | select_option, select_first, select_last, select_next, select_previous |
+| `eversolo.{name}.spectrum_mode_select` | select | *(none)* | select_option, select_first, select_last, select_next, select_previous |
+| `eversolo.{name}.model_sensor` | sensor | *(none)* | *(read-only)* |
+| `eversolo.{name}.firmware_sensor` | sensor | *(none)* | *(read-only)* |
+| `eversolo.{name}.network_address_sensor` | sensor | *(none)* | *(read-only)* |
+| `eversolo.{name}.mac_sensor` | sensor | *(none)* | *(read-only)* |
+| `eversolo.{name}.remote_boot_sensor` | sensor | *(none)* | *(read-only)* |
 
 The `{name}` comes from the configured device instance. `--device-name` is only a seed default and defaults to `streamer`.
 
@@ -26,6 +45,9 @@ The `{name}` comes from the configured device instance. `--device-name` is only 
 |--------|------------|
 | `power` | `state` = `ON`, `OFF`, or `UNKNOWN` |
 | `player` | `state`, `volume`, `muted`, `source`, `media_position`, `media_duration`, `media_title`, `media_artist`, `media_album` |
+| `input_select`, `output_select`, `vu_mode_select`, `spectrum_mode_select` | `current_option`, `options` |
+| `screen_brightness`, `knob_brightness` | `state`, `brightness` |
+| `*_sensor` | `value` |
 
 The power switch is inferred as:
 
@@ -36,8 +58,8 @@ The player state is inferred as:
 
 - `PLAYING` while media is actively playing
 - `PAUSED` while paused with the display still on
+- `STOPPED` when the device is reachable, not actively playing, and not in effective standby
 - `STANDBY` when media is not actively playing and the front-panel display is off
-- `ON` for other reachable idle states
 - `OFF` when the device is unreachable
 
 ### Power Commands
@@ -49,6 +71,14 @@ The player state is inferred as:
 ### Source Selection
 
 The media player's `select_source` command uses the current Eversolo input list returned by `getInputAndOutputList`. The integration advertises the human-readable input names in `source_list` and resolves the selected name back to the device tag at command time.
+
+### Additional Controls
+
+- Button entities use the UC `push` command, not `press`.
+- The media-player volume command uses the UC `volume` command id, not `volume_set`.
+- UC `select` entities publish `current_option` plus `options` in entity state and accept `select_option` / `select_first` / `select_last` / `select_next` / `select_previous`.
+- Brightness is exposed as UC `light` entities so the Remote can present slider-style dimming controls instead of an oversized numeric selector.
+- `media_position` and `media_duration` are reported in UC seconds even though the raw Eversolo API uses milliseconds; the `seek` command likewise accepts UC seconds and is translated back to milliseconds for the device.
 
 ## Architecture
 
@@ -63,7 +93,7 @@ sequenceDiagram
     R->>I: get_available_entities
     I->>E: GET /ZidooMusicControl/v2/getState
     I->>E: GET /ZidooMusicControl/v2/getInputAndOutputList
-    I-->>R: power switch + media player
+    I-->>R: power, player, routing, brightness, mode, and metadata entities
 
     R->>I: entity_command (power/off)
     I->>E: GET /ZidooMusicControl/v2/playOrPause (if currently playing)
@@ -268,5 +298,5 @@ This means front-panel changes, mobile-app commands, or other API clients can be
 - The `power` switch is intentionally user-facing rather than a strict true-power indicator. `OFF` means either effective standby or unreachable/truly off; the `player` entity carries the finer `STANDBY` vs `OFF` distinction.
 - A network outage is still observationally indistinguishable from true power-off. On poll failure the integration marks the device disconnected and applies a stable offline schema with `OFF` power/player state plus cleared playback metadata.
 - Power on from true off still depends on Wake-on-LAN. If `--mac` is not configured, `power on` and `power toggle` from an unreachable state return a UC `400` result.
-- Output switching, screen controls, brightness, and VU/spectrum display modes are intentionally not exposed in this first pass. The protocol research shows those endpoints exist, but this repo does not yet have an established UC entity pattern for them.
+- Output routing, brightness, and VU/spectrum modes are now exposed directly through UC entities instead of being left behind in the raw Eversolo HTTP API.
 - Installed/local-mode packaging is not included. This package currently targets external deployment only.

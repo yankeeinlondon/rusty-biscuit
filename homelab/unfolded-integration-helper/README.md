@@ -101,6 +101,8 @@ The point of this crate is not abstraction for its own sake. It exists to keep t
 - device state persists across restarts via `PersistentRegistry`
 - a single integration process manages multiple physical devices via `DeviceManager`
 - setup schemas must follow the documented UC field contract such as `dropdown` plus `items`, item `id`, and selected `value`
+- entity semantics must follow the documented UC command/state model:
+  `button` uses `push`, `select` publishes `current_option` plus `options`, and media-player volume uses `volume` rather than ad hoc command ids like `volume_set`
 - initial setup metadata must remain valid even when discovery returns zero candidates, which means omitting device-selection controls that cannot yet be populated
 - long-running setup operations must acknowledge `setup_driver` / `set_driver_user_data` first, then send `driver_setup_change` progress or follow-up input events; delaying the ack can make the configurator time out before it renders the next screen
 - inbound UC frames must be classified by `kind` before enforcing request-only fields such as top-level `id`, because setup flows can emit event messages like `abort_driver_setup`
