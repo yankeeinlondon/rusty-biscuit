@@ -1888,7 +1888,6 @@ fn create_package(
     let package_area = make_package_area(&relative);
     let name = resolve_package_name(path, root);
     let ecosystem = detect_package_ecosystem(path);
-    let (primary_language, languages) = detect_package_languages(path, &[]);
     let package_managers = detect_package_managers(path);
     let version = resolve_package_version(path, root);
     let files = detect_package_files(path, root);
@@ -1985,8 +1984,8 @@ fn create_package(
         ecosystem,
         discovery_sources: vec![discovery_source],
         nested_packages: Vec::new(),
-        primary_language,
-        languages,
+        primary_language: None,
+        languages: Vec::new(),
         configuration: files.configuration,
         documentation: files.documentation,
         editor_config: files.editor_config,
