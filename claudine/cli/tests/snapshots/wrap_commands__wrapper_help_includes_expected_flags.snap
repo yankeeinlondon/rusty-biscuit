@@ -22,4 +22,6 @@ Options:
   -q, --quiet                        Suppress the Claudine preflight summary banner
       --sandbox                      Enable provider-specific sandboxing
       --repo                         Use only repo-scoped skills, commands, and agents via a shadow HOME
+      --mcp                          Enable Claudine-managed MCP session composition
+      --use <ID>                     Activate specific MCP servers by ID or alias (comma-separated)
   -h, --help                         Print help

@@ -23,6 +23,7 @@ Commands:
   providers    Show provider capability matrix (skill/slash/agent/hooks)
   logs         Query and sync Claudine JSONL logs through the reporting index
   uninstall    Remove Claudine hooks from all agents
+  mcp          Manage MCP (Model Context Protocol) servers
   claude       Wrap Claude Code with Claudine preflight/env handling
   codex        Wrap Codex CLI with Claudine preflight/env handling
   gemini       Wrap Gemini CLI with Claudine preflight/env handling
