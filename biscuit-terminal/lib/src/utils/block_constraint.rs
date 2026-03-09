@@ -267,6 +267,7 @@ fn find_break_position(
     let mut idx = 0usize;
     let bytes = content.as_bytes();
     let mut last_break: Option<(usize, usize, bool)> = None;
+    let mut early_break: Option<(usize, usize, bool)> = None;
 
     while idx < content.len() {
         if bytes[idx] == 0x1b {
@@ -291,14 +292,18 @@ fn find_break_position(
         }
 
         visible = visible.saturating_add(ch_width);
-        if visible >= start_search && (ch.is_whitespace() || ch == '-') {
-            last_break = Some((idx, ch_len, ch.is_whitespace()));
+        if ch.is_whitespace() || ch == '-' {
+            if visible >= start_search {
+                last_break = Some((idx, ch_len, ch.is_whitespace()));
+            } else {
+                early_break = Some((idx, ch_len, ch.is_whitespace()));
+            }
         }
 
         idx += ch_len;
     }
 
-    last_break
+    last_break.or(early_break)
 }
 
 fn find_bespoke_break_position(
@@ -312,6 +317,7 @@ fn find_bespoke_break_position(
     let mut idx = 0usize;
     let bytes = content.as_bytes();
     let mut last_break: Option<(usize, usize, bool)> = None;
+    let mut early_break: Option<(usize, usize, bool)> = None;
 
     while idx < content.len() {
         if bytes[idx] == 0x1b {
@@ -336,14 +342,18 @@ fn find_bespoke_break_position(
         }
 
         visible = visible.saturating_add(ch_width);
-        if visible >= start_search && (ch.is_whitespace() || break_chars.contains(&ch)) {
-            last_break = Some((idx, ch_len, ch.is_whitespace()));
+        if ch.is_whitespace() || break_chars.contains(&ch) {
+            if visible >= start_search {
+                last_break = Some((idx, ch_len, ch.is_whitespace()));
+            } else {
+                early_break = Some((idx, ch_len, ch.is_whitespace()));
+            }
         }
 
         idx += ch_len;
     }
 
-    last_break
+    last_break.or(early_break)
 }
 
 pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<String> {
@@ -800,6 +810,63 @@ mod tests {
                 visible_width(line),
             );
         }
+    }
+
+    #[test]
+    fn wrap_lines_prefers_word_break_over_hyphenation() {
+        // When the last word is longer than search_offset, the algorithm should
+        // fall back to an earlier break point rather than hyphenating mid-word.
+        // "hello immediate-mode rendering" at width=25 with search_offset=8:
+        // search zone starts at col 17. The space before "immediate-mode" is at
+        // col 6 (before the zone), but should still be used as a fallback.
+        let lines = wrap_lines(
+            vec!["hello immediate-mode rendering".to_string()],
+            &WordWrap::WrapProse(Some(8), None),
+            25,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "hello immediate-mode".to_string(),
+                "rendering".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn wrap_bespoke_prefers_word_break_over_hyphenation() {
+        // Same test for BespokeProse: should use early break rather than hyphenating.
+        let lines = wrap_lines(
+            vec!["hello immediate-mode rendering".to_string()],
+            &WordWrap::BespokeProse(Some(8), vec![' '], None),
+            25,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "hello immediate-mode".to_string(),
+                "rendering".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn wrap_bespoke_breaks_on_hyphen_and_underscore() {
+        // With '-' and '_' as break chars, long hyphenated/underscored words
+        // break at those characters instead of being force-hyphenated.
+        let lines = wrap_lines(
+            vec!["cross-platform terminal applications".to_string()],
+            &WordWrap::BespokeProse(Some(8), vec![' ', '-', '_'], None),
+            20,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "cross-platform".to_string(),
+                "terminal".to_string(),
+                "applications".to_string(),
+            ]
+        );
     }
 
     #[test]
