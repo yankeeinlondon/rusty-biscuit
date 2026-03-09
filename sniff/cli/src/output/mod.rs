@@ -17,7 +17,7 @@ use std::path::Path;
 
 use sniff::SniffResult;
 
-use crate::args::DocsFilter;
+use crate::args::{DocsFilter, FilesFilter};
 
 pub use filesystem::{print_git_section, print_hash_section};
 pub use programs::{print_programs_json, print_programs_markdown};
@@ -28,8 +28,8 @@ pub use topics::print_topics_table;
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
     print_dirty_package_areas, print_dirty_packages, print_docs_section, print_filesystem_section,
-    print_language_section, print_repo_deps_text, print_repo_deps_visual, print_repo_package,
-    print_repo_package_area, print_repo_packages, print_repo_section,
+    print_files_section, print_language_section, print_repo_deps_text, print_repo_deps_visual,
+    print_repo_package, print_repo_package_area, print_repo_packages, print_repo_section,
 };
 pub(crate) use hardware::{
     print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
@@ -72,6 +72,8 @@ pub enum OutputFilter {
     Repo,
     /// Show only language detection (filesystem subsection, flattened in JSON)
     Language,
+    /// Show only broad file associations (filesystem subsection, flattened in JSON)
+    Files,
     /// Show only markdown document metadata (filesystem subsection, flattened in JSON)
     Docs,
     /// Show only programs info (installed programs detection)
@@ -244,6 +246,7 @@ pub fn print_text(
     filter: OutputFilter,
     history_count: usize,
     docs_filter: &DocsFilter,
+    files_filter: &FilesFilter,
     deps: bool,
     packages: bool,
     package: bool,
@@ -377,6 +380,13 @@ pub fn print_text(
                 print_language_section(langs, verbose);
             }
         }
+        OutputFilter::Files => {
+            if let Some(ref filesystem) = result.filesystem
+                && let Some(ref files) = filesystem.files
+            {
+                print_files_section(files, verbose, files_filter);
+            }
+        }
         OutputFilter::Docs => {
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref docs) = filesystem.docs
@@ -413,6 +423,7 @@ fn apply_filter_to_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
+    files_filter: &FilesFilter,
 ) -> serde_json::Value {
     use serde_json::{Value, json};
 
@@ -517,6 +528,16 @@ fn apply_filter_to_json(
                 json!({})
             }
         }
+        OutputFilter::Files => {
+            if let Some(ref fs) = result.filesystem
+                && let Some(ref files) = fs.files
+            {
+                let filtered = filesystem::filter_file_breakdown(files, files_filter);
+                serde_json::to_value(&filtered).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
         OutputFilter::Docs => {
             // Flatten: return docs array at top level
             if let Some(ref fs) = result.filesystem
@@ -548,8 +569,9 @@ pub fn print_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
+    files_filter: &FilesFilter,
 ) -> serde_json::Result<()> {
-    let filtered_json = apply_filter_to_json(result, filter, docs_filter);
+    let filtered_json = apply_filter_to_json(result, filter, docs_filter, files_filter);
     println!("{}", serde_json::to_string_pretty(&filtered_json)?);
     Ok(())
 }

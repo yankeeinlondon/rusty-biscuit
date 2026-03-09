@@ -1,0 +1,234 @@
+use super::model::{
+    ClassificationSource, FileAssociation, FileAssociationBreakdown, FileAssociationStats,
+    FileInventory, FrameworkKind, FrameworkStats, LanguageSummary, ProgrammingLanguage,
+    ProgrammingLanguageStats,
+};
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
+
+const DIRECT_LANGUAGE_WEIGHT: f64 = 1.0;
+const EXPLICIT_FRAMEWORK_WEIGHT: f64 = 1.0;
+const INFERRED_FRAMEWORK_WEIGHT: f64 = 0.75;
+
+#[derive(Default)]
+struct LanguageAccumulator {
+    direct_files: Vec<PathBuf>,
+    framework_files: Vec<PathBuf>,
+    explicit_framework_count: usize,
+    inferred_framework_count: usize,
+}
+
+#[derive(Default)]
+struct FrameworkAccumulator {
+    files: Vec<PathBuf>,
+    explicit_file_count: usize,
+    inferred_file_count: usize,
+    related_languages: BTreeSet<ProgrammingLanguage>,
+}
+
+pub fn summarize_file_inventory(inventory: &FileInventory) -> FileAssociationBreakdown {
+    FileAssociationBreakdown {
+        total_files: inventory.total_files_scanned,
+        by_association: summarize_associations(inventory),
+        by_language: summarize_languages(inventory).languages,
+        by_framework: summarize_languages(inventory).frameworks,
+    }
+}
+
+pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
+    let mut language_map: HashMap<ProgrammingLanguage, LanguageAccumulator> = HashMap::new();
+    let mut framework_map: HashMap<FrameworkKind, FrameworkAccumulator> = HashMap::new();
+
+    for classification in &inventory.classifications {
+        if classification.association == FileAssociation::ProgrammingLanguage
+            && let Some(language) = classification.language
+        {
+            language_map
+                .entry(language)
+                .or_default()
+                .direct_files
+                .push(classification.path.clone());
+        }
+
+        if classification.association == FileAssociation::FrameworkFile
+            && let Some(framework) = classification.framework
+        {
+            let framework_acc = framework_map.entry(framework).or_default();
+            framework_acc.files.push(classification.path.clone());
+
+            let explicit = classification.source == ClassificationSource::EmbeddedLanguageHint;
+            if explicit {
+                framework_acc.explicit_file_count += 1;
+            } else {
+                framework_acc.inferred_file_count += 1;
+            }
+
+            for language in &classification.related_languages {
+                framework_acc.related_languages.insert(*language);
+                let lang_acc = language_map.entry(*language).or_default();
+                lang_acc.framework_files.push(classification.path.clone());
+                if explicit {
+                    lang_acc.explicit_framework_count += 1;
+                } else {
+                    lang_acc.inferred_framework_count += 1;
+                }
+            }
+        }
+    }
+
+    let total_language_files = language_map
+        .values()
+        .map(|entry| entry.direct_files.len() + entry.framework_files.len())
+        .sum();
+
+    let mut languages: Vec<ProgrammingLanguageStats> = language_map
+        .into_iter()
+        .map(|(language, mut entry)| {
+            entry.direct_files.sort();
+            entry.framework_files.sort();
+
+            let direct_file_count = entry.direct_files.len();
+            let framework_file_count = entry.framework_files.len();
+            let total_file_count = direct_file_count + framework_file_count;
+            let signal = direct_file_count as f64 * DIRECT_LANGUAGE_WEIGHT
+                + entry.explicit_framework_count as f64 * EXPLICIT_FRAMEWORK_WEIGHT
+                + entry.inferred_framework_count as f64 * INFERRED_FRAMEWORK_WEIGHT;
+
+            ProgrammingLanguageStats {
+                language,
+                language_type: language.language_type(),
+                direct_file_count,
+                framework_file_count,
+                total_file_count,
+                signal,
+                percentage: if total_language_files > 0 {
+                    (total_file_count as f64 / total_language_files as f64) * 100.0
+                } else {
+                    0.0
+                },
+                direct_files: entry.direct_files,
+                framework_files: entry.framework_files,
+            }
+        })
+        .collect();
+
+    languages.sort_by(|left, right| {
+        right
+            .signal
+            .total_cmp(&left.signal)
+            .then(right.direct_file_count.cmp(&left.direct_file_count))
+            .then(right.framework_file_count.cmp(&left.framework_file_count))
+            .then_with(|| left.language.as_str().cmp(right.language.as_str()))
+    });
+
+    let primary = languages.first().map(|stats| stats.language);
+    let secondary = languages.iter().skip(1).map(|stats| stats.language).collect();
+
+    let mut frameworks: Vec<FrameworkStats> = framework_map
+        .into_iter()
+        .map(|(framework, mut entry)| {
+            entry.files.sort();
+            FrameworkStats {
+                framework,
+                file_count: entry.files.len(),
+                explicit_file_count: entry.explicit_file_count,
+                inferred_file_count: entry.inferred_file_count,
+                related_languages: entry.related_languages.into_iter().collect(),
+                files: entry.files,
+            }
+        })
+        .collect();
+
+    frameworks.sort_by(|left, right| {
+        right
+            .file_count
+            .cmp(&left.file_count)
+            .then_with(|| left.framework.as_str().cmp(right.framework.as_str()))
+    });
+
+    LanguageSummary {
+        primary,
+        secondary,
+        total_files_scanned: inventory.total_files_scanned,
+        total_language_files,
+        languages,
+        frameworks,
+    }
+}
+
+fn summarize_associations(inventory: &FileInventory) -> Vec<FileAssociationStats> {
+    let mut associations: HashMap<FileAssociation, Vec<PathBuf>> = HashMap::new();
+
+    for classification in &inventory.classifications {
+        associations
+            .entry(classification.association)
+            .or_default()
+            .push(classification.path.clone());
+    }
+
+    let mut stats: Vec<FileAssociationStats> = associations
+        .into_iter()
+        .map(|(association, mut files)| {
+            files.sort();
+            let file_count = files.len();
+            FileAssociationStats {
+                association,
+                file_count,
+                percentage: if inventory.total_files_scanned > 0 {
+                    (file_count as f64 / inventory.total_files_scanned as f64) * 100.0
+                } else {
+                    0.0
+                },
+                files,
+            }
+        })
+        .collect();
+
+    stats.sort_by(|left, right| {
+        right
+            .file_count
+            .cmp(&left.file_count)
+            .then_with(|| left.association.as_str().cmp(right.association.as_str()))
+    });
+    stats
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filesystem::file_types::classify::scan_file_inventory;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn language_summary_ignores_configuration_and_docs() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("lib.rs"), "pub fn hi() {}").unwrap();
+        fs::write(dir.path().join("README.md"), "# docs").unwrap();
+        fs::write(dir.path().join("config.toml"), "name = 'x'").unwrap();
+
+        let inventory = scan_file_inventory(dir.path()).unwrap();
+        let summary = summarize_languages(&inventory);
+
+        assert_eq!(summary.primary, Some(ProgrammingLanguage::Rust));
+        assert_eq!(summary.total_language_files, 1);
+        assert_eq!(summary.languages.len(), 1);
+    }
+
+    #[test]
+    fn framework_default_language_counts_toward_js() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Component.vue"),
+            "<template><div>Hello</div></template>",
+        )
+        .unwrap();
+
+        let inventory = scan_file_inventory(dir.path()).unwrap();
+        let summary = summarize_languages(&inventory);
+
+        assert_eq!(summary.primary, Some(ProgrammingLanguage::JavaScript));
+        assert_eq!(summary.languages[0].framework_file_count, 1);
+        assert_eq!(summary.frameworks[0].framework, FrameworkKind::Vue);
+    }
+}

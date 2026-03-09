@@ -48,6 +48,8 @@ Commands:
     sniff repo --deps biscuit        Filtered text dependency list
     sniff repo --packages biscuit    Filtered CSV package names
     sniff language                   Show only language detection results
+    sniff files                      Show broad file associations
+    sniff files --association image  Show only image file statistics
     sniff docs                       Show markdown documents in the repository
     sniff docs --readme              Show only README.md files
     sniff docs --plan                Show only plan-related documents

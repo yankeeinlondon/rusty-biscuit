@@ -7,7 +7,8 @@ use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 
 use crate::args::{
-    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, ServiceStateArg,
+    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, FilesFilter,
+    ServiceStateArg,
 };
 use crate::output::{self, OutputFilter};
 
@@ -181,7 +182,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::AudioDevices => {
             config = config.skip_os().skip_network().skip_filesystem();
         }
-        OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language | OutputFilter::Docs => {
+        OutputFilter::Git
+        | OutputFilter::Repo
+        | OutputFilter::Language
+        | OutputFilter::Files
+        | OutputFilter::Docs => {
             config = config.skip_os().skip_hardware().skip_network();
         }
         OutputFilter::All => {
@@ -278,6 +283,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .command
         .as_ref()
         .map_or(DocsFilter::default(), |c| c.docs_filter());
+    let files_filter = cli
+        .command
+        .as_ref()
+        .map_or(FilesFilter::default(), |c| c.files_filter());
 
     let deps = cli.command.as_ref().is_some_and(|c| c.deps());
     let packages = cli.command.as_ref().is_some_and(|c| c.packages());
@@ -297,7 +306,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let use_json = cli.command.is_none() || cli.json;
 
     if use_json {
-        output::print_json(&result, output_filter, &docs_filter)?;
+        output::print_json(&result, output_filter, &docs_filter, &files_filter)?;
     } else {
         output::print_text(
             &result,
@@ -305,6 +314,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             output_filter,
             history_count,
             &docs_filter,
+            &files_filter,
             deps,
             packages,
             package,

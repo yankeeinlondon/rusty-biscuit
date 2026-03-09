@@ -8,10 +8,12 @@ use biscuit_terminal::components::mermaid::MermaidRenderer;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
+use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats, FrameworkStats};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
 
+use crate::args::FilesFilter;
 use super::{format_number, relative_path};
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
@@ -1047,7 +1049,22 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
             items.push(format!("<dim>used by:</dim> {}", pkg.used_by.join(", ")));
         }
         if !pkg.languages.is_empty() {
-            items.push(format!("<dim>langs:</dim> {}", pkg.languages.join(", ")));
+            let languages = pkg
+                .languages
+                .iter()
+                .map(|language| language.language.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            items.push(format!("<dim>langs:</dim> {}", languages));
+        }
+        if !pkg.frameworks.is_empty() {
+            let frameworks = pkg
+                .frameworks
+                .iter()
+                .map(|framework| framework.framework.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            items.push(format!("<dim>frameworks:</dim> {}", frameworks));
         }
     }
 
@@ -1377,97 +1394,69 @@ pub fn print_repo_section(
 }
 
 /// Categorize a language name for display styling.
-enum LanguageCategory {
-    /// The project's primary programming language (bold)
-    Primary,
-    /// A programming language that is not the primary (normal weight)
-    Programming,
-    /// Configuration/data formats like TOML, YAML, JSON (dim + italic)
-    Config,
-    /// Executable/shell languages like Shell, Bash, PowerShell (orange + dim)
-    Executable,
-    /// Everything else: markup, docs, etc. (yellow + dim)
-    Other,
-}
-
-const CONFIG_LANGUAGES: &[&str] = &[
-    "TOML", "YAML", "JSON", "JSON5", "JSONL", "JSON with Comments", "XML", "INI",
-    "EditorConfig", "Git Config", "Git Attributes", "Ignore List", "Nix", "Dockerfile",
-    "Makefile", "CMake", "Meson", "Diff", "Markdown",
-];
-
-const EXECUTABLE_LANGUAGES: &[&str] = &[
-    "Shell", "Bash", "Zsh", "Fish", "PowerShell", "Batch",
-];
-
-const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
-    "Markdown", "JSON", "YAML", "TOML", "XML", "HTML", "CSS", "Text", "Plain Text",
-    "reStructuredText", "AsciiDoc", "Org", "TeX", "LaTeX", "BibTeX", "Diff", "Ignore List",
-    "INI", "EditorConfig", "Git Config", "Git Attributes", "Dockerfile", "Makefile", "CMake",
-    "Meson", "Nix", "Scheme",
-];
-
-fn categorize_language(lang: &str, primary: Option<&str>) -> LanguageCategory {
-    if primary == Some(lang) {
-        return LanguageCategory::Primary;
-    }
-    if CONFIG_LANGUAGES.contains(&lang) {
-        return LanguageCategory::Config;
-    }
-    if EXECUTABLE_LANGUAGES.contains(&lang) {
-        return LanguageCategory::Executable;
-    }
-    if NON_PROGRAMMING_LANGUAGES.contains(&lang) {
-        return LanguageCategory::Other;
-    }
-    LanguageCategory::Programming
-}
-
-fn style_language_cell(name: &str, category: &LanguageCategory, term: &Terminal) -> String {
-    let markup = match category {
-        LanguageCategory::Primary => format!("<b>{}</b>", name),
-        LanguageCategory::Programming => name.to_string(),
-        LanguageCategory::Config => format!("<dim><i>{}</i></dim>", name),
-        LanguageCategory::Executable => format!("<dim><orange>{}</orange></dim>", name),
-        LanguageCategory::Other => format!("<dim><yellow>{}</yellow></dim>", name),
-    };
-    Prose::new(&markup).render(term)
-}
-
-fn style_stats_cell(
-    lang: &sniff::filesystem::languages::LanguageStats,
-    category: &LanguageCategory,
+fn render_language_name(
+    name: &impl std::fmt::Display,
+    is_primary: bool,
     term: &Terminal,
 ) -> String {
-    let stats = format!(
-        "{} files ({:.1}%)",
-        format_number(lang.file_count),
-        lang.percentage
-    );
-    let markup = match category {
-        LanguageCategory::Primary => format!("<b>{}</b>", stats),
-        LanguageCategory::Programming => stats,
-        LanguageCategory::Config => format!("<dim><i>{}</i></dim>", stats),
-        LanguageCategory::Executable => format!("<dim><orange>{}</orange></dim>", stats),
-        LanguageCategory::Other => format!("<dim><yellow>{}</yellow></dim>", stats),
+    let markup = if is_primary {
+        format!("<b>{}</b>", name)
+    } else {
+        name.to_string()
     };
     Prose::new(&markup).render(term)
+}
+
+fn render_language_usage(
+    lang: &sniff::filesystem::languages::LanguageStats,
+    term: &Terminal,
+) -> String {
+    Prose::new(format!(
+        "{} direct, {} framework ({:.1}%)",
+        format_number(lang.direct_file_count),
+        format_number(lang.framework_file_count),
+        lang.percentage
+    ))
+    .render(term)
+}
+
+fn render_framework_summary(frameworks: &[FrameworkStats]) -> String {
+    frameworks
+        .iter()
+        .map(|framework| format!("{} ({})", framework.framework, framework.file_count))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn print_language_section(
     langs: &sniff::filesystem::languages::LanguageBreakdown,
-    _verbose: u8,
+    verbose: u8,
 ) {
     use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
     let term = Terminal::default();
-    let primary = langs.primary.as_deref();
+    let primary = langs.primary;
+
+    if let Some(primary) = primary {
+        println!("Primary language: {}", primary);
+    }
+    if !langs.secondary.is_empty() {
+        println!(
+            "Secondary languages: {}",
+            langs.secondary
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
 
     let mut table = Table::new()
         .with_columns(vec![
-            TableColumn::new("Type").with_min_width(14),
+            TableColumn::new("Language").with_min_width(16),
             TableColumn::new("Usage").with_alignment(Alignment::Right),
+            TableColumn::new("Signal").with_alignment(Alignment::Right),
         ])
         .prefer_cursor_alignment();
 
@@ -1476,10 +1465,14 @@ pub fn print_language_section(
     table.layout_mut().bottom_margin = Margin::Chars(1);
 
     for lang in &langs.languages {
-        let category = categorize_language(&lang.language, primary);
         table.add_row(vec![
-            TableCellContent::Text(style_language_cell(&lang.language, &category, &term)),
-            TableCellContent::Text(style_stats_cell(lang, &category, &term)),
+            TableCellContent::Text(render_language_name(
+                &lang.language,
+                Some(lang.language) == primary,
+                &term,
+            )),
+            TableCellContent::Text(render_language_usage(lang, &term)),
+            TableCellContent::Text(Prose::new(format!("{:.2}", lang.signal)).render(&term)),
         ]);
     }
 
@@ -1487,12 +1480,97 @@ pub fn print_language_section(
     print!("{}", table.display(&term));
     println!();
 
+    if verbose > 0 && !langs.frameworks.is_empty() {
+        println!("Frameworks: {}", render_framework_summary(&langs.frameworks));
+    }
+
     let footer = Prose::new(format!(
-        "<dim><i>- analyzed </i></dim><yellow>{}</yellow><dim><i> files</i></dim>",
-        format_number(langs.total_files)
+        "<dim><i>- analyzed </i></dim><yellow>{}</yellow><dim><i> files, </i></dim><yellow>{}</yellow><dim><i> contributed to language selection</i></dim>",
+        format_number(langs.total_files_scanned),
+        format_number(langs.total_language_files)
     ))
     .render(&term);
     eprintln!("{}", footer);
+}
+
+pub(crate) fn filter_file_breakdown(
+    breakdown: &FileAssociationBreakdown,
+    filter: &FilesFilter,
+) -> FileAssociationBreakdown {
+    let Some(association) = filter.association else {
+        return breakdown.clone();
+    };
+
+    let by_association: Vec<FileAssociationStats> = breakdown
+        .by_association
+        .iter()
+        .filter(|stats| stats.association == association)
+        .cloned()
+        .collect();
+    let total_files = by_association.iter().map(|stats| stats.file_count).sum();
+
+    FileAssociationBreakdown {
+        total_files,
+        by_association,
+        by_language: if association == sniff::filesystem::FileAssociation::ProgrammingLanguage {
+            breakdown.by_language.clone()
+        } else {
+            Vec::new()
+        },
+        by_framework: if association == sniff::filesystem::FileAssociation::FrameworkFile {
+            breakdown.by_framework.clone()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+pub fn print_files_section(
+    files: &FileAssociationBreakdown,
+    verbose: u8,
+    filter: &FilesFilter,
+) {
+    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+    use biscuit_terminal::utils::layout::{Alignment, Margin};
+
+    let filtered = filter_file_breakdown(files, filter);
+    let term = Terminal::default();
+
+    let mut table = Table::new()
+        .with_columns(vec![
+            TableColumn::new("Association").with_min_width(18),
+            TableColumn::new("Count").with_alignment(Alignment::Right),
+        ])
+        .prefer_cursor_alignment();
+    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().top_margin = Margin::Chars(1);
+    table.layout_mut().bottom_margin = Margin::Chars(1);
+
+    for stats in &filtered.by_association {
+        table.add_row(vec![
+            TableCellContent::Text(stats.association.to_string()),
+            TableCellContent::Text(format!("{} ({:.1}%)", stats.file_count, stats.percentage)),
+        ]);
+    }
+
+    println!();
+    print!("{}", table.display(&term));
+    println!();
+
+    if verbose > 0 && !filtered.by_framework.is_empty() {
+        println!("Frameworks: {}", render_framework_summary(&filtered.by_framework));
+    }
+    if verbose > 0 && !filtered.by_language.is_empty() {
+        println!(
+            "Languages: {}",
+            filtered
+                .by_language
+                .iter()
+                .map(|language| format!("{} ({})", language.language, language.total_file_count))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
 }
 
 pub fn print_filesystem_section(
@@ -1522,36 +1600,62 @@ pub fn print_filesystem_section(
 
     if let Some(ref langs) = fs.languages {
         println!(
-            "Languages ({} files analyzed):",
-            format_number(langs.total_files)
+            "Languages ({} contributing files out of {} scanned):",
+            format_number(langs.total_language_files),
+            format_number(langs.total_files_scanned)
         );
         if let Some(ref primary) = langs.primary {
             println!("  Primary: {}", primary);
         }
+        if !langs.secondary.is_empty() {
+            println!(
+                "  Secondary: {}",
+                langs.secondary
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         let show_count = if verbose > 0 { 10 } else { 5 };
         for lang in langs.languages.iter().take(show_count) {
             println!(
-                "  {}: {} files ({:.1}%)",
+                "  {}: {} direct, {} framework ({:.1}%)",
                 lang.language,
-                format_number(lang.file_count),
+                format_number(lang.direct_file_count),
+                format_number(lang.framework_file_count),
                 lang.percentage
             );
-            // Show file list at verbose level 2+
-            if verbose > 1 && !lang.files.is_empty() {
-                let file_show_count = 3.min(lang.files.len());
-                for file in lang.files.iter().take(file_show_count) {
+            if verbose > 1 && !lang.direct_files.is_empty() {
+                let file_show_count = 3.min(lang.direct_files.len());
+                for file in lang.direct_files.iter().take(file_show_count) {
                     println!("    - {}", file.display());
                 }
-                if lang.files.len() > file_show_count {
+                if lang.direct_files.len() > file_show_count {
                     println!(
                         "    ... and {} more files",
-                        lang.files.len() - file_show_count
+                        lang.direct_files.len() - file_show_count
                     );
                 }
             }
         }
         if langs.languages.len() > show_count {
             println!("  ... and {} more", langs.languages.len() - show_count);
+        }
+        if verbose > 0 && !langs.frameworks.is_empty() {
+            println!("  Frameworks: {}", render_framework_summary(&langs.frameworks));
+        }
+    }
+    if let Some(ref files) = fs.files {
+        println!("Files ({} scanned):", format_number(files.total_files));
+        let show_count = if verbose > 0 { 10 } else { 6 };
+        for stats in files.by_association.iter().take(show_count) {
+            println!(
+                "  {}: {} files ({:.1}%)",
+                stats.association,
+                format_number(stats.file_count),
+                stats.percentage
+            );
         }
     }
     println!();
@@ -2050,7 +2154,10 @@ mod tests {
             discovery_sources: vec![],
             nested_packages: vec![],
             primary_language: None,
+            secondary_languages: vec![],
             languages: vec![],
+            frameworks: vec![],
+            file_associations: vec![],
             configuration: vec![],
             documentation: vec![],
             editor_config: None,

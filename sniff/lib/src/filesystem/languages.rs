@@ -1,79 +1,9 @@
 use crate::Result;
-use ignore::WalkBuilder;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Maximum files to scan before early termination
-const MAX_FILES: usize = 10_000;
-
-/// Language detection statistics for a repository or directory.
-///
-/// This structure contains information about the programming languages
-/// detected in a codebase, including file counts and percentages.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LanguageBreakdown {
-    /// List of detected languages with their statistics
-    pub languages: Vec<LanguageStats>,
-    /// The primary language (the one with the most files)
-    pub primary: Option<String>,
-    /// Total number of files scanned
-    pub total_files: usize,
-}
-
-/// Statistics for a single programming language.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LanguageStats {
-    /// Name of the programming language
-    pub language: String,
-    /// Number of files written in this language
-    pub file_count: usize,
-    /// Percentage of total files (0.0 to 100.0)
-    pub percentage: f64,
-    /// List of files detected for this language (paths relative to scanned root)
-    pub files: Vec<PathBuf>,
-}
-
-/// Languages that should not be considered as "primary" for a package.
-///
-/// Includes documentation/data formats and build/config languages that rarely
-/// represent the main source code of a project. Notably, `.scm` files are
-/// detected as "Scheme" by hyperpolyglot but are almost always Tree-sitter
-/// query files in modern codebases.
-const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
-    "Markdown",
-    "JSON",
-    "YAML",
-    "TOML",
-    "XML",
-    "HTML",
-    "CSS",
-    "Text",
-    "Plain Text",
-    "reStructuredText",
-    "AsciiDoc",
-    "Org",
-    "TeX",
-    "LaTeX",
-    "BibTeX",
-    "Diff",
-    "Ignore List",
-    "INI",
-    "EditorConfig",
-    "Git Config",
-    "Git Attributes",
-    "Dockerfile",
-    "Makefile",
-    "CMake",
-    "Meson",
-    "Nix",
-    "Scheme",
-];
-
-/// Checks if a language is a programming language (not just markup/config/data).
-fn is_programming_language(lang: &str) -> bool {
-    !NON_PROGRAMMING_LANGUAGES.contains(&lang)
-}
+pub use super::file_types::{
+    LanguageSummary as LanguageBreakdown, ProgrammingLanguageStats as LanguageStats,
+};
 
 /// Detects programming languages in a directory tree.
 ///
@@ -100,7 +30,8 @@ fn is_programming_language(lang: &str) -> bool {
 ///
 /// let breakdown = detect_languages(Path::new(".")).unwrap();
 /// println!("Primary language: {:?}", breakdown.primary);
-/// println!("Total files: {}", breakdown.total_files);
+/// println!("Scanned files: {}", breakdown.total_files_scanned);
+/// println!("Language files: {}", breakdown.total_language_files);
 /// ```
 pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
     detect_languages_with_exclusions(root, &[])
@@ -111,112 +42,14 @@ pub(crate) fn detect_languages_with_exclusions(
     root: &Path,
     exclude_roots: &[PathBuf],
 ) -> Result<LanguageBreakdown> {
-    let mut language_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    let mut total_files = 0;
-    let exclude_roots: Vec<PathBuf> = exclude_roots
-        .iter()
-        .map(|path| {
-            if path.is_absolute() {
-                path.clone()
-            } else {
-                root.join(path)
-            }
-        })
-        .collect();
-
-    // Use the `ignore` crate which respects .gitignore files
-    let walker = WalkBuilder::new(root)
-        .hidden(true) // Skip hidden files (like .git)
-        .git_ignore(true) // Respect .gitignore
-        .git_global(true) // Respect global gitignore
-        .git_exclude(true) // Respect .git/info/exclude
-        .filter_entry(move |e| !is_excluded_entry(e, &exclude_roots))
-        .build();
-
-    for entry in walker
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .take(MAX_FILES)
-    {
-        total_files += 1;
-        if let Ok(Some(detection)) = hyperpolyglot::detect(entry.path()) {
-            // Store path relative to the scanned root
-            let relative_path =
-                entry.path().strip_prefix(root).unwrap_or(entry.path()).to_path_buf();
-            language_files.entry(detection.language().to_string()).or_default().push(relative_path);
-        }
-    }
-
-    let languages = calculate_stats(&language_files, total_files);
-
-    // Primary language must be a programming language, not markup/config
-    let primary =
-        languages.iter().find(|s| is_programming_language(&s.language)).map(|s| s.language.clone());
-
-    Ok(LanguageBreakdown {
-        languages,
-        primary,
-        total_files,
-    })
-}
-
-/// Checks if a directory entry should be excluded from language detection.
-///
-/// Excludes common build artifacts and dependency directories to improve
-/// performance and accuracy.
-fn is_excluded_entry(entry: &ignore::DirEntry, exclude_roots: &[PathBuf]) -> bool {
-    if exclude_roots
-        .iter()
-        .any(|root| entry.path() == root || entry.path().starts_with(root))
-    {
-        return true;
-    }
-
-    if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-        return false;
-    }
-    matches!(
-        entry.file_name().to_str(),
-        Some("node_modules" | "target" | "vendor" | "dist" | "build" | "__pycache__")
-    )
-}
-
-/// Calculates language statistics from file lists.
-///
-/// Converts a HashMap of language file lists into a sorted vector of LanguageStats,
-/// computing percentages and sorting by file count in descending order.
-/// Files within each language are sorted for consistent output.
-fn calculate_stats(
-    language_files: &HashMap<String, Vec<PathBuf>>,
-    total: usize,
-) -> Vec<LanguageStats> {
-    let mut stats: Vec<_> = language_files
-        .iter()
-        .map(|(lang, files)| {
-            let count = files.len();
-            let mut sorted_files = files.clone();
-            sorted_files.sort();
-            LanguageStats {
-                language: lang.clone(),
-                file_count: count,
-                percentage: if total > 0 {
-                    (count as f64 / total as f64) * 100.0
-                } else {
-                    0.0
-                },
-                files: sorted_files,
-            }
-        })
-        .collect();
-
-    // Sort by file count descending
-    stats.sort_by(|a, b| b.file_count.cmp(&a.file_count));
-    stats
+    let inventory = super::file_types::scan_file_inventory_with_exclusions(root, exclude_roots)?;
+    Ok(super::file_types::summarize_languages(&inventory))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filesystem::file_types::{FrameworkKind, ProgrammingLanguage};
     use std::fs;
     use tempfile::TempDir;
 
@@ -224,7 +57,7 @@ mod tests {
     fn test_empty_directory_returns_zero_languages() {
         let dir = TempDir::new().unwrap();
         let result = detect_languages(dir.path()).unwrap();
-        assert_eq!(result.total_files, 0);
+        assert_eq!(result.total_files_scanned, 0);
         assert!(result.languages.is_empty());
         assert!(result.primary.is_none());
     }
@@ -238,7 +71,7 @@ mod tests {
 
         let result = detect_languages(dir.path()).unwrap();
         // Should only count main.rs, not the file in node_modules
-        assert_eq!(result.total_files, 1);
+        assert_eq!(result.total_files_scanned, 1);
     }
 
     #[test]
@@ -248,33 +81,9 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
 
         let result = detect_languages(dir.path()).unwrap();
-        assert_eq!(result.total_files, 2);
+        assert_eq!(result.total_files_scanned, 2);
         assert!(result.primary.is_some());
-        // Verify the primary language is Rust
-        assert_eq!(result.primary.as_deref(), Some("Rust"));
-    }
-
-    #[test]
-    fn test_excluded_dirs_list() {
-        let dir = TempDir::new().unwrap();
-
-        // Create a regular directory (should not be excluded)
-        let regular_dir = dir.path().join("src");
-        fs::create_dir(&regular_dir).unwrap();
-
-        // Create an excluded directory
-        let excluded_dir = dir.path().join("target");
-        fs::create_dir(&excluded_dir).unwrap();
-
-        // Test with ignore WalkBuilder entries
-        for entry in WalkBuilder::new(dir.path()).build().filter_map(|e| e.ok()) {
-            if entry.path() == regular_dir {
-                assert!(!is_excluded_entry(&entry, &[]), "src should not be excluded");
-            }
-            if entry.path() == excluded_dir {
-                assert!(is_excluded_entry(&entry, &[]), "target should be excluded");
-            }
-        }
+        assert_eq!(result.primary, Some(ProgrammingLanguage::Rust));
     }
 
     #[test]
@@ -288,97 +97,24 @@ mod tests {
         let result =
             detect_languages_with_exclusions(dir.path(), &[dir.path().join("frontend")]).unwrap();
 
-        assert_eq!(result.total_files, 1);
-        assert_eq!(result.primary.as_deref(), Some("Rust"));
+        assert_eq!(result.total_files_scanned, 1);
+        assert_eq!(result.primary, Some(ProgrammingLanguage::Rust));
         assert_eq!(result.languages.len(), 1);
-        assert_eq!(result.languages[0].language, "Rust");
+        assert_eq!(result.languages[0].language, ProgrammingLanguage::Rust);
     }
 
     #[test]
-    fn test_percentage_calculation() {
-        let mut language_files = HashMap::new();
-        language_files.insert(
-            "Rust".to_string(),
-            (0..7).map(|i| PathBuf::from(format!("file{}.rs", i))).collect(),
-        );
-        language_files.insert(
-            "JavaScript".to_string(),
-            (0..3).map(|i| PathBuf::from(format!("file{}.js", i))).collect(),
-        );
-
-        let stats = calculate_stats(&language_files, 10);
-
-        assert_eq!(stats.len(), 2);
-        // Should be sorted by count (Rust first)
-        assert_eq!(stats[0].language, "Rust");
-        assert_eq!(stats[0].file_count, 7);
-        assert!((stats[0].percentage - 70.0).abs() < 0.01);
-        assert_eq!(stats[0].files.len(), 7);
-
-        assert_eq!(stats[1].language, "JavaScript");
-        assert_eq!(stats[1].file_count, 3);
-        assert!((stats[1].percentage - 30.0).abs() < 0.01);
-        assert_eq!(stats[1].files.len(), 3);
-    }
-
-    #[test]
-    fn test_primary_language_is_programming_language() {
-        // Markdown should not be considered a programming language
-        assert!(!is_programming_language("Markdown"));
-        assert!(!is_programming_language("JSON"));
-        assert!(!is_programming_language("YAML"));
-        assert!(!is_programming_language("TOML"));
-
-        // Scheme (.scm) is excluded — almost always Tree-sitter query files
-        assert!(!is_programming_language("Scheme"));
-
-        // Real programming languages
-        assert!(is_programming_language("Rust"));
-        assert!(is_programming_language("JavaScript"));
-        assert!(is_programming_language("Python"));
-        assert!(is_programming_language("Go"));
-    }
-
-    #[test]
-    fn test_primary_skips_scheme_for_programming_language() {
+    fn test_markdown_does_not_count_as_language() {
         let dir = TempDir::new().unwrap();
-        // Simulate tree-hugger layout: many .scm query files outnumbering .rs files
-        let queries_dir = dir.path().join("queries");
-        fs::create_dir(&queries_dir).unwrap();
-        for lang in &[
-            "rust", "python", "go",
-        ] {
-            let lang_dir = queries_dir.join(lang);
-            fs::create_dir(&lang_dir).unwrap();
-            fs::write(lang_dir.join("highlights.scm"), "(comment) @comment").unwrap();
-            fs::write(lang_dir.join("locals.scm"), "(function) @local").unwrap();
-        }
-
-        let src_dir = dir.path().join("src");
-        fs::create_dir(&src_dir).unwrap();
-        fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
-
-        let result = detect_languages(dir.path()).unwrap();
-        // Primary should be Rust, not Scheme (even though .scm files outnumber .rs)
-        assert_eq!(result.primary.as_deref(), Some("Rust"));
-        // Scheme should still appear in the breakdown
-        assert!(result.languages.iter().any(|l| l.language == "Scheme"));
-    }
-
-    #[test]
-    fn test_primary_skips_markdown_for_programming_language() {
-        let dir = TempDir::new().unwrap();
-        // Create more markdown files than Rust files
         for i in 0..10 {
             fs::write(dir.path().join(format!("doc{}.md", i)), "# Heading").unwrap();
         }
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
 
         let result = detect_languages(dir.path()).unwrap();
-        // Primary should be Rust, not Markdown
-        assert_eq!(result.primary.as_deref(), Some("Rust"));
-        // But Markdown should still be in the languages list
-        assert!(result.languages.iter().any(|l| l.language == "Markdown"));
+        assert_eq!(result.primary, Some(ProgrammingLanguage::Rust));
+        assert_eq!(result.total_language_files, 1);
+        assert!(result.languages.iter().all(|language| language.language != ProgrammingLanguage::Unknown));
     }
 
     #[test]
@@ -399,8 +135,10 @@ mod tests {
         fs::create_dir(dir.path().join(".git")).unwrap();
 
         let result = detect_languages(dir.path()).unwrap();
-        // Should only count main.rs, not the file in generated/
-        assert_eq!(result.total_files, 1);
+        // main.rs plus the visible .gitignore file are scanned, but only main.rs
+        // contributes to language selection.
+        assert_eq!(result.total_files_scanned, 2);
+        assert_eq!(result.total_language_files, 1);
     }
 
     #[test]
@@ -423,29 +161,41 @@ mod tests {
         let rust_stats = result
             .languages
             .iter()
-            .find(|s| s.language == "Rust")
+            .find(|s| s.language == ProgrammingLanguage::Rust)
             .expect("Rust should be detected");
 
-        // Verify Rust files are collected
-        assert_eq!(rust_stats.file_count, 2);
-        assert_eq!(rust_stats.files.len(), 2);
+        assert_eq!(rust_stats.direct_file_count, 2);
+        assert_eq!(rust_stats.direct_files.len(), 2);
 
-        // Paths should be relative and sorted
-        assert!(rust_stats.files.contains(&PathBuf::from("main.rs")));
-        assert!(rust_stats.files.contains(&PathBuf::from("src/lib.rs")));
+        assert!(rust_stats.direct_files.contains(&PathBuf::from("main.rs")));
+        assert!(rust_stats.direct_files.contains(&PathBuf::from("src/lib.rs")));
 
-        // Verify files are sorted
-        assert!(rust_stats.files[0] < rust_stats.files[1]);
+        assert!(rust_stats.direct_files[0] < rust_stats.direct_files[1]);
 
-        // Find JavaScript stats
         let js_stats = result
             .languages
             .iter()
-            .find(|s| s.language == "JavaScript")
+            .find(|s| s.language == ProgrammingLanguage::JavaScript)
             .expect("JavaScript should be detected");
 
-        assert_eq!(js_stats.file_count, 1);
-        assert_eq!(js_stats.files.len(), 1);
-        assert_eq!(js_stats.files[0], PathBuf::from("index.js"));
+        assert_eq!(js_stats.direct_file_count, 1);
+        assert_eq!(js_stats.direct_files.len(), 1);
+        assert_eq!(js_stats.direct_files[0], PathBuf::from("index.js"));
+    }
+
+    #[test]
+    fn framework_files_contribute_to_language_summary() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Component.vue"),
+            "<script setup lang=\"ts\">const value = 1;</script>",
+        )
+        .unwrap();
+
+        let result = detect_languages(dir.path()).unwrap();
+        assert_eq!(result.primary, Some(ProgrammingLanguage::TypeScript));
+        assert_eq!(result.frameworks.len(), 1);
+        assert_eq!(result.frameworks[0].framework, FrameworkKind::Vue);
+        assert_eq!(result.languages[0].framework_file_count, 1);
     }
 }

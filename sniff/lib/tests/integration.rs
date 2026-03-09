@@ -1,3 +1,4 @@
+use sniff::filesystem::ProgrammingLanguage;
 use sniff::{SniffConfig, detect, detect_with_config};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -80,7 +81,7 @@ fn test_detect_mixed_languages() {
     let fs = result.filesystem.unwrap();
     assert!(fs.languages.is_some());
     let langs = fs.languages.unwrap();
-    assert!(langs.total_files >= 4);
+    assert!(langs.total_files_scanned >= 4);
 }
 
 #[test]
@@ -103,10 +104,16 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
     let filesystem = result.filesystem.unwrap();
     let languages = filesystem.languages.unwrap();
 
-    assert_eq!(languages.primary.as_deref(), Some("Rust"));
-    assert_eq!(languages.total_files, 2);
-    assert!(languages.languages.iter().any(|lang| lang.language == "Rust"));
-    assert!(!languages.languages.iter().any(|lang| lang.language == "TypeScript"));
+    assert_eq!(languages.primary, Some(ProgrammingLanguage::Rust));
+    assert_eq!(languages.total_files_scanned, 2);
+    assert!(languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::Rust));
+    assert!(!languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::TypeScript));
 }
 
 // === Regression tests for JSON serialization of partial results ===

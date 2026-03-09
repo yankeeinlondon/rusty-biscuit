@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::file_types::{
+    FileAssociation, FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
+    ProgrammingLanguageStats, is_command_runner_filename,
+};
+
 /// Supported monorepo tools and package managers
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,13 +185,23 @@ pub struct Package {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nested_packages: Vec<String>,
     /// The primary programming language detected in this package
-    pub primary_language: Option<String>,
-    /// All programming languages detected in this package
-    pub languages: Vec<String>,
-    /// Configuration files found in the package root (JSON, TOML, YAML, etc.)
+    pub primary_language: Option<ProgrammingLanguage>,
+    /// Secondary programming languages detected in this package.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secondary_languages: Vec<ProgrammingLanguage>,
+    /// Structured programming language statistics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<ProgrammingLanguageStats>,
+    /// Structured framework statistics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frameworks: Vec<FrameworkStats>,
+    /// Broad file-association statistics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_associations: Vec<FileAssociationStats>,
+    /// Configuration files found in the package tree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configuration: Vec<PathBuf>,
-    /// Documentation files found in the package root (MD, TXT, etc.)
+    /// Documentation files found in the package tree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documentation: Vec<PathBuf>,
     /// EditorConfig file path (if present)
@@ -242,7 +257,7 @@ impl RepoInfo {
 
         packages
             .iter()
-            .filter(|pkg| dir.starts_with(&canonicalize_path(&pkg.path)))
+            .filter(|pkg| dir.starts_with(canonicalize_path(&pkg.path)))
             .max_by_key(|pkg| canonicalize_path(&pkg.path).components().count())
     }
 
@@ -286,11 +301,19 @@ impl RepoInfo {
 pub type PackageLocation = Package;
 
 /// Categorized files found in a package directory.
+#[derive(Default)]
 struct PackageFiles {
     configuration: Vec<PathBuf>,
     documentation: Vec<PathBuf>,
     editor_config: Option<PathBuf>,
     command_runner: Vec<PathBuf>,
+}
+
+#[derive(Default)]
+struct PackageScanResult {
+    language_breakdown: super::languages::LanguageBreakdown,
+    file_breakdown: super::file_types::FileAssociationBreakdown,
+    compatibility: PackageFiles,
 }
 
 /// Resolved versions from Cargo.lock.
@@ -1291,83 +1314,45 @@ fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
 ///
 /// All paths are stored relative to the repo root for portability.
 /// Only performs a shallow scan of the package root directory (no recursion).
-fn detect_package_files(path: &Path, repo_root: &Path) -> PackageFiles {
-    let config_extensions = [
-        "json", "toml", "yaml", "yml", "ini", "cfg", "conf",
-    ];
-    let doc_extensions = [
-        "md", "txt", "rst", "adoc",
-    ];
-    let command_runners = [
-        "justfile",
-        "Justfile",
-        "Makefile",
-        "makefile",
-        "Taskfile.yml",
-        "Rakefile",
-    ];
+fn detect_package_files(package_relative: &str, inventory: &FileInventory) -> PackageFiles {
+    let mut files = PackageFiles::default();
 
-    let mut configuration = Vec::new();
-    let mut documentation = Vec::new();
-    let mut editor_config = None;
-    let mut command_runner = Vec::new();
+    for classification in &inventory.classifications {
+        let repo_relative = package_relative_path(package_relative, &classification.path);
+        let file_name =
+            classification.path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
 
-    let entries = match std::fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => {
-            return PackageFiles {
-                configuration,
-                documentation,
-                editor_config,
-                command_runner,
-            };
-        }
-    };
-
-    for entry in entries.filter_map(|e| e.ok()) {
-        let entry_path = entry.path();
-        if !entry_path.is_file() {
-            continue;
-        }
-
-        let file_name = entry.file_name().to_string_lossy().to_string();
-
-        // Convert to relative path from repo root
-        let rel_path = entry_path.strip_prefix(repo_root).unwrap_or(&entry_path).to_path_buf();
-
-        // Check for .editorconfig
         if file_name == ".editorconfig" {
-            editor_config = Some(rel_path);
+            files.editor_config = Some(repo_relative.clone());
+            continue;
+        }
+        if is_command_runner_filename(file_name) {
+            files.command_runner.push(repo_relative.clone());
             continue;
         }
 
-        // Check for command runners
-        if command_runners.contains(&file_name.as_str()) {
-            command_runner.push(rel_path);
-            continue;
-        }
-
-        // Check extension-based categories
-        if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
-            let ext_lower = ext.to_lowercase();
-            if config_extensions.contains(&ext_lower.as_str()) {
-                configuration.push(rel_path);
-            } else if doc_extensions.contains(&ext_lower.as_str()) {
-                documentation.push(rel_path);
-            }
+        match classification.association {
+            FileAssociation::Configuration => files.configuration.push(repo_relative),
+            FileAssociation::Documentation => files.documentation.push(repo_relative),
+            _ => {}
         }
     }
 
-    // Sort for deterministic output
-    configuration.sort();
-    documentation.sort();
-    command_runner.sort();
+    files.configuration.sort();
+    files.configuration.dedup();
+    files.documentation.sort();
+    files.documentation.dedup();
+    files.command_runner.sort();
+    files.command_runner.dedup();
 
-    PackageFiles {
-        configuration,
-        documentation,
-        editor_config,
-        command_runner,
+    files
+}
+
+fn package_relative_path(package_relative: &str, path: &Path) -> PathBuf {
+    if package_relative.is_empty() {
+        path.to_path_buf()
+    } else {
+        PathBuf::from(package_relative).join(path)
     }
 }
 
@@ -1521,15 +1506,21 @@ fn make_package_area(relative: &str) -> String {
     }
 }
 
-/// Detects programming languages in a package directory.
-fn detect_package_languages(path: &Path, exclude_roots: &[PathBuf]) -> (Option<String>, Vec<String>) {
-    match super::languages::detect_languages_with_exclusions(path, exclude_roots) {
-        Ok(breakdown) => {
-            let languages: Vec<String> =
-                breakdown.languages.iter().map(|s| s.language.clone()).collect();
-            (breakdown.primary, languages)
-        }
-        Err(_) => (None, Vec::new()),
+/// Detects structured file metadata in a package directory.
+fn detect_package_languages(
+    package_relative: &str,
+    path: &Path,
+    exclude_roots: &[PathBuf],
+) -> PackageScanResult {
+    let Ok(inventory) = super::file_types::scan_file_inventory_with_exclusions(path, exclude_roots)
+    else {
+        return PackageScanResult::default();
+    };
+
+    PackageScanResult {
+        language_breakdown: super::file_types::summarize_languages(&inventory),
+        file_breakdown: super::file_types::summarize_file_inventory(&inventory),
+        compatibility: detect_package_files(package_relative, &inventory),
     }
 }
 
@@ -1695,6 +1686,16 @@ fn merge_package_into(existing: &mut Package, incoming: Package) {
         }
     }
 
+    if existing.primary_language.is_none() {
+        existing.primary_language = incoming.primary_language;
+    }
+
+    for language in incoming.secondary_languages {
+        if !existing.secondary_languages.contains(&language) {
+            existing.secondary_languages.push(language);
+        }
+    }
+
     existing.configuration = merge_path_lists(&existing.configuration, &incoming.configuration);
     existing.documentation = merge_path_lists(&existing.documentation, &incoming.documentation);
     existing.command_runner = merge_path_lists(&existing.command_runner, &incoming.command_runner);
@@ -1756,9 +1757,16 @@ fn refresh_package_boundaries(packages: &mut [Package]) {
         nested_roots.sort();
         nested_packages.sort();
 
-        let (primary_language, languages) = detect_package_languages(&package.path, &nested_roots);
-        package.primary_language = primary_language;
-        package.languages = languages;
+        let scan = detect_package_languages(&package.relative, &package.path, &nested_roots);
+        package.primary_language = scan.language_breakdown.primary;
+        package.secondary_languages = scan.language_breakdown.secondary;
+        package.languages = scan.language_breakdown.languages;
+        package.frameworks = scan.language_breakdown.frameworks;
+        package.file_associations = scan.file_breakdown.by_association;
+        package.configuration = scan.compatibility.configuration;
+        package.documentation = scan.compatibility.documentation;
+        package.editor_config = scan.compatibility.editor_config;
+        package.command_runner = scan.compatibility.command_runner;
         package.nested_packages = nested_packages;
     }
 }
@@ -1934,7 +1942,6 @@ fn create_package(
     let ecosystem = detect_package_ecosystem(path);
     let package_managers = detect_package_managers(path);
     let version = resolve_package_version(path, root);
-    let files = detect_package_files(path, root);
 
     // Read feature flags (Cargo only for now)
     let cargo_toml = path.join("Cargo.toml");
@@ -2029,11 +2036,14 @@ fn create_package(
         discovery_sources: vec![discovery_source],
         nested_packages: Vec::new(),
         primary_language: None,
+        secondary_languages: Vec::new(),
         languages: Vec::new(),
-        configuration: files.configuration,
-        documentation: files.documentation,
-        editor_config: files.editor_config,
-        command_runner: files.command_runner,
+        frameworks: Vec::new(),
+        file_associations: Vec::new(),
+        configuration: Vec::new(),
+        documentation: Vec::new(),
+        editor_config: None,
+        command_runner: Vec::new(),
         package_managers,
         version,
         features,
@@ -2439,9 +2449,13 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         fs::write(dir.path().join("lib.rs"), "pub fn foo() {}").unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path(), &[]);
-        assert_eq!(primary, Some("Rust".to_string()));
-        assert!(languages.contains(&"Rust".to_string()));
+        let scan = detect_package_languages("", dir.path(), &[]);
+        assert_eq!(scan.language_breakdown.primary, Some(ProgrammingLanguage::Rust));
+        assert!(scan
+            .language_breakdown
+            .languages
+            .iter()
+            .any(|language| language.language == ProgrammingLanguage::Rust));
     }
 
     #[test]
@@ -2449,18 +2463,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("index.js"), "console.log('hello')").unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path(), &[]);
-        assert_eq!(primary, Some("JavaScript".to_string()));
-        assert!(languages.contains(&"JavaScript".to_string()));
+        let scan = detect_package_languages("", dir.path(), &[]);
+        assert_eq!(scan.language_breakdown.primary, Some(ProgrammingLanguage::JavaScript));
+        assert!(scan
+            .language_breakdown
+            .languages
+            .iter()
+            .any(|language| language.language == ProgrammingLanguage::JavaScript));
     }
 
     #[test]
     fn test_detect_package_languages_empty() {
         let dir = TempDir::new().unwrap();
 
-        let (primary, languages) = detect_package_languages(dir.path(), &[]);
-        assert!(primary.is_none());
-        assert!(languages.is_empty());
+        let scan = detect_package_languages("", dir.path(), &[]);
+        assert!(scan.language_breakdown.primary.is_none());
+        assert!(scan.language_breakdown.languages.is_empty());
     }
 
     #[test]
@@ -2497,14 +2515,14 @@ mod tests {
         // Find the rust package (by native name from Cargo.toml)
         let rust_package =
             packages.iter().find(|p| p.name == "rust-pkg").expect("rust-pkg should be found");
-        assert_eq!(rust_package.primary_language, Some("Rust".to_string()));
+        assert_eq!(rust_package.primary_language, Some(ProgrammingLanguage::Rust));
         assert!(rust_package.package_managers.contains(&"cargo".to_string()));
         assert_eq!(rust_package.version, Some("0.1.0".to_string()));
 
         // Find the node package (falls back to relative path since no name in package.json)
         let node_package =
             packages.iter().find(|p| p.name == "node-pkg").expect("node-pkg should be found");
-        assert_eq!(node_package.primary_language, Some("JavaScript".to_string()));
+        assert_eq!(node_package.primary_language, Some(ProgrammingLanguage::JavaScript));
         assert!(node_package.package_managers.contains(&"npm".to_string()));
     }
 
@@ -2703,7 +2721,8 @@ require (
         fs::write(pkg_dir.join("justfile"), "build:").unwrap();
         fs::write(pkg_dir.join("main.rs"), "fn main() {}").unwrap();
 
-        let files = detect_package_files(&pkg_dir, dir.path());
+        let inventory = super::super::file_types::scan_file_inventory(&pkg_dir).unwrap();
+        let files = detect_package_files("pkg", &inventory);
         assert_eq!(files.configuration.len(), 2);
         assert_eq!(files.documentation.len(), 2);
         assert!(files.editor_config.is_some());
@@ -2962,14 +2981,17 @@ version = "1.0.128"
 
         let server = packages.iter().find(|pkg| pkg.name == "homelab-server").unwrap();
         assert_eq!(server.ecosystem, PackageEcosystem::Cargo);
-        assert_eq!(server.primary_language.as_deref(), Some("Rust"));
-        assert!(!server.languages.iter().any(|language| language == "TypeScript"));
+        assert_eq!(server.primary_language, Some(ProgrammingLanguage::Rust));
+        assert!(!server
+            .languages
+            .iter()
+            .any(|language| language.language == ProgrammingLanguage::TypeScript));
         assert_eq!(server.nested_packages, vec!["homelab-frontend".to_string()]);
         assert!(server.discovery_sources.contains(&PackageDiscoverySource::CargoWorkspace));
 
         let frontend = packages.iter().find(|pkg| pkg.name == "homelab-frontend").unwrap();
         assert_eq!(frontend.ecosystem, PackageEcosystem::Node);
-        assert_eq!(frontend.primary_language.as_deref(), Some("TypeScript"));
+        assert_eq!(frontend.primary_language, Some(ProgrammingLanguage::TypeScript));
         assert!(frontend.discovery_sources.contains(&PackageDiscoverySource::PnpmWorkspace));
         assert!(frontend.discovery_sources.contains(&PackageDiscoverySource::ManifestScan));
     }

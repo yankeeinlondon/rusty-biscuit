@@ -3,12 +3,18 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub mod docs;
+pub mod file_types;
 pub mod formatting;
 pub mod git;
 pub mod languages;
 pub mod repo;
 
 pub use docs::{MarkdownMeta, RepoDocuments, detect_docs};
+pub use file_types::{
+    FileAssociation, FileAssociationBreakdown, FileAssociationStats, FileClassification,
+    FileInventory, FrameworkKind, FrameworkStats, ProgrammingLanguage, ProgrammingLanguageStats,
+    ProgrammingLanguageType,
+};
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
     BehindStatus, CommitInfo, DeltaKind, GitInfo, HostingProvider, LocalBranchInfo, RemoteInfo,
@@ -28,6 +34,9 @@ pub type PackageLocation = Package;
 pub struct FilesystemInfo {
     /// Programming language breakdown
     pub languages: Option<LanguageBreakdown>,
+    /// Broad file-association breakdown
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<FileAssociationBreakdown>,
     /// Git repository information
     pub git: Option<GitInfo>,
     /// Repository detection results (monorepo or single-package repo)
@@ -53,7 +62,7 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
     // from a subdirectory still finds workspace markers at the repo root.
     let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
     let repo = detect_repo(repo_root_path)?;
-    let languages = match repo.as_ref().and_then(|repo| repo.package_for_dir(root)) {
+    let inventory = match repo.as_ref().and_then(|repo| repo.package_for_dir(root)) {
         Some(package) => {
             let exclude_roots = repo
                 .as_ref()
@@ -68,16 +77,19 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
                 })
                 .unwrap_or_default();
 
-            languages::detect_languages_with_exclusions(&package.path, &exclude_roots).ok()
+            file_types::scan_file_inventory_with_exclusions(&package.path, &exclude_roots).ok()
         }
-        None => detect_languages(root).ok(),
+        None => file_types::scan_file_inventory(root).ok(),
     };
+    let languages = inventory.as_ref().map(file_types::summarize_languages);
+    let files = inventory.as_ref().map(file_types::summarize_file_inventory);
 
     let formatting = detect_formatting(root).ok().flatten();
     let docs = detect_docs(root);
 
     Ok(FilesystemInfo {
         languages,
+        files,
         git,
         repo,
         formatting,

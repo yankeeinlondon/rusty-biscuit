@@ -249,6 +249,13 @@ pub enum Commands {
     /// Show only language detection results
     Language,
 
+    /// Show broad file associations
+    Files {
+        /// Filter to a specific file association
+        #[arg(long, value_enum)]
+        association: Option<FileAssociationArg>,
+    },
+
     /// Show markdown documents in the repository
     Docs {
         /// Show only README files
@@ -350,6 +357,7 @@ impl Commands {
             Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
+            Commands::Files { .. } => OutputFilter::Files,
             Commands::Docs { .. } => OutputFilter::Docs,
             Commands::Programs { .. } => OutputFilter::Programs,
             Commands::Editors { .. } => OutputFilter::Editors,
@@ -588,6 +596,16 @@ impl Commands {
             _ => DocsFilter::default(),
         }
     }
+
+    /// Get file-association filter if this is a files command.
+    pub fn files_filter(&self) -> FilesFilter {
+        match self {
+            Commands::Files { association } => FilesFilter {
+                association: association.map(Into::into),
+            },
+            _ => FilesFilter::default(),
+        }
+    }
 }
 
 /// Filter options for the docs subcommand.
@@ -603,6 +621,51 @@ pub struct DocsFilter {
     pub has_prompt: bool,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Option<String>,
+}
+
+/// Filter options for the files subcommand.
+#[derive(Debug, Clone, Default)]
+pub struct FilesFilter {
+    pub association: Option<sniff::filesystem::FileAssociation>,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum FileAssociationArg {
+    ProgrammingLanguage,
+    FrameworkFile,
+    Configuration,
+    Styling,
+    Documentation,
+    Data,
+    Image,
+    Binary,
+    BinaryExecutable,
+    Archive,
+    Font,
+    Audio,
+    Video,
+    Unknown,
+}
+
+impl From<FileAssociationArg> for sniff::filesystem::FileAssociation {
+    fn from(value: FileAssociationArg) -> Self {
+        match value {
+            FileAssociationArg::ProgrammingLanguage => Self::ProgrammingLanguage,
+            FileAssociationArg::FrameworkFile => Self::FrameworkFile,
+            FileAssociationArg::Configuration => Self::Configuration,
+            FileAssociationArg::Styling => Self::Styling,
+            FileAssociationArg::Documentation => Self::Documentation,
+            FileAssociationArg::Data => Self::Data,
+            FileAssociationArg::Image => Self::Image,
+            FileAssociationArg::Binary => Self::Binary,
+            FileAssociationArg::BinaryExecutable => Self::BinaryExecutable,
+            FileAssociationArg::Archive => Self::Archive,
+            FileAssociationArg::Font => Self::Font,
+            FileAssociationArg::Audio => Self::Audio,
+            FileAssociationArg::Video => Self::Video,
+            FileAssociationArg::Unknown => Self::Unknown,
+        }
+    }
 }
 
 /// Service state filter for services subcommand.
@@ -658,6 +721,8 @@ Commands:
     sniff repo --deps biscuit        Filtered text dependency list
     sniff repo --packages biscuit    Filtered CSV package names
     sniff language                   Show only language detection results
+    sniff files                      Show broad file associations
+    sniff files --association image  Show only image file statistics
     sniff docs                       Show markdown documents in the repository
     sniff docs --readme              Show only README.md files
     sniff docs --plan                Show only plan-related documents
@@ -758,6 +823,10 @@ mod tests {
                 Some(Commands::Network)
             ));
             assert!(matches!(
+                parse_args(&["files"]).unwrap().command,
+                Some(Commands::Files { .. })
+            ));
+            assert!(matches!(
                 parse_args(&["filesystem"]).unwrap().command,
                 Some(Commands::Filesystem { .. })
             ));
@@ -824,6 +893,18 @@ mod tests {
                 assert_eq!(filter.as_deref(), Some("research"));
             } else {
                 panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn files_association_filter_parse() {
+            let cli = parse_args(&["files", "--association", "documentation"]).unwrap();
+            if let Some(Commands::Files {
+                association: Some(FileAssociationArg::Documentation),
+            }) = cli.command
+            {
+            } else {
+                panic!("Expected Files command with documentation association");
             }
         }
 
@@ -929,6 +1010,10 @@ mod tests {
                 }
                 .to_output_filter(),
                 OutputFilter::Repo
+            );
+            assert_eq!(
+                Commands::Files { association: None }.to_output_filter(),
+                OutputFilter::Files
             );
             assert_eq!(
                 Commands::Programs { action: None }.to_output_filter(),

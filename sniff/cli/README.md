@@ -7,7 +7,7 @@
 - **OS Detection**: Distribution, kernel, architecture, hostname, package managers, locale, timezone, and NTP status
 - **Hardware Detection**: CPU (with SIMD capabilities), GPU (with Metal/Vulkan support), memory, and storage
 - **Network Detection**: Network interfaces with IPv4/IPv6 addresses and status flags
-- **Filesystem Detection**: Git repository status, monorepo detection, programming language analysis, and EditorConfig formatting rules
+- **Filesystem Detection**: Git repository status, monorepo detection, programming language analysis, broad file associations, and EditorConfig formatting rules
 - **Scoped Enrichment**: Refresh git remotes with `--refresh-remotes` and check registries with `--latest-versions`
 - **Flexible Output**: Text (with verbosity levels) or JSON formats
 
@@ -91,7 +91,8 @@ sniff storage     # Storage/disk information
 ```bash
 sniff git         # Git repository information
 sniff repo        # Repository/monorepo structure
-sniff language    # Language detection results
+sniff language    # Programming language results
+sniff files       # Broad file association results
 ```
 
 **Programs Subcommands:**
@@ -196,11 +197,17 @@ Interfaces: 12
     IPv6: fe80::1
 
 === Filesystem ===
-Languages (1,234 files analyzed):
+Languages (212 contributing files out of 1,234 scanned):
   Primary: Rust
-  Rust: 145 files (62.3%)
-  TypeScript: 67 files (28.8%)
-  JavaScript: 21 files (9.0%)
+  Secondary: TypeScript, JavaScript
+  Rust: 145 direct, 0 framework (68.4%)
+  TypeScript: 41 direct, 26 framework (31.6%)
+
+Files (1,234 scanned):
+  Programming language: 186 files (15.1%)
+  Framework file: 26 files (2.1%)
+  Configuration: 54 files (4.4%)
+  Documentation: 18 files (1.5%)
 
 Git Repository:
   Root: .

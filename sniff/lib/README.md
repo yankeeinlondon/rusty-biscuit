@@ -7,7 +7,7 @@
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
 - **Hardware Detection**: CPU with SIMD capabilities, GPU with Metal/Vulkan support, memory, storage
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses and flags
-- **Filesystem Analysis**: Git repositories, monorepo tools, language detection, EditorConfig
+- **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
 - **Programs Detection**: 8 categories (editors, utilities, package managers, TTS, terminals, AI tools)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
@@ -64,6 +64,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Git repo: {:?}", git.repo_root);
             println!("Branch: {:?}", git.current_branch);
         }
+        if let Some(files) = fs.files {
+            println!("File groups detected: {}", files.by_association.len());
+        }
     }
 
     Ok(())
@@ -118,7 +121,7 @@ sniff-lib/
 ├── os              # Operating system detection
 ├── hardware        # CPU, GPU, memory, storage
 ├── network         # Network interfaces
-├── filesystem      # Git, monorepo, languages
+├── filesystem      # Git, monorepo, languages, file associations
 ├── package         # Package manager abstraction
 ├── programs        # Installed program detection (8 categories)
 ├── services        # System service and init system detection
