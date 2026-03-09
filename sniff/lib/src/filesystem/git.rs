@@ -3,6 +3,7 @@ use git2::{Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::{Result, SniffError};
 
@@ -853,7 +854,7 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 /// Returns an error if:
 /// - The repository exists but has no working directory (bare repo)
 /// - Git operations fail due to filesystem permissions or corruption
-pub fn detect_git(path: &Path, _deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
+pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     let repo = match Repository::discover(path) {
         Ok(r) => r,
         Err(_) => return Ok(None),
@@ -867,13 +868,22 @@ pub fn detect_git(path: &Path, _deep: bool, commit_count: usize) -> Result<Optio
 
     let in_worktree = repo.is_worktree();
 
-    let recent = get_recent_commits(&repo, commit_count);
-    let (status, file_changes) = get_repo_status_with_changes(&repo)?;
-    let remotes = get_remotes(&repo);
+    if deep {
+        refresh_remote_tracking_refs(&repo);
+    }
+
+    let mut recent = get_recent_commits(&repo, commit_count);
+    let (mut status, file_changes) = get_repo_status_with_changes(&repo)?;
+    let remotes = get_remotes(&repo, deep);
     let worktrees = get_worktrees(&repo);
     let config = get_git_config(&repo);
     let branches = get_local_branches(&repo, current_branch.as_deref());
     let tracking = get_tracking_status(&repo, current_branch.as_deref());
+
+    if deep {
+        status.is_behind = summarize_behind_status(&tracking);
+        populate_recent_commit_remotes(&repo, &mut recent);
+    }
 
     let (org, repo) = preferred_remote(&remotes)
         .and_then(|r| r.url.as_deref())
@@ -976,8 +986,6 @@ fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecor
 }
 
 /// Gets the last N commits from HEAD using revwalk.
-///
-/// When `deep` is true, also determines which remotes contain each commit.
 fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
@@ -1395,9 +1403,9 @@ fn get_tracking_status(
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
 ///
-/// Also reads the list of branches from each remote via local tracking refs
-/// (no network access required).
-fn get_remotes(repo: &Repository) -> Vec<RemoteInfo> {
+/// When `include_remote_details` is true, also includes locally known
+/// remote-tracking branches and the resolved default branch.
+fn get_remotes(repo: &Repository, include_remote_details: bool) -> Vec<RemoteInfo> {
     repo.remotes()
         .map(|names| {
             names
@@ -1411,8 +1419,11 @@ fn get_remotes(repo: &Repository) -> Vec<RemoteInfo> {
                             .map(|u| HostingProvider::from_url(u))
                             .unwrap_or(HostingProvider::Unknown);
 
-                        let branches = get_remote_branches(repo, name);
-                        let default_branch = get_remote_default_branch(repo, name);
+                        let (branches, default_branch) = if include_remote_details {
+                            (get_remote_branches(repo, name), get_remote_default_branch(repo, name))
+                        } else {
+                            (None, None)
+                        };
 
                         RemoteInfo {
                             name: name.to_string(),
@@ -1426,6 +1437,99 @@ fn get_remotes(repo: &Repository) -> Vec<RemoteInfo> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Refresh local remote-tracking refs using the user's configured `git` binary.
+///
+/// This uses `git fetch --quiet --prune <remote>` per remote and disables
+/// terminal prompts so CLI use does not block on credential input.
+fn refresh_remote_tracking_refs(repo: &Repository) {
+    let Some(repo_root) = repo.workdir() else {
+        return;
+    };
+
+    let Ok(remotes) = repo.remotes() else {
+        return;
+    };
+
+    for remote_name in remotes.iter().flatten() {
+        let _ = Command::new("git")
+            .current_dir(repo_root)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args(["fetch", "--quiet", "--prune", remote_name])
+            .status();
+    }
+}
+
+/// Derive the user-facing behind status from per-remote tracking counts.
+fn summarize_behind_status(tracking: &[RemoteTrackingStatus]) -> Option<BehindStatus> {
+    if tracking.is_empty() {
+        return None;
+    }
+
+    let mut behind_remotes: Vec<String> = tracking
+        .iter()
+        .filter(|status| status.behind > 0)
+        .map(|status| status.remote.clone())
+        .collect();
+    behind_remotes.sort();
+    behind_remotes.dedup();
+
+    Some(if behind_remotes.is_empty() {
+        BehindStatus::NotBehind
+    } else {
+        BehindStatus::Behind(behind_remotes)
+    })
+}
+
+/// Populate commit containment data from locally available remote-tracking refs.
+fn populate_recent_commit_remotes(repo: &Repository, commits: &mut [CommitInfo]) {
+    let remote_tips = remote_branch_tips(repo);
+    if remote_tips.is_empty() {
+        return;
+    }
+
+    for commit in commits {
+        let Ok(commit_oid) = git2::Oid::from_str(&commit.sha) else {
+            continue;
+        };
+
+        let mut containing_remotes = Vec::new();
+        for (remote_name, tip_oid) in &remote_tips {
+            let contains = *tip_oid == commit_oid
+                || repo.graph_descendant_of(*tip_oid, commit_oid).unwrap_or(false);
+            if contains {
+                containing_remotes.push(remote_name.clone());
+            }
+        }
+
+        containing_remotes.sort();
+        containing_remotes.dedup();
+        if !containing_remotes.is_empty() {
+            commit.remotes = Some(containing_remotes);
+        }
+    }
+}
+
+/// Collect the tip OIDs for all remote-tracking branches keyed by remote name.
+fn remote_branch_tips(repo: &Repository) -> Vec<(String, git2::Oid)> {
+    let Ok(refs) = repo.references_glob("refs/remotes/*") else {
+        return Vec::new();
+    };
+
+    refs.flatten()
+        .filter_map(|reference| {
+            let name = reference.name()?;
+            let branch = name.strip_prefix("refs/remotes/")?;
+            if branch.ends_with("/HEAD") {
+                return None;
+            }
+
+            let (remote_name, _) = branch.split_once('/')?;
+            let target = reference.peel_to_commit().ok()?;
+            Some((remote_name.to_string(), target.id()))
+        })
+        .collect()
 }
 
 /// Resolves the default branch for a remote from `refs/remotes/{name}/HEAD`.

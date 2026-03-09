@@ -28,6 +28,47 @@ pub enum MonorepoTool {
     Unknown,
 }
 
+/// The primary ecosystem associated with a package boundary.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageEcosystem {
+    /// Rust/Cargo package
+    Cargo,
+    /// Node.js package
+    Node,
+    /// Python package
+    Python,
+    /// Go module
+    Go,
+    /// Unknown or mixed ecosystem package
+    #[default]
+    Unknown,
+}
+
+/// Describes how a package boundary was discovered.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageDiscoverySource {
+    /// Cargo workspace member
+    CargoWorkspace,
+    /// pnpm workspace package
+    PnpmWorkspace,
+    /// npm workspace package
+    NpmWorkspace,
+    /// Yarn workspace package
+    YarnWorkspace,
+    /// Nx-discovered package
+    Nx,
+    /// Turborepo-discovered package
+    Turborepo,
+    /// Lerna-discovered package
+    Lerna,
+    /// Directly discovered from a package manifest
+    ManifestScan,
+}
+
 /// The type/category of a dependency.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -96,6 +137,9 @@ pub struct RepoInfo {
     /// The tool managing the monorepo (if is_monorepo is true)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monorepo_tool: Option<MonorepoTool>,
+    /// All workspace tools detected at the repo root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_tools: Vec<MonorepoTool>,
     /// Root directory of the repository
     pub root: PathBuf,
     /// Dependencies (for non-monorepo projects only)
@@ -127,6 +171,15 @@ pub struct Package {
     pub package_area: String,
     /// Native package name from manifest (Cargo.toml [package].name or package.json name)
     pub name: String,
+    /// The package ecosystem inferred from its manifests.
+    #[serde(default)]
+    pub ecosystem: PackageEcosystem,
+    /// How this package boundary was discovered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovery_sources: Vec<PackageDiscoverySource>,
+    /// Nested package names detected beneath this package root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested_packages: Vec<String>,
     /// The primary programming language detected in this package
     pub primary_language: Option<String>,
     /// All programming languages detected in this package
@@ -186,12 +239,12 @@ impl RepoInfo {
     /// Returns `None` when `dir` is not inside any package.
     pub fn package_for_dir(&self, dir: &Path) -> Option<&Package> {
         let packages = self.packages.as_ref()?;
-        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let dir = canonicalize_path(dir);
 
-        packages.iter().find(|pkg| {
-            let pkg_path = std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
-            dir.starts_with(&pkg_path)
-        })
+        packages
+            .iter()
+            .filter(|pkg| dir.starts_with(&canonicalize_path(&pkg.path)))
+            .max_by_key(|pkg| canonicalize_path(&pkg.path).components().count())
     }
 
     /// Find the package area that contains `dir`.
@@ -201,18 +254,15 @@ impl RepoInfo {
     /// Returns `None` when `dir` is outside every known package area.
     pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
         let packages = self.packages.as_ref()?;
-        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let dir = canonicalize_path(dir);
 
         // Check if inside a specific package first
-        if let Some(pkg) = packages.iter().find(|pkg| {
-            let pkg_path = std::fs::canonicalize(&pkg.path).unwrap_or_else(|_| pkg.path.clone());
-            dir.starts_with(&pkg_path)
-        }) {
+        if let Some(pkg) = self.package_for_dir(&dir) {
             return Some(&pkg.package_area);
         }
 
         // Fall back to checking package area directories
-        let root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+        let root = canonicalize_path(&self.root);
         let areas: HashSet<&str> =
             packages.iter().map(|p| p.package_area.as_str()).filter(|a| *a != "root").collect();
 
@@ -306,29 +356,72 @@ impl CargoLockVersions {
 /// - `Ok(None)` if no repository configuration is found
 /// - `Err(SniffError)` if there's an error reading files
 pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
-    // Check in priority order (more specific tools first)
-    if let Some(info) = detect_cargo_workspace(root)? {
-        return Ok(Some(info));
+    let mut workspace_tools = Vec::new();
+    let mut packages = Vec::new();
+
+    collect_repo_info(detect_cargo_workspace(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_nx(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_turborepo(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_pnpm_workspace(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_yarn_workspace(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_npm_workspace(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(detect_lerna(root)?, &mut workspace_tools, &mut packages);
+
+    if workspace_tools.is_empty() {
+        return Ok(None);
     }
-    if let Some(info) = detect_nx(root)? {
-        return Ok(Some(info));
+
+    let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
+    packages.extend(discover_packages_from_manifests(
+        root,
+        MonorepoTool::Unknown,
+        &lock_versions,
+        PackageDiscoverySource::ManifestScan,
+    ));
+
+    let mut packages = merge_packages(packages);
+    refresh_package_boundaries(&mut packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: workspace_tools.first().copied(),
+        workspace_tools,
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages: Some(packages),
+    }))
+}
+
+fn collect_repo_info(
+    info: Option<RepoInfo>,
+    workspace_tools: &mut Vec<MonorepoTool>,
+    packages: &mut Vec<Package>,
+) {
+    let Some(info) = info else {
+        return;
+    };
+
+    if let Some(tool) = info.monorepo_tool
+        && !workspace_tools.contains(&tool)
+    {
+        workspace_tools.push(tool);
     }
-    if let Some(info) = detect_turborepo(root)? {
-        return Ok(Some(info));
+
+    if !info.workspace_tools.is_empty() {
+        for tool in info.workspace_tools {
+            if !workspace_tools.contains(&tool) {
+                workspace_tools.push(tool);
+            }
+        }
     }
-    if let Some(info) = detect_pnpm_workspace(root)? {
-        return Ok(Some(info));
+
+    if let Some(mut detected_packages) = info.packages {
+        packages.append(&mut detected_packages);
     }
-    if let Some(info) = detect_yarn_workspace(root)? {
-        return Ok(Some(info));
-    }
-    if let Some(info) = detect_npm_workspace(root)? {
-        return Ok(Some(info));
-    }
-    if let Some(info) = detect_lerna(root)? {
-        return Ok(Some(info));
-    }
-    Ok(None)
 }
 
 fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
@@ -394,6 +487,7 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::CargoWorkspace),
+        workspace_tools: vec![MonorepoTool::CargoWorkspace],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -797,6 +891,7 @@ fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::PnpmWorkspaces),
+        workspace_tools: vec![MonorepoTool::PnpmWorkspaces],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -831,6 +926,7 @@ fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::NpmWorkspaces),
+        workspace_tools: vec![MonorepoTool::NpmWorkspaces],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -869,6 +965,7 @@ fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::YarnWorkspaces),
+        workspace_tools: vec![MonorepoTool::YarnWorkspaces],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -903,6 +1000,7 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Nx),
+        workspace_tools: vec![MonorepoTool::Nx],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -934,6 +1032,7 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Turborepo),
+        workspace_tools: vec![MonorepoTool::Turborepo],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -968,6 +1067,7 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
     Ok(Some(RepoInfo {
         is_monorepo: true,
         monorepo_tool: Some(MonorepoTool::Lerna),
+        workspace_tools: vec![MonorepoTool::Lerna],
         root: root.to_path_buf(),
         dependencies: None,
         dev_dependencies: None,
@@ -1242,31 +1342,20 @@ fn detect_package_files(path: &Path, repo_root: &Path) -> PackageFiles {
 // Package name resolution
 // ============================================================================
 
-/// Determines the native package name based on monorepo tool type.
-fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String {
-    match tool {
-        MonorepoTool::CargoWorkspace => {
-            let cargo_toml = path.join("Cargo.toml");
-            if cargo_toml.exists()
-                && let Some(name) = read_cargo_package_name(&cargo_toml)
-            {
-                return name;
-            }
-        }
-        MonorepoTool::NpmWorkspaces
-        | MonorepoTool::PnpmWorkspaces
-        | MonorepoTool::YarnWorkspaces
-        | MonorepoTool::Nx
-        | MonorepoTool::Turborepo
-        | MonorepoTool::Lerna => {
-            let package_json = path.join("package.json");
-            if package_json.exists()
-                && let Some(name) = read_npm_package_name(&package_json)
-            {
-                return name;
-            }
-        }
-        _ => {}
+/// Determines the native package name based on manifests present in the package.
+fn resolve_package_name(path: &Path, root: &Path) -> String {
+    let cargo_toml = path.join("Cargo.toml");
+    if cargo_toml.exists()
+        && let Some(name) = read_cargo_package_name(&cargo_toml)
+    {
+        return name;
+    }
+
+    let package_json = path.join("package.json");
+    if package_json.exists()
+        && let Some(name) = read_npm_package_name(&package_json)
+    {
+        return name;
     }
 
     let pyproject_toml = path.join("pyproject.toml");
@@ -1287,35 +1376,24 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
     make_relative_path(path, root)
 }
 
-/// Determines the package version based on monorepo tool type.
-fn resolve_package_version(path: &Path, root: &Path, tool: MonorepoTool) -> Option<String> {
-    match tool {
-        MonorepoTool::CargoWorkspace => {
-            let cargo_toml = path.join("Cargo.toml");
-            if cargo_toml.exists() {
-                return read_cargo_package_version(&cargo_toml);
+/// Determines the package version based on manifests present in the package.
+fn resolve_package_version(path: &Path, root: &Path) -> Option<String> {
+    let cargo_toml = path.join("Cargo.toml");
+    if cargo_toml.exists() {
+        return read_cargo_package_version(&cargo_toml);
+    }
+
+    let package_json = path.join("package.json");
+    if package_json.exists() {
+        if let Some(version) = read_npm_package_version(&package_json) {
+            return Some(version);
+        }
+        if path != root {
+            let root_package_json = root.join("package.json");
+            if root_package_json.exists() {
+                return read_npm_package_version(&root_package_json);
             }
         }
-        MonorepoTool::NpmWorkspaces
-        | MonorepoTool::PnpmWorkspaces
-        | MonorepoTool::YarnWorkspaces
-        | MonorepoTool::Nx
-        | MonorepoTool::Turborepo
-        | MonorepoTool::Lerna => {
-            let package_json = path.join("package.json");
-            if package_json.exists() {
-                if let Some(version) = read_npm_package_version(&package_json) {
-                    return Some(version);
-                }
-                if path != root {
-                    let root_package_json = root.join("package.json");
-                    if root_package_json.exists() {
-                        return read_npm_package_version(&root_package_json);
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 
     let pyproject_toml = path.join("pyproject.toml");
@@ -1394,6 +1472,10 @@ fn make_relative_path(path: &Path, root: &Path) -> String {
     )
 }
 
+fn canonicalize_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Derives the package area from a relative path.
 ///
 /// The area is the directory path between the repo root and the package directory.
@@ -1407,8 +1489,8 @@ fn make_package_area(relative: &str) -> String {
 }
 
 /// Detects programming languages in a package directory.
-fn detect_package_languages(path: &Path) -> (Option<String>, Vec<String>) {
-    match detect_languages(path) {
+fn detect_package_languages(path: &Path, exclude_roots: &[PathBuf]) -> (Option<String>, Vec<String>) {
+    match super::languages::detect_languages_with_exclusions(path, exclude_roots) {
         Ok(breakdown) => {
             let languages: Vec<String> =
                 breakdown.languages.iter().map(|s| s.language.clone()).collect();
@@ -1475,6 +1557,36 @@ fn resolve_js_package_manager(
     "npm"
 }
 
+fn discovery_source_for_tool(tool: MonorepoTool) -> PackageDiscoverySource {
+    match tool {
+        MonorepoTool::CargoWorkspace => PackageDiscoverySource::CargoWorkspace,
+        MonorepoTool::PnpmWorkspaces => PackageDiscoverySource::PnpmWorkspace,
+        MonorepoTool::NpmWorkspaces => PackageDiscoverySource::NpmWorkspace,
+        MonorepoTool::YarnWorkspaces => PackageDiscoverySource::YarnWorkspace,
+        MonorepoTool::Nx => PackageDiscoverySource::Nx,
+        MonorepoTool::Turborepo => PackageDiscoverySource::Turborepo,
+        MonorepoTool::Lerna => PackageDiscoverySource::Lerna,
+        MonorepoTool::Unknown => PackageDiscoverySource::ManifestScan,
+    }
+}
+
+fn detect_package_ecosystem(path: &Path) -> PackageEcosystem {
+    if path.join("Cargo.toml").exists() {
+        return PackageEcosystem::Cargo;
+    }
+    if path.join("package.json").exists() {
+        return PackageEcosystem::Node;
+    }
+    if path.join("pyproject.toml").exists() || path.join("requirements.txt").exists() {
+        return PackageEcosystem::Python;
+    }
+    if path.join("go.mod").exists() {
+        return PackageEcosystem::Go;
+    }
+
+    PackageEcosystem::Unknown
+}
+
 fn dedupe_patterns(patterns: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
@@ -1501,10 +1613,128 @@ fn dedupe_packages(packages: Vec<Package>) -> Vec<Package> {
     deduped
 }
 
+fn merge_packages(packages: Vec<Package>) -> Vec<Package> {
+    let mut merged = Vec::new();
+    let mut index_by_path: HashMap<PathBuf, usize> = HashMap::new();
+
+    for package in packages {
+        let key = canonicalize_path(&package.path);
+        if let Some(index) = index_by_path.get(&key).copied() {
+            merge_package_into(&mut merged[index], package);
+        } else {
+            index_by_path.insert(key, merged.len());
+            merged.push(package);
+        }
+    }
+
+    merged.sort_by(|a, b| a.relative.cmp(&b.relative));
+    merged
+}
+
+fn merge_package_into(existing: &mut Package, incoming: Package) {
+    if existing.name == existing.relative && incoming.name != incoming.relative {
+        existing.name = incoming.name.clone();
+    }
+
+    if existing.version.is_none() {
+        existing.version = incoming.version.clone();
+    }
+
+    if existing.ecosystem == PackageEcosystem::Unknown {
+        existing.ecosystem = incoming.ecosystem;
+    }
+
+    for source in incoming.discovery_sources {
+        if !existing.discovery_sources.contains(&source) {
+            existing.discovery_sources.push(source);
+        }
+    }
+
+    for manager in incoming.package_managers {
+        if !existing.package_managers.contains(&manager) {
+            existing.package_managers.push(manager);
+        }
+    }
+
+    for feature in incoming.features {
+        if !existing.features.contains(&feature) {
+            existing.features.push(feature);
+        }
+    }
+
+    existing.configuration = merge_path_lists(&existing.configuration, &incoming.configuration);
+    existing.documentation = merge_path_lists(&existing.documentation, &incoming.documentation);
+    existing.command_runner = merge_path_lists(&existing.command_runner, &incoming.command_runner);
+
+    if existing.editor_config.is_none() {
+        existing.editor_config = incoming.editor_config;
+    }
+
+    if existing.dependencies.is_none() {
+        existing.dependencies = incoming.dependencies;
+    }
+    if existing.dev_dependencies.is_none() {
+        existing.dev_dependencies = incoming.dev_dependencies;
+    }
+    if existing.peer_dependencies.is_none() {
+        existing.peer_dependencies = incoming.peer_dependencies;
+    }
+    if existing.optional_dependencies.is_none() {
+        existing.optional_dependencies = incoming.optional_dependencies;
+    }
+
+    existing.is_excluded |= incoming.is_excluded;
+    existing.discovery_sources.sort_by_key(|source| *source as u8);
+    existing.package_managers.sort();
+    existing.features.sort();
+}
+
+fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> {
+    let mut merged = existing.to_vec();
+    for path in incoming {
+        if !merged.contains(path) {
+            merged.push(path.clone());
+        }
+    }
+    merged.sort();
+    merged
+}
+
+fn refresh_package_boundaries(packages: &mut [Package]) {
+    let package_roots: Vec<PathBuf> = packages.iter().map(|pkg| canonicalize_path(&pkg.path)).collect();
+    let package_names: Vec<String> = packages.iter().map(|pkg| pkg.name.clone()).collect();
+
+    for (index, package) in packages.iter_mut().enumerate() {
+        let package_root = &package_roots[index];
+        let mut nested_roots = Vec::new();
+        let mut nested_packages = Vec::new();
+
+        for (other_index, other_root) in package_roots.iter().enumerate() {
+            if index == other_index {
+                continue;
+            }
+
+            if other_root.starts_with(package_root) {
+                nested_roots.push(packages[other_index].path.clone());
+                nested_packages.push(package_names[other_index].clone());
+            }
+        }
+
+        nested_roots.sort();
+        nested_packages.sort();
+
+        let (primary_language, languages) = detect_package_languages(&package.path, &nested_roots);
+        package.primary_language = primary_language;
+        package.languages = languages;
+        package.nested_packages = nested_packages;
+    }
+}
+
 fn discover_packages_from_manifests(
     root: &Path,
     tool: MonorepoTool,
     lock_versions: &Option<CargoLockVersions>,
+    discovery_source: PackageDiscoverySource,
 ) -> Vec<Package> {
     let mut discovered_dirs = HashSet::new();
 
@@ -1549,7 +1779,9 @@ fn discover_packages_from_manifests(
     let mut dirs: Vec<PathBuf> = discovered_dirs.into_iter().collect();
     dirs.sort();
 
-    dirs.iter().map(|path| create_package(path, root, tool, lock_versions)).collect()
+    dirs.iter()
+        .map(|path| create_package(path, root, tool, lock_versions, discovery_source))
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -1571,7 +1803,13 @@ fn expand_glob_patterns_with_deps(
                     for entry in entries.filter_map(|e| e.ok()) {
                         if entry.path().is_dir() {
                             let path = entry.path();
-                            packages.push(create_package(&path, root, tool, lock_versions));
+                            packages.push(create_package(
+                                &path,
+                                root,
+                                tool,
+                                lock_versions,
+                                discovery_source_for_tool(tool),
+                            ));
                         }
                     }
                 }
@@ -1579,7 +1817,13 @@ fn expand_glob_patterns_with_deps(
         } else {
             let path = root.join(pattern);
             if path.exists() {
-                packages.push(create_package(&path, root, tool, lock_versions));
+                packages.push(create_package(
+                    &path,
+                    root,
+                    tool,
+                    lock_versions,
+                    discovery_source_for_tool(tool),
+                ));
             }
         }
     }
@@ -1593,13 +1837,15 @@ fn create_package(
     root: &Path,
     tool: MonorepoTool,
     lock_versions: &Option<CargoLockVersions>,
+    discovery_source: PackageDiscoverySource,
 ) -> Package {
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
-    let name = resolve_package_name(path, root, tool);
-    let (primary_language, languages) = detect_package_languages(path);
+    let name = resolve_package_name(path, root);
+    let ecosystem = detect_package_ecosystem(path);
+    let (primary_language, languages) = detect_package_languages(path, &[]);
     let package_managers = detect_package_managers(path);
-    let version = resolve_package_version(path, root, tool);
+    let version = resolve_package_version(path, root);
     let files = detect_package_files(path, root);
 
     // Read feature flags (Cargo only for now)
@@ -1691,6 +1937,9 @@ fn create_package(
         relative,
         package_area,
         name,
+        ecosystem,
+        discovery_sources: vec![discovery_source],
+        nested_packages: Vec::new(),
         primary_language,
         languages,
         configuration: files.configuration,

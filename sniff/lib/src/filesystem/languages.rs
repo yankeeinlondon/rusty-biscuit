@@ -103,8 +103,26 @@ fn is_programming_language(lang: &str) -> bool {
 /// println!("Total files: {}", breakdown.total_files);
 /// ```
 pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
+    detect_languages_with_exclusions(root, &[])
+}
+
+/// Detects programming languages in a directory tree while excluding nested subtrees.
+pub(crate) fn detect_languages_with_exclusions(
+    root: &Path,
+    exclude_roots: &[PathBuf],
+) -> Result<LanguageBreakdown> {
     let mut language_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
     let mut total_files = 0;
+    let exclude_roots: Vec<PathBuf> = exclude_roots
+        .iter()
+        .map(|path| {
+            if path.is_absolute() {
+                path.clone()
+            } else {
+                root.join(path)
+            }
+        })
+        .collect();
 
     // Use the `ignore` crate which respects .gitignore files
     let walker = WalkBuilder::new(root)
@@ -112,7 +130,7 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
         .git_ignore(true) // Respect .gitignore
         .git_global(true) // Respect global gitignore
         .git_exclude(true) // Respect .git/info/exclude
-        .filter_entry(|e| !is_excluded_dir(e))
+        .filter_entry(|e| !is_excluded_entry(e, &exclude_roots))
         .build();
 
     for entry in walker
@@ -146,7 +164,14 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
 ///
 /// Excludes common build artifacts and dependency directories to improve
 /// performance and accuracy.
-fn is_excluded_dir(entry: &ignore::DirEntry) -> bool {
+fn is_excluded_entry(entry: &ignore::DirEntry, exclude_roots: &[PathBuf]) -> bool {
+    if exclude_roots
+        .iter()
+        .any(|root| entry.path() == root || entry.path().starts_with(root))
+    {
+        return true;
+    }
+
     if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
         return false;
     }
@@ -244,12 +269,28 @@ mod tests {
         // Test with ignore WalkBuilder entries
         for entry in WalkBuilder::new(dir.path()).build().filter_map(|e| e.ok()) {
             if entry.path() == regular_dir {
-                assert!(!is_excluded_dir(&entry), "src should not be excluded");
+                assert!(!is_excluded_entry(&entry, &[]), "src should not be excluded");
             }
             if entry.path() == excluded_dir {
-                assert!(is_excluded_dir(&entry), "target should be excluded");
+                assert!(is_excluded_entry(&entry, &[]), "target should be excluded");
             }
         }
+    }
+
+    #[test]
+    fn test_excludes_nested_package_roots() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("frontend/src")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("frontend/src/index.ts"), "console.log('hi')").unwrap();
+
+        let result =
+            detect_languages_with_exclusions(dir.path(), &[dir.path().join("frontend")]).unwrap();
+
+        assert_eq!(result.total_files, 1);
+        assert_eq!(result.primary.as_deref(), Some("Rust"));
+        assert_eq!(result.languages.len(), 1);
+        assert_eq!(result.languages[0].language, "Rust");
     }
 
     #[test]
