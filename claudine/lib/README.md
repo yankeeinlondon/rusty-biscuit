@@ -1,10 +1,10 @@
 # Claudine Library
 
-Core library for the Claudine cross-agent event handling and skill linking system. Provides the event model, provider adapters, dispatch pipeline, configuration management, agent capability catalog, and skill synchronization logic used by the `claudine` CLI.
+Core library for the Claudine cross-agent event handling, skill linking, and MCP management system. Provides the event model, provider adapters, dispatch pipeline, configuration management, agent capability catalog, MCP catalog/sync/runtime primitives, and skill synchronization logic used by the `claudine` CLI.
 
 ## Architecture
 
-The library is organized into nine top-level modules:
+The library is organized into ten top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
@@ -15,6 +15,7 @@ claudine/lib/src/
 ├── dispatch/    → Event processing pipeline
 ├── events/      → Normalized event model and types
 ├── linking/     → Cross-provider skill and command synchronization
+├── mcp/         → MCP catalog, defaults, import/export, session, and injection
 ├── reporting/   → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/    → Cross-provider policy services (Protect)
 └── error.rs     → ClaudineError enum
@@ -171,6 +172,20 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 | RooCode | `~/.roo/skills/` | `.roo/skills/` | -- |
 
 Additional sub-modules: `canonical` (canonical provider selection), `capabilities` (provider resource support metadata with required/optional property schemas), `compatibility` (candidate/reference classification with alias duplication and name derivation), `conflict` (sync status analysis with also-reads-from awareness), `detector` (per-resource-type detectors via `LinkDetector` trait), `discovery` (legacy skill and command discovery), `execution` (analyze and apply resource links with derived artifact generation), `hashing` (xxHash content dedup with symlink resolution), `model` (data types including `ResourceReference` 9-variant state machine), `paths` (provider path resolution with repo-root awareness), `report` (link report types), `symlink` (symlink creation with relative path support).
+
+### MCP (`mcp`)
+
+Provider-agnostic MCP storage and provider-specific import/export/runtime integration:
+
+- `catalog` - normalized server storage plus 5-tier ID/alias/query resolution
+- `defaults` - user defaults (`~/.claudine/mcp/defaults.json`) and repo defaults (`<repo>/.claudine/mcp.json`), where repo replaces user
+- `state` - provenance and managed ownership in `~/.claudine/mcp/provider-state.json`
+- `import` - scans Claude, Codex, Gemini, OpenCode, and Roo native configs into the catalog with fingerprint dedupe
+- `export` - dry-run/apply sync back to native configs with backups and managed-entry tracking
+- `session` - computes runtime server sets from defaults, explicit `--use`, and non-interactive prompt `#tags`
+- `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (shadow-home config files)
+
+Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, Qwen, and Roo do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
 
 ### Services (`services`)
 

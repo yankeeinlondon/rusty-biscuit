@@ -1,6 +1,6 @@
 # Claudine CLI
 
-Binary: `claudine` — interactive setup, hook inspection, event handling, and skill linking for agentic CLIs.
+Binary: `claudine` — interactive setup, hook inspection, event handling, skill linking, and MCP management for agentic CLIs.
 
 ## Commands
 
@@ -78,6 +78,24 @@ Test what would happen for an event without side effects. Accepts event names in
 
 Query the local reporting index built from JSONL hook logs. Shared filters include `--provider`, `--repo`, `--package-area`, and `--package`, and read commands perform a best-effort sync before querying.
 
+### `claudine mcp [subcommand] [--json]`
+
+Manage Claudine's normalized MCP catalog and provider sync state.
+
+| Subcommand | Description |
+|------------|-------------|
+| *(none)* | List catalog entries, defaults, and provider presence |
+| `init` | Import supported native provider MCP configs into `~/.claudine/mcp/` |
+| `show <id>` | Show normalized definition and provenance for one server |
+| `default [ids...]` | Replace user-scope default server IDs |
+| `default --repo [ids...]` | Replace repo-scope default server IDs |
+| `alias add <id> <alias>` | Add a catalog alias |
+| `alias remove <alias>` | Remove an alias |
+| `remove <id>` | Remove a catalog entry after confirmation |
+| `sync <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a provider's native config |
+
+Storage lives in `~/.claudine/mcp/catalog.json`, `~/.claudine/mcp/defaults.json`, `~/.claudine/mcp/provider-state.json`, and optional repo defaults at `<repo>/.claudine/mcp.json`. Repo defaults replace user defaults.
+
 ### `claudine about`
 
 Renders rich help documentation using darkmatter markdown rendering with biscuit-terminal fallback.
@@ -108,7 +126,9 @@ Shared wrapper flags:
 |------|-------------|
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
+| `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
 | `-n, --non-interactive, --ni` | Translate to provider-specific non-interactive execution shape |
+| `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
 | `-- ...` | Force all remaining args to passthrough unchanged |
 
 Wrapper behavior:
@@ -118,6 +138,11 @@ Wrapper behavior:
 - Reports removed env variable names to stderr (names only, sorted/unique).
 - Injects `AGENT`, `YOLO`, `AGENT_PARAMS`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `claudine handle` records wrapper-provided `PACKAGE_AREA` / `PACKAGE` values into event logs so they can be used in reporting filters.
+- `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
+- Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
+- Runtime MCP injection currently exists for Codex, Gemini, and OpenCode only. Codex and Gemini use a shadow HOME under `~/.claudine`; OpenCode injects `OPENCODE_CONFIG_CONTENT`.
+- Gemini runtime sessions append `--allowed-mcp-server-names` for the resolved server list.
+- Claude, Goose, Kimi, and Qwen wrappers fail fast with guidance to use `claudine mcp sync <provider>` instead. Roo is import/sync only and has no wrapper command.
 - Runs child process with inherited stdio/cwd and propagates child exit code.
 
 ## Module Structure
@@ -133,6 +158,7 @@ cli/src/
     ├── handle.rs        → Event processing from stdin
     ├── hooks.rs         → Hook inspection and validation
     ├── link.rs          → Skill synchronization management
+    ├── mcp.rs           → MCP catalog, defaults, aliasing, import, and sync commands
     ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal

@@ -1,14 +1,14 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-02-19
+last_updated: 2026-03-09
 ---
 
 ## Claudine Library
 
-Claudine is a universal event handler and skill linker for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, then executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire. The library also synchronizes skills, commands, agents, and scripts between providers via symlinks, enabling a single set of resources to be shared across all installed agentic CLIs.
+Claudine is a universal event handler, skill linker, and MCP catalog manager for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire, synchronizes skills/commands/agents/scripts between providers, and manages provider-agnostic MCP storage plus provider-specific import/sync/runtime behavior.
 
-The library is organized into seven core modules: `actions` (hook action types and response model with 6 action variants and 4 decision types), `adapters` (provider-specific event parsers implementing the `ProviderAdapter` trait), `agents` (comprehensive capability catalog for all 8 CLIs covering model selection, permissions, skill paths, and more), `config` (agent detection, hook registration, atomic file writes, and backup utilities), `dispatch` (the 6-step event processing pipeline including config loading, matcher evaluation, and action execution), `events` (the normalized 16-event lifecycle model with metadata, support levels, and provider mappings), and `linking` (cross-provider skill synchronization via a 4-phase discovery/hashing/analysis/linking algorithm).
+The library is organized around these core modules: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `linking` (cross-provider skill synchronization), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `reporting` (JSONL-to-SQLite metrics index), and `services` (cross-provider policy engines such as Protect).
 
 The dispatch pipeline supports a Handlebars-style template engine with 28 variables across 5 categories (event, OS, hardware, git, and project), shell environment variable interpolation with optional defaults, and precompiled regex matchers for event filtering. Configuration merges user-scope and repo-scope configs with an intentionally asymmetric strategy: repo provider configs fully replace user-level configs, while global settings merge field-by-field.
 
@@ -33,6 +33,7 @@ The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so
 | `claudine hooks --variables` | Template variables with current values |
 | `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
+| `claudine mcp [init\|show\|default\|alias\|remove\|sync] [--json]` | Manage the normalized MCP catalog and provider sync state |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
@@ -40,6 +41,25 @@ The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so
 | `claudine about` | Rich help documentation |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
+
+## MCP Support
+
+Claudine stores normalized MCP data in `~/.claudine/mcp/catalog.json`, `~/.claudine/mcp/defaults.json`, and `~/.claudine/mcp/provider-state.json`, with optional repo defaults in `<repo>/.claudine/mcp.json`. Repo defaults replace user defaults.
+
+Current provider rollout:
+
+- Import and sync: Claude, Codex, Gemini, OpenCode, and Roo
+- Runtime wrapper injection: Codex, Gemini, and OpenCode
+- No MCP support yet: Goose, Kimi, and Qwen
+
+Wrapper MCP behavior:
+
+- `--mcp` launches with the effective defaults; `--use id-or-alias[,id-or-alias...]` adds explicit servers and also enables MCP mode.
+- Non-interactive Codex, Gemini, and OpenCode runs also resolve `#tags` in the prompt and strip them before forwarding the prompt to the provider.
+- Codex and Gemini runtime injection write provider config into a shadow HOME under `~/.claudine`; OpenCode uses `OPENCODE_CONFIG_CONTENT`.
+- Claude, Goose, Kimi, and Qwen wrappers currently direct users to `claudine mcp sync <provider>` instead of runtime injection.
+
+Read [claudine/docs/mcp-support.md](../../../claudine/docs/mcp-support.md) before changing MCP behavior or documenting new provider support.
 
 ## Research on Agentic CLI Platforms
 
