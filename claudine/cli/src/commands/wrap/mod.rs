@@ -13,6 +13,16 @@ use std::path::PathBuf;
 
 use crate::log;
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct McpRuntimeInfo {
+    pub(crate) servers: Vec<String>,
+    pub(crate) resolved_tags: Vec<String>,
+    pub(crate) cleaned_prompt: Option<String>,
+    pub(crate) env_vars_set: Vec<String>,
+    pub(crate) temp_files: Vec<PathBuf>,
+    pub(crate) extra_args: Vec<String>,
+}
+
 /// Shared wrapper args for provider subcommands.
 #[derive(Debug, Clone, Args)]
 pub struct WrapperArgs {
@@ -179,6 +189,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         deferred_warnings.push(warn);
     }
 
+    let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
+        && matches!(provider, Provider::Codex | Provider::Gemini);
+
     let mut env_plan = env::build_child_env(
         profile,
         provider,
@@ -189,23 +202,48 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         &cwd,
         &env_overrides,
         repo_requested,
+        needs_mcp_shadow_home,
     )?;
+
+    let mut mcp_runtime = None;
 
     // MCP session composition
     if args.mcp || !args.mcp_use.is_empty() {
         use claudine::mcp::catalog::McpCatalogStore;
         use claudine::mcp::inject::injector_for_provider;
-        use claudine::mcp::session::compute_session_set;
+        use claudine::mcp::session::{compute_session_set, extract_tags};
 
         let catalog = McpCatalogStore::load()
             .map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let repo_root_ref = env_plan.repo_root.as_deref();
-        let session = compute_session_set(&catalog, repo_root_ref, &args.mcp_use, &[])
+        let (cleaned_prompt, prompt_tags) = if non_interactive_requested {
+            extract_tags_from_child_args(provider, &mut child_args, &catalog, extract_tags)
+        } else {
+            (None, Vec::new())
+        };
+
+        let mut session = compute_session_set(&catalog, repo_root_ref, &args.mcp_use, &prompt_tags)
             .map_err(|e| eyre!("MCP session error: {e}"))?;
+        session.cleaned_prompt = cleaned_prompt.clone();
 
         for warning in &session.warnings {
             deferred_warnings.push(warning.clone());
         }
+
+        let mut runtime = McpRuntimeInfo {
+            servers: session
+                .servers
+                .iter()
+                .map(|server| server.id.clone())
+                .collect(),
+            resolved_tags: session
+                .resolved_tags
+                .iter()
+                .map(|tag| format!("#{} -> {} ({:?})", tag.tag, tag.resolved_to, tag.match_tier))
+                .collect(),
+            cleaned_prompt: session.cleaned_prompt.clone(),
+            ..McpRuntimeInfo::default()
+        };
 
         if !session.servers.is_empty() {
             if let Some(injector) = injector_for_provider(provider) {
@@ -224,8 +262,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                     child_args.push(arg.clone());
                 }
 
-                let server_ids: Vec<&str> = session.servers.iter().map(|s| s.id.as_str()).collect();
-                deferred_messages.push(format!("MCP: {}", server_ids.join(", ")));
+                runtime.env_vars_set = result.env_vars_set;
+                runtime.temp_files = result.temp_files;
+                runtime.extra_args = result.extra_args;
             } else {
                 return Err(eyre!(
                     "provider {} does not support runtime MCP injection.\n\
@@ -235,6 +274,16 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                 ));
             }
         }
+
+        deferred_messages.push(if runtime.servers.is_empty() {
+            "MCP: no active servers".to_string()
+        } else {
+            format!("MCP: {}", runtime.servers.join(", "))
+        });
+        if !runtime.resolved_tags.is_empty() {
+            deferred_messages.push(format!("MCP tags: {}", runtime.resolved_tags.join(", ")));
+        }
+        mcp_runtime = Some(runtime);
     }
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
@@ -247,6 +296,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             &child_args,
             repo_requested,
             &env_plan,
+            mcp_runtime.as_ref(),
             child_cwd,
             &term,
         );
@@ -262,6 +312,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             repo_requested,
             &child_args,
             &env_plan,
+            mcp_runtime.as_ref(),
             &term,
             args.verbose_level(),
         );
@@ -345,6 +396,126 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptLocation {
+    Value(usize),
+    Inline {
+        index: usize,
+        prefix: &'static str,
+    },
+}
+
+fn extract_tags_from_child_args(
+    provider: Provider,
+    args: &mut [String],
+    catalog: &claudine::mcp::catalog::McpCatalogStore,
+    extract_tags: fn(&str, &claudine::mcp::catalog::McpCatalogStore) -> (String, Vec<String>),
+) -> (Option<String>, Vec<String>) {
+    let Some(location) = find_prompt_location(provider, args) else {
+        return (None, Vec::new());
+    };
+
+    let prompt = match location {
+        PromptLocation::Value(index) => args[index].clone(),
+        PromptLocation::Inline { index, prefix } => args[index]
+            .strip_prefix(prefix)
+            .unwrap_or_default()
+            .to_string(),
+    };
+
+    let (cleaned_prompt, tags) = extract_tags(&prompt, catalog);
+    if tags.is_empty() {
+        return (None, tags);
+    }
+
+    match location {
+        PromptLocation::Value(index) => args[index] = cleaned_prompt.clone(),
+        PromptLocation::Inline { index, prefix } => {
+            args[index] = format!("{prefix}{cleaned_prompt}");
+        }
+    }
+
+    (Some(cleaned_prompt), tags)
+}
+
+fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
+    match provider {
+        Provider::Gemini => find_gemini_prompt_location(args),
+        Provider::Codex => find_positional_prompt_location(args, 1),
+        Provider::OpenCode => find_positional_prompt_location(args, 1),
+        _ => None,
+    }
+}
+
+fn find_gemini_prompt_location(args: &[String]) -> Option<PromptLocation> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--prompt" || arg == "-p" {
+            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
+        }
+        if arg.starts_with("--prompt=") {
+            return Some(PromptLocation::Inline {
+                index,
+                prefix: "--prompt=",
+            });
+        }
+        if arg.starts_with("-p=") {
+            return Some(PromptLocation::Inline {
+                index,
+                prefix: "-p=",
+            });
+        }
+    }
+
+    find_positional_prompt_location(args, 0)
+}
+
+fn find_positional_prompt_location(args: &[String], start_index: usize) -> Option<PromptLocation> {
+    let mut skip_next = false;
+
+    for (index, arg) in args.iter().enumerate().skip(start_index) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        if index == 0 && (arg == "exec" || arg == "run" || arg == "e") {
+            continue;
+        }
+
+        if arg == "--" {
+            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
+        }
+
+        if takes_value(arg) {
+            skip_next = !arg.contains('=');
+            continue;
+        }
+
+        if !arg.starts_with('-') {
+            return Some(PromptLocation::Value(index));
+        }
+    }
+
+    None
+}
+
+fn takes_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "-m"
+            | "--model"
+            | "-o"
+            | "--output"
+            | "--output-format"
+            | "--approval-mode"
+            | "--config"
+            | "-c"
+            | "--profile"
+            | "--system-prompt"
+            | "--sandbox-image"
+    )
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ExtractedWrapperFlags {
     yolo: bool,
@@ -387,6 +558,12 @@ fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::path::Path;
+
+    use chrono::Utc;
+    use claudine::mcp::catalog::McpCatalogStore;
+    use claudine::mcp::session::extract_tags;
+    use claudine::mcp::types::{McpServer, McpServerMetadata, McpTransport};
 
     #[test]
     fn missing_binary_preflight_has_actionable_message() {
@@ -471,6 +648,65 @@ mod tests {
     fn resolve_system_prompt_returns_literal_for_non_file() {
         let result = resolve_system_prompt("You are a helpful assistant.").unwrap();
         assert_eq!(result, "You are a helpful assistant.");
+    }
+
+    fn make_catalog_with_servers(names: &[&str]) -> McpCatalogStore {
+        let mut catalog = McpCatalogStore::load_from(Path::new("/nonexistent")).unwrap();
+        for name in names {
+            catalog.add_server(McpServer {
+                id: (*name).to_string(),
+                aliases: Vec::new(),
+                transport: McpTransport::Stdio,
+                command: Some("npx".into()),
+                args: vec!["-y".into(), format!("@test/{name}")],
+                cwd: None,
+                env: HashMap::new(),
+                url: None,
+                headers: HashMap::new(),
+                enabled_tools: Vec::new(),
+                disabled_tools: Vec::new(),
+                required: false,
+                metadata: McpServerMetadata {
+                    description: None,
+                    created_from: None,
+                    fingerprint: String::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                },
+                provider_overrides: HashMap::new(),
+            });
+        }
+        catalog
+    }
+
+    #[test]
+    fn extracts_tags_from_codex_prompt_position() {
+        let catalog = make_catalog_with_servers(&["calendar"]);
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "fix #calendar bugs".to_string(),
+        ];
+
+        let (cleaned, tags) =
+            extract_tags_from_child_args(Provider::Codex, &mut args, &catalog, extract_tags);
+
+        assert_eq!(tags, vec!["calendar"]);
+        assert_eq!(cleaned.as_deref(), Some("fix bugs"));
+        assert_eq!(args[2], "fix bugs");
+    }
+
+    #[test]
+    fn extracts_tags_from_gemini_prompt_flag() {
+        let catalog = make_catalog_with_servers(&["slack"]);
+        let mut args = vec!["--prompt".to_string(), "debug #slack auth".to_string()];
+
+        let (cleaned, tags) =
+            extract_tags_from_child_args(Provider::Gemini, &mut args, &catalog, extract_tags);
+
+        assert_eq!(tags, vec!["slack"]);
+        assert_eq!(cleaned.as_deref(), Some("debug auth"));
+        assert_eq!(args[1], "debug auth");
     }
 
     #[cfg(test)]

@@ -410,7 +410,15 @@ impl WrapperProfile for GeminiWrapper {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for gemini");
         }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") || has_non_flag_positional(args) {
+        if has_flag(args, "-p") || has_flag(args, "--prompt") {
+            return Ok(());
+        }
+        // Convert a bare positional prompt to --prompt so Gemini CLI
+        // runs in explicit headless mode even when stdin is a TTY.
+        if let Some(index) = find_first_positional(args) {
+            let prompt = args.remove(index);
+            args.push("--prompt".to_string());
+            args.push(prompt);
             return Ok(());
         }
         bail!("--non-interactive for gemini requires a prompt (positional or --prompt/-p)");
@@ -545,7 +553,15 @@ impl WrapperProfile for QwenWrapper {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for qwen");
         }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") || has_non_flag_positional(args) {
+        if has_flag(args, "-p") || has_flag(args, "--prompt") {
+            return Ok(());
+        }
+        // Convert a bare positional prompt to --prompt so Qwen CLI
+        // runs in explicit headless mode even when stdin is a TTY.
+        if let Some(index) = find_first_positional(args) {
+            let prompt = args.remove(index);
+            args.push("--prompt".to_string());
+            args.push(prompt);
             return Ok(());
         }
         bail!("--non-interactive for qwen requires a prompt (positional or --prompt/-p)");
@@ -721,15 +737,20 @@ fn non_empty_env_var(name: &str) -> Option<String> {
 }
 
 pub(super) fn has_non_flag_positional(args: &[String]) -> bool {
+    find_first_positional(args).is_some()
+}
+
+/// Return the index of the first positional (non-flag) argument.
+fn find_first_positional(args: &[String]) -> Option<usize> {
     let mut skip_next = false;
-    for arg in args {
+    for (index, arg) in args.iter().enumerate() {
         if skip_next {
             skip_next = false;
             continue;
         }
 
         if arg == "--" {
-            return true;
+            return Some(index);
         }
 
         // Skip known value-taking flags so their values aren't mistaken for
@@ -746,11 +767,11 @@ pub(super) fn has_non_flag_positional(args: &[String]) -> bool {
         }
 
         if !arg.starts_with('-') {
-            return true;
+            return Some(index);
         }
     }
 
-    false
+    None
 }
 
 fn has_any_flag(args: &[String], primary: &str, aliases: &[&str]) -> bool {
@@ -859,6 +880,50 @@ mod tests {
 
         let error = p.apply_non_interactive(&mut args).unwrap_err();
         assert!(error.to_string().contains("conflicts"));
+    }
+
+    #[test]
+    fn gemini_non_interactive_converts_positional_to_prompt_flag() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec!["hi".to_string()];
+
+        p.apply_non_interactive(&mut args).unwrap();
+
+        assert_eq!(args, vec!["--prompt", "hi"]);
+    }
+
+    #[test]
+    fn gemini_non_interactive_preserves_existing_prompt_flag() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec!["--prompt".to_string(), "hi".to_string()];
+
+        p.apply_non_interactive(&mut args).unwrap();
+
+        assert_eq!(args, vec!["--prompt", "hi"]);
+    }
+
+    #[test]
+    fn gemini_non_interactive_converts_positional_with_other_flags() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec![
+            "--model".to_string(),
+            "flash".to_string(),
+            "explain this".to_string(),
+        ];
+
+        p.apply_non_interactive(&mut args).unwrap();
+
+        assert_eq!(args, vec!["--model", "flash", "--prompt", "explain this"]);
+    }
+
+    #[test]
+    fn qwen_non_interactive_converts_positional_to_prompt_flag() {
+        let p = profile(Provider::QwenCode);
+        let mut args = vec!["hi".to_string()];
+
+        p.apply_non_interactive(&mut args).unwrap();
+
+        assert_eq!(args, vec!["--prompt", "hi"]);
     }
 
     #[test]

@@ -40,6 +40,7 @@ pub(crate) fn build_child_env(
     cwd: &Path,
     env_overrides: &[(String, String)],
     repo: bool,
+    force_shadow_home: bool,
 ) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
@@ -87,7 +88,7 @@ pub(crate) fn build_child_env(
 
     let mut shadow_home_path = None;
 
-    let needs_shadow_home = repo_home::needs_shadow_home(provider, cwd, repo);
+    let needs_shadow_home = force_shadow_home || repo_home::needs_shadow_home(provider, cwd, repo);
 
     // Use a shadow HOME when repo-only isolation is requested, or when Codex
     // needs repo-local prompt overlay because custom prompts are user-scoped.
