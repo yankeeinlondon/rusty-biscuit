@@ -13,11 +13,19 @@ That split creates a few problems:
 
 - the `languages` list still contains configuration and documentation formats
 - package-level file categorization is shallow and extension-based
+- package-level scans were previously vulnerable to nested package contamination
 - executable files are not modeled clearly
 - framework files such as `.vue` are not first-class concepts
 - `sniff language` reports more than programming languages even though users read it as a code-language report
 
 This document proposes a unified file-association system for the library and CLI.
+
+This design now assumes the boundary-aware package detection described in
+[`better-package-detection.md`](/Volumes/coding/personal/rusty-biscuit/sniff/docs/better-package-detection.md):
+
+- package discovery may come from multiple workspace tools
+- nested package roots are first-class boundaries
+- package-local scans exclude nested package roots by default
 
 ## Goals
 
@@ -265,8 +273,20 @@ Walk files recursively while respecting:
 - global git ignores
 - `.git/info/exclude`
 - the existing excluded dependency/build directories
+- package boundary exclusions supplied by repo/package detection
 
 This behavior is already correct in the current language scanner and should be preserved.
+
+For package-local scans, discovery should accept:
+
+```rust
+pub struct FileScanScope {
+    pub root: PathBuf,
+    pub exclude_roots: Vec<PathBuf>,
+}
+```
+
+The important point is that file association must not treat a nested package as ordinary content owned by the parent package.
 
 ### Step 2: Cheap Structural Classification
 
@@ -354,6 +374,8 @@ It should ignore:
 - media
 
 That satisfies the desired behavior for `sniff language`.
+
+If the scan is happening for a detected package, only files inside that package boundary and outside nested package exclusions should be eligible for this aggregation.
 
 ## Primary and Secondary Programming Language Logic
 
@@ -454,6 +476,12 @@ JavaScript
 
 It should no longer report configuration, documentation, styling, or data formats as "languages" in that command.
 
+It should also become package-boundary aware:
+
+- if invoked inside a detected package, scan the package root
+- exclude nested package roots by default
+- only fall back to raw current-directory scanning when no package boundary exists
+
 ### Proposed Output Shape
 
 For text output:
@@ -490,6 +518,8 @@ This command becomes the place to answer questions like:
 - are there binary executables in this tree?
 - how many images or PDFs are present?
 - what framework file types are present?
+
+Like `sniff language`, it should respect package boundaries by default so that nested packages are reported separately rather than absorbed into the parent package’s totals.
 
 ### Suggested CLI Surface
 
@@ -548,13 +578,25 @@ pub struct Package {
     pub languages: Vec<ProgrammingLanguageStats>,
     pub frameworks: Vec<FrameworkStats>,
     pub file_associations: Vec<FileAssociationStats>,
+    // existing package-boundary metadata such as ecosystem,
+    // discovery_sources, and nested_packages remains important
     // existing fields...
 }
 ```
 
 The existing shallow `configuration`, `documentation`, `editor_config`, and `command_runner` fields can be preserved for compatibility initially, but they should eventually be derived from the unified file-classification pass instead of a separate root-only scan.
 
+This design should build on, not replace, the newer package-boundary metadata. File association is a layer above package detection.
+
 ## Migration Strategy
+
+### Prerequisite: Boundary-Aware Package Detection
+
+The package-detection work described in
+[`better-package-detection.md`](/Volumes/coding/personal/rusty-biscuit/sniff/docs/better-package-detection.md)
+should be treated as a prerequisite for package-local file association.
+
+Without nested package exclusions, the file-association model can still classify files correctly, but package-level language and file summaries can still be assigned to the wrong package boundary.
 
 ### Phase 1: Introduce the New File-Type Registry
 
@@ -566,6 +608,7 @@ The existing shallow `configuration`, `documentation`, `editor_config`, and `com
 ### Phase 2: Rebuild Language Detection on Top of File Classification
 
 - make `filesystem/languages.rs` aggregate from `FileClassification`
+- thread package `exclude_roots` through package-local scans
 - restrict it to programming languages and framework files
 - add deterministic primary/secondary selection
 
@@ -588,6 +631,7 @@ This phase is what allows `sniff language` to associate a framework file with Ja
 - update `repo.rs` package creation to use unified file scans
 - replace or de-emphasize shallow package-root file categorization
 - update package output rendering
+- ensure package reports inherit ecosystem/discovery metadata and nested-package exclusions
 
 ## Testing Strategy
 

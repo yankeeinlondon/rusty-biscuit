@@ -74,6 +74,83 @@ pub(crate) fn filter_packages<'a>(
     }
 }
 
+fn area_parent(area: &str) -> Option<String> {
+    if area == "root" {
+        return None;
+    }
+
+    let parent = Path::new(area).parent()?;
+    if parent.as_os_str().is_empty() {
+        None
+    } else {
+        Some(parent.to_string_lossy().to_string())
+    }
+}
+
+fn build_area_hierarchy(
+    areas: &[String]
+) -> (
+    Vec<String>,
+    std::collections::HashMap<String, Vec<String>>,
+) {
+    let area_set: std::collections::HashSet<&str> = areas.iter().map(String::as_str).collect();
+    let mut top_areas = Vec::new();
+    let mut children: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+    for area in areas {
+        match area_parent(area) {
+            Some(parent) if area_set.contains(parent.as_str()) => {
+                children.entry(parent).or_default().push(area.clone());
+            }
+            _ => top_areas.push(area.clone()),
+        }
+    }
+
+    (top_areas, children)
+}
+
+fn append_package_items(items: &mut Vec<RenderableContent>, pkg: &Package, verbose: u8) {
+    let formatted = format_package_items(pkg, verbose);
+    let main = Prose::new(&formatted[0]).render_optimistic(None);
+    items.push(RenderableContent::String(main));
+
+    if formatted.len() > 1 {
+        let detail_items: Vec<String> =
+            formatted[1..].iter().map(|s| Prose::new(s).render_optimistic(None)).collect();
+        let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
+        items.push(RenderableContent::Component(Rc::new(detail_list)));
+    }
+}
+
+fn append_area_section(
+    output: &mut Vec<RenderableContent>,
+    area: &str,
+    area_packages: &std::collections::HashMap<String, Vec<&Package>>,
+    area_children: &std::collections::HashMap<String, Vec<String>>,
+    verbose: u8,
+) {
+    let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render_optimistic(None);
+    output.push(RenderableContent::String(label));
+
+    let mut inner_items: Vec<RenderableContent> = Vec::new();
+    if let Some(packages) = area_packages.get(area) {
+        for pkg in packages {
+            append_package_items(&mut inner_items, pkg, verbose);
+        }
+    }
+
+    if let Some(children) = area_children.get(area) {
+        for child in children {
+            append_area_section(&mut inner_items, child, area_packages, area_children, verbose);
+        }
+    }
+
+    if !inner_items.is_empty() {
+        let inner_list = UnorderedList::from(inner_items);
+        output.push(RenderableContent::Component(Rc::new(inner_list)));
+    }
+}
+
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
 /// Returns a tuple of (date_string, time_string, use_on) where:
@@ -1244,41 +1321,20 @@ pub fn print_repo_section(
 
         // Group packages by area, preserving discovery order
         let mut areas: Vec<String> = Vec::new();
-        let mut area_packages: std::collections::HashMap<&str, Vec<&&Package>> =
+        let mut area_packages: std::collections::HashMap<String, Vec<&Package>> =
             std::collections::HashMap::new();
         for pkg in &filtered {
-            let area = pkg.package_area.as_str();
-            if !area_packages.contains_key(area) {
-                areas.push(area.to_string());
+            let area = pkg.package_area.clone();
+            if !area_packages.contains_key(&area) {
+                areas.push(area.clone());
             }
-            area_packages.entry(area).or_default().push(pkg);
+            area_packages.entry(area).or_default().push(*pkg);
         }
+        let (top_areas, area_children) = build_area_hierarchy(&areas);
 
         let mut outer_items: Vec<RenderableContent> = Vec::new();
-        for area in &areas {
-            // Area heading in blue
-            let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render_optimistic(None);
-            outer_items.push(RenderableContent::String(label));
-
-            // Nested package list with left margin
-            let mut inner_items: Vec<RenderableContent> = Vec::new();
-            for pkg in &area_packages[area.as_str()] {
-                let items = format_package_items(pkg, verbose);
-                // First item is the main package line
-                let main = Prose::new(&items[0]).render_optimistic(None);
-                inner_items.push(RenderableContent::String(main));
-                // Additional items are verbose details shown as a nested child list
-                if items.len() > 1 {
-                    let detail_items: Vec<String> = items[1..]
-                        .iter()
-                        .map(|s| Prose::new(s).render_optimistic(None))
-                        .collect();
-                    let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-                    inner_items.push(RenderableContent::Component(Rc::new(detail_list)));
-                }
-            }
-            let inner_list = UnorderedList::from(inner_items);
-            outer_items.push(RenderableContent::Component(Rc::new(inner_list)));
+        for area in &top_areas {
+            append_area_section(&mut outer_items, area, &area_packages, &area_children, verbose);
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
@@ -2055,6 +2111,37 @@ mod tests {
             assert_eq!(f.query, "sniff");
             assert!(f.by_area);
             assert!(f.negate);
+        }
+    }
+
+    mod area_hierarchy {
+        use super::*;
+
+        #[test]
+        fn nests_child_areas_under_present_parents() {
+            let areas = vec![
+                "homelab".to_string(),
+                "homelab/server".to_string(),
+                "sniff".to_string(),
+            ];
+
+            let (top, children) = build_area_hierarchy(&areas);
+
+            assert_eq!(top, vec!["homelab".to_string(), "sniff".to_string()]);
+            assert_eq!(
+                children.get("homelab"),
+                Some(&vec!["homelab/server".to_string()])
+            );
+        }
+
+        #[test]
+        fn keeps_area_top_level_when_parent_is_missing() {
+            let areas = vec!["apps/browser".to_string()];
+
+            let (top, children) = build_area_hierarchy(&areas);
+
+            assert_eq!(top, vec!["apps/browser".to_string()]);
+            assert!(children.is_empty());
         }
     }
 
