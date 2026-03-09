@@ -13,7 +13,11 @@ use crate::provider_values::provider_value_parser;
 #[derive(Args)]
 pub struct HandleArgs {
     /// Event name (used for logging, the actual event is in the JSON payload).
-    pub event: String,
+    ///
+    /// Optional — when omitted (e.g. Codex `notify` hooks), the event label
+    /// defaults to `"event"` and the actual event type is derived from the
+    /// JSON payload by the provider adapter.
+    pub event: Option<String>,
     /// Optional provider hint (auto-detected from payload if not given).
     #[arg(long, value_parser = provider_value_parser())]
     pub provider: Option<String>,
@@ -30,12 +34,13 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let env = detect_environment(&cwd);
 
-    debug!(%provider, event = %args.event, "Handling event");
+    let event_label = args.event.as_deref().unwrap_or("event");
+    debug!(%provider, event = %event_label, "Handling event");
     let outcome = claudine::dispatch::dispatch(&raw, provider, &env).await?;
     if args.json {
         let output = serde_json::json!({
             "provider": provider.as_slug(),
-            "event": args.event,
+            "event": event_label,
             "response": outcome.response,
             "exit_code": outcome.exit_code,
             "protect_pre": outcome.protect_pre,

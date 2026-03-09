@@ -367,8 +367,21 @@ impl Provider {
 
     /// Detect a provider from raw payload shape.
     pub fn detect_from_payload(raw: &Value) -> Option<Self> {
-        if raw.get("hook_event_name").is_some() {
-            return Some(Provider::Claude);
+        if let Some(name) = raw.get("hook_event_name").and_then(Value::as_str) {
+            // Both Claude and Gemini use `hook_event_name`, but with different
+            // native event names. If the value resolves to a Gemini event but
+            // NOT a Claude event, it's Gemini.
+            let is_gemini = Provider::Gemini
+                .event_from_shared_native_name(name)
+                .is_some()
+                && Provider::Claude
+                    .event_from_shared_native_name(name)
+                    .is_none();
+            return Some(if is_gemini {
+                Provider::Gemini
+            } else {
+                Provider::Claude
+            });
         }
         if looks_like_codex_payload(raw) {
             return Some(Provider::Codex);
@@ -1295,10 +1308,59 @@ mod tests {
 
     #[test]
     fn detect_from_payload_recognizes_known_shapes() {
+        // Claude-only native names
         assert_eq!(
             Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"Stop"})),
             Some(Provider::Claude)
         );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"PreToolUse"})),
+            Some(Provider::Claude)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"UserPromptSubmit"})),
+            Some(Provider::Claude)
+        );
+
+        // Gemini-only native names via hook_event_name
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"BeforeAgent"})),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"AfterAgent"})),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"BeforeModel"})),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"BeforeTool"})),
+            Some(Provider::Gemini)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"AfterTool"})),
+            Some(Provider::Gemini)
+        );
+
+        // Ambiguous names (both Claude and Gemini) default to Claude
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"SessionStart"})),
+            Some(Provider::Claude)
+        );
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"Notification"})),
+            Some(Provider::Claude)
+        );
+
+        // Gemini via event_name field
+        assert_eq!(
+            Provider::detect_from_payload(&serde_json::json!({"event_name":"BeforeAgent"})),
+            Some(Provider::Gemini)
+        );
+
+        // Codex
         assert_eq!(
             Provider::detect_from_payload(
                 &serde_json::json!({"type":"turn.completed","thread_id":"t-1"})
@@ -1318,18 +1380,20 @@ mod tests {
             })),
             Some(Provider::Codex)
         );
+
+        // OpenCode
         assert_eq!(
             Provider::detect_from_payload(&serde_json::json!({"event_type":"session.idle"})),
             Some(Provider::OpenCode)
         );
-        assert_eq!(
-            Provider::detect_from_payload(&serde_json::json!({"event_name":"BeforeAgent"})),
-            Some(Provider::Gemini)
-        );
+
+        // KimiCode
         assert_eq!(
             Provider::detect_from_payload(&serde_json::json!({"method":"notification"})),
             Some(Provider::KimiCode)
         );
+
+        // Unknown
         assert_eq!(
             Provider::detect_from_payload(&serde_json::json!({"unknown":true})),
             None
