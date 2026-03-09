@@ -1,6 +1,5 @@
 ---
 source: sniff/cli/tests/snapshots.rs
-assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -10,7 +9,6 @@ Usage: sniff [OPTIONS] [COMMAND]
 
   -b, --base <BASE>  Base directory for filesystem analysis
       --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
-      --deep         Enable deep git inspection (queries remotes for branch info)
   -v, --verbose...   Increase output verbosity
   -h, --help         Print help
   -V, --version      Print version
@@ -23,7 +21,6 @@ Commands:
     sniff network     Show only network information
     sniff filesystem  Show only filesystem information
     sniff topics      Show subsection topics as a table
-    sniff structure   Show a structural overview of sniff output
 
   Hardware details:
     sniff cpu             Show only CPU information
@@ -34,6 +31,7 @@ Commands:
 
   Filesystem details:
     sniff git                        Show only git repository information
+    sniff git --refresh-remotes      Refresh remotes before reporting sync status
     sniff git --hash HEAD            Show details for the latest commit
     sniff git --hash abc1234         Show details for a specific commit
     sniff git --package homelab      Scope to commits within a package
@@ -41,6 +39,7 @@ Commands:
     sniff git owner/repo             Inspect by owner/repo shorthand
     sniff git https://github.com/... Inspect a remote by URL
     sniff repo                       Show only repository/monorepo structure
+    sniff repo --latest-versions     Check registries for dependency updates
     sniff repo biscuit               Filter to packages matching "biscuit"
     sniff repo !biscuit              Exclude packages matching "biscuit"
     sniff repo @sniff                Filter to packages in the "sniff" area
@@ -85,5 +84,6 @@ Examples:
   sniff --json cpu           # Same as above (flag position flexible)
   sniff programs             # Programs as text
   sniff programs --json      # Programs as JSON
+  sniff filesystem --refresh-remotes --latest-versions  # Enriched filesystem report
   sniff editors install      # Interactive editor install picker
   sniff -b /path/to/repo filesystem  # Analyze specific directory

@@ -133,13 +133,6 @@ fn topics_table_snapshot() {
     );
 }
 
-#[test]
-fn structure_output_snapshot() {
-    insta::assert_snapshot!(
-        "structure_output",
-        normalize_text(&run_stdout(&["structure"]))
-    );
-}
 
 #[test]
 fn os_json_snapshot() {

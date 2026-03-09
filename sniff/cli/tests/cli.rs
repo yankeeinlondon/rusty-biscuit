@@ -250,23 +250,23 @@ fn test_base_flag_after_subcommand() {
 }
 
 #[test]
-fn test_deep_flag_before_subcommand() {
+fn test_filesystem_scoped_flags_parse_in_help() {
     cargo_bin_cmd!("sniff")
-        .args(["--deep", "git"])
+        .args(["filesystem", "--help"])
         .assert()
         .success()
-        // New rich output format has Status and Meta sections
-        .stdout(predicate::str::contains("Status"));
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--latest-versions"));
 }
 
 #[test]
-fn test_deep_flag_after_subcommand() {
+fn test_repo_scoped_flags_parse_in_help() {
     cargo_bin_cmd!("sniff")
-        .args(["git", "--deep"])
+        .args(["repo", "--help"])
         .assert()
         .success()
-        // New rich output format has Status and Meta sections
-        .stdout(predicate::str::contains("Status"));
+        .stdout(predicate::str::contains("--latest-versions"))
+        .stdout(predicate::str::contains("--refresh-remotes").not());
 }
 
 #[test]
@@ -951,34 +951,48 @@ fn test_services_state_stopped() {
 }
 
 // ============================================================================
-// Deep Flag Tests
+// Scoped Enrichment Flag Tests
 // ============================================================================
 
 #[test]
-fn test_deep_flag_in_help() {
+fn test_enrichment_flags_in_help() {
     cargo_bin_cmd!("sniff")
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("--deep"))
-        .stdout(predicate::str::contains("remote").or(predicate::str::contains("git")));
+        .stdout(predicate::str::contains("--deep").not())
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--latest-versions"));
 }
 
 #[test]
-fn test_deep_flag_with_filesystem_subcommand() {
+fn test_filesystem_help_mentions_scoped_flags() {
     cargo_bin_cmd!("sniff")
-        .args(["--deep", "filesystem"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn test_deep_flag_with_git_subcommand_json() {
-    cargo_bin_cmd!("sniff")
-        .args(["--deep", "git", "--json"])
+        .args(["filesystem", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("recent"));
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--latest-versions"));
+}
+
+#[test]
+fn test_git_help_mentions_refresh_remotes() {
+    cargo_bin_cmd!("sniff")
+        .args(["git", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--latest-versions").not());
+}
+
+#[test]
+fn test_repo_help_mentions_latest_versions() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--latest-versions"))
+        .stdout(predicate::str::contains("--refresh-remotes").not());
 }
 
 #[test]
@@ -994,11 +1008,21 @@ fn test_git_json_contains_new_fields() {
 }
 
 #[test]
-fn test_deep_and_verbose_combined() {
+fn test_invalid_latest_versions_repo_combo_fails() {
     cargo_bin_cmd!("sniff")
-        .args(["--deep", "git", "-vv"])
+        .args(["repo", "--deps", "--latest-versions"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains("--latest-versions"));
+}
+
+#[test]
+fn test_invalid_refresh_remotes_git_remote_combo_fails() {
+    cargo_bin_cmd!("sniff")
+        .args(["git", "origin", "--refresh-remotes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--refresh-remotes"));
 }
 
 // ============================================================================
