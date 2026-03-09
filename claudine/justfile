@@ -306,18 +306,6 @@ review *args="":
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
-export UPDATE_SKILL := read("./prompts/update-skill.md")
-
-# fix documentation drift and update the skill for this package area
-skill:
-    @echo "$UPDATE_SKILL" > /tmp/claudine_update_skill.md
-    @just _claude_file /tmp/claudine_update_skill.md || ( \
-      just play "bong" && \
-      just _speak "A problem occurred updating the Claudine skill!" && \
-      exit 1 \
-    )
-    @just _speak "Claudine skill was updated and documentation drift was corrected."
-    @just _notify "Claudine skill was updated and documentation drift was corrected."
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
