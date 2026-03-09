@@ -25,10 +25,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Enable deep git inspection (queries remotes for branch info)
-    #[arg(long, global = true)]
-    pub deep: bool,
-
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -154,13 +150,18 @@ pub enum Commands {
     Network,
 
     /// Show only filesystem information (git, languages, monorepo)
-    Filesystem,
+    Filesystem {
+        /// Refresh remote-tracking data before reporting branch and sync status
+        #[arg(long)]
+        refresh_remotes: bool,
+
+        /// Query package registries for latest dependency versions and report available updates
+        #[arg(long)]
+        latest_versions: bool,
+    },
 
     /// Show a table of subsection topics for each top-level command
     Topics,
-
-    /// Show a structural overview of sniff output fields
-    Structure,
 
     /// Show only CPU information
     Cpu,
@@ -183,6 +184,10 @@ pub enum Commands {
         /// Number of recent commits to display (default: 10)
         #[arg(short = 'h', long, default_value_t = DEFAULT_COMMIT_COUNT)]
         history: usize,
+
+        /// Refresh remote-tracking data before reporting branch and sync status
+        #[arg(long, conflicts_with_all = ["remote", "hash"])]
+        refresh_remotes: bool,
 
         /// Show details for a specific commit by SHA
         #[arg(long, value_name = "SHA", conflicts_with = "package")]
@@ -221,6 +226,19 @@ pub enum Commands {
         /// Output only package area names that have uncommitted changes
         #[arg(long)]
         dirty_package_areas: bool,
+        /// Query package registries for latest dependency versions and report available updates
+        #[arg(
+            long,
+            conflicts_with_all = [
+                "deps",
+                "packages",
+                "package",
+                "package_area",
+                "dirty_packages",
+                "dirty_package_areas",
+            ]
+        )]
+        latest_versions: bool,
         /// Use visual (Mermaid) rendering for --deps instead of text
         #[arg(long)]
         ui: bool,
@@ -322,9 +340,8 @@ impl Commands {
             Commands::Os => OutputFilter::Os,
             Commands::Hardware => OutputFilter::Hardware,
             Commands::Network => OutputFilter::Network,
-            Commands::Filesystem => OutputFilter::Filesystem,
+            Commands::Filesystem { .. } => OutputFilter::Filesystem,
             Commands::Topics => OutputFilter::All,
-            Commands::Structure => OutputFilter::All,
             Commands::Cpu => OutputFilter::Cpu,
             Commands::Gpu => OutputFilter::Gpu,
             Commands::Memory => OutputFilter::Memory,
@@ -487,6 +504,34 @@ impl Commands {
         )
     }
 
+    /// Check if this command requests remote refresh data.
+    pub fn refresh_remotes(&self) -> bool {
+        matches!(
+            self,
+            Commands::Filesystem {
+                refresh_remotes: true,
+                ..
+            } | Commands::Git {
+                refresh_remotes: true,
+                ..
+            }
+        )
+    }
+
+    /// Check if this command requests dependency latest-version enrichment.
+    pub fn latest_versions(&self) -> bool {
+        matches!(
+            self,
+            Commands::Filesystem {
+                latest_versions: true,
+                ..
+            } | Commands::Repo {
+                latest_versions: true,
+                ..
+            }
+        )
+    }
+
     /// Check if this is a repo command with `--ui` flag.
     pub fn ui(&self) -> bool {
         matches!(self, Commands::Repo { ui: true, .. })
@@ -586,7 +631,6 @@ Commands:
     sniff network     Show only network information
     sniff filesystem  Show only filesystem information
     sniff topics      Show subsection topics as a table
-    sniff structure   Show a structural overview of sniff output
 
   Hardware details:
     sniff cpu             Show only CPU information
@@ -597,6 +641,7 @@ Commands:
 
   Filesystem details:
     sniff git                        Show only git repository information
+    sniff git --refresh-remotes      Refresh remotes before reporting sync status
     sniff git --hash HEAD            Show details for the latest commit
     sniff git --hash abc1234         Show details for a specific commit
     sniff git --package homelab      Scope to commits within a package
@@ -604,6 +649,7 @@ Commands:
     sniff git owner/repo             Inspect by owner/repo shorthand
     sniff git https://github.com/... Inspect a remote by URL
     sniff repo                       Show only repository/monorepo structure
+    sniff repo --latest-versions     Check registries for dependency updates
     sniff repo biscuit               Filter to packages matching \"biscuit\"
     sniff repo !biscuit              Exclude packages matching \"biscuit\"
     sniff repo @sniff                Filter to packages in the \"sniff\" area
@@ -648,6 +694,7 @@ Examples:
   sniff --json cpu           # Same as above (flag position flexible)
   sniff programs             # Programs as text
   sniff programs --json      # Programs as JSON
+  sniff filesystem --refresh-remotes --latest-versions  # Enriched filesystem report
   sniff editors install      # Interactive editor install picker
   sniff -b /path/to/repo filesystem  # Analyze specific directory
 ";
@@ -712,7 +759,7 @@ mod tests {
             ));
             assert!(matches!(
                 parse_args(&["filesystem"]).unwrap().command,
-                Some(Commands::Filesystem)
+                Some(Commands::Filesystem { .. })
             ));
             assert!(matches!(
                 parse_args(&["cpu"]).unwrap().command,
@@ -742,21 +789,21 @@ mod tests {
                 parse_args(&["topics"]).unwrap().command,
                 Some(Commands::Topics)
             ));
-            assert!(matches!(
-                parse_args(&["structure"]).unwrap().command,
-                Some(Commands::Structure)
-            ));
         }
 
         #[test]
         fn git_flags_and_remote_parse() {
-            let cli = parse_args(&["git", "--history", "10", "origin"]).unwrap();
+            let cli = parse_args(&["git", "--history", "10", "--refresh-remotes"]).unwrap();
             if let Some(Commands::Git {
-                history, remote, ..
+                history,
+                refresh_remotes,
+                remote,
+                ..
             }) = cli.command
             {
                 assert_eq!(history, 10);
-                assert_eq!(remote.as_deref(), Some("origin"));
+                assert!(refresh_remotes);
+                assert!(remote.is_none());
             } else {
                 panic!("Expected Git command");
             }
@@ -782,13 +829,14 @@ mod tests {
 
         #[test]
         fn repo_flags_and_filter_parse() {
-            let cli = parse_args(&["repo", "--deps", "--ui", "@sniff"]).unwrap();
+            let cli = parse_args(&["repo", "--latest-versions", "@sniff"]).unwrap();
             if let Some(Commands::Repo {
-                deps, ui, filter, ..
+                filter,
+                latest_versions,
+                ..
             }) = cli.command
             {
-                assert!(deps);
-                assert!(ui);
+                assert!(latest_versions);
                 assert_eq!(filter.as_deref(), Some("@sniff"));
             } else {
                 panic!("Expected Repo command");
@@ -875,6 +923,7 @@ mod tests {
                     package_area: false,
                     dirty_packages: false,
                     dirty_package_areas: false,
+                    latest_versions: false,
                     ui: false,
                     filter: None,
                 }
@@ -954,6 +1003,7 @@ mod tests {
                 package_area: true,
                 dirty_packages: true,
                 dirty_package_areas: true,
+                latest_versions: true,
                 ui: true,
                 filter: Some("biscuit".to_string()),
             };
@@ -964,6 +1014,7 @@ mod tests {
             assert!(cmd.package_area());
             assert!(cmd.dirty_packages());
             assert!(cmd.dirty_package_areas());
+            assert!(cmd.latest_versions());
             assert!(cmd.ui());
             assert_eq!(cmd.repo_filter(), Some("biscuit"));
         }
@@ -972,6 +1023,7 @@ mod tests {
         fn git_and_docs_accessors_work() {
             let git = Commands::Git {
                 history: 3,
+                refresh_remotes: true,
                 hash: None,
                 package: None,
                 remote: Some("owner/repo".to_string()),
@@ -979,6 +1031,7 @@ mod tests {
             };
             assert_eq!(git.history(), 3);
             assert_eq!(git.git_remote(), Some("owner/repo"));
+            assert!(git.refresh_remotes());
 
             let docs = Commands::Docs {
                 readme: true,
@@ -1016,16 +1069,14 @@ mod tests {
 
         #[test]
         fn global_flags_parse_before_or_after_subcommand() {
-            let before = parse_args(&["--json", "-v", "--deep", "cpu"]).unwrap();
+            let before = parse_args(&["--json", "-v", "cpu"]).unwrap();
             assert!(before.json);
             assert_eq!(before.verbose, 1);
-            assert!(before.deep);
             assert!(matches!(before.command, Some(Commands::Cpu)));
 
-            let after = parse_args(&["cpu", "--json", "-vv", "--deep"]).unwrap();
+            let after = parse_args(&["cpu", "--json", "-vv"]).unwrap();
             assert!(after.json);
             assert_eq!(after.verbose, 2);
-            assert!(after.deep);
             assert!(matches!(after.command, Some(Commands::Cpu)));
         }
 
@@ -1033,7 +1084,38 @@ mod tests {
         fn base_flag_works_globally() {
             let cli = parse_args(&["-b", "/tmp", "filesystem"]).unwrap();
             assert_eq!(cli.base, Some(PathBuf::from("/tmp")));
-            assert!(matches!(cli.command, Some(Commands::Filesystem)));
+            assert!(matches!(cli.command, Some(Commands::Filesystem { .. })));
+        }
+
+        #[test]
+        fn scoped_flags_parse_for_supported_commands() {
+            let filesystem = parse_args(&["filesystem", "--refresh-remotes", "--latest-versions"])
+                .unwrap();
+            assert!(matches!(
+                filesystem.command,
+                Some(Commands::Filesystem {
+                    refresh_remotes: true,
+                    latest_versions: true,
+                })
+            ));
+
+            let git = parse_args(&["git", "--refresh-remotes"]).unwrap();
+            assert!(git
+                .command
+                .as_ref()
+                .is_some_and(Commands::refresh_remotes));
+
+            let repo = parse_args(&["repo", "--latest-versions"]).unwrap();
+            assert!(repo
+                .command
+                .as_ref()
+                .is_some_and(Commands::latest_versions));
+        }
+
+        #[test]
+        fn unsupported_combinations_fail() {
+            assert!(parse_args(&["repo", "--deps", "--latest-versions"]).is_err());
+            assert!(parse_args(&["git", "origin", "--refresh-remotes"]).is_err());
         }
     }
 }

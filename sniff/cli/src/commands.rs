@@ -39,11 +39,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if matches!(cli.command, Some(Commands::Structure)) {
-        output::print_structure();
-        return Ok(());
-    }
-
     let output_filter = cli
         .command
         .as_ref()
@@ -150,8 +145,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         config = config.base_dir(base.clone());
     }
 
-    let deep_enabled = cli.deep;
-    if deep_enabled {
+    let refresh_remotes_enabled = cli
+        .command
+        .as_ref()
+        .is_some_and(|command| command.refresh_remotes());
+    if refresh_remotes_enabled {
         config = config.deep(true);
     }
 
@@ -267,17 +265,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Enrich dependencies with latest versions when --deep is enabled.
-    // Only for subcommands that display dependency info (repo, language, all).
-    if deep_enabled
-        && matches!(
-            output_filter,
-            OutputFilter::All
-                | OutputFilter::Filesystem
-                | OutputFilter::Repo
-                | OutputFilter::Language
-        )
-    {
+    let latest_versions_enabled = cli
+        .command
+        .as_ref()
+        .is_some_and(|command| command.latest_versions());
+
+    if latest_versions_enabled {
         result = enrich_result_dependencies(result).await;
     }
 
@@ -321,6 +314,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ui,
             repo_filter,
             base_dir.as_deref(),
+            latest_versions_enabled,
         );
     }
 

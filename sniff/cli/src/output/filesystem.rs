@@ -10,8 +10,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
-
-use sniff::filesystem::repo::Package;
+use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
 
 use super::{format_number, relative_path};
 
@@ -539,11 +538,10 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 })
                 .unwrap_or_default();
 
-            // Use remote's default branch, falling back to current branch
+            // Only show a remote default branch when refreshed remote data is available.
             let branch_part = remote
                 .default_branch
                 .as_ref()
-                .or(git.current_branch.as_ref())
                 .map(|b| format!(" <i>of</i> {}", b))
                 .unwrap_or_default();
 
@@ -736,6 +734,186 @@ fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'stati
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct UpdateSummary {
+    checked_packages: usize,
+    packages_with_updates: usize,
+    packages_with_major_updates: usize,
+    dependency_updates: usize,
+    major_dependency_updates: usize,
+    sample_transitions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PackageUpdateSummary {
+    checked: bool,
+    dependency_updates: usize,
+    major_dependency_updates: usize,
+    sample_transitions: Vec<String>,
+}
+
+fn collect_dependency_updates(
+    target: &mut UpdateSummary,
+    package_name: Option<&str>,
+    deps: &Option<Vec<DependencyEntry>>,
+) {
+    let Some(deps) = deps else {
+        return;
+    };
+
+    for dep in deps {
+        if !dep.is_updatable {
+            continue;
+        }
+
+        target.dependency_updates += 1;
+        if dep.has_major_update {
+            target.major_dependency_updates += 1;
+        }
+
+        if target.sample_transitions.len() >= 5 {
+            continue;
+        }
+
+        let Some(latest) = dep.latest_version.as_deref() else {
+            continue;
+        };
+
+        let current = dep
+            .actual_version
+            .as_deref()
+            .unwrap_or(dep.targeted_version.as_str());
+        let prefix = package_name.map(|name| format!("{name}: ")).unwrap_or_default();
+        target.sample_transitions.push(format!(
+            "{}{} {} -> {}",
+            prefix, dep.name, current, latest
+        ));
+    }
+}
+
+fn summarize_package_updates(pkg: &Package) -> PackageUpdateSummary {
+    let mut summary = PackageUpdateSummary {
+        checked: pkg.is_updatable.is_some(),
+        ..PackageUpdateSummary::default()
+    };
+
+    let mut rollup = UpdateSummary::default();
+    for deps in [
+        &pkg.dependencies,
+        &pkg.dev_dependencies,
+        &pkg.peer_dependencies,
+        &pkg.optional_dependencies,
+    ] {
+        collect_dependency_updates(&mut rollup, None, deps);
+    }
+
+    summary.dependency_updates = rollup.dependency_updates;
+    summary.major_dependency_updates = rollup.major_dependency_updates;
+    summary.sample_transitions = rollup.sample_transitions;
+    summary
+}
+
+fn summarize_repo_updates(
+    repo: &RepoInfo,
+    filtered_packages: Option<&[&Package]>,
+    latest_versions_requested: bool,
+) -> Option<UpdateSummary> {
+    let mut summary = UpdateSummary::default();
+
+    if let Some(packages) = filtered_packages {
+        for pkg in packages {
+            if pkg.is_updatable.is_some() {
+                summary.checked_packages += 1;
+            }
+            if pkg.is_updatable == Some(true) {
+                summary.packages_with_updates += 1;
+            }
+            if pkg.has_major_update == Some(true) {
+                summary.packages_with_major_updates += 1;
+            }
+
+            for deps in [
+                &pkg.dependencies,
+                &pkg.dev_dependencies,
+                &pkg.peer_dependencies,
+                &pkg.optional_dependencies,
+            ] {
+                collect_dependency_updates(&mut summary, Some(pkg.name.as_str()), deps);
+            }
+        }
+
+        if summary.checked_packages > 0 || latest_versions_requested {
+            return Some(summary);
+        }
+        return None;
+    }
+
+    let has_dependency_lists = [
+        &repo.dependencies,
+        &repo.dev_dependencies,
+        &repo.peer_dependencies,
+        &repo.optional_dependencies,
+    ]
+    .iter()
+    .any(|deps| deps.as_ref().is_some_and(|entries| !entries.is_empty()));
+
+    if !has_dependency_lists && !latest_versions_requested {
+        return None;
+    }
+
+    summary.checked_packages = usize::from(has_dependency_lists && latest_versions_requested);
+    for deps in [
+        &repo.dependencies,
+        &repo.dev_dependencies,
+        &repo.peer_dependencies,
+        &repo.optional_dependencies,
+    ] {
+        collect_dependency_updates(&mut summary, None, deps);
+    }
+    summary.packages_with_updates = usize::from(summary.dependency_updates > 0);
+    summary.packages_with_major_updates = usize::from(summary.major_dependency_updates > 0);
+
+    Some(summary)
+}
+
+fn package_word(count: usize) -> &'static str {
+    if count == 1 { "package" } else { "packages" }
+}
+
+fn update_word(count: usize) -> &'static str {
+    if count == 1 { "update" } else { "updates" }
+}
+
+fn render_update_summary(
+    summary: &UpdateSummary,
+    latest_versions_requested: bool,
+    verbose: u8,
+    term: &Terminal,
+) {
+    if !latest_versions_requested {
+        return;
+    }
+
+    let summary_line = format!(
+        "<dim>Registry check:</dim> {} {} checked, {} with updates, {} with major updates",
+        summary.checked_packages,
+        package_word(summary.checked_packages),
+        summary.packages_with_updates,
+        summary.packages_with_major_updates,
+    );
+    println!("{}", Prose::new(&summary_line).render(term));
+
+    if verbose > 1 && !summary.sample_transitions.is_empty() {
+        let samples = summary
+            .sample_transitions
+            .iter()
+            .map(|sample| Prose::new(format!("<dim>{}</dim>", sample)).render(term))
+            .collect::<Vec<_>>();
+        let list = UnorderedList::new(samples);
+        println!("{}", list.render(term));
+    }
+}
+
 /// Render a single package as a styled list item string.
 ///
 /// Format a single package as a list of renderable items.
@@ -743,6 +921,7 @@ fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'stati
 /// The first item is the main line (name, version, path, etc.).
 /// Subsequent items are verbose details rendered as child bullets.
 fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> Vec<String> {
+    let update_summary = summarize_package_updates(pkg);
     let version_part = pkg
         .version
         .as_ref()
@@ -793,6 +972,22 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
         if !pkg.languages.is_empty() {
             items.push(format!("<dim>langs:</dim> {}", pkg.languages.join(", ")));
         }
+    }
+
+    if verbose > 0 && update_summary.checked {
+        items.push(format!(
+            "<dim>updates:</dim> {} {}, {} major",
+            update_summary.dependency_updates,
+            update_word(update_summary.dependency_updates),
+            update_summary.major_dependency_updates,
+        ));
+    }
+
+    if verbose > 1 && !update_summary.sample_transitions.is_empty() {
+        items.push(format!(
+            "<dim>latest:</dim> {}",
+            update_summary.sample_transitions.join(", ")
+        ));
     }
 
     items
@@ -995,16 +1190,23 @@ pub fn print_repo_section(
     verbose: u8,
     _repo_root: Option<&Path>,
     repo_filter: Option<&str>,
+    latest_versions_requested: bool,
 ) {
+    let terminal = Terminal::default();
+
     if !repo.is_monorepo {
         let title = Prose::new("<b><u>Repository</u></b>");
-        println!("\n{}\n", title.render_optimistic(None));
+        println!("\n{}\n", title.render(&terminal));
         let items = vec![
-            Prose::new("<b>Type:</b> Single-package").render_optimistic(None),
-            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render_optimistic(None),
+            Prose::new("<b>Type:</b> Single-package").render(&terminal),
+            Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
         ];
         let list = UnorderedList::new(items);
-        println!("{}", list.render_optimistic(None));
+        println!("{}", list.render(&terminal));
+
+        if let Some(summary) = summarize_repo_updates(repo, None, latest_versions_requested) {
+            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+        }
         return;
     }
 
@@ -1031,7 +1233,10 @@ pub fn print_repo_section(
         };
 
         let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
-        println!("\n{}\n", title.render_optimistic(None));
+        println!("\n{}\n", title.render(&terminal));
+
+        let update_summary =
+            summarize_repo_updates(repo, Some(filtered.as_slice()), latest_versions_requested);
 
         // Track whether any package has updatable deps or excluded packages for the key
         let has_updatable = filtered.iter().any(|pkg| pkg.is_updatable == Some(true));
@@ -1077,7 +1282,11 @@ pub fn print_repo_section(
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-        println!("{}", list.render_optimistic(None));
+        println!("{}", list.render(&terminal));
+
+        if let Some(summary) = update_summary {
+            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+        }
 
         // Legend for indicators
         if has_updatable || has_excluded {
@@ -1100,54 +1309,142 @@ pub fn print_repo_section(
                 );
             }
             legend.push_str("</dim>");
-            println!("{}", Prose::new(&legend).render_optimistic(None));
+            println!("{}", Prose::new(&legend).render(&terminal));
         }
     } else {
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
             tool_name, total_count,
         ));
-        println!("\n{}\n", title.render_optimistic(None));
+        println!("\n{}\n", title.render(&terminal));
     }
+}
+
+/// Categorize a language name for display styling.
+enum LanguageCategory {
+    /// The project's primary programming language (bold)
+    Primary,
+    /// A programming language that is not the primary (normal weight)
+    Programming,
+    /// Configuration/data formats like TOML, YAML, JSON (dim + italic)
+    Config,
+    /// Executable/shell languages like Shell, Bash, PowerShell (orange + dim)
+    Executable,
+    /// Everything else: markup, docs, etc. (yellow + dim)
+    Other,
+}
+
+const CONFIG_LANGUAGES: &[&str] = &[
+    "TOML", "YAML", "JSON", "JSON5", "JSONL", "JSON with Comments", "XML", "INI",
+    "EditorConfig", "Git Config", "Git Attributes", "Ignore List", "Nix", "Dockerfile",
+    "Makefile", "CMake", "Meson", "Diff", "Markdown",
+];
+
+const EXECUTABLE_LANGUAGES: &[&str] = &[
+    "Shell", "Bash", "Zsh", "Fish", "PowerShell", "Batch",
+];
+
+const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
+    "Markdown", "JSON", "YAML", "TOML", "XML", "HTML", "CSS", "Text", "Plain Text",
+    "reStructuredText", "AsciiDoc", "Org", "TeX", "LaTeX", "BibTeX", "Diff", "Ignore List",
+    "INI", "EditorConfig", "Git Config", "Git Attributes", "Dockerfile", "Makefile", "CMake",
+    "Meson", "Nix", "Scheme",
+];
+
+fn categorize_language(lang: &str, primary: Option<&str>) -> LanguageCategory {
+    if primary == Some(lang) {
+        return LanguageCategory::Primary;
+    }
+    if CONFIG_LANGUAGES.contains(&lang) {
+        return LanguageCategory::Config;
+    }
+    if EXECUTABLE_LANGUAGES.contains(&lang) {
+        return LanguageCategory::Executable;
+    }
+    if NON_PROGRAMMING_LANGUAGES.contains(&lang) {
+        return LanguageCategory::Other;
+    }
+    LanguageCategory::Programming
+}
+
+fn style_language_cell(name: &str, category: &LanguageCategory, term: &Terminal) -> String {
+    let markup = match category {
+        LanguageCategory::Primary => format!("<b>{}</b>", name),
+        LanguageCategory::Programming => name.to_string(),
+        LanguageCategory::Config => format!("<dim><i>{}</i></dim>", name),
+        LanguageCategory::Executable => format!("<dim><orange>{}</orange></dim>", name),
+        LanguageCategory::Other => format!("<dim><yellow>{}</yellow></dim>", name),
+    };
+    Prose::new(&markup).render(term)
+}
+
+fn style_stats_cell(
+    lang: &sniff::filesystem::languages::LanguageStats,
+    category: &LanguageCategory,
+    term: &Terminal,
+) -> String {
+    let stats = format!(
+        "{} files ({:.1}%)",
+        format_number(lang.file_count),
+        lang.percentage
+    );
+    let markup = match category {
+        LanguageCategory::Primary => format!("<b>{}</b>", stats),
+        LanguageCategory::Programming => stats,
+        LanguageCategory::Config => format!("<dim><i>{}</i></dim>", stats),
+        LanguageCategory::Executable => format!("<dim><orange>{}</orange></dim>", stats),
+        LanguageCategory::Other => format!("<dim><yellow>{}</yellow></dim>", stats),
+    };
+    Prose::new(&markup).render(term)
 }
 
 pub fn print_language_section(
     langs: &sniff::filesystem::languages::LanguageBreakdown,
-    verbose: u8,
+    _verbose: u8,
 ) {
-    println!("=== Languages ===");
-    println!("Files analyzed: {}", format_number(langs.total_files));
-    if let Some(ref primary) = langs.primary {
-        println!("Primary: {}", primary);
+    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+    use biscuit_terminal::utils::layout::{Alignment, Margin};
+
+    let term = Terminal::default();
+    let primary = langs.primary.as_deref();
+
+    let mut table = Table::new()
+        .with_columns(vec![
+            TableColumn::new("Type").with_min_width(14),
+            TableColumn::new("Usage").with_alignment(Alignment::Right),
+        ])
+        .prefer_cursor_alignment();
+
+    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().top_margin = Margin::Chars(1);
+    table.layout_mut().bottom_margin = Margin::Chars(1);
+
+    for lang in &langs.languages {
+        let category = categorize_language(&lang.language, primary);
+        table.add_row(vec![
+            TableCellContent::Text(style_language_cell(&lang.language, &category, &term)),
+            TableCellContent::Text(style_stats_cell(lang, &category, &term)),
+        ]);
     }
-    let show_count = if verbose > 0 { 10 } else { 5 };
-    for lang in langs.languages.iter().take(show_count) {
-        println!(
-            "{}: {} files ({:.1}%)",
-            lang.language,
-            format_number(lang.file_count),
-            lang.percentage
-        );
-        if verbose > 1 && !lang.files.is_empty() {
-            let file_show_count = 3.min(lang.files.len());
-            for file in lang.files.iter().take(file_show_count) {
-                println!("  - {}", file.display());
-            }
-            if lang.files.len() > file_show_count {
-                println!(
-                    "  ... and {} more files",
-                    lang.files.len() - file_show_count
-                );
-            }
-        }
-    }
-    if langs.languages.len() > show_count {
-        println!("... and {} more", langs.languages.len() - show_count);
-    }
+
     println!();
+    print!("{}", table.display(&term));
+    println!();
+
+    let footer = Prose::new(format!(
+        "<dim><i>- analyzed </i></dim><yellow>{}</yellow><dim><i> files</i></dim>",
+        format_number(langs.total_files)
+    ))
+    .render(&term);
+    eprintln!("{}", footer);
 }
 
-pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_root: Option<&Path>) {
+pub fn print_filesystem_section(
+    fs: &sniff::FilesystemInfo,
+    verbose: u8,
+    repo_root: Option<&Path>,
+    latest_versions_requested: bool,
+) {
     println!("=== Filesystem ===");
 
     // Print EditorConfig formatting info at verbose level 2+
@@ -1325,6 +1622,9 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
         // Show remotes with enhanced branch info
         for remote in &git.remotes {
             print!("  Remote {}: {:?}", remote.name, remote.provider);
+            if let Some(ref default_branch) = remote.default_branch {
+                print!(" (default: {})", default_branch);
+            }
             // Show branch count in deep mode
             if let Some(ref branches) = remote.branches {
                 print!(" ({} branches)", branches.len());
@@ -1346,9 +1646,28 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
     }
     println!();
 
-    if let Some(ref repo) = fs.repo
-        && repo.is_monorepo
-    {
+    if let Some(ref repo) = fs.repo {
+        let filtered_packages_storage = repo
+            .packages
+            .as_ref()
+            .map(|packages| packages.iter().collect::<Vec<_>>());
+        let update_summary = summarize_repo_updates(
+            repo,
+            filtered_packages_storage.as_deref(),
+            latest_versions_requested,
+        );
+
+        if !repo.is_monorepo {
+            println!("Repository:");
+            println!("  Type: Single-package");
+            println!("  Root: {}", relative_path(&repo.root, repo_root));
+            if let Some(summary) = update_summary {
+                let terminal = Terminal::default();
+                render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+            }
+            return;
+        }
+
         let tool_name = repo
             .monorepo_tool
             .as_ref()
@@ -1363,16 +1682,43 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
         println!("{}", header.render_optimistic(None));
 
         if let Some(ref packages) = repo.packages {
-            let items: Vec<String> = packages
-                .iter()
-                .map(|pkg| {
-                    let markup = &format_package_items(pkg, verbose)[0];
-                    Prose::new(markup).render_optimistic(None)
-                })
-                .collect();
+            let mut items: Vec<RenderableContent> = Vec::new();
+            for pkg in packages {
+                let package_items = format_package_items(pkg, verbose);
+                items.push(RenderableContent::String(
+                    Prose::new(&package_items[0]).render_optimistic(None),
+                ));
+                if package_items.len() > 1 {
+                    let detail_items = package_items[1..]
+                        .iter()
+                        .map(|item| Prose::new(item).render_optimistic(None))
+                        .collect::<Vec<_>>();
+                    let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
+                    items.push(RenderableContent::Component(Rc::new(detail_list)));
+                }
+            }
 
-            let list = UnorderedList::new(items);
+            let list = UnorderedList::from(items);
             println!("{}", list.render_optimistic(None));
+        }
+
+        if let Some(summary) = update_summary {
+            let terminal = Terminal::default();
+            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+        }
+
+        let has_updatable = repo
+            .packages
+            .as_ref()
+            .is_some_and(|packages| packages.iter().any(|pkg| pkg.is_updatable == Some(true)));
+        if has_updatable {
+            println!(
+                "{}",
+                Prose::new(
+                    "<dim><yellow>*</yellow> dependency updates available  <red>*</red> major version update available</dim>"
+                )
+                .render_optimistic(None)
+            );
         }
     }
 }
@@ -1644,6 +1990,9 @@ mod tests {
             relative: format!("{area}/{name}"),
             package_area: area.to_string(),
             name: name.to_string(),
+            ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
+            discovery_sources: vec![],
+            nested_packages: vec![],
             primary_language: None,
             languages: vec![],
             configuration: vec![],

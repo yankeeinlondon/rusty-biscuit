@@ -11,7 +11,6 @@ mod os;
 mod programs;
 mod remote;
 mod services;
-mod structure;
 mod topics;
 
 use std::path::Path;
@@ -24,7 +23,6 @@ pub use filesystem::{print_git_section, print_hash_section};
 pub use programs::{print_programs_json, print_programs_markdown};
 pub use remote::{print_remote_json, print_remote_text};
 pub use services::{print_services_json, print_services_text};
-pub use structure::print_structure;
 pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
@@ -255,6 +253,7 @@ pub fn print_text(
     ui: bool,
     repo_filter: Option<&str>,
     base_dir: Option<&std::path::Path>,
+    latest_versions_requested: bool,
 ) {
     // Get repo root for relative paths
     let repo_root = result
@@ -276,7 +275,12 @@ pub fn print_text(
                 print_network_section(network);
             }
             if let Some(ref filesystem) = result.filesystem {
-                print_filesystem_section(filesystem, verbose, repo_root);
+                print_filesystem_section(
+                    filesystem,
+                    verbose,
+                    repo_root,
+                    latest_versions_requested,
+                );
             }
         }
         // Top-level section filters (used for single-section requests)
@@ -297,7 +301,12 @@ pub fn print_text(
         }
         OutputFilter::Filesystem => {
             if let Some(ref filesystem) = result.filesystem {
-                print_filesystem_section(filesystem, verbose, repo_root);
+                print_filesystem_section(
+                    filesystem,
+                    verbose,
+                    repo_root,
+                    latest_versions_requested,
+                );
             }
         }
         OutputFilter::Cpu => {
@@ -351,7 +360,13 @@ pub fn print_text(
                 } else if deps {
                     print_repo_deps_text(repo, repo_filter);
                 } else {
-                    print_repo_section(repo, verbose, repo_root, repo_filter);
+                    print_repo_section(
+                        repo,
+                        verbose,
+                        repo_root,
+                        repo_filter,
+                        latest_versions_requested,
+                    );
                 }
             }
         }
