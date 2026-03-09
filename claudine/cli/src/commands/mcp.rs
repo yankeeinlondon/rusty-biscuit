@@ -1,11 +1,18 @@
+use std::io;
+use std::path::{Path, PathBuf};
+
 use clap::{Args, Subcommand};
-use claudine::events::Provider;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::linking::resolve_repo_root;
 use claudine::mcp::catalog::McpCatalogStore;
-use claudine::mcp::defaults;
+use claudine::mcp::defaults::{self, load_repo_defaults, load_user_defaults};
 use claudine::mcp::export::McpExporter;
 use claudine::mcp::import::McpImporter;
 use claudine::mcp::state::{McpProviderStateStore, Scope};
 use color_eyre::eyre::{Result, eyre};
+use serde_json::{Value, json};
+
+use crate::log;
 
 /// MCP (Model Context Protocol) server management.
 #[derive(Debug, Args)]
@@ -105,56 +112,91 @@ pub fn run(args: McpArgs) -> Result<()> {
         None => run_list(json_output),
         Some(McpCommand::Init) => run_init(json_output),
         Some(McpCommand::Show(show_args)) => run_show(&show_args.id, json_output),
-        Some(McpCommand::Default(default_args)) => run_default(default_args),
-        Some(McpCommand::Alias(alias_args)) => run_alias(alias_args),
-        Some(McpCommand::Remove(remove_args)) => run_remove(&remove_args.id),
-        Some(McpCommand::Sync(sync_args)) => run_sync(sync_args),
+        Some(McpCommand::Default(default_args)) => run_default(default_args, json_output),
+        Some(McpCommand::Alias(alias_args)) => run_alias(alias_args, json_output),
+        Some(McpCommand::Remove(remove_args)) => run_remove(&remove_args.id, json_output),
+        Some(McpCommand::Sync(sync_args)) => run_sync(sync_args, json_output),
     }
 }
 
 /// `claudine mcp` — list all catalog entries.
 fn run_list(json_output: bool) -> Result<()> {
     let catalog = McpCatalogStore::load()?;
+    let state = McpProviderStateStore::load()?;
+    let user_defaults = load_user_defaults()?.defaults;
+    let repo_root = current_repo_root()?;
+    let repo_defaults = repo_root
+        .as_deref()
+        .map(load_repo_defaults)
+        .transpose()?
+        .flatten()
+        .map(|defaults| defaults.defaults)
+        .unwrap_or_default();
+    let active_defaults = defaults::effective_defaults(repo_root.as_deref(), &catalog)?;
     let servers = catalog.list_servers();
 
     if json_output {
-        let entries: Vec<serde_json::Value> = servers
+        let entries: Vec<Value> = servers
             .iter()
-            .map(|s| {
-                serde_json::json!({
-                    "id": s.id,
-                    "aliases": s.aliases,
-                    "transport": s.transport,
-                    "command": s.command,
-                    "url": s.url,
+            .map(|server| {
+                json!({
+                    "id": server.id,
+                    "aliases": server.aliases,
+                    "transport": server.transport,
+                    "defaults": {
+                        "user": user_defaults.contains(&server.id),
+                        "repo": repo_defaults.contains(&server.id),
+                        "active": active_defaults.contains(&server.id),
+                    },
+                    "providers": collect_provider_presence(&state, &server.id, repo_root.as_deref()),
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&entries)?);
+        log::data(&serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }
 
     if servers.is_empty() {
-        println!("No MCP servers in catalog.");
-        println!("Run `claudine mcp init` to import from native provider configs.");
+        log::data("No MCP servers in catalog.");
+        log::data("Run `claudine mcp init` to import from native provider configs.");
         return Ok(());
     }
 
-    println!("{:<25} {:<10} {:<20} ALIASES", "ID", "TRANSPORT", "COMMAND/URL");
-    println!("{}", "-".repeat(75));
+    log::data(&format!(
+        "{:<25} {:<10} {:<12} {:<28} ALIASES",
+        "ID", "TRANSPORT", "DEFAULTS", "PROVIDERS"
+    ));
+    log::data(&"-".repeat(95));
     for server in servers {
         let transport = format!("{:?}", server.transport).to_lowercase();
-        let target = server
-            .command
-            .as_deref()
-            .or(server.url.as_deref())
-            .unwrap_or("-");
+        let defaults = format_defaults(&server.id, &user_defaults, &repo_defaults, &active_defaults);
+        let providers = collect_provider_presence(&state, &server.id, repo_root.as_deref())
+            .into_iter()
+            .map(|value| {
+                let provider = value["provider"].as_str().unwrap_or_default();
+                let scope = value["scope"].as_str().unwrap_or_default();
+                let native = value["native_name"].as_str().unwrap_or_default();
+                if native == server.id {
+                    format!("{provider}:{scope}")
+                } else {
+                    format!("{provider}:{scope}={native}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         let aliases = if server.aliases.is_empty() {
             String::new()
         } else {
             server.aliases.join(", ")
         };
-        println!("{:<25} {:<10} {:<20} {}", server.id, transport, target, aliases);
+        log::data(&format!(
+            "{:<25} {:<10} {:<12} {:<28} {}",
+            server.id,
+            transport,
+            defaults,
+            truncate_column(&providers, 28),
+            aliases
+        ));
     }
 
     Ok(())
@@ -165,57 +207,76 @@ fn run_init(json_output: bool) -> Result<()> {
     let mut catalog = McpCatalogStore::load()?;
     let mut state = McpProviderStateStore::load()?;
 
-    let cwd = std::env::current_dir().ok();
+    let repo_root = current_repo_root()?;
     let mut importer = McpImporter::new(&mut catalog, &mut state);
-    let report = importer.import_all(cwd.as_deref());
+    let report = importer.import_all(repo_root.as_deref());
 
     catalog.save()?;
     state.save()?;
 
     if json_output {
-        let summary = serde_json::json!({
-            "imported": report.imported.len(),
-            "merged": report.merged.len(),
-            "conflicts": report.conflicts.len(),
-            "skipped": report.skipped.len(),
-            "errors": report.errors.len(),
+        let summary = json!({
+            "imported": report.imported,
+            "merged": report.merged,
+            "conflicts": report.conflicts,
+            "skipped": report.skipped,
+            "errors": report.errors,
         });
-        println!("{}", serde_json::to_string_pretty(&summary)?);
+        log::data(&serde_json::to_string_pretty(&summary)?);
         return Ok(());
     }
 
-    println!("MCP import complete:");
+    log::data("MCP import complete:");
     if !report.imported.is_empty() {
-        println!("  Imported: {}", report.imported.len());
+        log::data(&format!("  Imported: {}", report.imported.len()));
         for entry in &report.imported {
-            println!("    + {} (from {:?}:{})", entry.catalog_id, entry.provider, entry.native_name);
+            log::data(&format!(
+                "    + {} (from {:?}:{})",
+                entry.catalog_id, entry.provider, entry.native_name
+            ));
         }
     }
     if !report.merged.is_empty() {
-        println!("  Merged:   {}", report.merged.len());
+        log::data(&format!("  Merged:   {}", report.merged.len()));
         for entry in &report.merged {
             let alias_note = entry
                 .alias_added
                 .as_ref()
-                .map(|a| format!(" (alias added: {a})"))
+                .map(|alias| format!(" (alias added: {alias})"))
                 .unwrap_or_default();
-            println!("    ~ {} (from {:?}){}", entry.catalog_id, entry.provider, alias_note);
+            log::data(&format!(
+                "    ~ {} (from {:?}:{}){}",
+                entry.catalog_id, entry.provider, entry.native_name, alias_note
+            ));
         }
     }
     if !report.conflicts.is_empty() {
-        println!("  Conflicts: {}", report.conflicts.len());
+        log::data(&format!("  Conflicts: {}", report.conflicts.len()));
         for entry in &report.conflicts {
-            println!("    ! {} → {} (from {:?})", entry.name, entry.new_catalog_id, entry.provider);
+            log::data(&format!(
+                "    ! {} -> {} (from {:?})",
+                entry.name, entry.new_catalog_id, entry.provider
+            ));
         }
+    }
+    if !report.skipped.is_empty() {
+        log::data(&format!("  Skipped: {}", report.skipped.len()));
     }
     if !report.errors.is_empty() {
-        println!("  Errors: {}", report.errors.len());
+        log::data(&format!("  Errors: {}", report.errors.len()));
         for entry in &report.errors {
-            println!("    ✗ {:?}:{} — {}", entry.provider, entry.native_name, entry.reason);
+            log::data(&format!(
+                "    x {:?}:{} - {}",
+                entry.provider, entry.native_name, entry.reason
+            ));
         }
     }
-    if report.imported.is_empty() && report.merged.is_empty() && report.conflicts.is_empty() {
-        println!("  No MCP servers found in native provider configs.");
+    if report.imported.is_empty()
+        && report.merged.is_empty()
+        && report.conflicts.is_empty()
+        && report.skipped.is_empty()
+    {
+        log::data("  No MCP servers found in native provider configs.");
     }
 
     Ok(())
@@ -224,138 +285,369 @@ fn run_init(json_output: bool) -> Result<()> {
 /// `claudine mcp show <id>` — display server details.
 fn run_show(id: &str, json_output: bool) -> Result<()> {
     let catalog = McpCatalogStore::load()?;
+    let state = McpProviderStateStore::load()?;
     let server = catalog.resolve(id).map_err(|e| eyre!("{e}"))?;
+    let provenance = collect_provenance(&state, &server.id);
 
     if json_output {
-        println!("{}", serde_json::to_string_pretty(server)?);
+        log::data(&serde_json::to_string_pretty(&json!({
+            "server": server,
+            "provenance": provenance,
+        }))?);
         return Ok(());
     }
 
-    println!("ID:        {}", server.id);
+    log::data(&format!("ID:          {}", server.id));
     if !server.aliases.is_empty() {
-        println!("Aliases:   {}", server.aliases.join(", "));
+        log::data(&format!("Aliases:     {}", server.aliases.join(", ")));
     }
-    println!("Transport: {:?}", server.transport);
+    log::data(&format!(
+        "Transport:   {}",
+        format!("{:?}", server.transport).to_lowercase()
+    ));
     if let Some(ref cmd) = server.command {
-        println!("Command:   {}", cmd);
+        log::data(&format!("Command:     {}", cmd));
     }
     if !server.args.is_empty() {
-        println!("Args:      {}", server.args.join(" "));
+        log::data(&format!("Args:        {}", server.args.join(" ")));
     }
     if let Some(ref url) = server.url {
-        println!("URL:       {}", url);
+        log::data(&format!("URL:         {}", url));
     }
     if !server.env.is_empty() {
-        println!("Env:");
-        for k in server.env.keys() {
-            println!("  {}=<redacted>", k);
-        }
+        log::data(&format!(
+            "Env:         {}",
+            redacted_keys(server.env.keys().cloned().collect())
+        ));
     }
     if !server.headers.is_empty() {
-        println!("Headers:");
-        for k in server.headers.keys() {
-            println!("  {}: <redacted>", k);
-        }
+        log::data(&format!(
+            "Headers:     {}",
+            redacted_keys(server.headers.keys().cloned().collect())
+        ));
     }
     if let Some(ref desc) = server.metadata.description {
-        println!("Description: {}", desc);
+        log::data(&format!("Description: {}", desc));
     }
     if let Some(ref from) = server.metadata.created_from {
-        println!("Created from: {}", from);
+        log::data(&format!("Created from: {}", from));
     }
-    println!("Fingerprint: {}", server.metadata.fingerprint);
+    log::data(&format!("Fingerprint: {}", server.metadata.fingerprint));
+
+    if provenance.is_empty() {
+        log::data("Provenance:  none");
+    } else {
+        log::data("Provenance:");
+        for entry in provenance {
+            log::data(&format!(
+                "  - {}:{} as {} ({})",
+                entry["provider"].as_str().unwrap_or_default(),
+                entry["scope"].as_str().unwrap_or_default(),
+                entry["native_name"].as_str().unwrap_or_default(),
+                entry["origin"].as_str().unwrap_or_default()
+            ));
+        }
+    }
 
     Ok(())
 }
 
 /// `claudine mcp default [ids...]`
-fn run_default(args: DefaultArgs) -> Result<()> {
+fn run_default(args: DefaultArgs, json_output: bool) -> Result<()> {
     if args.repo {
-        let cwd = std::env::current_dir()?;
-        defaults::set_repo_defaults(&cwd, args.ids.clone())?;
-        println!("Repo defaults set: {}", args.ids.join(", "));
+        let repo_root = current_repo_root()?.ok_or_else(|| eyre!("failed to resolve repo root"))?;
+        defaults::set_repo_defaults(&repo_root, args.ids.clone())?;
+        if json_output {
+            log::data(&serde_json::to_string_pretty(&json!({
+                "scope": "repo",
+                "repo_root": repo_root,
+                "defaults": args.ids,
+            }))?);
+        } else {
+            log::data(&format!("Repo defaults set: {}", args.ids.join(", ")));
+        }
     } else {
         defaults::set_user_defaults(args.ids.clone())?;
-        println!("User defaults set: {}", args.ids.join(", "));
+        if json_output {
+            log::data(&serde_json::to_string_pretty(&json!({
+                "scope": "user",
+                "defaults": args.ids,
+            }))?);
+        } else {
+            log::data(&format!("User defaults set: {}", args.ids.join(", ")));
+        }
     }
     Ok(())
 }
 
 /// `claudine mcp alias add|remove`
-fn run_alias(args: AliasArgs) -> Result<()> {
+fn run_alias(args: AliasArgs, json_output: bool) -> Result<()> {
     let mut catalog = McpCatalogStore::load()?;
 
     match args.command {
         AliasCommand::Add(add) => {
             catalog.add_alias(&add.id, &add.alias)?;
             catalog.save()?;
-            println!("Alias '{}' added to server '{}'", add.alias, add.id);
+            if json_output {
+                log::data(&serde_json::to_string_pretty(&json!({
+                    "action": "add",
+                    "id": add.id,
+                    "alias": add.alias,
+                }))?);
+            } else {
+                log::data(&format!("Alias '{}' added to server '{}'", add.alias, add.id));
+            }
         }
         AliasCommand::Remove(remove) => {
             catalog.remove_alias(&remove.alias)?;
             catalog.save()?;
-            println!("Alias '{}' removed", remove.alias);
+            if json_output {
+                log::data(&serde_json::to_string_pretty(&json!({
+                    "action": "remove",
+                    "alias": remove.alias,
+                }))?);
+            } else {
+                log::data(&format!("Alias '{}' removed", remove.alias));
+            }
         }
     }
     Ok(())
 }
 
 /// `claudine mcp remove <id>`
-fn run_remove(id: &str) -> Result<()> {
+fn run_remove(id: &str, json_output: bool) -> Result<()> {
+    confirm_remove(id)?;
+
     let mut catalog = McpCatalogStore::load()?;
     let server = catalog.remove_server(id)?;
     catalog.save()?;
-    println!("Removed server '{}' from catalog", server.id);
+
+    if json_output {
+        log::data(&serde_json::to_string_pretty(&json!({
+            "removed": server.id,
+        }))?);
+    } else {
+        log::data(&format!("Removed server '{}' from catalog", server.id));
+    }
     Ok(())
 }
 
 /// `claudine mcp sync <provider>`
-fn run_sync(args: SyncExportArgs) -> Result<()> {
+fn run_sync(args: SyncExportArgs, json_output: bool) -> Result<()> {
     let provider = Provider::fuzzy_match_cli_name(&args.provider)
         .ok_or_else(|| eyre!("unknown provider: {}", args.provider))?;
 
     let catalog = McpCatalogStore::load()?;
-    let state = McpProviderStateStore::load()?;
+    let mut state = McpProviderStateStore::load()?;
 
     let scope = match args.scope.as_str() {
-        "repo" => {
-            let cwd = std::env::current_dir()?;
-            Scope::Repo(cwd)
-        }
-        _ => Scope::User,
+        "repo" => Scope::Repo(current_repo_root()?.ok_or_else(|| eyre!("failed to resolve repo root"))?),
+        "user" => Scope::User,
+        other => return Err(eyre!("unknown scope '{}'; expected user or repo", other)),
     };
 
-    // Get servers from effective defaults
-    let default_ids = defaults::effective_defaults(
-        match &scope {
-            Scope::Repo(p) => Some(p.as_path()),
-            Scope::User => None,
-        },
-        &catalog,
-    )?;
+    let repo_root = match &scope {
+        Scope::User => None,
+        Scope::Repo(root) => Some(root.as_path()),
+    };
 
-    let servers: Vec<_> = default_ids
-        .iter()
-        .filter_map(|id| catalog.resolve(id).ok().cloned())
-        .collect();
+    let default_ids = defaults::effective_defaults(repo_root, &catalog)?;
+    let mut unresolved = Vec::new();
+    let mut servers = Vec::new();
 
-    let exporter = McpExporter::new(&catalog, &state);
+    for id in &default_ids {
+        match catalog.resolve(id) {
+            Ok(server) => servers.push(server.clone()),
+            Err(_) => unresolved.push(id.clone()),
+        }
+    }
+
+    let mut exporter = McpExporter::new(&catalog, &mut state);
     let report = exporter.sync_provider(provider, &scope, &servers, args.apply)?;
+    if args.apply {
+        state.save()?;
+    }
+
+    if json_output {
+        log::data(&serde_json::to_string_pretty(&json!({
+            "provider": provider.as_slug(),
+            "scope": scope_name(&scope),
+            "applied": args.apply,
+            "written": report.written,
+            "removed": report.removed,
+            "preserved": report.preserved,
+            "unresolved": unresolved,
+        }))?);
+        return Ok(());
+    }
 
     if args.apply {
-        println!("Sync applied to {}:", provider.as_slug());
+        log::data(&format!("Sync applied to {}:", provider.as_slug()));
     } else {
-        println!("Sync dry run for {} (use --apply to write):", provider.as_slug());
+        log::data(&format!(
+            "Sync dry run for {} (use --apply to write):",
+            provider.as_slug()
+        ));
     }
     if !report.written.is_empty() {
-        println!("  Write: {}", report.written.join(", "));
+        log::data(&format!("  Write: {}", report.written.join(", ")));
     }
     if !report.removed.is_empty() {
-        println!("  Remove: {}", report.removed.join(", "));
+        log::data(&format!("  Remove: {}", report.removed.join(", ")));
     }
     if !report.preserved.is_empty() {
-        println!("  Preserve: {}", report.preserved.join(", "));
+        log::data(&format!("  Preserve: {}", report.preserved.join(", ")));
+    }
+    if !unresolved.is_empty() {
+        log::data(&format!("  Unresolved defaults: {}", unresolved.join(", ")));
     }
 
     Ok(())
+}
+
+fn current_repo_root() -> Result<Option<PathBuf>> {
+    let cwd = std::env::current_dir()?;
+    Ok(Some(resolve_repo_root(&cwd)))
+}
+
+fn collect_provider_presence(
+    state: &McpProviderStateStore,
+    catalog_id: &str,
+    current_repo_root: Option<&Path>,
+) -> Vec<Value> {
+    let mut entries = Vec::new();
+    let state = state.state();
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let slug = provider.as_slug();
+        if let Some(provider_entries) = state.providers.get(slug) {
+            for entry in &provider_entries.user {
+                if entry.catalog_id == catalog_id {
+                    entries.push(json!({
+                        "provider": slug,
+                        "scope": "user",
+                        "native_name": entry.native_name,
+                        "origin": format!("{:?}", entry.origin).to_lowercase(),
+                    }));
+                }
+            }
+        }
+
+        if let Some(repo_root) = current_repo_root
+            && let Some(repo_state) = state.repos.get(&repo_root.to_string_lossy().to_string())
+            && let Some(provider_entries) = repo_state.providers.get(slug)
+        {
+            for entry in &provider_entries.repo {
+                if entry.catalog_id == catalog_id {
+                    entries.push(json!({
+                        "provider": slug,
+                        "scope": "repo",
+                        "native_name": entry.native_name,
+                        "origin": format!("{:?}", entry.origin).to_lowercase(),
+                    }));
+                }
+            }
+        }
+    }
+
+    entries
+}
+
+fn collect_provenance(state: &McpProviderStateStore, catalog_id: &str) -> Vec<Value> {
+    let mut entries = Vec::new();
+    let state = state.state();
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let slug = provider.as_slug();
+        if let Some(provider_entries) = state.providers.get(slug) {
+            for entry in &provider_entries.user {
+                if entry.catalog_id == catalog_id {
+                    entries.push(json!({
+                        "provider": slug,
+                        "scope": "user",
+                        "native_name": entry.native_name,
+                        "origin": format!("{:?}", entry.origin).to_lowercase(),
+                        "source": entry.source,
+                    }));
+                }
+            }
+        }
+
+        for (repo_path, repo_state) in &state.repos {
+            if let Some(provider_entries) = repo_state.providers.get(slug) {
+                for entry in &provider_entries.repo {
+                    if entry.catalog_id == catalog_id {
+                        entries.push(json!({
+                            "provider": slug,
+                            "scope": "repo",
+                            "repo_root": repo_path,
+                            "native_name": entry.native_name,
+                            "origin": format!("{:?}", entry.origin).to_lowercase(),
+                            "source": entry.source,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    entries
+}
+
+fn confirm_remove(id: &str) -> Result<()> {
+    log::message(&format!("Remove MCP server '{id}'? [y/N]"));
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    let answer = line.trim().to_ascii_lowercase();
+    if answer == "y" || answer == "yes" {
+        return Ok(());
+    }
+
+    Err(eyre!("aborted removal of '{id}'"))
+}
+
+fn format_defaults(
+    id: &str,
+    user_defaults: &[String],
+    repo_defaults: &[String],
+    active_defaults: &[String],
+) -> String {
+    let mut scopes = Vec::new();
+    if user_defaults.contains(&id.to_string()) {
+        scopes.push("user");
+    }
+    if repo_defaults.contains(&id.to_string()) {
+        scopes.push("repo");
+    }
+    if active_defaults.contains(&id.to_string()) {
+        scopes.push("active");
+    }
+    if scopes.is_empty() {
+        "-".to_string()
+    } else {
+        scopes.join(",")
+    }
+}
+
+fn redacted_keys(mut keys: Vec<String>) -> String {
+    keys.sort();
+    keys.into_iter()
+        .map(|key| format!("{key}=<redacted>"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn scope_name(scope: &Scope) -> &'static str {
+    match scope {
+        Scope::User => "user",
+        Scope::Repo(_) => "repo",
+    }
+}
+
+fn truncate_column(value: &str, max_len: usize) -> String {
+    if value.chars().count() <= max_len {
+        return value.to_string();
+    }
+
+    value.chars().take(max_len.saturating_sub(3)).collect::<String>() + "..."
 }

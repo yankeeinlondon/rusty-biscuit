@@ -7,6 +7,7 @@ use claudine::badges::{NON_INTERACTIVE, REPO_FLAG, YOLO};
 use std::path::Path;
 
 use crate::commands::wrap::env::EnvPlan;
+use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::log;
 
@@ -18,6 +19,7 @@ pub(crate) fn log_wrapper_summary(
     repo_requested: bool,
     child_args: &[String],
     env_plan: &EnvPlan,
+    mcp_runtime: Option<&McpRuntimeInfo>,
     term: &Terminal,
     verbose: u8,
 ) {
@@ -96,6 +98,10 @@ pub(crate) fn log_wrapper_summary(
         let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
         log::message(&rendered);
     }
+
+    if let Some(mcp_runtime) = mcp_runtime {
+        log_mcp_runtime(term, mcp_runtime);
+    }
 }
 
 pub(crate) fn log_dry_run(
@@ -104,6 +110,7 @@ pub(crate) fn log_dry_run(
     child_args: &[String],
     repo_requested: bool,
     env_plan: &EnvPlan,
+    mcp_runtime: Option<&McpRuntimeInfo>,
     child_cwd: &Path,
     term: &Terminal,
 ) {
@@ -162,6 +169,10 @@ pub(crate) fn log_dry_run(
     }
     let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
     log::message(&rendered);
+
+    if let Some(mcp_runtime) = mcp_runtime {
+        log_mcp_runtime(term, mcp_runtime);
+    }
 }
 
 pub(crate) fn summarize_value(key: &str, value: &str) -> String {
@@ -223,6 +234,66 @@ pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) 
         .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
         .render(term),
     )
+}
+
+fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
+    log::message(&Prose::new("<bold>MCP:</bold>").render(term));
+
+    let mut items: Vec<RenderableContent> = Vec::new();
+    if mcp_runtime.servers.is_empty() {
+        items.push(RenderableContent::from(Prose::new(
+            "<dim>no active MCP servers</dim>",
+        )));
+    } else {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>servers</green><dim>={}</dim>",
+            mcp_runtime.servers.join(", ")
+        ))));
+    }
+
+    if !mcp_runtime.resolved_tags.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>tags</green><dim>={}</dim>",
+            mcp_runtime.resolved_tags.join(", ")
+        ))));
+    }
+    if let Some(cleaned_prompt) = &mcp_runtime.cleaned_prompt {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>cleaned_prompt</green><dim>={}</dim>",
+            shell_escape(cleaned_prompt)
+        ))));
+    }
+    if !mcp_runtime.env_vars_set.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>env</green><dim>={}</dim>",
+            mcp_runtime.env_vars_set.join(", ")
+        ))));
+    }
+    if !mcp_runtime.extra_args.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>extra_args</green><dim>={}</dim>",
+            mcp_runtime
+                .extra_args
+                .iter()
+                .map(|arg| shell_escape(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ))));
+    }
+    if !mcp_runtime.temp_files.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>files</green><dim>={}</dim>",
+            mcp_runtime
+                .temp_files
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))));
+    }
+
+    let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
+    log::message(&rendered);
 }
 
 pub(crate) fn post_env_message(message: &str, term: &Terminal) -> String {
