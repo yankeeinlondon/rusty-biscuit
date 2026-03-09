@@ -8,7 +8,7 @@
 - **Hardware Detection**: CPU (with SIMD capabilities), GPU (with Metal/Vulkan support), memory, and storage
 - **Network Detection**: Network interfaces with IPv4/IPv6 addresses and status flags
 - **Filesystem Detection**: Git repository status, monorepo detection, programming language analysis, and EditorConfig formatting rules
-- **Dependency Enrichment**: Fetch latest versions from package registries with `--deep` mode
+- **Scoped Enrichment**: Refresh git remotes with `--refresh-remotes` and check registries with `--latest-versions`
 - **Flexible Output**: Text (with verbosity levels) or JSON formats
 
 ## Installation
@@ -127,24 +127,33 @@ sniff services --state stopped   # Only stopped services
 sniff services --json            # JSON output
 ```
 
-### Deep Mode
+### Scoped Enrichment Flags
 
-Enable deep inspection for enhanced repository information:
+Expensive repository checks are opt-in and scoped to the subcommands that can
+actually report the extra data:
 
 ```bash
-# Enable deep git inspection (queries remote branches)
-sniff --deep
+# Refresh local remote-tracking data before reporting git sync status
+sniff git --refresh-remotes -v
 
-# Show git info with remote branch details
-sniff git --deep -v
+# Query registries for latest dependency versions
+sniff repo --latest-versions -v
+
+# Combine both on the aggregate filesystem report
+sniff filesystem --refresh-remotes --latest-versions
 ```
 
-Deep mode provides:
+- `sniff git --refresh-remotes` and `sniff filesystem --refresh-remotes` add:
 
 - Remote branch lists for each git remote
 - Commit synchronization status across remotes
 - Detection of whether local branch is behind remote
+
+- `sniff repo --latest-versions` and `sniff filesystem --latest-versions` add:
+
 - Latest version information for dependencies from package registries
+- Package-level update summaries in text output
+- `latest_version`, `is_updatable`, and `has_major_update` fields in JSON output
 
 ## Output Examples
 
@@ -297,7 +306,7 @@ The CLI binary provides:
 - **Subcommand Filtering**: Use subcommands like `hardware`, `cpu`, `git` to show specific sections
 - **Text Rendering**: Multi-level verbosity with human-readable formatting
 - **JSON Serialization**: Full structured output for programmatic use
-- **Dependency Enrichment**: Async network queries to package registries in `--deep` mode
+- **Scoped Enrichment**: Async registry lookups via `--latest-versions` and remote-aware git reporting via `--refresh-remotes`
 
 **Key Files:**
 
@@ -336,7 +345,7 @@ The library provides modular detection across six domains:
    - Dirty file tracking with diffs
    - Worktree detection and status
    - Remote provider detection (GitHub, GitLab, etc.)
-   - Deep mode: Remote branch lists, commit synchronization
+   - Optional remote refresh: branch inventory, default branch, behind status, commit containment
 
 2. **Repository Detection** (`filesystem/repo.rs`):
    - Monorepo tool detection (Cargo workspaces, pnpm, npm, yarn, Nx, Turborepo, Lerna)
@@ -352,7 +361,7 @@ The library provides modular detection across six domains:
 
 4. **Dependency Enrichment** (`package/network.rs`):
    - Async queries to package registries (crates.io, npm, PyPI)
-   - Latest version resolution for `--deep` mode
+   - Latest version resolution for `--latest-versions`
    - Manager-specific network implementations (Cargo, npm, pnpm, Yarn, Bun)
 
 **Programs Module:**
@@ -444,7 +453,7 @@ sniff cpu --json
 
 ### Dependency Enrichment
 
-With `--deep` mode, sniff enriches dependency information:
+With `--latest-versions`, sniff enriches dependency information:
 
 1. Parses `Cargo.toml` dependencies (normal, dev, build)
 2. Extracts version requirements and features
@@ -460,47 +469,47 @@ Supports:
 - **Lua**: LuaRocks HEAD requests
 - **Go**: pkg.go.dev HEAD requests
 
-### Git Deep Mode
+### Remote Refresh
 
-Deep git inspection (`--deep`) queries remote repositories:
+Remote-aware git inspection (`--refresh-remotes`) refreshes local remote-tracking data and reports:
 
 - Fetches branch lists for each remote
-- Determines which remotes have each commit (via `git branch -r --contains`)
+- Determines which remotes have each recent commit
 - Detects if local branch is behind remote
 - Network-bound operations with error handling
 
 ### Remote Repository Inspection
 
-The `sniff remote` command inspects remote git repositories via hosting provider APIs:
+The `sniff git <remote>` flow inspects remote repositories via hosting provider APIs:
 
 ```bash
 # Inspect a GitHub repository
-sniff remote https://github.com/rust-lang/cargo
+sniff git https://github.com/rust-lang/cargo
 
 # SSH URLs also work
-sniff remote git@github.com:rust-lang/cargo.git
+sniff git git@github.com:rust-lang/cargo.git
 
 # GitLab (including nested groups)
-sniff remote https://gitlab.com/inkscape/inkscape
+sniff git https://gitlab.com/inkscape/inkscape
 
 # Gitea/Codeberg
-sniff remote https://codeberg.org/forgejo/forgejo
+sniff git https://codeberg.org/forgejo/forgejo
 
 # Bitbucket
-sniff remote https://bitbucket.org/atlassian/python-bitbucket
+sniff git https://bitbucket.org/atlassian/python-bitbucket
 
 # JSON output
-sniff remote https://github.com/rust-lang/cargo --json
+sniff git https://github.com/rust-lang/cargo --json
 ```
 
-**From within a repository**, use `sniff repo --remote` to inspect a remote by name:
+**From within a repository**, use `sniff git <name>` to inspect a configured remote by name:
 
 ```bash
 # Fetch remote info for 'origin'
-sniff repo --remote origin
+sniff git origin
 
 # Or specify a URL directly
-sniff repo --remote https://github.com/rust-lang/cargo
+sniff git https://github.com/rust-lang/cargo
 ```
 
 **Output includes:**
@@ -525,7 +534,7 @@ sniff repo --remote https://github.com/rust-lang/cargo
 
 - Library uses `thiserror` for structured error types
 - CLI displays user-friendly error messages
-- Network errors in `--deep` mode are graceful (shows available data)
+- Network errors in `--refresh-remotes` and `--latest-versions` are graceful (shows available data)
 - Permission denials for network interfaces are handled explicitly
 
 ## Development
@@ -634,18 +643,18 @@ sniff hardware
 # Analyze codebase languages
 sniff language -v
 
-# Check git status across monorepo packages
-sniff git --deep -v
+# Refresh remote tracking state before printing git status
+sniff git --refresh-remotes -v
 
 # Inspect dependencies with latest versions
-sniff repo --deep --json | jq '.packages[].dependencies'
+sniff repo --latest-versions --json | jq '.packages[].dependencies'
 ```
 
 ## Limitations
 
 - **Network detection** requires appropriate permissions (may fail on restricted systems)
-- **Deep mode** requires network access to package registries
-- **Git deep mode** queries all remotes (can be slow for many remotes)
+- **`--latest-versions`** requires network access to package registries
+- **`--refresh-remotes`** may contact configured git remotes and can be slow on large or private repos
 - **Monorepo detection** is limited to known tools (Cargo, npm, pnpm, yarn, Nx, Turborepo, Lerna)
 - **Language detection** is file extension-based (no content analysis)
 
