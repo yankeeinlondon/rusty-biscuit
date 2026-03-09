@@ -8,6 +8,7 @@ pub mod hooks;
 pub mod init;
 pub mod link;
 pub mod logs;
+pub mod mcp;
 pub mod providers;
 pub mod skills;
 pub mod slash_commands;

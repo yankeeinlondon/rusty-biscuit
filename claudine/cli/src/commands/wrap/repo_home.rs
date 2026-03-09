@@ -189,16 +189,13 @@ fn materialize_repo_scoped_resources(
     repo_root: &Path,
     repo_only: bool,
 ) -> Result<()> {
-    match provider {
-        Provider::Codex => {
-            materialize_codex_prompts(
-                &original_home.join("prompts"),
-                &shadow_home.join("prompts"),
-                repo_root,
-                repo_only,
-            )?;
-        }
-        _ => {}
+    if provider == Provider::Codex {
+        materialize_codex_prompts(
+            &original_home.join("prompts"),
+            &shadow_home.join("prompts"),
+            repo_root,
+            repo_only,
+        )?;
     }
 
     Ok(())

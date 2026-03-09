@@ -1,5 +1,5 @@
 pub mod atomic;
-mod backup;
+pub(crate) mod backup;
 mod claude;
 mod codex;
 mod gemini;

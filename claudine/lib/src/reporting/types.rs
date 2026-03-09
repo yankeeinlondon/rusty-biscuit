@@ -36,20 +36,15 @@ impl DateRange {
 }
 
 /// Scope of a sync run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SyncRequest {
     /// Sync all known JSONL files.
+    #[default]
     All,
     /// Sync one local calendar date.
     Date(NaiveDate),
     /// Sync an inclusive date range.
     Range(DateRange),
-}
-
-impl Default for SyncRequest {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 /// One per-file sync failure.

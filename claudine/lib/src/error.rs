@@ -107,6 +107,53 @@ pub enum ClaudineError {
         /// Inclusive range end.
         to: String,
     },
+
+    /// MCP catalog file not found.
+    #[error("MCP catalog not found at ~/.claudine/mcp/catalog.json")]
+    McpCatalogNotFound,
+
+    /// MCP server not found in the catalog.
+    #[error("MCP server not found: {id}")]
+    McpServerNotFound {
+        /// Server ID that was looked up.
+        id: String,
+    },
+
+    /// Alias conflicts with an existing server ID or alias.
+    #[error("alias `{alias}` conflicts with existing server `{existing_id}`")]
+    McpAliasConflict {
+        /// The alias that was being added.
+        alias: String,
+        /// The existing server ID or alias owner.
+        existing_id: String,
+    },
+
+    /// Query matched multiple servers ambiguously.
+    #[error("ambiguous MCP match for `{query}`: {}", candidates.join(", "))]
+    McpAmbiguousMatch {
+        /// The query string that produced multiple matches.
+        query: String,
+        /// The candidate server IDs.
+        candidates: Vec<String>,
+    },
+
+    /// Import detected a naming conflict across providers.
+    #[error("MCP import conflict for `{name}` across providers: {}", providers.join(", "))]
+    McpImportConflict {
+        /// The conflicting server name.
+        name: String,
+        /// Providers that define this name differently.
+        providers: Vec<String>,
+    },
+
+    /// Provider does not support the requested MCP operation.
+    #[error("MCP not supported for {provider}: {reason}")]
+    McpProviderNotSupported {
+        /// Provider name.
+        provider: String,
+        /// Why the operation is not supported.
+        reason: String,
+    },
 }
 
 /// Convenience type alias for Claudine results.

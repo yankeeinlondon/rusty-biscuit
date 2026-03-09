@@ -60,6 +60,14 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub repo: bool,
 
+    /// Enable Claudine-managed MCP session composition.
+    #[arg(long)]
+    pub mcp: bool,
+
+    /// Activate specific MCP servers by ID or alias (comma-separated).
+    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
+    pub mcp_use: Vec<String>,
+
     /// Arguments forwarded to the wrapped provider CLI.
     #[arg(
         value_name = "ARGS",
@@ -171,7 +179,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         deferred_warnings.push(warn);
     }
 
-    let env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env(
         profile,
         provider,
         &args.include,
@@ -182,6 +190,52 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         &env_overrides,
         repo_requested,
     )?;
+
+    // MCP session composition
+    if args.mcp || !args.mcp_use.is_empty() {
+        use claudine::mcp::catalog::McpCatalogStore;
+        use claudine::mcp::inject::injector_for_provider;
+        use claudine::mcp::session::compute_session_set;
+
+        let catalog = McpCatalogStore::load()
+            .map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+        let repo_root_ref = env_plan.repo_root.as_deref();
+        let session = compute_session_set(&catalog, repo_root_ref, &args.mcp_use, &[])
+            .map_err(|e| eyre!("MCP session error: {e}"))?;
+
+        for warning in &session.warnings {
+            deferred_warnings.push(warning.clone());
+        }
+
+        if !session.servers.is_empty() {
+            if let Some(injector) = injector_for_provider(provider) {
+                let shadow = env_plan.shadow_home_path.as_deref();
+                // Injector works with String env; bridge to OsString env plan
+                let mut string_env = std::collections::HashMap::new();
+                let result = injector.inject(&session.servers, &mut string_env, shadow)
+                    .map_err(|e| eyre!("MCP injection failed: {e}"))?;
+
+                // Merge injected env vars into the OsString env plan
+                for (k, v) in string_env {
+                    env_plan.env.insert(k.into(), v.into());
+                }
+
+                for arg in &result.extra_args {
+                    child_args.push(arg.clone());
+                }
+
+                let server_ids: Vec<&str> = session.servers.iter().map(|s| s.id.as_str()).collect();
+                deferred_messages.push(format!("MCP: {}", server_ids.join(", ")));
+            } else {
+                return Err(eyre!(
+                    "provider {} does not support runtime MCP injection.\n\
+                     Use `claudine mcp sync {}` to write servers to its native config instead.",
+                    provider,
+                    provider.as_slug()
+                ));
+            }
+        }
+    }
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 

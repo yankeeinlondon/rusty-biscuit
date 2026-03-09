@@ -39,6 +39,7 @@ pub(crate) enum Commands {
     Agents(commands::agents::AgentsArgs),
     /// List available slash commands and their scopes.
     #[command(name = "commands")]
+    #[allow(clippy::enum_variant_names)]
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers,
@@ -46,6 +47,8 @@ pub(crate) enum Commands {
     Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
+    /// Manage MCP (Model Context Protocol) servers.
+    Mcp(commands::mcp::McpArgs),
     /// Wrap Claude Code with Claudine preflight/env handling.
     Claude(commands::wrap::WrapperArgs),
     /// Wrap Codex CLI with Claudine preflight/env handling.
