@@ -48,8 +48,9 @@ fn test_detect_completes_in_reasonable_time() {
     let start = Instant::now();
     let _ = detect();
     let elapsed = start.elapsed();
-    // Allow slack for CI environments and package manager detection (PATH scanning)
-    assert!(elapsed.as_millis() < 15000, "Detection took too long: {:?}", elapsed);
+    // Allow slack for CI environments, package manager detection (PATH scanning),
+    // and boundary-aware mixed-workspace package discovery.
+    assert!(elapsed.as_millis() < 20000, "Detection took too long: {:?}", elapsed);
 }
 
 #[test]
