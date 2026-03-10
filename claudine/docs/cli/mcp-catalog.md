@@ -1,6 +1,6 @@
 # MCP Catalog Management
 
-The MCP catalog is saved in the `~/.claudine/mcp-catalog.json` file and represents all **possible** configurations that a user (and their repos) have used before.
+The MCP catalog is saved in `~/.claudine/mcp/catalog.json` and represents all **possible** configurations that a user (and their repos) have used before.
 
 It's important to recognize that the **catalog**:
 
@@ -13,11 +13,11 @@ It is recommended that by default, no MCP servers are configured. This, however,
 
 - this mapping of default MCP servers is done in two files:
 
-    - `~/.claudine/user-mcp-defaults.json`
-    - `~/.claudine/repo-mcp-default.json`
+    - `~/.claudine/mcp/defaults.json`
+    - `<repo>/.claudine/mcp.json`
 
 - the _user_ scoped MCP servers are a singular list, 
-- the _repo_ scoped MCP servers are key/value of lists where the key is a "repo"
+- the _repo_ scoped MCP servers live in the repo that owns them
 - the two configuration files will always exist (at least once MCP mode initialization has taken place). Again, by default we'll have **no** MCP servers as a default.
 
 ## Initializing MCP mode
@@ -43,7 +43,7 @@ While both ways of initializing the catalog and default settings are completely 
 
 If a user runs `claudine mcp init` _after_ the catalog has been setup already:
 
-- if the user is in a **git** repo and that git repo _has not_ been configured in the `~/.claudine/repo-mcp-default.json` file then we will:
+- if the user is in a **git** repo and that git repo has not been configured in `<repo>/.claudine/mcp.json` then we will:
     - remind them what MCP servers are _always_ included at the user level
     - ask them to choose any MCP servers they _always_ want to configure at the repo level
         - the options are a multi-select box
@@ -65,7 +65,7 @@ The MCP mode is activated by using the `--mcp` flag but there are several manage
 - `claudine mcp add remote` - adds a remote MCP server
     - this process will be run through an interactive interview with the user
     - Name, URL, ENV, other?
-- `claudine alias <name> <alias>`
+- `claudine mcp alias <name> <alias>`
     - adds a new _alias_ to an existing MCP server in the catalog
     - both `name` and `alias` are optional parameters
         - those parameters which are not provided will be asked for in an interactive prompt
@@ -93,5 +93,7 @@ The MCP mode is activated by using the `--mcp` flag but there are several manage
     - Checks that the current configuration is valid
 - `claudine mcp sync`
     - This will re-evaluate all the Agent configurations for MCP and if it finds any new server's which are not currently in these configurations it will add it to the catalog and report the new server's availability
+- `claudine mcp export <provider> [--scope user|repo] [--apply]`
+    - This writes the effective Claudine defaults back into a provider's native MCP config
 
 > **Note:** if the `claudine mcp` subcommand is provided without any additional specificity then we will run `claudine mcp list`.

@@ -4,6 +4,8 @@ Sometimes it feels good to add an MCP server that we deem as being useful for so
 
 For this reason, rather than an opt-out philosophy, Claudine espouses an "opt-in" approach to MCP services. To use this philosophy when using Claudine's _wrapping_ functionality we add the `--mcp` flag to the call.
 
+When the wrapped provider cannot accept runtime MCP injection, Claudine stops and directs the user to `claudine mcp export <provider> --apply` instead of silently proceeding.
+
 ## Opting In
 
 When a user has passed in a non-interactive prompt to an Agent for processing or to kick off a new interactive session, the process is the same:
@@ -73,6 +75,7 @@ The goal is to _find a match_ between the **tag** the user provided and an MCP s
         - if a singular item matches the result then this is used
         - if MORE than one item matches:
             - by default, the user is interactively requested to specify which tag (or tags) were intended
+            - in non-interactive runs, ambiguity is treated as a hard error because there is no safe prompt path
             - if the CLI command contains the `--strict` flag then instead of asking it will simply exit in an error. The error will express what the ambiguous tag was and what the possible matches were
         - if NO matches were found:
             - by default, we remove the tag reference from the prompt, report a warning to STDERR, but execute the Agent

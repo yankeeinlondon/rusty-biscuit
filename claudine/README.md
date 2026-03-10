@@ -2,7 +2,7 @@
 
 > Claude Code's ex-girlfriend who knows Claude's inner secrets but is now dating other Agents
 
-Universal event handler, skill linker, and MCP catalog manager for agentic CLIs. Normalizes 16 lifecycle events across 8 providers into a single configuration, executes 6 action types (TTS, sound effects, logging, shell commands, reports, blocking calls) when those events fire, synchronizes skills/commands/agents between providers, and manages import/sync/runtime composition of MCP servers.
+Universal event handler, skill linker, and MCP catalog manager for agentic CLIs. Normalizes 16 lifecycle events across 8 providers into a single configuration, executes 6 action types (TTS, sound effects, logging, shell commands, reports, blocking calls) when those events fire, synchronizes skills/commands/agents between providers, and manages import/export/runtime composition of MCP servers.
 
 ## Supported Providers
 
@@ -56,7 +56,7 @@ claudine logs
 | `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
-| `claudine mcp [init\|show\|default\|alias\|remove\|sync] [--json]` | Import, catalog, default, alias, remove, and sync MCP servers |
+| `claudine mcp [list\|init\|add\|config\|default\|alias\|remove\|check\|sync\|export] [--json]` | Manage the normalized MCP catalog, defaults, validation, refresh, and export flows |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
@@ -73,7 +73,7 @@ MCP state is stored separately in `~/.claudine/mcp/`:
 
 - `catalog.json` - normalized server definitions
 - `defaults.json` - user-scope default server IDs
-- `provider-state.json` - import/sync provenance
+- `provider-state.json` - import/export provenance
 - `<repo>/.claudine/mcp.json` - repo-scope default server IDs
 
 ## Packages

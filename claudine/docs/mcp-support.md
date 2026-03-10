@@ -4,23 +4,28 @@ Claudine ships a normalized MCP catalog with three distinct workflows:
 
 - import native provider configs into `~/.claudine/mcp/`
 - choose effective defaults at user or repo scope
-- either sync those defaults back to native configs or inject them at wrapper runtime when the provider supports it
+- either export those defaults back to native configs or inject them at wrapper runtime when the provider supports it
 
 ## Command Family
 
 | Command | Behavior |
 |---------|----------|
 | `claudine mcp` | List catalog entries, defaults, and provider presence |
-| `claudine mcp init` | Scan supported native configs and import them into the catalog |
-| `claudine mcp show <id>` | Show a normalized server definition plus provenance |
+| `claudine mcp init` | Import the catalog, create defaults files, and guide first-time setup |
+| `claudine mcp list [filter]` | List catalog entries and optionally filter by ID substring |
+| `claudine mcp list --alias <filter>` | Filter the catalog by alias substring |
+| `claudine mcp add local` | Add a local stdio MCP server interactively |
+| `claudine mcp add remote` | Add a remote HTTP MCP server interactively |
+| `claudine mcp config <id-or-alias>` | Show a normalized server definition plus provenance |
 | `claudine mcp default [ids...]` | Replace user-scope default server IDs |
 | `claudine mcp default --repo [ids...]` | Replace repo-scope default server IDs |
-| `claudine mcp alias add <id> <alias>` | Add a catalog alias |
-| `claudine mcp alias remove <alias>` | Remove a catalog alias |
-| `claudine mcp remove <id>` | Remove a catalog entry after confirmation |
-| `claudine mcp sync <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a native provider config |
+| `claudine mcp alias <id-or-alias> <alias>` | Add a catalog alias |
+| `claudine mcp remove <id-or-alias>` | Remove a catalog entry or just an alias |
+| `claudine mcp check` | Validate transport combinations, aliases, defaults, and provider-state |
+| `claudine mcp sync` | Refresh the catalog from provider configs |
+| `claudine mcp export <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a native provider config |
 
-`--json` is available across the command family. Text `show` output redacts env/header values by key name; `claudine mcp show --json` returns the stored definition, including env/header values.
+`--json` is available across the command family. Text `config` output redacts env/header values by key name; `claudine mcp config --json` returns the stored definition, including env/header values.
 
 ## Claudine Storage
 
@@ -44,7 +49,7 @@ Repo defaults replace user defaults; they do not merge.
 | Roo | repo `.roo/mcp.json`; macOS user import from VS Code global storage | repo `.roo/mcp.json` | No | Import/sync only; no wrapper command |
 | Goose, Kimi, Qwen | No | No | No | Not modeled in the MCP module yet |
 
-## Import And Sync Workflow
+## Import And Refresh Workflow
 
 `claudine mcp init` never edits provider configs. It scans the supported native files, normalizes each server, fingerprints the provider-agnostic definition, and then:
 
@@ -53,7 +58,9 @@ Repo defaults replace user defaults; they do not merge.
 - adds an alias when the same server arrived under a different native name
 - records import provenance in `provider-state.json`
 
-`claudine mcp sync <provider>` works from the effective default set for the selected scope. It is a dry run unless `--apply` is passed. On apply it:
+`claudine mcp sync` refreshes the catalog from supported provider configs and creates explicit defaults files when they do not exist yet.
+
+`claudine mcp export <provider>` works from the effective default set for the selected scope. It is a dry run unless `--apply` is passed. On apply it:
 
 - creates a backup before writing an existing native config
 - preserves non-MCP config in the provider file
@@ -67,7 +74,7 @@ Repo defaults replace user defaults; they do not merge.
 
 1. repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults
 2. any explicit `--use id-or-alias[,id-or-alias...]`
-3. resolved `#tags` stripped from the prompt in non-interactive Codex, Gemini, and OpenCode runs
+3. resolved `#tags` stripped from the prompt in initial Codex, Gemini, and OpenCode prompts
 
 `--use` also enables MCP composition by itself; it does not replace defaults.
 
@@ -81,8 +88,8 @@ Wrapper `--dry-run` includes the resolved MCP server set, prompt tags, cleaned p
 
 ## Current Limits
 
-- Runtime MCP injection is not available for Claude, Goose, Kimi, Qwen, or Roo. Use `claudine mcp sync <provider> --apply` when that provider has native config support.
-- Prompt-tag activation only runs in non-interactive wrapper launches where Claudine can identify a prompt argument.
-- Defaults are stored verbatim. Missing IDs surface later as warnings during wrapper launch or `claudine mcp sync`.
+- Runtime MCP injection is not available for Claude, Goose, Kimi, Qwen, or Roo. Use `claudine mcp export <provider> --apply` when that provider has native config support.
+- Prompt-tag activation runs on the initial prompt only. Tags are stripped before forwarding; unmatched tags warn by default and fail with `--strict`.
+- Defaults are stored verbatim. Missing IDs surface later as warnings during wrapper launch or `claudine mcp check`.
 - `claudine mcp remove` deletes the catalog entry only. It does not clean defaults or native provider configs for you.
 - Shadow-home runtime injection for Codex and Gemini writes under `~/.claudine` and currently leaves those shadow config files in place after the wrapped process exits.
