@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bytes::Bytes;
 
 /// A file or media attachment.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     pub kind: AttachmentKind,
     pub source: AttachmentSource,
@@ -22,7 +22,7 @@ pub enum AttachmentKind {
 }
 
 /// Where the attachment data comes from.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachmentSource {
     Path(PathBuf),
     Url(String),
@@ -39,6 +39,16 @@ impl Attachment {
     pub fn image(path: impl Into<PathBuf>) -> Self {
         Self {
             kind: AttachmentKind::Image,
+            source: AttachmentSource::Path(path.into()),
+            caption: None,
+            alt_text: None,
+        }
+    }
+
+    /// Create a document attachment from a file path.
+    pub fn file(path: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: AttachmentKind::Document,
             source: AttachmentSource::Path(path.into()),
             caption: None,
             alt_text: None,

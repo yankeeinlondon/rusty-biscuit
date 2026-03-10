@@ -1,3 +1,6 @@
+use std::fs::File;
+
+use crate::attachment::AttachmentSource;
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::{CompatibilityMode, Dispatch};
 use crate::error::MessengerError;
@@ -33,7 +36,24 @@ pub fn validate_dispatch(
         }
     }
 
-    // In strict mode, check capabilities
+    for attachment in &message.attachments {
+        validate_attachment_source(attachment, provider)?;
+    }
+
+    if !message.attachments.is_empty() && !capabilities.supports_attachments {
+        return Err(MessengerError::UnsupportedFeature {
+            provider,
+            feature: "attachments",
+        });
+    }
+    if message.location.is_some() && !capabilities.supports_location {
+        return Err(MessengerError::UnsupportedFeature {
+            provider,
+            feature: "location",
+        });
+    }
+
+    // In strict mode, check compatibility-sensitive features.
     if dispatch.options.compatibility == CompatibilityMode::Strict {
         if message.body.is_some()
             && matches!(message.body, Some(crate::message::MessageBody::Markdown(_)))
@@ -42,18 +62,6 @@ pub fn validate_dispatch(
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "markdown rendering",
-            });
-        }
-        if !message.attachments.is_empty() && !capabilities.supports_attachments {
-            return Err(MessengerError::UnsupportedFeature {
-                provider,
-                feature: "attachments",
-            });
-        }
-        if message.location.is_some() && !capabilities.supports_location {
-            return Err(MessengerError::UnsupportedFeature {
-                provider,
-                feature: "location",
             });
         }
         if dispatch.options.silent && !capabilities.supports_silent_delivery {
@@ -73,6 +81,71 @@ pub fn validate_dispatch(
                 provider,
                 feature: "replies",
             });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_attachment_source(
+    attachment: &crate::attachment::Attachment,
+    provider: ProviderKind,
+) -> Result<(), MessengerError> {
+    match &attachment.source {
+        AttachmentSource::Path(path) => {
+            if !path.exists() {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} attachment path does not exist: {}",
+                    path.display()
+                )));
+            }
+
+            if !path.is_file() {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} attachment path is not a file: {}",
+                    path.display()
+                )));
+            }
+
+            File::open(path).map_err(|error| {
+                MessengerError::InvalidMessage(format!(
+                    "{provider} attachment path is not readable ({}): {error}",
+                    path.display()
+                ))
+            })?;
+        }
+        AttachmentSource::Url(url) => {
+            if url.trim().is_empty() {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} attachment URL is empty"
+                )));
+            }
+        }
+        AttachmentSource::Bytes {
+            filename,
+            mime_type,
+            ..
+        } => {
+            if filename.trim().is_empty() {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} attachment filename is empty"
+                )));
+            }
+            if mime_type.trim().is_empty() {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} attachment mime type is empty"
+                )));
+            }
+        }
+        AttachmentSource::ProviderFileId(file_id) => {
+            if file_id.trim().is_empty()
+                || file_id.contains('\n')
+                || file_id.contains('\r')
+            {
+                return Err(MessengerError::InvalidMessage(format!(
+                    "{provider} provider file id is malformed"
+                )));
+            }
         }
     }
 
