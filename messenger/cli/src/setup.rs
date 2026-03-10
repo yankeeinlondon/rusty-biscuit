@@ -4,34 +4,20 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, InquireError, Select, Text};
 
-use crate::config::{Config, RouteConfig};
-use crate::VALID_PROVIDERS;
+use crate::config::{Config, RouteConfig, RouteProvider};
 
 fn styled(text: impl Into<String>) -> String {
     Prose::new(text).render(&Terminal::default())
 }
 
 /// Run the interactive setup flow.
-pub fn run(provider_arg: Option<String>) -> Result<()> {
+pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
     let mut config = Config::load()?;
 
-    // Resolve provider
-    let provider = match provider_arg {
-        Some(p) if VALID_PROVIDERS.contains(&p.as_str()) => p,
-        Some(invalid) => {
-            println!(
-                "{}",
-                styled(format!(
-                    "<b><red>Error:</red></b> the provider <b>{invalid}</b> is not a valid provider name."
-                ))
-            );
-            select_provider()?
-        }
-        None => select_provider()?,
-    };
+    let provider = provider_arg.unwrap_or(select_provider()?);
 
     // Check for existing configurations
-    let existing = config.routes_for_provider(&provider);
+    let existing = config.routes_for_provider(provider);
     if !existing.is_empty() {
         match handle_existing(&provider, &existing)? {
             ExistingAction::Exit => return Ok(()),
@@ -99,8 +85,8 @@ pub fn run(provider_arg: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn select_provider() -> Result<String> {
-    let options: Vec<String> = VALID_PROVIDERS.iter().map(|s| s.to_string()).collect();
+fn select_provider() -> Result<RouteProvider> {
+    let options: Vec<RouteProvider> = RouteProvider::ALL.to_vec();
     let selected = Select::new("Which provider would you like to configure?", options)
         .with_help_message("Use arrow keys to select, Enter to confirm")
         .prompt()
@@ -114,7 +100,7 @@ enum ExistingAction {
     Modify(String),
 }
 
-fn handle_existing(provider: &str, existing: &[String]) -> Result<ExistingAction> {
+fn handle_existing(provider: &RouteProvider, existing: &[String]) -> Result<ExistingAction> {
     if existing.len() == 1 {
         println!(
             "\n{}",
@@ -158,19 +144,18 @@ fn handle_existing(provider: &str, existing: &[String]) -> Result<ExistingAction
     Ok(ExistingAction::Exit)
 }
 
-fn configure_provider(provider: &str, route_name: Option<&str>) -> Result<RouteConfig> {
+fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Result<RouteConfig> {
     println!(
         "\n{}",
         styled(format!("Configuring <b>{provider}</b>{}", route_name.map(|n| format!(" (route: <blue>{n}</blue>)")).unwrap_or_default()))
     );
 
     match provider {
-        "discord" => configure_discord(),
-        "slack" => configure_slack(),
-        "signal" => configure_signal(),
-        "whatsapp" => configure_whatsapp(),
-        "telegram" => configure_telegram(),
-        _ => unreachable!(),
+        RouteProvider::Discord => configure_discord(),
+        RouteProvider::Slack => configure_slack(),
+        RouteProvider::Signal => configure_signal(),
+        RouteProvider::WhatsApp => configure_whatsapp(),
+        RouteProvider::Telegram => configure_telegram(),
     }
 }
 
@@ -200,10 +185,9 @@ fn configure_discord() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    Ok(RouteConfig {
-        provider: "discord".into(),
+    Ok(RouteConfig::Discord {
         channel_id,
-        token_env,
+        bot_token_env: token_env,
     })
 }
 
@@ -237,10 +221,9 @@ fn configure_slack() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    Ok(RouteConfig {
-        provider: "slack".into(),
+    Ok(RouteConfig::Slack {
         channel_id,
-        token_env,
+        bot_token_env: token_env,
     })
 }
 
@@ -268,7 +251,7 @@ fn configure_signal() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    let _account_env = Text::new("Environment variable for account:")
+    let account_env = Text::new("Environment variable for account:")
         .with_default("SIGNAL_ACCOUNT")
         .with_help_message("The env var for your registered Signal phone number (+1234567890)")
         .prompt()
@@ -280,10 +263,10 @@ fn configure_signal() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    Ok(RouteConfig {
-        provider: "signal".into(),
-        channel_id: recipient,
-        token_env: rpc_env,
+    Ok(RouteConfig::Signal {
+        recipient,
+        rpc_url_env: rpc_env,
+        account_env,
     })
 }
 
@@ -311,7 +294,7 @@ fn configure_whatsapp() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    let _phone_id_env = Text::new("Environment variable for phone number ID:")
+    let phone_number_id_env = Text::new("Environment variable for phone number ID:")
         .with_default("WHATSAPP_PHONE_NUMBER_ID")
         .with_help_message("The env var for your WhatsApp Business phone number ID")
         .prompt()
@@ -323,10 +306,10 @@ fn configure_whatsapp() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    Ok(RouteConfig {
-        provider: "whatsapp".into(),
-        channel_id: recipient,
-        token_env,
+    Ok(RouteConfig::WhatsApp {
+        recipient,
+        access_token_env: token_env,
+        phone_number_id_env,
     })
 }
 
@@ -360,14 +343,13 @@ fn configure_telegram() -> Result<RouteConfig> {
         .prompt()
         .map_err(handle_cancel)?;
 
-    Ok(RouteConfig {
-        provider: "telegram".into(),
-        channel_id: chat_id,
-        token_env,
+    Ok(RouteConfig::Telegram {
+        chat_id,
+        bot_token_env: token_env,
     })
 }
 
-fn suggest_route_name(provider: &str, config: &Config) -> String {
+fn suggest_route_name(provider: &RouteProvider, config: &Config) -> String {
     let base = provider.to_string();
     if !config.routes.contains_key(&base) {
         return base;

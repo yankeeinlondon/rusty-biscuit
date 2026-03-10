@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Path, PathBuf};
 
+use clap::ValueEnum;
 use color_eyre::eyre::Result;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// CLI configuration loaded from `~/.messenger.json`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Config {
     #[serde(default)]
     pub default_route: Option<String>,
@@ -13,27 +15,354 @@ pub struct Config {
     pub routes: HashMap<String, RouteConfig>,
 }
 
-/// A named route pointing to a provider and channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RouteConfig {
-    pub provider: String,
-    pub channel_id: String,
-    #[serde(default = "default_token_env_empty")]
-    pub token_env: String,
+/// Supported CLI providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum RouteProvider {
+    #[value(name = "discord")]
+    Discord,
+    #[value(name = "slack")]
+    Slack,
+    #[value(name = "signal")]
+    Signal,
+    #[value(name = "whatsapp")]
+    WhatsApp,
+    #[value(name = "telegram")]
+    Telegram,
 }
 
-fn default_token_env_empty() -> String {
-    String::new()
+impl RouteProvider {
+    pub const ALL: [Self; 5] = [
+        Self::Discord,
+        Self::Slack,
+        Self::Signal,
+        Self::WhatsApp,
+        Self::Telegram,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discord => "discord",
+            Self::Slack => "slack",
+            Self::Signal => "signal",
+            Self::WhatsApp => "whatsapp",
+            Self::Telegram => "telegram",
+        }
+    }
+}
+
+impl fmt::Display for RouteProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A named route pointing to a provider and target plus provider-specific env mappings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteConfig {
+    Discord {
+        channel_id: String,
+        bot_token_env: String,
+    },
+    Slack {
+        channel_id: String,
+        bot_token_env: String,
+    },
+    Signal {
+        recipient: String,
+        rpc_url_env: String,
+        account_env: String,
+    },
+    WhatsApp {
+        recipient: String,
+        access_token_env: String,
+        phone_number_id_env: String,
+    },
+    Telegram {
+        chat_id: String,
+        bot_token_env: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "lowercase")]
+enum RouteConfigRepr {
+    Discord {
+        channel_id: String,
+        #[serde(default = "default_discord_token_env")]
+        bot_token_env: String,
+    },
+    Slack {
+        channel_id: String,
+        #[serde(default = "default_slack_token_env")]
+        bot_token_env: String,
+    },
+    Signal {
+        recipient: String,
+        #[serde(default = "default_signal_rpc_url_env")]
+        rpc_url_env: String,
+        #[serde(default = "default_signal_account_env")]
+        account_env: String,
+    },
+    WhatsApp {
+        recipient: String,
+        #[serde(default = "default_whatsapp_access_token_env")]
+        access_token_env: String,
+        #[serde(default = "default_whatsapp_phone_number_id_env")]
+        phone_number_id_env: String,
+    },
+    Telegram {
+        chat_id: String,
+        #[serde(default = "default_telegram_token_env")]
+        bot_token_env: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyRouteConfig {
+    provider: RouteProvider,
+    channel_id: String,
+    #[serde(default)]
+    token_env: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RouteConfigSerde {
+    New(RouteConfigRepr),
+    Legacy(LegacyRouteConfig),
+}
+
+impl RouteConfig {
+    pub fn provider(&self) -> RouteProvider {
+        match self {
+            Self::Discord { .. } => RouteProvider::Discord,
+            Self::Slack { .. } => RouteProvider::Slack,
+            Self::Signal { .. } => RouteProvider::Signal,
+            Self::WhatsApp { .. } => RouteProvider::WhatsApp,
+            Self::Telegram { .. } => RouteProvider::Telegram,
+        }
+    }
+
+    pub fn from_provider_and_target(provider: RouteProvider, target_id: impl Into<String>) -> Self {
+        let target_id = target_id.into();
+        match provider {
+            RouteProvider::Discord => Self::Discord {
+                channel_id: target_id,
+                bot_token_env: default_discord_token_env(),
+            },
+            RouteProvider::Slack => Self::Slack {
+                channel_id: target_id,
+                bot_token_env: default_slack_token_env(),
+            },
+            RouteProvider::Signal => Self::Signal {
+                recipient: target_id,
+                rpc_url_env: default_signal_rpc_url_env(),
+                account_env: default_signal_account_env(),
+            },
+            RouteProvider::WhatsApp => Self::WhatsApp {
+                recipient: target_id,
+                access_token_env: default_whatsapp_access_token_env(),
+                phone_number_id_env: default_whatsapp_phone_number_id_env(),
+            },
+            RouteProvider::Telegram => Self::Telegram {
+                chat_id: target_id,
+                bot_token_env: default_telegram_token_env(),
+            },
+        }
+    }
+}
+
+impl Serialize for RouteConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        RouteConfigRepr::from(self.clone()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RouteConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RouteConfigSerde::deserialize(deserializer)?;
+        Ok(match raw {
+            RouteConfigSerde::New(config) => config.into(),
+            RouteConfigSerde::Legacy(config) => config.into(),
+        })
+    }
+}
+
+impl From<RouteConfigRepr> for RouteConfig {
+    fn from(value: RouteConfigRepr) -> Self {
+        match value {
+            RouteConfigRepr::Discord {
+                channel_id,
+                bot_token_env,
+            } => Self::Discord {
+                channel_id,
+                bot_token_env,
+            },
+            RouteConfigRepr::Slack {
+                channel_id,
+                bot_token_env,
+            } => Self::Slack {
+                channel_id,
+                bot_token_env,
+            },
+            RouteConfigRepr::Signal {
+                recipient,
+                rpc_url_env,
+                account_env,
+            } => Self::Signal {
+                recipient,
+                rpc_url_env,
+                account_env,
+            },
+            RouteConfigRepr::WhatsApp {
+                recipient,
+                access_token_env,
+                phone_number_id_env,
+            } => Self::WhatsApp {
+                recipient,
+                access_token_env,
+                phone_number_id_env,
+            },
+            RouteConfigRepr::Telegram {
+                chat_id,
+                bot_token_env,
+            } => Self::Telegram {
+                chat_id,
+                bot_token_env,
+            },
+        }
+    }
+}
+
+impl From<RouteConfig> for RouteConfigRepr {
+    fn from(value: RouteConfig) -> Self {
+        match value {
+            RouteConfig::Discord {
+                channel_id,
+                bot_token_env,
+            } => Self::Discord {
+                channel_id,
+                bot_token_env,
+            },
+            RouteConfig::Slack {
+                channel_id,
+                bot_token_env,
+            } => Self::Slack {
+                channel_id,
+                bot_token_env,
+            },
+            RouteConfig::Signal {
+                recipient,
+                rpc_url_env,
+                account_env,
+            } => Self::Signal {
+                recipient,
+                rpc_url_env,
+                account_env,
+            },
+            RouteConfig::WhatsApp {
+                recipient,
+                access_token_env,
+                phone_number_id_env,
+            } => Self::WhatsApp {
+                recipient,
+                access_token_env,
+                phone_number_id_env,
+            },
+            RouteConfig::Telegram {
+                chat_id,
+                bot_token_env,
+            } => Self::Telegram {
+                chat_id,
+                bot_token_env,
+            },
+        }
+    }
+}
+
+impl From<LegacyRouteConfig> for RouteConfig {
+    fn from(value: LegacyRouteConfig) -> Self {
+        let token_env = if value.token_env.is_empty() {
+            None
+        } else {
+            Some(value.token_env)
+        };
+
+        match value.provider {
+            RouteProvider::Discord => Self::Discord {
+                channel_id: value.channel_id,
+                bot_token_env: token_env.unwrap_or_else(default_discord_token_env),
+            },
+            RouteProvider::Slack => Self::Slack {
+                channel_id: value.channel_id,
+                bot_token_env: token_env.unwrap_or_else(default_slack_token_env),
+            },
+            RouteProvider::Signal => Self::Signal {
+                recipient: value.channel_id,
+                rpc_url_env: token_env.unwrap_or_else(default_signal_rpc_url_env),
+                account_env: default_signal_account_env(),
+            },
+            RouteProvider::WhatsApp => Self::WhatsApp {
+                recipient: value.channel_id,
+                access_token_env: token_env.unwrap_or_else(default_whatsapp_access_token_env),
+                phone_number_id_env: default_whatsapp_phone_number_id_env(),
+            },
+            RouteProvider::Telegram => Self::Telegram {
+                chat_id: value.channel_id,
+                bot_token_env: token_env.unwrap_or_else(default_telegram_token_env),
+            },
+        }
+    }
+}
+
+fn default_discord_token_env() -> String {
+    "DISCORD_BOT_TOKEN".into()
+}
+
+fn default_slack_token_env() -> String {
+    "SLACK_BOT_TOKEN".into()
+}
+
+fn default_signal_rpc_url_env() -> String {
+    "SIGNAL_RPC_URL".into()
+}
+
+fn default_signal_account_env() -> String {
+    "SIGNAL_ACCOUNT".into()
+}
+
+fn default_whatsapp_access_token_env() -> String {
+    "WHATSAPP_ACCESS_TOKEN".into()
+}
+
+fn default_whatsapp_phone_number_id_env() -> String {
+    "WHATSAPP_PHONE_NUMBER_ID".into()
+}
+
+fn default_telegram_token_env() -> String {
+    "TELEGRAM_BOT_TOKEN".into()
 }
 
 impl Config {
     /// Load config from `~/.messenger.json`, returning default if not found.
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
+        Self::load_from_path(&path)
+    }
+
+    /// Load config from a specific path, returning default if not found.
+    pub fn load_from_path(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Config::default());
         }
-        let contents = std::fs::read_to_string(&path)?;
+        let contents = std::fs::read_to_string(path)?;
         let config: Config = serde_json::from_str(&contents)?;
         Ok(config)
     }
@@ -41,8 +370,16 @@ impl Config {
     /// Save config to `~/.messenger.json`.
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path()?;
+        self.save_to_path(&path)
+    }
+
+    /// Save config to a specific path.
+    pub fn save_to_path(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let contents = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        std::fs::write(path, contents)?;
         Ok(())
     }
 
@@ -54,11 +391,61 @@ impl Config {
     }
 
     /// Return all route names that use the given provider.
-    pub fn routes_for_provider(&self, provider: &str) -> Vec<String> {
+    pub fn routes_for_provider(&self, provider: RouteProvider) -> Vec<String> {
         self.routes
             .iter()
-            .filter(|(_, r)| r.provider == provider)
+            .filter(|(_, route)| route.provider() == provider)
             .map(|(name, _)| name.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn legacy_route_config_migrates_to_typed_shape() {
+        let raw = r#"{
+            "provider": "signal",
+            "channel_id": "+15551234567",
+            "token_env": "CUSTOM_SIGNAL_RPC_URL"
+        }"#;
+
+        let route: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            route,
+            RouteConfig::Signal {
+                recipient: "+15551234567".into(),
+                rpc_url_env: "CUSTOM_SIGNAL_RPC_URL".into(),
+                account_env: "SIGNAL_ACCOUNT".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn config_round_trips_with_typed_route_config() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let mut config = Config {
+            default_route: Some("signal.ops".into()),
+            routes: HashMap::new(),
+        };
+        config.routes.insert(
+            "signal.ops".into(),
+            RouteConfig::Signal {
+                recipient: "+15551234567".into(),
+                rpc_url_env: "SIGNAL_RPC_URL".into(),
+                account_env: "SIGNAL_ACCOUNT".into(),
+            },
+        );
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
     }
 }

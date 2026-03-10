@@ -5,11 +5,10 @@ use color_eyre::eyre::{Result, eyre};
 use secrecy::SecretString;
 
 mod config;
+mod receipt_store;
 mod setup;
 
-use config::{Config, RouteConfig};
-
-pub const VALID_PROVIDERS: &[&str] = &["discord", "slack", "signal", "whatsapp", "telegram"];
+use config::{Config, RouteConfig, RouteProvider};
 
 #[derive(Parser)]
 #[command(name = "messenger", about = "Send messages to any platform")]
@@ -20,16 +19,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Send a message (default command).
+    /// Send a message.
     Send {
-        /// The message text to send (Markdown supported).
+        /// The message text to send (Markdown supported unless --plain is used).
         message: String,
 
-        /// Provider to use (discord, slack, signal, whatsapp, telegram).
+        /// Provider to use for an ad-hoc route.
         #[arg(long)]
-        provider: Option<String>,
+        provider: Option<RouteProvider>,
 
-        /// Channel or recipient ID.
+        /// Channel or recipient for an ad-hoc route.
         #[arg(long)]
         channel: Option<String>,
 
@@ -37,7 +36,7 @@ enum Commands {
         #[arg(long)]
         route: Option<String>,
 
-        /// Message reference to reply to (provider-specific format).
+        /// Reply target as a saved receipt path or MessageRef/SendReceipt JSON.
         #[arg(long)]
         reply_to: Option<String>,
 
@@ -63,14 +62,20 @@ enum Commands {
     },
     /// Interactive provider configuration.
     Setup {
-        /// Provider to configure (discord, slack, signal, whatsapp, telegram).
-        provider: Option<String>,
+        /// Provider to configure.
+        provider: Option<RouteProvider>,
     },
     /// Interactive provider configuration (alias for setup).
     Init {
-        /// Provider to configure (discord, slack, signal, whatsapp, telegram).
-        provider: Option<String>,
+        /// Provider to configure.
+        provider: Option<RouteProvider>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedRoute {
+    name: Option<String>,
+    route: RouteConfig,
 }
 
 #[tokio::main]
@@ -86,15 +91,24 @@ async fn main() -> Result<()> {
             provider,
             channel,
             route,
-            reply_to: _,
+            reply_to,
             image,
-            file: _,
+            file,
             silent,
             strict,
             plain,
         } => {
             send_message(
-                &message, provider, channel, route, image, silent, strict, plain,
+                &message,
+                provider,
+                channel,
+                route,
+                reply_to,
+                image,
+                file,
+                silent,
+                strict,
+                plain,
             )
             .await?;
         }
@@ -109,41 +123,41 @@ async fn main() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn send_message(
     message_text: &str,
-    provider_opt: Option<String>,
+    provider_opt: Option<RouteProvider>,
     channel_opt: Option<String>,
     route_opt: Option<String>,
+    reply_to: Option<String>,
     image: Option<PathBuf>,
+    file: Option<PathBuf>,
     silent: bool,
     strict: bool,
     plain: bool,
 ) -> Result<()> {
     let config = Config::load()?;
+    let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
 
-    // Resolve which route to use
-    let route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
-
-    // Build the messenger with the appropriate provider
     let mut messenger = messenger::Messenger::new();
-    register_provider(&mut messenger, &route)?;
+    register_provider(&mut messenger, &resolved_route.route)?;
 
-    // Build the message
-    let message = if plain {
+    let mut message = if plain {
         messenger::Message::text(message_text)
     } else {
         messenger::Message::markdown(message_text)
     };
 
-    // Add image attachment if provided
-    let message = if let Some(image_path) = &image {
-        message.image(image_path)
-    } else {
-        message
-    };
+    if let Some(image_path) = image {
+        message = message.image(image_path);
+    }
+    if let Some(file_path) = file {
+        message = message.file(file_path);
+    }
 
-    // Build the dispatch
-    let target = build_target(&route)?;
+    let target = build_target(&resolved_route.route)?;
     let mut dispatch = messenger::Dispatch::to(target);
 
+    if let Some(reply_spec) = reply_to {
+        dispatch = dispatch.reply_to(receipt_store::load_message_ref(&reply_spec)?);
+    }
     if silent {
         dispatch = dispatch.silent();
     }
@@ -151,50 +165,56 @@ async fn send_message(
         dispatch = dispatch.strict();
     }
 
-    // Send
     let receipt = messenger.send(dispatch, &message).await?;
+    let receipt_path = receipt_store::save_receipt(&receipt, resolved_route.name.as_deref())?;
     eprintln!(
-        "Sent via {} (id: {})",
-        receipt.provider, receipt.raw_id
+        "Sent via {} (id: {})\nReceipt: {}",
+        receipt.provider,
+        receipt.raw_id,
+        receipt_path.display()
     );
 
     Ok(())
 }
 
 fn resolve_route(
-    provider_opt: Option<String>,
+    provider_opt: Option<RouteProvider>,
     channel_opt: Option<String>,
     route_opt: Option<String>,
     config: &Config,
-) -> Result<RouteConfig> {
-    // Explicit provider + channel flags
-    if let Some(provider) = &provider_opt {
-        let channel = channel_opt.as_deref().ok_or_else(|| {
-            eyre!("--channel is required when using --provider")
-        })?;
-        return Ok(RouteConfig {
-            provider: provider.clone(),
-            channel_id: channel.to_string(),
-            token_env: default_token_env(provider),
+) -> Result<ResolvedRoute> {
+    if let Some(provider) = provider_opt {
+        let channel = channel_opt
+            .as_deref()
+            .ok_or_else(|| eyre!("--channel is required when using --provider"))?;
+        return Ok(ResolvedRoute {
+            name: None,
+            route: RouteConfig::from_provider_and_target(provider, channel),
         });
     }
 
-    // Named route from config
-    if let Some(route_name) = &route_opt {
-        return config
+    if let Some(route_name) = route_opt {
+        let route = config
             .routes
-            .get(route_name)
+            .get(&route_name)
             .cloned()
-            .ok_or_else(|| eyre!("route '{route_name}' not found in config"));
+            .ok_or_else(|| eyre!("route '{route_name}' not found in config"))?;
+        return Ok(ResolvedRoute {
+            name: Some(route_name),
+            route,
+        });
     }
 
-    // Default route
     if let Some(default_name) = &config.default_route {
-        return config
+        let route = config
             .routes
             .get(default_name)
             .cloned()
-            .ok_or_else(|| eyre!("default route '{default_name}' not found in config"));
+            .ok_or_else(|| eyre!("default route '{default_name}' not found in config"))?;
+        return Ok(ResolvedRoute {
+            name: Some(default_name.clone()),
+            route,
+        });
     }
 
     Err(eyre!(
@@ -202,24 +222,16 @@ fn resolve_route(
     ))
 }
 
-pub fn default_token_env(provider: &str) -> String {
-    match provider {
-        "discord" => "DISCORD_BOT_TOKEN".into(),
-        "slack" => "SLACK_BOT_TOKEN".into(),
-        "signal" => "SIGNAL_RPC_URL".into(),
-        "whatsapp" => "WHATSAPP_ACCESS_TOKEN".into(),
-        "telegram" => "TELEGRAM_BOT_TOKEN".into(),
-        _ => format!("{}_TOKEN", provider.to_uppercase()),
-    }
-}
-
 fn register_provider(
     messenger: &mut messenger::Messenger,
     route: &RouteConfig,
 ) -> Result<()> {
-    match route.provider.as_str() {
-        "discord" => {
-            let token = resolve_env(&route.token_env)?;
+    match route {
+        RouteConfig::Discord {
+            bot_token_env,
+            ..
+        } => {
+            let token = resolve_env(bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::discord::DiscordProvider::new(
                     messenger::provider::discord::DiscordConfig {
@@ -228,8 +240,11 @@ fn register_provider(
                 ),
             ));
         }
-        "slack" => {
-            let token = resolve_env(&route.token_env)?;
+        RouteConfig::Slack {
+            bot_token_env,
+            ..
+        } => {
+            let token = resolve_env(bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::slack::SlackProvider::new(
                     messenger::provider::slack::SlackConfig {
@@ -239,21 +254,26 @@ fn register_provider(
                 ),
             ));
         }
-        "signal" => {
-            let rpc_url = resolve_env("SIGNAL_RPC_URL")?;
-            let account = resolve_env("SIGNAL_ACCOUNT")?;
+        RouteConfig::Signal {
+            rpc_url_env,
+            account_env,
+            ..
+        } => {
+            let rpc_url = resolve_env(rpc_url_env)?;
+            let account = resolve_env(account_env)?;
             messenger.register(Box::new(
                 messenger::provider::signal::SignalProvider::new(
-                    messenger::provider::signal::SignalConfig {
-                        rpc_url,
-                        account,
-                    },
+                    messenger::provider::signal::SignalConfig { rpc_url, account },
                 ),
             ));
         }
-        "whatsapp" => {
-            let token = resolve_env(&route.token_env)?;
-            let phone_id = resolve_env("WHATSAPP_PHONE_NUMBER_ID")?;
+        RouteConfig::WhatsApp {
+            access_token_env,
+            phone_number_id_env,
+            ..
+        } => {
+            let token = resolve_env(access_token_env)?;
+            let phone_id = resolve_env(phone_number_id_env)?;
             messenger.register(Box::new(
                 messenger::provider::whatsapp::WhatsAppProvider::new(
                     messenger::provider::whatsapp::WhatsAppConfig {
@@ -265,8 +285,11 @@ fn register_provider(
                 ),
             ));
         }
-        "telegram" => {
-            let token = resolve_env(&route.token_env)?;
+        RouteConfig::Telegram {
+            bot_token_env,
+            ..
+        } => {
+            let token = resolve_env(bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::telegram::TelegramProvider::new(
                     messenger::provider::telegram::TelegramConfig {
@@ -276,34 +299,34 @@ fn register_provider(
                 ),
             ));
         }
-        other => return Err(eyre!("unknown provider: {other}")),
     }
     Ok(())
 }
 
 fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
-    match route.provider.as_str() {
-        "discord" => Ok(messenger::Target::discord_channel(&route.channel_id)),
-        "slack" => Ok(messenger::Target::slack_channel(&route.channel_id)),
-        "signal" => {
-            if route.channel_id.starts_with('+') {
+    match route {
+        RouteConfig::Discord { channel_id, .. } => Ok(messenger::Target::discord_channel(channel_id)),
+        RouteConfig::Slack { channel_id, .. } => Ok(messenger::Target::slack_channel(channel_id)),
+        RouteConfig::Signal { recipient, .. } => {
+            if recipient.starts_with('+') {
                 Ok(messenger::Target::signal_user(
-                    messenger::target::SignalAddress::Phone(route.channel_id.clone()),
+                    messenger::target::SignalAddress::Phone(recipient.clone()),
                 ))
             } else {
-                Ok(messenger::Target::signal_group(&route.channel_id))
+                Ok(messenger::Target::signal_group(recipient))
             }
         }
-        "whatsapp" => Ok(messenger::Target::whatsapp_recipient(&route.channel_id)),
-        "telegram" => {
-            let chat_id = if let Ok(id) = route.channel_id.parse::<i64>() {
+        RouteConfig::WhatsApp { recipient, .. } => {
+            Ok(messenger::Target::whatsapp_recipient(recipient))
+        }
+        RouteConfig::Telegram { chat_id, .. } => {
+            let chat_id = if let Ok(id) = chat_id.parse::<i64>() {
                 messenger::target::TelegramChatId::Id(id)
             } else {
-                messenger::target::TelegramChatId::Username(route.channel_id.clone())
+                messenger::target::TelegramChatId::Username(chat_id.clone())
             };
             Ok(messenger::Target::telegram_chat(chat_id))
         }
-        other => Err(eyre!("unknown provider: {other}")),
     }
 }
 
@@ -313,4 +336,80 @@ fn resolve_env(var: &str) -> Result<String> {
             "environment variable {var} is not set. Set it before running messenger."
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn resolve_route_builds_ad_hoc_provider_route() {
+        let resolved = resolve_route(
+            Some(RouteProvider::Slack),
+            Some("C012345".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(
+            resolved.route,
+            RouteConfig::Slack {
+                channel_id: "C012345".into(),
+                bot_token_env: "SLACK_BOT_TOKEN".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_route_prefers_named_route() {
+        let mut config = Config {
+            default_route: Some("slack.default".into()),
+            routes: HashMap::new(),
+        };
+        config.routes.insert(
+            "slack.ops".into(),
+            RouteConfig::Slack {
+                channel_id: "C012345".into(),
+                bot_token_env: "SLACK_BOT_TOKEN".into(),
+            },
+        );
+
+        let resolved = resolve_route(None, None, Some("slack.ops".into()), &config).unwrap();
+        assert_eq!(resolved.name.as_deref(), Some("slack.ops"));
+    }
+
+    #[test]
+    fn build_target_maps_signal_phone_to_direct_target() {
+        let target = build_target(&RouteConfig::Signal {
+            recipient: "+15551234567".into(),
+            rpc_url_env: "SIGNAL_RPC_URL".into(),
+            account_env: "SIGNAL_ACCOUNT".into(),
+        })
+        .unwrap();
+
+        assert!(
+            matches!(target, messenger::Target::Signal(messenger::target::SignalTarget::User(_)))
+        );
+    }
+
+    #[test]
+    fn build_target_maps_telegram_username_to_username_target() {
+        let target = build_target(&RouteConfig::Telegram {
+            chat_id: "@ops".into(),
+            bot_token_env: "TELEGRAM_BOT_TOKEN".into(),
+        })
+        .unwrap();
+
+        assert!(matches!(
+            target,
+            messenger::Target::Telegram(messenger::target::TelegramTarget {
+                chat_id: messenger::target::TelegramChatId::Username(_),
+                ..
+            })
+        ));
+    }
 }
