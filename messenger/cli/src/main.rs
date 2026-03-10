@@ -394,12 +394,14 @@ fn parse_location(s: &str) -> Result<(f64, f64)> {
             "invalid location format: expected \"LAT,LON\" (e.g. \"34.05,-118.24\")"
         ));
     }
-    let lat: f64 = parts[0].trim().parse().map_err(|_| {
-        eyre!("invalid latitude: \"{}\"", parts[0].trim())
-    })?;
-    let lon: f64 = parts[1].trim().parse().map_err(|_| {
-        eyre!("invalid longitude: \"{}\"", parts[1].trim())
-    })?;
+    let lat: f64 = parts[0]
+        .trim()
+        .parse()
+        .map_err(|_| eyre!("invalid latitude: \"{}\"", parts[0].trim()))?;
+    let lon: f64 = parts[1]
+        .trim()
+        .parse()
+        .map_err(|_| eyre!("invalid longitude: \"{}\"", parts[1].trim()))?;
     Ok((lat, lon))
 }
 
