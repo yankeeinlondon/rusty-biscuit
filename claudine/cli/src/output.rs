@@ -11,19 +11,17 @@ use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::log;
 
+/// Print the one-line header: `Claudine ▸ Provider [badges] args`
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn log_wrapper_summary(
+pub(crate) fn log_wrapper_header(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive_requested: bool,
     repo_requested: bool,
     child_args: &[String],
     env_plan: &EnvPlan,
-    mcp_runtime: Option<&McpRuntimeInfo>,
     term: &Terminal,
-    verbose: u8,
 ) {
-    // Header always includes: Claudine ▸ ProviderName [badges]
     let mut header_parts: Vec<String> = vec![
         Prose::new(format!(
             "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
@@ -59,9 +57,15 @@ pub(crate) fn log_wrapper_summary(
     }
 
     log::message(&format!("\n{}", header_parts.join(" ")));
+}
 
-    // Verbose level 0: header only (no env details)
-    // Verbose level 1+: header + environment changes
+/// Print environment variable details (removed, included, added).
+pub(crate) fn log_wrapper_env_details(
+    env_plan: &EnvPlan,
+    mcp_runtime: Option<&McpRuntimeInfo>,
+    term: &Terminal,
+    verbose: u8,
+) {
     if verbose > 0
         || !env_plan.added.is_empty()
         || !env_plan.removed.is_empty()
