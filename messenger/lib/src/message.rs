@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 
 /// Portable message content, independent of any destination.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub body: Option<MessageBody>,
     pub attachments: Vec<Attachment>,
@@ -12,14 +12,14 @@ pub struct Message {
 }
 
 /// The text content of a message.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageBody {
     Plain(String),
     Markdown(String),
 }
 
 /// A geographic location.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Location {
     pub latitude: f64,
     pub longitude: f64,
@@ -77,6 +77,11 @@ impl Message {
             caption: None,
             alt_text: None,
         })
+    }
+
+    /// Shorthand for adding a document attachment from a path.
+    pub fn file(self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.attachment(Attachment::file(path))
     }
 
     /// Add a key-value metadata pair.

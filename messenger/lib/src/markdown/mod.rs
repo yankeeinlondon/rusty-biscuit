@@ -6,18 +6,23 @@ pub mod slack_mrkdwn;
 pub mod telegram_html;
 
 use crate::receipt::ProviderKind;
+use ast::RichNode;
 use parse::parse_markdown;
 
 /// Render a Markdown string for a specific provider.
 pub fn render_for_provider(markdown: &str, provider: ProviderKind) -> String {
     let nodes = parse_markdown(markdown);
+    render_nodes_for_provider(&nodes, provider)
+}
 
+/// Render a pre-parsed Markdown AST for a specific provider.
+pub fn render_nodes_for_provider(nodes: &[RichNode], provider: ProviderKind) -> String {
     match provider {
-        ProviderKind::Discord => discord::render_discord(&nodes),
-        ProviderKind::Slack => slack_mrkdwn::render_slack_mrkdwn(&nodes),
-        ProviderKind::Telegram => telegram_html::render_telegram_html(&nodes),
+        ProviderKind::Discord => discord::render_discord(nodes),
+        ProviderKind::Slack => slack_mrkdwn::render_slack_mrkdwn(nodes),
+        ProviderKind::Telegram => telegram_html::render_telegram_html(nodes),
         // Signal and WhatsApp don't support rich text
-        ProviderKind::Signal | ProviderKind::WhatsApp => plain_text::render_plain_text(&nodes),
+        ProviderKind::Signal | ProviderKind::WhatsApp => plain_text::render_plain_text(nodes),
     }
 }
 

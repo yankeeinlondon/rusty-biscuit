@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Identifies which messaging provider was used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
     Discord,
     Slack,
@@ -24,7 +27,8 @@ impl fmt::Display for ProviderKind {
 }
 
 /// A provider-typed reference to a sent message, usable for replies.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MessageRef {
     Discord {
         channel_id: String,
@@ -60,34 +64,59 @@ impl MessageRef {
             Self::Telegram { .. } => ProviderKind::Telegram,
         }
     }
+
+    /// Parse a message reference from JSON.
+    pub fn from_json_str(input: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(input)
+    }
+
+    /// Serialize a message reference to pretty JSON.
+    pub fn to_pretty_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
 }
 
 /// Signal thread identifier for replies.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SignalThreadKey {
     Direct(String),
     Group(String),
 }
 
 /// Signal message author for reply quoting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SignalAuthor {
     Phone(String),
     Uuid(String),
 }
 
 /// Telegram chat reference for receipts.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TelegramChatRef {
     Id(i64),
     Username(String),
 }
 
 /// Proof of delivery returned after a successful send.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendReceipt {
     pub provider: ProviderKind,
     pub message_ref: MessageRef,
     pub raw_id: String,
     pub metadata: BTreeMap<String, String>,
+}
+
+impl SendReceipt {
+    /// Parse a send receipt from JSON.
+    pub fn from_json_str(input: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(input)
+    }
+
+    /// Serialize a send receipt to pretty JSON.
+    pub fn to_pretty_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
 }

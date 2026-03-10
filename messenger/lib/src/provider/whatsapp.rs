@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::{Message, MessageBody};
+use crate::message::MessageBody;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
 
@@ -114,17 +115,17 @@ impl super::Provider for WhatsAppProvider {
         CapabilitySet {
             supports_markdown_rendering: false,
             supports_reply: true,
-            supports_attachments: true,
+            supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
         }
     }
 
-    async fn send(
+    async fn send_prepared(
         &self,
         dispatch: &Dispatch,
-        message: &Message,
+        message: &PreparedMessage,
     ) -> Result<SendReceipt, MessengerError> {
         let recipient = match &dispatch.target {
             Target::WhatsApp(t) => &t.recipient,
@@ -143,7 +144,7 @@ impl super::Provider for WhatsAppProvider {
         };
 
         // Choose which API method to use based on content
-        let body = if let Some(location) = &message.location {
+        let body = if let Some(location) = message.location() {
             WhatsAppMessageRequest {
                 messaging_product: "whatsapp",
                 to: recipient,
@@ -159,10 +160,9 @@ impl super::Provider for WhatsAppProvider {
             }
         } else {
             // Render body as plain text (WhatsApp doesn't support rich formatting)
-            let text = match &message.body {
-                Some(MessageBody::Plain(text)) => text.clone(),
-                Some(MessageBody::Markdown(md)) => {
-                    crate::markdown::render_for_provider(md, ProviderKind::WhatsApp)
+            let text = match message.body() {
+                Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
+                    message.render_body_for_provider(ProviderKind::WhatsApp)
                 }
                 None => String::new(),
             };

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::{Message, MessageBody};
+use crate::message::MessageBody;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{
     MessageRef, ProviderKind, SendReceipt, SignalAuthor, SignalThreadKey,
 };
@@ -84,17 +85,17 @@ impl super::Provider for SignalProvider {
         CapabilitySet {
             supports_markdown_rendering: false,
             supports_reply: true,
-            supports_attachments: true,
+            supports_attachments: false,
             supports_location: false,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
         }
     }
 
-    async fn send(
+    async fn send_prepared(
         &self,
         dispatch: &Dispatch,
-        message: &Message,
+        message: &PreparedMessage,
     ) -> Result<SendReceipt, MessengerError> {
         let target = match &dispatch.target {
             Target::Signal(t) => t,
@@ -106,10 +107,9 @@ impl super::Provider for SignalProvider {
         };
 
         // Render body as plain text
-        let text = match &message.body {
-            Some(MessageBody::Plain(text)) => text.clone(),
-            Some(MessageBody::Markdown(md)) => {
-                crate::markdown::render_for_provider(md, ProviderKind::Signal)
+        let text = match message.body() {
+            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
+                message.render_body_for_provider(ProviderKind::Signal)
             }
             None => String::new(),
         };

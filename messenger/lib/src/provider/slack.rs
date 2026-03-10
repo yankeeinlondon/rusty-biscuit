@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::markdown;
-use crate::message::{Message, MessageBody};
+use crate::message::MessageBody;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
 
@@ -78,10 +78,10 @@ impl super::Provider for SlackProvider {
         }
     }
 
-    async fn send(
+    async fn send_prepared(
         &self,
         dispatch: &Dispatch,
-        message: &Message,
+        message: &PreparedMessage,
     ) -> Result<SendReceipt, MessengerError> {
         let channel_id = match &dispatch.target {
             Target::Slack(t) => &t.channel_id,
@@ -93,9 +93,10 @@ impl super::Provider for SlackProvider {
         };
 
         // Render the message body to Slack mrkdwn
-        let text = match &message.body {
-            Some(MessageBody::Plain(text)) => text.clone(),
-            Some(MessageBody::Markdown(md)) => markdown::render_for_provider(md, ProviderKind::Slack),
+        let text = match message.body() {
+            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
+                message.render_body_for_provider(ProviderKind::Slack)
+            }
             None => String::new(),
         };
 

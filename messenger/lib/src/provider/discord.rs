@@ -8,8 +8,8 @@ use twilight_model::id::marker::{ChannelMarker, MessageMarker};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::markdown;
-use crate::message::{Message, MessageBody};
+use crate::message::MessageBody;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
 
@@ -42,6 +42,31 @@ impl DiscordProvider {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::DiscordProvider;
+
+    #[test]
+    fn rejects_invalid_channel_id() {
+        let err = DiscordProvider::parse_channel_id("not-a-number").unwrap_err();
+        assert!(matches!(
+            err,
+            crate::MessengerError::InvalidMessage(message)
+            if message.contains("invalid Discord channel ID")
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_message_id() {
+        let err = DiscordProvider::parse_message_id("not-a-number").unwrap_err();
+        assert!(matches!(
+            err,
+            crate::MessengerError::InvalidMessage(message)
+            if message.contains("invalid Discord message ID")
+        ));
+    }
+}
+
 #[async_trait::async_trait]
 impl super::Provider for DiscordProvider {
     fn kind(&self) -> ProviderKind {
@@ -52,17 +77,17 @@ impl super::Provider for DiscordProvider {
         CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
-            supports_attachments: true,
+            supports_attachments: false,
             supports_location: false,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
         }
     }
 
-    async fn send(
+    async fn send_prepared(
         &self,
         dispatch: &Dispatch,
-        message: &Message,
+        message: &PreparedMessage,
     ) -> Result<SendReceipt, MessengerError> {
         let channel_id = match &dispatch.target {
             Target::Discord(t) => Self::parse_channel_id(&t.channel_id)?,
@@ -74,9 +99,10 @@ impl super::Provider for DiscordProvider {
         };
 
         // Render the message body
-        let content = match &message.body {
-            Some(MessageBody::Plain(text)) => text.clone(),
-            Some(MessageBody::Markdown(md)) => markdown::render_for_provider(md, ProviderKind::Discord),
+        let content = match message.body() {
+            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
+                message.render_body_for_provider(ProviderKind::Discord)
+            }
             None => String::new(),
         };
 
@@ -92,9 +118,6 @@ impl super::Provider for DiscordProvider {
             let msg_id = Self::parse_message_id(message_id)?;
             req = req.reply(msg_id);
         }
-
-        // TODO: Handle attachments via multipart upload in a future iteration
-
         // Execute the request
         let response = req.await.map_err(|e| MessengerError::Transport {
             provider: ProviderKind::Discord,

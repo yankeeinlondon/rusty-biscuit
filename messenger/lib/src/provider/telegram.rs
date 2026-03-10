@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::markdown;
-use crate::message::{Message, MessageBody};
+use crate::message::MessageBody;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt, TelegramChatRef};
 use crate::target::{Target, TelegramChatId};
 
@@ -154,17 +154,17 @@ impl super::Provider for TelegramProvider {
         CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
-            supports_attachments: true,
+            supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: true,
             supports_link_preview_control: true,
         }
     }
 
-    async fn send(
+    async fn send_prepared(
         &self,
         dispatch: &Dispatch,
-        message: &Message,
+        message: &PreparedMessage,
     ) -> Result<SendReceipt, MessengerError> {
         let (chat_id_target, thread_id) = match &dispatch.target {
             Target::Telegram(t) => (&t.chat_id, t.thread_id),
@@ -195,7 +195,7 @@ impl super::Provider for TelegramProvider {
         };
 
         // Send location if present
-        if let Some(location) = &message.location {
+        if let Some(location) = message.location() {
             let body = SendLocationRequest {
                 chat_id: &chat_id_str,
                 latitude: location.latitude,
@@ -221,12 +221,15 @@ impl super::Provider for TelegramProvider {
         }
 
         // Render message body
-        let (text, parse_mode) = match &message.body {
-            Some(MessageBody::Markdown(md)) => {
-                let html = markdown::render_for_provider(md, ProviderKind::Telegram);
-                (html, Some("HTML"))
-            }
-            Some(MessageBody::Plain(text)) => (text.clone(), None),
+        let (text, parse_mode) = match message.body() {
+            Some(MessageBody::Markdown(_)) => (
+                message.render_body_for_provider(ProviderKind::Telegram),
+                Some("HTML"),
+            ),
+            Some(MessageBody::Plain(_)) => (
+                message.render_body_for_provider(ProviderKind::Telegram),
+                None,
+            ),
             None => (String::new(), None),
         };
 
