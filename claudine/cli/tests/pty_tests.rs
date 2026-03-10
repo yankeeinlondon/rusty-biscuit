@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use expectrl::{Expect, Session};
 use std::fs;
