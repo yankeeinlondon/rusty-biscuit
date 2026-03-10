@@ -428,6 +428,10 @@ fn test_network_ip_addresses_json_structure() {
         if let Some(network) = value.get("network") {
             let ip_addresses = network.get("ip_addresses");
             assert!(ip_addresses.is_some(), "network should have ip_addresses field");
+            assert!(
+                network.get("wan_ip_address").is_some(),
+                "network should have wan_ip_address field"
+            );
 
             let ip_addr = ip_addresses.unwrap();
             assert!(ip_addr.get("v4").is_some(), "ip_addresses should have v4");
@@ -479,6 +483,10 @@ fn test_network_ip_addresses_roundtrip() {
             orig_net.ip_addresses.v6.len(),
             parsed_net.ip_addresses.v6.len(),
             "v6 count should survive roundtrip"
+        );
+        assert_eq!(
+            orig_net.wan_ip_address, parsed_net.wan_ip_address,
+            "wan_ip_address should survive roundtrip"
         );
 
         // Contents should match

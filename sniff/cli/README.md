@@ -6,7 +6,7 @@
 
 - **OS Detection**: Distribution, kernel, architecture, hostname, package managers, locale, timezone, and NTP status
 - **Hardware Detection**: CPU (with SIMD capabilities), GPU (with Metal/Vulkan support), memory, and storage
-- **Network Detection**: Network interfaces with IPv4/IPv6 addresses and status flags
+- **Network Detection**: Network interfaces with IPv4/IPv6 addresses, status flags, and WAN IP lookup
 - **Filesystem Detection**: Git repository status, monorepo detection, programming language analysis, broad file associations, and EditorConfig formatting rules
 - **Scoped Enrichment**: Refresh git remotes with `--refresh-remotes` and check registries with `--latest-versions`
 - **Flexible Output**: Text (with verbosity levels) or JSON formats
@@ -66,7 +66,7 @@ Use subcommands to filter output to specific sections.
 ```bash
 sniff os          # OS information (name, kernel, locale, timezone)
 sniff hardware    # Hardware information (CPU, GPU, memory, storage)
-sniff network     # Network information (interfaces, IP addresses)
+sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
 ```
 
@@ -189,12 +189,21 @@ GPUs:
 Storage:
   / (apfs, SSD)
 
-=== Network ===
-Primary interface: en0
-Interfaces: 12
-  en0 [UP]
-    IPv4: 192.168.1.100
-    IPv6: fe80::1
+# Network
+Local interface inventory for this host, plus an external WAN lookup when available.
+## Snapshot
+• Primary interface: en0
+• WAN IP address: 203.0.113.10
+• Interfaces detected: 12
+• IPv4 addresses: 3
+• IPv6 addresses: 6
+
+## Interfaces
+### en0
+• Status: up, running, primary
+• MAC address: 12:34:56:78:9a:bc
+• IPv4 addresses: 192.168.1.100
+• IPv6 addresses: fe80::1
 
 === Filesystem ===
 Languages (212 contributing files out of 1,234 scanned):

@@ -6,7 +6,7 @@
 
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
 - **Hardware Detection**: CPU with SIMD capabilities, GPU with Metal/Vulkan support, memory, storage
-- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses and flags
+- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
 - **Programs Detection**: 8 categories (editors, utilities, package managers, TTS, terminals, AI tools)
@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Network information
     if let Some(net) = result.network {
         println!("Primary interface: {:?}", net.primary_interface);
+        println!("WAN IP: {:?}", net.wan_ip_address);
         println!("Interfaces: {}", net.interfaces.len());
     }
 
@@ -283,6 +284,7 @@ Network interface enumeration using `getifaddrs` system call.
 
 - IPv4 and IPv6 address collection
 - Primary interface detection (first non-loopback with IPv4)
+- WAN IP lookup when the `network` feature is enabled
 - Permission denied error handling
 - Interface filtering utilities
 
@@ -294,6 +296,7 @@ use sniff_lib::network::{detect_network, detect_network_filtered};
 // All interfaces
 let net = detect_network()?;
 if !net.permission_denied {
+    println!("WAN IP: {:?}", net.wan_ip_address);
     for iface in &net.interfaces {
         println!("Interface: {}", iface.name);
         println!("  Up: {}, Loopback: {}", iface.flags.is_up, iface.flags.is_loopback);

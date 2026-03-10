@@ -1,9 +1,19 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(feature = "network")]
+use std::net::IpAddr;
+#[cfg(feature = "network")]
+use std::sync::OnceLock;
 
 mod interface;
 pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
+
+#[cfg(feature = "network")]
+const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
+
+#[cfg(feature = "network")]
+static WAN_IP_CACHE: OnceLock<Option<String>> = OnceLock::new();
 
 /// Network information for the system.
 ///
@@ -41,6 +51,13 @@ pub struct NetworkInfo {
     /// in one place, allowing quick lookups without iterating through interfaces.
     pub ip_addresses: IpAddresses,
 
+    /// The host's WAN IP address, if it could be determined.
+    ///
+    /// This is resolved via an external IP echo service when the `network`
+    /// feature is enabled. Detection failure is non-fatal and leaves this as
+    /// `None`.
+    pub wan_ip_address: Option<String>,
+
     /// True if permission was denied during interface enumeration
     pub permission_denied: bool,
 }
@@ -75,6 +92,7 @@ pub struct NetworkInfo {
 /// }
 /// ```
 pub fn detect_network() -> Result<NetworkInfo> {
+    let wan_ip_address = detect_wan_ip();
     let addrs = match getifaddrs::getifaddrs() {
         Ok(addrs) => addrs,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -82,6 +100,7 @@ pub fn detect_network() -> Result<NetworkInfo> {
                 interfaces: vec![],
                 primary_interface: None,
                 ip_addresses: IpAddresses::default(),
+                wan_ip_address,
                 permission_denied: true,
             });
         }
@@ -142,8 +161,82 @@ pub fn detect_network() -> Result<NetworkInfo> {
         interfaces,
         primary_interface: primary,
         ip_addresses,
+        wan_ip_address,
         permission_denied: false,
     })
+}
+
+#[cfg(feature = "network")]
+#[derive(Debug, Clone)]
+struct WanIpDetector {
+    client: Option<reqwest::Client>,
+    endpoints: Vec<String>,
+}
+
+#[cfg(feature = "network")]
+impl WanIpDetector {
+    fn new() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .user_agent("sniff-lib/0.1.0")
+                .timeout(std::time::Duration::from_secs(1))
+                .build()
+                .ok(),
+            endpoints: DEFAULT_WAN_IP_ENDPOINTS
+                .iter()
+                .map(|endpoint| endpoint.to_string())
+                .collect(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_endpoints(mut self, endpoints: Vec<String>) -> Self {
+        self.endpoints = endpoints;
+        self
+    }
+
+    fn detect(&self) -> Option<String> {
+        let client = self.client.clone()?;
+        let endpoints = self.endpoints.clone();
+
+        std::thread::spawn(move || {
+            let runtime =
+                tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+
+            runtime.block_on(async move {
+                for endpoint in endpoints {
+                    let response = match client.get(&endpoint).send().await {
+                        Ok(response) if response.status().is_success() => response,
+                        _ => continue,
+                    };
+
+                    let body = match response.text().await {
+                        Ok(body) => body,
+                        Err(_) => continue,
+                    };
+
+                    if let Ok(address) = body.trim().parse::<IpAddr>() {
+                        return Some(address.to_string());
+                    }
+                }
+
+                None
+            })
+        })
+        .join()
+        .ok()
+        .flatten()
+    }
+}
+
+#[cfg(feature = "network")]
+fn detect_wan_ip() -> Option<String> {
+    WAN_IP_CACHE.get_or_init(|| WanIpDetector::new().detect()).clone()
+}
+
+#[cfg(not(feature = "network"))]
+fn detect_wan_ip() -> Option<String> {
+    None
 }
 
 /// Formats a MAC address as a colon-separated hex string.
@@ -449,6 +542,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn test_wan_ip_detector_returns_ip_from_echo_service() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("203.0.113.10\n"))
+            .mount(&server)
+            .await;
+
+        let detector = WanIpDetector::new().with_endpoints(vec![server.uri()]);
+        assert_eq!(detector.detect(), Some("203.0.113.10".to_string()));
+    }
+
+    #[cfg(feature = "network")]
+    #[tokio::test]
+    async fn test_wan_ip_detector_falls_back_after_invalid_response() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/invalid"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not-an-ip"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/valid"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("2001:db8::7"))
+            .mount(&server)
+            .await;
+
+        let detector = WanIpDetector::new().with_endpoints(vec![
+            format!("{}/invalid", server.uri()),
+            format!("{}/valid", server.uri()),
+        ]);
+        assert_eq!(detector.detect(), Some("2001:db8::7".to_string()));
     }
 
     #[test]

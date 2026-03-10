@@ -379,7 +379,8 @@ fn test_network_subcommand_text_output() {
         .arg("network")
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== Network ==="));
+        .stdout(predicate::str::contains("Network"))
+        .stdout(predicate::str::contains("WAN IP address"));
 }
 
 #[test]
@@ -403,6 +404,10 @@ fn test_network_subcommand_json_output() {
     assert!(
         json.get("permission_denied").is_some(),
         "permission_denied should be at top level"
+    );
+    assert!(
+        json.get("wan_ip_address").is_some(),
+        "wan_ip_address should be at top level"
     );
 
     // Should NOT have wrapper or other sections
