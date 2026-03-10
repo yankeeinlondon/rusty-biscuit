@@ -229,11 +229,11 @@ Use this for any crate’s initial publish.
 9. Run a full dry run:
    - `cargo publish --dry-run --locked -p <crate>`
 10. Publish:
-   - `cargo publish --locked -p <crate>`
+    - `cargo publish --locked -p <crate>`
 11. Verify:
-   - crates.io page
-   - docs.rs build
-   - install/use from a clean environment
+    - crates.io page
+    - docs.rs build
+    - install/use from a clean environment
 
 ## Authentication and Ownership
 
