@@ -13,9 +13,49 @@ We use the [`just`]() runner for packages in this repo to organize all key opera
 brew install just
 # ubuntu / debian
 apt install just
-
+# ...
+asdf install just
+nix-env -iA nixpkgs.just
+npm install -g rust-just
+uv tool install rust-just
+snap install --edge --classic just
 ```
 
+Once installed you should run `just init` from the repo's root which will:
+
+- ensure you have all necessary build tools
+- install some core CLI's from this monorepo to make sure all your `justfile` configurations will work with full fidelity
+
+At this point you're ready to explore, install, test, whatever you like.
+
+- run `just` and it will give you all the "recipes" appropriate for the directory you are in
+- it will include things like:
+    - testing
+    - linting
+    - installing
+    - documentation drift
+    - skill generation
+    - _and more_
+
+> **Notes:**
+> 
+> - **TTS**
+>     - we use TTS messages to communicate successful or failing recipes (_typically those which are long running_)
+>     - this leverages the `biscuit-speaks` library which in turn leverages what you have installed on your host computer
+>     - most computer's will have _some_ TTS software we support but the quality of the TTS can vary widely
+>     - run `so-you-say --list-providers` to see which TTS providers we can use on your system
+>         - on macOS the built-in `say` TTS is not bad but it's quality varies on how you've configured it
+>         - on Windows the built-in `XXX` TTS is decent as well
+>         - on Linux there is more variance but something like `espeak`/`espeak-ng` is most common. These voices are low quality (but the do have a TON of languages).
+>     - if you want better voices, it's a safe bet that installing `kokoro_tts` will be a big improvement:
+>         - run `sniff tts-clients install kokoro_tts` to install
+> - **Audio Playback**
+>     - several of the just recipes will play sound effects when certain events take place
+>     - in addition, some TTS providers, rely on the `playa` library to play their voice audio
+>     - We support native audio on macOS, Linux, and Windows
+>     - In most cases this is all you'll need but we will fallback to any headless audio players detected on the host which meet the requirements if the native solution can't perform the particular audio task.
+>     - You can check your setup by running `playa players`
+>     - You can install any which are missing with `sniff audio install`
 
 ## Packages
 
@@ -70,30 +110,34 @@ infra --> sandbox(Agent Sandbox) --> A@{ shape: braces, label: "Docker and LxC\n
 
 ### Core Libraries
 
+1. **biscuit-speaks** [[`./biscuit-speaks`](./biscuit-speaks/README.md)]
+
+    A library and CLI which provides TTS functionality it borrows from the host.
+
+    - The **biscuit-speaks-cli** [[`./biscuit-speaks/cli`](./biscuit-speaks/cli/README.md)] binary is called **so-you-say**:
+
+      ```sh
+      # TTS
+      so-you-say "hello world"
+      # TTS with specific gender voice
+      so-you-say "hello world" --gender male
+      # List TTS providers on host
+      so-you-say --list-providers
+      ```
+
 1. **schematic** [[`./schematic`](./schematic/README.md)]
 
-   Builds type-strong enumerations for API's and data types to be consumed by other libraries/apps.
+   Builds type-strong API clients to be consumed by other libraries.
 
-2. **ai-pipeline** [[`./ai-pipeline`](./ai-pipeline/README.md)]
-
-   Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
+   - **schematic-define** [[`./schematic/define`](./schematic/define/README.md)] - primitives for defining an API
+   - **schematic-definitions** [[`./schematic/definitions`](./schematic/definitions/README.md)] - API's which have been defined
+   - **schematic-gen** [[`./schematic/gen`](./schematic/gen/README.md)] - generates the API client's from schematic-definitions _into_ schematic-schema
+   - **schematic-schema** [[`./schematic/schema`](./schematic/schema/README.md)] - the generated API clients
 
 ### Applications
 
-1. **researcher** [ [`./research`](./research/README.md) ]
 
-   A **CLI** which facilitates the research process and is able to produce content rich "deep dives" and tree-based `skills` for Claude Code and Opencode.
-
-   ```sh
-   # do research
-   research library chalk
-   # list research
-   research list
-   # link research to Claude Code and Opencode
-   research link
-   ```
-
-2. **darkmatter** CLI [[`./darkmatter`](./darkmatter/README.md)]
+1. **darkmatter** [[`./darkmatter`](./darkmatter/README.md)]
 
    A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
 
@@ -108,75 +152,29 @@ infra --> sandbox(Agent Sandbox) --> A@{ shape: braces, label: "Docker and LxC\n
    md doc.md --ast
    ```
 
-3. **observer** TUI [[`./observer`](./observer/README.md)]
+1. **unchained-ai** [[`./unchained-ai`](./unchained-ai/README.md)]
 
-   A TUI which helps you to observe state changes in the terminal.
+   Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
 
-   ```sh
-   # observes changes in status/progress when pointed to either a
-   # markdown file (with TODO's in it) or a JSON file which is structured
-   # as a observation data file.
-   observe <file>
-   ```
 
-4. **notable** [[`./notable`](./notable/README.md)]
+1. **research** [ [`./research`](./research/README.md) ]
 
-   A CLI (and lib) which interacts with an Obsidian vault.
+   A **CLI** which facilitates the research process and is able to produce content rich deep dives and tree-based **agent skills** for Agentic CLI's like Claude Code, Codex, OpenCode, etc.
 
    ```sh
-   # Add a note to your vault, with specified tags
-   note #foo #bar hello world
-   # Create a new note and fill it with the results of a prompt.
-   # The prompt is saved as frontmatter, the LLM's response is saved
-   # the body of the message.
-   note --prompt "what are the top news stories today?"
+   # do research
+   research library chalk
+   # list research
+   research list
+   # link research to Claude Code and Opencode
+   research link
    ```
 
-5. **so-you-say** CLI [[`./so-you-say`](./so-you-say/README.md)]
-
-   A simple TTS CLI which leverages TTS features on the host or in the cloud.
-
-   ```sh
-   # TTS
-   so-you-say "hello world"
-   # TTS with specific gender voice
-   so-you-say "hello world" --gender male
-   ```
-
-## System Dependencies
-
-Some packages require system libraries to be installed:
-
-### Text-to-Speech (research, so-you-say)
-
-The TTS functionality requires platform-specific dependencies:
-
-**Linux (Ubuntu/Debian):**
-
-```bash
-sudo apt-get update
-sudo apt-get install libspeechd-dev
-```
-
-**Linux (Fedora/RHEL):**
-
-```bash
-sudo dnf install speech-dispatcher-devel
-```
-
-**Linux (Arch):**
-
-```bash
-sudo pacman -S speech-dispatcher
-```
-
-**macOS/Windows:** No additional dependencies required.
 
 ## More Details
 
 For more functional/usage details on any of the packages in this monorepo refer to the `README.md` files in their respective directories.
 
-> **Note:** if you're a developer and looking for more detailed documentation or context, then look for `README.md` files within folders of the source tree. These files will provide information about their respective module or source sub-tree.
 
 ## License
 
