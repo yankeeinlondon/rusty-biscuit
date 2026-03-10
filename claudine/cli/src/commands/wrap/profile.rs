@@ -136,6 +136,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
         ))
     }
 
+    // -- Non-interactive stdout noise filtering --------------------------------
+
+    /// Line prefixes that should be stripped from stdout in non-interactive mode.
+    ///
+    /// Some CLIs print hook execution debug info, skill conflict warnings, or
+    /// other noise to stdout that contaminates non-interactive output. Lines
+    /// starting with any of these prefixes are suppressed.
+    ///
+    /// Default: empty (no filtering).
+    fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     // -- Provider-required env vars ------------------------------------------
 
     /// Env var names that this provider requires and should bypass the
@@ -404,6 +417,15 @@ impl WrapperProfile for GeminiWrapper {
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    }
+
+    fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
+        &[
+            "Created execution plan for ",
+            "Expanding hook command: ",
+            "Hook execution for ",
+            "Skill conflict detected: ",
+        ]
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {

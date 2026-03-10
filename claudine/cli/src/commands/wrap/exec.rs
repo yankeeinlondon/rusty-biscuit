@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread;
 
 use color_eyre::eyre::Result;
 
@@ -24,12 +26,20 @@ use color_eyre::eyre::Result;
 ///
 /// When `timeout` is `Some(seconds)`, the child is sent SIGTERM after the
 /// specified duration, followed by SIGKILL after a 5-second grace period.
+///
+/// ## Stdout Filtering
+///
+/// When `stdout_noise_prefixes` is non-empty, stdout is piped through a
+/// filter that suppresses lines starting with any of the given prefixes.
+/// This is used in non-interactive mode to strip provider debug noise
+/// (e.g. Gemini CLI's hook execution logs) from the response.
 pub(crate) fn run_child(
     binary: &Path,
     args: &[String],
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    stdout_noise_prefixes: &[&str],
 ) -> Result<i32> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
@@ -41,6 +51,8 @@ pub(crate) fn run_child(
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
 
+    let filtering = !stdout_noise_prefixes.is_empty();
+
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -48,16 +60,44 @@ pub(crate) fn run_child(
         .envs(env)
         .current_dir(cwd)
         .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
+        .stdout(if filtering {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
         .stderr(Stdio::inherit());
 
     let mut child = command.spawn()?;
+
+    // Spawn a filter thread that reads child stdout line-by-line and
+    // suppresses lines matching any noise prefix.
+    let filter_handle = if filtering {
+        let pipe = child.stdout.take().expect("stdout was set to piped");
+        let prefixes: Vec<String> = stdout_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        Some(thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            let mut out = std::io::stdout().lock();
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+                    continue;
+                }
+                let _ = writeln!(out, "{line}");
+            }
+        }))
+    } else {
+        None
+    };
 
     let exit_code = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
     };
+
+    if let Some(handle) = filter_handle {
+        let _ = handle.join();
+    }
 
     Ok(exit_code)
 }

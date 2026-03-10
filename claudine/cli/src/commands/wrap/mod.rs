@@ -339,12 +339,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         }
     }
 
+    let noise_prefixes = if non_interactive_requested {
+        profile.stdout_noise_prefixes()
+    } else {
+        &[]
+    };
+
     exec::run_child(
         binary_path.as_path(),
         &child_args,
         &env_plan.env,
         child_cwd,
         args.timeout,
+        noise_prefixes,
     )
 }
 

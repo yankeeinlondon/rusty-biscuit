@@ -121,10 +121,13 @@ impl AgentConfigurator for GeminiConfigurator {
 
             let snake = event.to_string();
             let hook_entry = json!({
-                "name": format!("{CLAUDINE_NAME_PREFIX}{snake}"),
-                "command": handle_command(&snake),
-                "timeout": 30000,
-                "description": format!("Claudine handler for {snake}")
+                "hooks": [{
+                    "type": "command",
+                    "name": format!("{CLAUDINE_NAME_PREFIX}{snake}"),
+                    "command": handle_command(&snake),
+                    "timeout": 30000,
+                    "description": format!("Claudine handler for {snake}")
+                }]
             });
 
             let existing = hooks
@@ -223,8 +226,16 @@ impl AgentConfigurator for GeminiConfigurator {
 
 impl GeminiConfigurator {
     /// Check if the registered hooks match the expected events from config.
+    ///
+    /// Returns false if any legacy flat-format entries exist, forcing
+    /// re-registration to clean them up.
     fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
+
+        // Check for legacy flat-format entries that need cleanup
+        if self.has_legacy_entries(config_dir)? {
+            return Ok(false);
+        }
 
         let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
@@ -247,23 +258,79 @@ impl GeminiConfigurator {
 
         Ok(registered == expected)
     }
+
+    /// Check if any claudine hook entries use the legacy flat format
+    /// (missing nested `hooks` array).
+    fn has_legacy_entries(&self, config_dir: Option<&Path>) -> Result<bool> {
+        let settings_path = config_path(config_dir);
+        if !settings_path.exists() {
+            return Ok(false);
+        }
+
+        let content = fs::read_to_string(&settings_path)?;
+        let root: Value = serde_json::from_str(&content)?;
+
+        if let Some(hooks) = root.get("hooks").and_then(|h| h.as_object()) {
+            for (_, hook_list) in hooks {
+                if let Some(arr) = hook_list.as_array() {
+                    for entry in arr {
+                        // Legacy format: has claudine name at top level (no nested hooks array)
+                        if entry.get("hooks").is_none() && is_claudine_hook(entry) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(false)
+    }
 }
 
-/// Check if a hook entry has a Claudine name prefix.
+/// Check if a hook definition contains a Claudine-managed hook.
+///
+/// Detects both the correct nested format (`{hooks: [{name: "claudine-..."}]}`)
+/// and the legacy flat format (`{name: "claudine-..."}`) to ensure old entries
+/// get cleaned up during re-registration.
 fn is_claudine_hook(entry: &Value) -> bool {
-    entry
-        .get("name")
-        .and_then(|n| n.as_str())
-        .is_some_and(|name| name.starts_with(CLAUDINE_NAME_PREFIX))
+    let has_claudine_name = |v: &Value| {
+        v.get("name")
+            .and_then(|n| n.as_str())
+            .is_some_and(|name| name.starts_with(CLAUDINE_NAME_PREFIX))
+    };
+
+    // Nested format: {hooks: [{name: "claudine-..."}]}
+    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array()) {
+        if hooks.iter().any(has_claudine_name) {
+            return true;
+        }
+    }
+
+    // Legacy flat format: {name: "claudine-..."}
+    has_claudine_name(entry)
 }
 
-/// Extract the event name from a Claudine hook (e.g., "claudine-before_tool" -> "before_tool").
+/// Extract the event name from a Claudine hook definition.
+///
+/// Supports both nested (`{hooks: [{name: "claudine-..."}]}`) and legacy flat
+/// (`{name: "claudine-..."}`) formats.
 fn extract_claudine_event(entry: &Value) -> Option<String> {
-    entry
-        .get("name")
-        .and_then(|n| n.as_str())
-        .and_then(|name| name.strip_prefix(CLAUDINE_NAME_PREFIX))
-        .map(|s| s.to_string())
+    let extract_from = |v: &Value| {
+        v.get("name")
+            .and_then(|n| n.as_str())
+            .and_then(|name| name.strip_prefix(CLAUDINE_NAME_PREFIX))
+            .map(|s| s.to_string())
+    };
+
+    // Try nested format first
+    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array()) {
+        if let Some(event) = hooks.iter().find_map(extract_from) {
+            return Some(event);
+        }
+    }
+
+    // Fall back to legacy flat format
+    extract_from(entry)
 }
 
 /// Resolve the settings.json path for Gemini.
@@ -334,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn gemini_hooks_use_millisecond_timeout_and_name() {
+    fn gemini_hooks_use_nested_structure_with_type() {
         let tmp = TempDir::new().unwrap();
         let settings = tmp.path().join("settings.json");
         fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
@@ -344,15 +411,15 @@ mod tests {
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        let hook = &content["hooks"]["AfterAgent"][0];
+        let definition = &content["hooks"]["AfterAgent"][0];
 
-        // Verify ms timeout
-        assert_eq!(hook["timeout"], 30000);
-        // Verify name field present
-        let name = hook["name"].as_str().unwrap();
+        // Verify nested hooks array structure
+        let inner_hook = &definition["hooks"][0];
+        assert_eq!(inner_hook["type"], "command");
+        assert_eq!(inner_hook["timeout"], 30000);
+        let name = inner_hook["name"].as_str().unwrap();
         assert!(name.starts_with("claudine-"));
-        // Verify description
-        assert!(hook["description"].as_str().unwrap().contains("Claudine"));
+        assert!(inner_hook["description"].as_str().unwrap().contains("Claudine"));
     }
 
     #[test]
@@ -362,8 +429,8 @@ mod tests {
         let initial = json!({
             "hooks": {
                 "AfterAgent": [
-                    {"name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini", "timeout": 30000},
-                    {"name": "my-custom-hook", "command": "echo done", "timeout": 5000}
+                    {"hooks": [{"type": "command", "name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini", "timeout": 30000}]},
+                    {"hooks": [{"type": "command", "name": "my-custom-hook", "command": "echo done", "timeout": 5000}]}
                 ]
             }
         });
@@ -375,7 +442,7 @@ mod tests {
         let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let arr = content["hooks"]["AfterAgent"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["name"], "my-custom-hook");
+        assert_eq!(arr[0]["hooks"][0]["name"], "my-custom-hook");
     }
 
     #[test]
@@ -384,7 +451,7 @@ mod tests {
         let settings = tmp.path().join("settings.json");
         fs::write(
             &settings,
-            r#"{"hooks": {"AfterAgent": [{"name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini"}]}}"#,
+            r#"{"hooks": {"AfterAgent": [{"hooks": [{"type": "command", "name": "claudine-turn_complete", "command": "claudine handle turn_complete --provider gemini"}]}]}}"#,
         )
         .unwrap();
 

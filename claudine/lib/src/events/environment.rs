@@ -272,7 +272,8 @@ impl From<sniff::SniffResult> for EnvironmentContext {
         let primary_language = fs
             .as_ref()
             .and_then(|f| f.languages.as_ref())
-            .and_then(|l| l.primary.clone());
+            .and_then(|l| l.primary.as_ref())
+            .map(|l| l.to_string());
 
         let mut context = EnvironmentContext {
             os,
