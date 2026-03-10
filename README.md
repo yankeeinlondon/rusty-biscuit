@@ -2,16 +2,73 @@
 
 <img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
 
-> A monorepo for AI-powered research and automation tools
+> A monorepo of tools to help you achieve AI excellence
 
-- All libraries, CLI's, and TUI's are written in Rust.
-- Many CLI/TUI's are published to `npm` as well as `cargo`
+## Usage
+
+We use the [`just`]() runner for packages in this repo to organize all key operations. The first step is to make sure your host has **jest** installed.
+
+```sh
+# macOS
+brew install just
+# ubuntu / debian
+apt install just
+
+```
+
 
 ## Packages
 
-This monorepo hosts the following packages:
+This monorepo hosts the following package areas:
 
-### Shared Libraries
+```mermaid
+flowchart LR
+repo@{label: "Rusty Biscuit\nMonorepo"}
+foundation((Foundation))
+infra((Infrastructure))
+app((Applications))
+
+terminal(biscuit-terminal) --> T@{ shape: braces, label: "Terminal\nfeature detection and \nrendering components" }
+hashing(biscuit-hash) --> H@{ shape: braces, label: "Hash Utilities" }
+file(biscuit-file) --> F@{ shape: braces, label: "File Utilities" }
+tts(biscuit-speaks) --> TTS@{ shape: braces, label: "Text-to-Speech" }
+schematic(schematic) --> SCHEMA@{ shape: braces, label: "API Client Builder" }
+playa(playa) --> AUDIO@{ shape: braces, label: "Audio Playback\nand Sound Effects" }
+tree(tree-hugger) --> TREE@{ shape: braces, label: "Static Analysis" }
+
+repo --> foundation
+repo --> infra
+repo --> app
+
+foundation --> terminal
+foundation --> hashing
+foundation --> file
+foundation --> tts
+foundation --> schematic
+foundation --> playa
+foundation --> tree
+
+app --> darkmatter(Darkmatter)
+app --> unchained(Unchained AI)
+app --> research
+app --> sniff
+app --> homelab
+app --> claudine
+app --> messenger
+
+
+darkmatter(darkmatter) --> DM@{ shape: braces, label: "Markdown Pipeline:\nDSL, LSP, and CLI"}
+unchained(unchained-ai) --> UN@{ shape: braces, label: "AI Pipeline:\nconcurrency, chaining,\nserializable, conditional"}
+research(research) --> R@{ shape: braces, label: "Full lifecycle skill based\nResearch Management"}
+sniff(sniff) --> Detection@{ shape: braces, label: "Hardware, software,\nOS, and filesystem\ndetection"}
+homelab(homelab) --> HL@{ shape: braces, label: "Container Mgmt,\nAutomation APIs,\nNetwork Utils"}
+claudine(claudine) --> CL@{ shape: braces, label: "Agentic CLI abstraction:\nClaude, Codex, OpenCode,\nGemini CLI, Qwen, Kimi, ..."}
+messenger(messenger) --> M@{ shape: braces, label: "Multi-Platform\nMessaging Client"}
+
+infra --> sandbox(Agent Sandbox) --> A@{ shape: braces, label: "Docker and LxC\nUtilities and Images"}
+```
+
+### Core Libraries
 
 1. **schematic** [[`./schematic`](./schematic/README.md)]
 

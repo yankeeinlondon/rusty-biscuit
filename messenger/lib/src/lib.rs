@@ -1,14 +1,24 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod attachment;
+pub mod capabilities;
+pub mod dispatch;
+pub mod error;
+pub mod message;
+pub mod receipt;
+pub mod target;
+pub mod markdown;
+pub mod provider;
+pub mod validate;
+
+pub use attachment::{Attachment, AttachmentKind, AttachmentSource};
+pub use capabilities::CapabilitySet;
+pub use dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
+pub use error::MessengerError;
+pub use message::{Location, Message, MessageBody};
+pub use receipt::{MessageRef, ProviderKind, SendReceipt};
+pub use target::Target;
+pub use provider::{Messenger, Provider};
+pub use validate::{validate_dispatch, validate_message};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
