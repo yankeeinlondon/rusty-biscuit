@@ -434,12 +434,18 @@ Example CLI route config shape:
     "slack.ops": {
       "provider": "slack",
       "channel_id": "C012345",
-      "token_env": "SLACK_BOT_TOKEN"
+      "bot_token_env": "SLACK_BOT_TOKEN"
     },
     "discord.alerts": {
       "provider": "discord",
       "channel_id": "123456789012345678",
-      "token_env": "DISCORD_BOT_TOKEN"
+      "bot_token_env": "DISCORD_BOT_TOKEN"
+    },
+    "signal.ops": {
+      "provider": "signal",
+      "recipient": "+15551234567",
+      "rpc_url_env": "SIGNAL_RPC_URL",
+      "account_env": "SIGNAL_ACCOUNT"
     }
   }
 }
@@ -465,6 +471,8 @@ Validation rules:
 - attachment source must be resolvable before send
 - in `Strict` mode, the provider must support every requested content element
 - in `BestEffort` mode, formatting may downgrade, but core content kinds may not silently disappear
+
+The CLI should persist each `SendReceipt` so later reply commands can load the typed `MessageRef` back from disk rather than requiring a raw provider-specific ID string.
 
 ## Error Model
 
