@@ -4141,6 +4141,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-terminal",
  "clap 4.5.60",
+ "clap_complete",
  "color-eyre",
  "dirs",
  "inquire",
