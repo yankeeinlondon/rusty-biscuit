@@ -18,7 +18,7 @@ pub const DEFAULT_COMMIT_COUNT: usize = 10;
 )]
 pub struct Cli {
     /// Base directory for filesystem analysis
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     pub base: Option<PathBuf>,
 
     /// Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
@@ -1166,7 +1166,7 @@ mod tests {
         }
 
         #[test]
-        fn base_flag_works_globally() {
+        fn base_flag_works_before_subcommand() {
             let cli = parse_args(&["-b", "/tmp", "filesystem"]).unwrap();
             assert_eq!(cli.base, Some(PathBuf::from("/tmp")));
             assert!(matches!(cli.command, Some(Commands::Filesystem { .. })));

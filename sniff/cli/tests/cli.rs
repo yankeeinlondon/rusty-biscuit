@@ -242,11 +242,11 @@ fn test_base_flag_before_subcommand() {
 }
 
 #[test]
-fn test_base_flag_after_subcommand() {
+fn test_base_flag_after_subcommand_is_rejected() {
     cargo_bin_cmd!("sniff")
         .args(["filesystem", "-b", "."])
         .assert()
-        .success();
+        .failure();
 }
 
 #[test]
@@ -380,7 +380,18 @@ fn test_network_subcommand_text_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Network"))
-        .stdout(predicate::str::contains("WAN IP address"));
+        .stdout(predicate::str::contains("Primary interface:"))
+        .stdout(predicate::str::contains("##").not());
+}
+
+#[test]
+fn test_network_subcommand_verbose_text_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["network", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Interfaces"))
+        .stdout(predicate::str::contains("##").not());
 }
 
 #[test]
