@@ -57,29 +57,40 @@ impl fmt::Display for RouteProvider {
     }
 }
 
-/// A named route pointing to a provider and target plus provider-specific env mappings.
+/// A named route pointing to a provider and target plus secrets.
+///
+/// Each secret can be stored directly (e.g. `bot_token`) or referenced
+/// via an environment variable name (e.g. `bot_token_env`). Direct values
+/// take priority over env var lookups.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteConfig {
     Discord {
         channel_id: String,
+        bot_token: Option<String>,
         bot_token_env: String,
     },
     Slack {
         channel_id: String,
+        bot_token: Option<String>,
         bot_token_env: String,
     },
     Signal {
         recipient: String,
+        rpc_url: Option<String>,
         rpc_url_env: String,
+        account: Option<String>,
         account_env: String,
     },
     WhatsApp {
         recipient: String,
+        access_token: Option<String>,
         access_token_env: String,
+        phone_number_id: Option<String>,
         phone_number_id_env: String,
     },
     Telegram {
         chat_id: String,
+        bot_token: Option<String>,
         bot_token_env: String,
     },
 }
@@ -89,30 +100,44 @@ pub enum RouteConfig {
 enum RouteConfigRepr {
     Discord {
         channel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_token: Option<String>,
         #[serde(default = "default_discord_token_env")]
         bot_token_env: String,
     },
     Slack {
         channel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_token: Option<String>,
         #[serde(default = "default_slack_token_env")]
         bot_token_env: String,
     },
     Signal {
         recipient: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rpc_url: Option<String>,
         #[serde(default = "default_signal_rpc_url_env")]
         rpc_url_env: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
         #[serde(default = "default_signal_account_env")]
         account_env: String,
     },
     WhatsApp {
         recipient: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token: Option<String>,
         #[serde(default = "default_whatsapp_access_token_env")]
         access_token_env: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phone_number_id: Option<String>,
         #[serde(default = "default_whatsapp_phone_number_id_env")]
         phone_number_id_env: String,
     },
     Telegram {
         chat_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_token: Option<String>,
         #[serde(default = "default_telegram_token_env")]
         bot_token_env: String,
     },
@@ -149,24 +174,31 @@ impl RouteConfig {
         match provider {
             RouteProvider::Discord => Self::Discord {
                 channel_id: target_id,
+                bot_token: None,
                 bot_token_env: default_discord_token_env(),
             },
             RouteProvider::Slack => Self::Slack {
                 channel_id: target_id,
+                bot_token: None,
                 bot_token_env: default_slack_token_env(),
             },
             RouteProvider::Signal => Self::Signal {
                 recipient: target_id,
+                rpc_url: None,
                 rpc_url_env: default_signal_rpc_url_env(),
+                account: None,
                 account_env: default_signal_account_env(),
             },
             RouteProvider::WhatsApp => Self::WhatsApp {
                 recipient: target_id,
+                access_token: None,
                 access_token_env: default_whatsapp_access_token_env(),
+                phone_number_id: None,
                 phone_number_id_env: default_whatsapp_phone_number_id_env(),
             },
             RouteProvider::Telegram => Self::Telegram {
                 chat_id: target_id,
+                bot_token: None,
                 bot_token_env: default_telegram_token_env(),
             },
         }
@@ -200,41 +232,55 @@ impl From<RouteConfigRepr> for RouteConfig {
         match value {
             RouteConfigRepr::Discord {
                 channel_id,
+                bot_token,
                 bot_token_env,
             } => Self::Discord {
                 channel_id,
+                bot_token,
                 bot_token_env,
             },
             RouteConfigRepr::Slack {
                 channel_id,
+                bot_token,
                 bot_token_env,
             } => Self::Slack {
                 channel_id,
+                bot_token,
                 bot_token_env,
             },
             RouteConfigRepr::Signal {
                 recipient,
+                rpc_url,
                 rpc_url_env,
+                account,
                 account_env,
             } => Self::Signal {
                 recipient,
+                rpc_url,
                 rpc_url_env,
+                account,
                 account_env,
             },
             RouteConfigRepr::WhatsApp {
                 recipient,
+                access_token,
                 access_token_env,
+                phone_number_id,
                 phone_number_id_env,
             } => Self::WhatsApp {
                 recipient,
+                access_token,
                 access_token_env,
+                phone_number_id,
                 phone_number_id_env,
             },
             RouteConfigRepr::Telegram {
                 chat_id,
+                bot_token,
                 bot_token_env,
             } => Self::Telegram {
                 chat_id,
+                bot_token,
                 bot_token_env,
             },
         }
@@ -246,41 +292,55 @@ impl From<RouteConfig> for RouteConfigRepr {
         match value {
             RouteConfig::Discord {
                 channel_id,
+                bot_token,
                 bot_token_env,
             } => Self::Discord {
                 channel_id,
+                bot_token,
                 bot_token_env,
             },
             RouteConfig::Slack {
                 channel_id,
+                bot_token,
                 bot_token_env,
             } => Self::Slack {
                 channel_id,
+                bot_token,
                 bot_token_env,
             },
             RouteConfig::Signal {
                 recipient,
+                rpc_url,
                 rpc_url_env,
+                account,
                 account_env,
             } => Self::Signal {
                 recipient,
+                rpc_url,
                 rpc_url_env,
+                account,
                 account_env,
             },
             RouteConfig::WhatsApp {
                 recipient,
+                access_token,
                 access_token_env,
+                phone_number_id,
                 phone_number_id_env,
             } => Self::WhatsApp {
                 recipient,
+                access_token,
                 access_token_env,
+                phone_number_id,
                 phone_number_id_env,
             },
             RouteConfig::Telegram {
                 chat_id,
+                bot_token,
                 bot_token_env,
             } => Self::Telegram {
                 chat_id,
+                bot_token,
                 bot_token_env,
             },
         }
@@ -298,24 +358,31 @@ impl From<LegacyRouteConfig> for RouteConfig {
         match value.provider {
             RouteProvider::Discord => Self::Discord {
                 channel_id: value.channel_id,
+                bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_discord_token_env),
             },
             RouteProvider::Slack => Self::Slack {
                 channel_id: value.channel_id,
+                bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_slack_token_env),
             },
             RouteProvider::Signal => Self::Signal {
                 recipient: value.channel_id,
+                rpc_url: None,
                 rpc_url_env: token_env.unwrap_or_else(default_signal_rpc_url_env),
+                account: None,
                 account_env: default_signal_account_env(),
             },
             RouteProvider::WhatsApp => Self::WhatsApp {
                 recipient: value.channel_id,
+                access_token: None,
                 access_token_env: token_env.unwrap_or_else(default_whatsapp_access_token_env),
+                phone_number_id: None,
                 phone_number_id_env: default_whatsapp_phone_number_id_env(),
             },
             RouteProvider::Telegram => Self::Telegram {
                 chat_id: value.channel_id,
+                bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_telegram_token_env),
             },
         }
@@ -419,7 +486,9 @@ mod tests {
             route,
             RouteConfig::Signal {
                 recipient: "+15551234567".into(),
+                rpc_url: None,
                 rpc_url_env: "CUSTOM_SIGNAL_RPC_URL".into(),
+                account: None,
                 account_env: "SIGNAL_ACCOUNT".into(),
             }
         );
@@ -438,7 +507,9 @@ mod tests {
             "signal.ops".into(),
             RouteConfig::Signal {
                 recipient: "+15551234567".into(),
+                rpc_url: None,
                 rpc_url_env: "SIGNAL_RPC_URL".into(),
+                account: None,
                 account_env: "SIGNAL_ACCOUNT".into(),
             },
         );

@@ -173,11 +173,21 @@ fn configure_discord() -> Result<RouteConfig> {
         styled("<dim>Find the Channel ID by right-clicking a channel with Developer Mode enabled.</dim>")
     );
 
-    let token_env = Text::new("Environment variable for bot token:")
-        .with_default("DISCORD_BOT_TOKEN")
-        .with_help_message("The env var that holds your Discord bot token")
+    let bot_token = Text::new("Bot token:")
+        .with_help_message("Your Discord bot token (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let bot_token = non_empty(bot_token);
+
+    let bot_token_env = if bot_token.is_none() {
+        Text::new("Environment variable for bot token:")
+            .with_default("DISCORD_BOT_TOKEN")
+            .with_help_message("The env var that holds your Discord bot token")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "DISCORD_BOT_TOKEN".into()
+    };
 
     let channel_id = Text::new("Channel ID:")
         .with_placeholder("123456789012345678")
@@ -187,7 +197,8 @@ fn configure_discord() -> Result<RouteConfig> {
 
     Ok(RouteConfig::Discord {
         channel_id,
-        bot_token_env: token_env,
+        bot_token,
+        bot_token_env,
     })
 }
 
@@ -209,11 +220,21 @@ fn configure_slack() -> Result<RouteConfig> {
         styled("<dim>Find the Channel ID by right-clicking a channel and selecting \"View channel details\".</dim>")
     );
 
-    let token_env = Text::new("Environment variable for bot token:")
-        .with_default("SLACK_BOT_TOKEN")
-        .with_help_message("The env var that holds your Slack bot token (xoxb-...)")
+    let bot_token = Text::new("Bot token:")
+        .with_help_message("Your Slack bot token (xoxb-..., leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let bot_token = non_empty(bot_token);
+
+    let bot_token_env = if bot_token.is_none() {
+        Text::new("Environment variable for bot token:")
+            .with_default("SLACK_BOT_TOKEN")
+            .with_help_message("The env var that holds your Slack bot token")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "SLACK_BOT_TOKEN".into()
+    };
 
     let channel_id = Text::new("Channel ID:")
         .with_placeholder("C012345ABC")
@@ -223,7 +244,8 @@ fn configure_slack() -> Result<RouteConfig> {
 
     Ok(RouteConfig::Slack {
         channel_id,
-        bot_token_env: token_env,
+        bot_token,
+        bot_token_env,
     })
 }
 
@@ -245,17 +267,39 @@ fn configure_signal() -> Result<RouteConfig> {
         styled("<dim>The recipient is a phone number (+1234567890) or a base64 group ID.</dim>")
     );
 
-    let rpc_env = Text::new("Environment variable for RPC URL:")
-        .with_default("SIGNAL_RPC_URL")
-        .with_help_message("The env var that holds the signal-cli JSON-RPC URL (e.g., http://localhost:7583)")
+    let rpc_url = Text::new("RPC URL:")
+        .with_placeholder("http://localhost:7583")
+        .with_help_message("The signal-cli JSON-RPC URL (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let rpc_url = non_empty(rpc_url);
 
-    let account_env = Text::new("Environment variable for account:")
-        .with_default("SIGNAL_ACCOUNT")
-        .with_help_message("The env var for your registered Signal phone number (+1234567890)")
+    let rpc_url_env = if rpc_url.is_none() {
+        Text::new("Environment variable for RPC URL:")
+            .with_default("SIGNAL_RPC_URL")
+            .with_help_message("The env var that holds the signal-cli JSON-RPC URL")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "SIGNAL_RPC_URL".into()
+    };
+
+    let account = Text::new("Account phone number:")
+        .with_placeholder("+1234567890")
+        .with_help_message("Your registered Signal phone number (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let account = non_empty(account);
+
+    let account_env = if account.is_none() {
+        Text::new("Environment variable for account:")
+            .with_default("SIGNAL_ACCOUNT")
+            .with_help_message("The env var for your registered Signal phone number")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "SIGNAL_ACCOUNT".into()
+    };
 
     let recipient = Text::new("Recipient (phone number or group ID):")
         .with_placeholder("+15551234567")
@@ -265,7 +309,9 @@ fn configure_signal() -> Result<RouteConfig> {
 
     Ok(RouteConfig::Signal {
         recipient,
-        rpc_url_env: rpc_env,
+        rpc_url,
+        rpc_url_env,
+        account,
         account_env,
     })
 }
@@ -288,17 +334,37 @@ fn configure_whatsapp() -> Result<RouteConfig> {
         styled("<dim>The phone number ID identifies which WhatsApp Business number sends messages.</dim>")
     );
 
-    let token_env = Text::new("Environment variable for access token:")
-        .with_default("WHATSAPP_ACCESS_TOKEN")
-        .with_help_message("The env var that holds your WhatsApp Cloud API access token")
+    let access_token = Text::new("Access token:")
+        .with_help_message("Your WhatsApp Cloud API access token (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let access_token = non_empty(access_token);
 
-    let phone_number_id_env = Text::new("Environment variable for phone number ID:")
-        .with_default("WHATSAPP_PHONE_NUMBER_ID")
-        .with_help_message("The env var for your WhatsApp Business phone number ID")
+    let access_token_env = if access_token.is_none() {
+        Text::new("Environment variable for access token:")
+            .with_default("WHATSAPP_ACCESS_TOKEN")
+            .with_help_message("The env var that holds your WhatsApp Cloud API access token")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "WHATSAPP_ACCESS_TOKEN".into()
+    };
+
+    let phone_number_id = Text::new("Phone number ID:")
+        .with_help_message("Your WhatsApp Business phone number ID (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let phone_number_id = non_empty(phone_number_id);
+
+    let phone_number_id_env = if phone_number_id.is_none() {
+        Text::new("Environment variable for phone number ID:")
+            .with_default("WHATSAPP_PHONE_NUMBER_ID")
+            .with_help_message("The env var for your WhatsApp Business phone number ID")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "WHATSAPP_PHONE_NUMBER_ID".into()
+    };
 
     let recipient = Text::new("Default recipient phone number:")
         .with_placeholder("+15551234567")
@@ -308,7 +374,9 @@ fn configure_whatsapp() -> Result<RouteConfig> {
 
     Ok(RouteConfig::WhatsApp {
         recipient,
-        access_token_env: token_env,
+        access_token,
+        access_token_env,
+        phone_number_id,
         phone_number_id_env,
     })
 }
@@ -331,11 +399,21 @@ fn configure_telegram() -> Result<RouteConfig> {
         styled("<dim>Find your Chat ID by messaging @userinfobot or using the Bot API's getUpdates.</dim>")
     );
 
-    let token_env = Text::new("Environment variable for bot token:")
-        .with_default("TELEGRAM_BOT_TOKEN")
-        .with_help_message("The env var that holds your Telegram bot token")
+    let bot_token = Text::new("Bot token:")
+        .with_help_message("Your Telegram bot token (leave empty to use env var instead)")
         .prompt()
         .map_err(handle_cancel)?;
+    let bot_token = non_empty(bot_token);
+
+    let bot_token_env = if bot_token.is_none() {
+        Text::new("Environment variable for bot token:")
+            .with_default("TELEGRAM_BOT_TOKEN")
+            .with_help_message("The env var that holds your Telegram bot token")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "TELEGRAM_BOT_TOKEN".into()
+    };
 
     let chat_id = Text::new("Chat ID:")
         .with_placeholder("-1001234567890 or @channelname")
@@ -345,7 +423,8 @@ fn configure_telegram() -> Result<RouteConfig> {
 
     Ok(RouteConfig::Telegram {
         chat_id,
-        bot_token_env: token_env,
+        bot_token,
+        bot_token_env,
     })
 }
 
@@ -362,6 +441,10 @@ fn suggest_route_name(provider: &RouteProvider, config: &Config) -> String {
         }
     }
     base
+}
+
+fn non_empty(s: String) -> Option<String> {
+    if s.trim().is_empty() { None } else { Some(s) }
 }
 
 fn handle_cancel(err: InquireError) -> color_eyre::eyre::Error {

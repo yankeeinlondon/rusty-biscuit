@@ -228,10 +228,11 @@ fn register_provider(
 ) -> Result<()> {
     match route {
         RouteConfig::Discord {
+            bot_token,
             bot_token_env,
             ..
         } => {
-            let token = resolve_env(bot_token_env)?;
+            let token = resolve_secret(bot_token.as_deref(), bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::discord::DiscordProvider::new(
                     messenger::provider::discord::DiscordConfig {
@@ -241,10 +242,11 @@ fn register_provider(
             ));
         }
         RouteConfig::Slack {
+            bot_token,
             bot_token_env,
             ..
         } => {
-            let token = resolve_env(bot_token_env)?;
+            let token = resolve_secret(bot_token.as_deref(), bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::slack::SlackProvider::new(
                     messenger::provider::slack::SlackConfig {
@@ -255,12 +257,14 @@ fn register_provider(
             ));
         }
         RouteConfig::Signal {
+            rpc_url,
             rpc_url_env,
+            account,
             account_env,
             ..
         } => {
-            let rpc_url = resolve_env(rpc_url_env)?;
-            let account = resolve_env(account_env)?;
+            let rpc_url = resolve_secret(rpc_url.as_deref(), rpc_url_env)?;
+            let account = resolve_secret(account.as_deref(), account_env)?;
             messenger.register(Box::new(
                 messenger::provider::signal::SignalProvider::new(
                     messenger::provider::signal::SignalConfig { rpc_url, account },
@@ -268,12 +272,14 @@ fn register_provider(
             ));
         }
         RouteConfig::WhatsApp {
+            access_token,
             access_token_env,
+            phone_number_id,
             phone_number_id_env,
             ..
         } => {
-            let token = resolve_env(access_token_env)?;
-            let phone_id = resolve_env(phone_number_id_env)?;
+            let token = resolve_secret(access_token.as_deref(), access_token_env)?;
+            let phone_id = resolve_secret(phone_number_id.as_deref(), phone_number_id_env)?;
             messenger.register(Box::new(
                 messenger::provider::whatsapp::WhatsAppProvider::new(
                     messenger::provider::whatsapp::WhatsAppConfig {
@@ -286,10 +292,11 @@ fn register_provider(
             ));
         }
         RouteConfig::Telegram {
+            bot_token,
             bot_token_env,
             ..
         } => {
-            let token = resolve_env(bot_token_env)?;
+            let token = resolve_secret(bot_token.as_deref(), bot_token_env)?;
             messenger.register(Box::new(
                 messenger::provider::telegram::TelegramProvider::new(
                     messenger::provider::telegram::TelegramConfig {
@@ -330,10 +337,15 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
     }
 }
 
-fn resolve_env(var: &str) -> Result<String> {
-    std::env::var(var).map_err(|_| {
+/// Resolve a secret: use the direct value if present, otherwise look up the env var.
+fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
+    if let Some(v) = value {
+        return Ok(v.to_string());
+    }
+    std::env::var(env_name).map_err(|_| {
         eyre!(
-            "environment variable {var} is not set. Set it before running messenger."
+            "no value configured and environment variable {env_name} is not set. \
+             Either store the value in your route config or set {env_name}."
         )
     })
 }
@@ -359,6 +371,7 @@ mod tests {
             resolved.route,
             RouteConfig::Slack {
                 channel_id: "C012345".into(),
+                bot_token: None,
                 bot_token_env: "SLACK_BOT_TOKEN".into(),
             }
         );
@@ -374,6 +387,7 @@ mod tests {
             "slack.ops".into(),
             RouteConfig::Slack {
                 channel_id: "C012345".into(),
+                bot_token: None,
                 bot_token_env: "SLACK_BOT_TOKEN".into(),
             },
         );
@@ -386,7 +400,9 @@ mod tests {
     fn build_target_maps_signal_phone_to_direct_target() {
         let target = build_target(&RouteConfig::Signal {
             recipient: "+15551234567".into(),
+            rpc_url: None,
             rpc_url_env: "SIGNAL_RPC_URL".into(),
+            account: None,
             account_env: "SIGNAL_ACCOUNT".into(),
         })
         .unwrap();
@@ -400,6 +416,7 @@ mod tests {
     fn build_target_maps_telegram_username_to_username_target() {
         let target = build_target(&RouteConfig::Telegram {
             chat_id: "@ops".into(),
+            bot_token: None,
             bot_token_env: "TELEGRAM_BOT_TOKEN".into(),
         })
         .unwrap();
