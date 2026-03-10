@@ -17,6 +17,7 @@ The dispatch pipeline supports a Handlebars-style template engine with 28 variab
 - [Supported Actions](hook-actions.md)
 - [Linking Strategy](linking-strategy.md)
 
+
 ## Claudine CLI
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, and skill linking for agentic CLIs. It includes an `init` wizard that walks through 5 phases (agent discovery, event selection, action configuration, global settings, and hook registration), with a `--quick` flag for sensible defaults and a `--repo` flag for project-scoped configuration. All user-facing output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), with rich formatting via biscuit-terminal components including tables, prose markup, and OSC8 hyperlinks.
@@ -33,7 +34,7 @@ The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so
 | `claudine hooks --variables` | Template variables with current values |
 | `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
 | `claudine link --support` | Provider resource support matrix |
-| `claudine mcp [init\|show\|default\|alias\|remove\|sync] [--json]` | Manage the normalized MCP catalog and provider sync state |
+| `claudine mcp [list\|init\|add\|config\|default\|alias\|remove\|check\|sync\|export] [--json]` | Manage the normalized MCP catalog, defaults, validation, refresh, and export state |
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
@@ -55,9 +56,9 @@ Current provider rollout:
 Wrapper MCP behavior:
 
 - `--mcp` launches with the effective defaults; `--use id-or-alias[,id-or-alias...]` adds explicit servers and also enables MCP mode.
-- Non-interactive Codex, Gemini, and OpenCode runs also resolve `#tags` in the prompt and strip them before forwarding the prompt to the provider.
+- Initial Codex, Gemini, and OpenCode prompts resolve `#tags` and strip them before forwarding the prompt to the provider.
 - Codex and Gemini runtime injection write provider config into a shadow HOME under `~/.claudine`; OpenCode uses `OPENCODE_CONFIG_CONTENT`.
-- Claude, Goose, Kimi, and Qwen wrappers currently direct users to `claudine mcp sync <provider>` instead of runtime injection.
+- Claude, Goose, Kimi, and Qwen wrappers currently direct users to `claudine mcp export <provider> --apply` instead of runtime injection.
 
 Read [claudine/docs/mcp-support.md](../../../claudine/docs/mcp-support.md) before changing MCP behavior or documenting new provider support.
 
@@ -88,6 +89,12 @@ Research into each Agentic CLI's support for features like agentic skills, slash
 - [OpenCode](research/cross-referencing/opencode.md)
 - [Qwen CLI](research/cross-referencing/qwen-cli.md)
 - [Roo Code](research/cross-referencing/roo-code.md)
+
+### ACP Support
+
+Claudine does not use ACP today but we may add it in the future. If you're looking at anything related to ACP you should consider using the **acp** skill. If you're interested in how ACP might work with observability then use the **agent-observability** skill.
+
+
 
 ### CLI Research
 
