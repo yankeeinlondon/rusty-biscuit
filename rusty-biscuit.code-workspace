@@ -51,6 +51,9 @@
         {
             "name": "queue",
             "path": "queue"
+        },{
+            "name": "messenger",
+            "path": "messenger"
         },
         {
             "name": "research",

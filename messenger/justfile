@@ -148,7 +148,7 @@ test:
     @echo
     @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
     @echo
-    @cargo test -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    @cargo test -p {{LIBRARY}} --all-features || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
     @echo
     @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
     @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"

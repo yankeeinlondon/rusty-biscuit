@@ -19,11 +19,11 @@ messenger.send(Dispatch::to(Target::discord_channel("123456")), &message).await?
 
 | Provider | Feature Flag | Transport | Capabilities |
 |----------|-------------|-----------|-------------|
-| Discord | `discord` (default) | `twilight-http` | Markdown, replies, attachments |
+| Discord | `discord` (default) | `twilight-http` | Markdown, replies |
 | Slack | `slack` (default) | `reqwest` → Web API | Markdown (mrkdwn), replies, link preview control |
-| Telegram | `telegram` | `reqwest` → Bot API | Markdown (HTML), replies, attachments, location, silent, link preview |
-| WhatsApp | `whatsapp` | `reqwest` → Cloud API | Replies, attachments, location |
-| Signal | `signal` | `reqwest` → JSON-RPC (`signal-cli`) | Replies, attachments |
+| Telegram | `telegram` | `reqwest` → Bot API | Markdown (HTML), replies, location, silent, link preview |
+| WhatsApp | `whatsapp` | `reqwest` → Cloud API | Replies, location |
+| Signal | `signal` | `reqwest` → JSON-RPC (`signal-cli`) | Replies |
 
 ### Key Design Decisions
 
@@ -31,6 +31,7 @@ messenger.send(Dispatch::to(Target::discord_channel("123456")), &message).await?
 - **Markdown rendering pipeline** — parsed once into an internal AST, then rendered per-provider (Discord Markdown, Slack mrkdwn, Telegram HTML, plain text)
 - **Best-effort by default** — formatting downgrades silently; use `Dispatch::strict()` to error on unsupported features
 - **Provider-typed receipts** — `SendReceipt` contains a `MessageRef` for replies (Slack `thread_ts`, Discord `message_reference`, etc.)
+- **Receipt-backed CLI replies** — each CLI send stores a JSON receipt so later replies can reuse the typed `MessageRef`
 - **Feature-gated providers** — only `discord` + `slack` compile by default; Stage 2 providers are opt-in
 
 ### Core Types
@@ -73,7 +74,12 @@ messenger --route discord.alerts "Server down"
 messenger --silent --image /tmp/chart.png "See attached"
 messenger --plain "No **markdown** rendering"
 messenger --strict "Error if provider can't handle this"
+
+# Reply using a saved receipt path
+messenger --route slack.ops --reply-to ~/.messenger/receipts/1712345678000-slack.json "Follow-up"
 ```
+
+`--reply-to` accepts either a saved receipt path or a JSON `SendReceipt`/`MessageRef`. `--image` and `--file` now flow end-to-end through validation, so unsupported providers fail explicitly instead of silently discarding attachments.
 
 ### Configuration
 
@@ -86,12 +92,18 @@ Config file: `~/.messenger.json`
     "slack.ops": {
       "provider": "slack",
       "channel_id": "C012345",
-      "token_env": "SLACK_BOT_TOKEN"
+      "bot_token_env": "SLACK_BOT_TOKEN"
     },
     "discord.alerts": {
       "provider": "discord",
       "channel_id": "123456789012345678",
-      "token_env": "DISCORD_BOT_TOKEN"
+      "bot_token_env": "DISCORD_BOT_TOKEN"
+    },
+    "signal.ops": {
+      "provider": "signal",
+      "recipient": "+15551234567",
+      "rpc_url_env": "SIGNAL_RPC_URL",
+      "account_env": "SIGNAL_ACCOUNT"
     }
   }
 }
