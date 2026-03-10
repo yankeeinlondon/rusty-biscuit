@@ -2,43 +2,66 @@
 
 use biscuit_terminal::{
     components::{
+        compose::Compose,
         list::UnorderedList,
         prose::Prose,
-        renderable::Renderable,
-        section::{HeadingLevel, Section},
+        renderable::{Renderable, RenderableContent},
     },
     terminal::Terminal,
+    utils::layout::Margin,
 };
 
-pub fn print_network_section(network: &sniff::NetworkInfo) {
+pub fn print_network_section(network: &sniff::NetworkInfo, verbose: u8) {
     let terminal = Terminal::new();
-    let document = build_network_document(network);
+    let document = build_network_document(network, verbose);
     print!("{}", document.display(&terminal));
     println!();
 }
 
-fn build_network_document(network: &sniff::NetworkInfo) -> Section {
-    let mut document = Section::new(HeadingLevel::h1, "Network");
+fn build_network_document(network: &sniff::NetworkInfo, verbose: u8) -> Compose {
+    let mut document = Compose::default();
+
+    document.add_prose(Prose::new("<bold><underline>Network</underline></bold>"));
+    document.add_text("\n");
 
     if network.permission_denied {
-        document.push(Prose::new(
+        document.add_prose(Prose::new(
             "<red>Interface enumeration was denied by the host OS.</red>",
         ));
-        document.push(build_snapshot_section(network));
+        document.add_text("\n");
+        document.add_unordered_list(build_summary_list(network, verbose));
         return document;
     }
 
-    document.push(Prose::new(
-        "Local interface inventory for this host, plus an external WAN lookup when available.",
-    ));
-    document.push(build_snapshot_section(network));
-    document.push(build_interfaces_section(network));
+    document.add_unordered_list(build_summary_list(network, verbose));
+
+    if verbose == 0 {
+        return document;
+    }
+
+    let interfaces = build_interface_blocks(network, verbose);
+    if !interfaces.is_empty() {
+        document.add_text("\n");
+        document.add_prose(Prose::new("<bold>Interfaces</bold>"));
+        document.add_text("\n");
+        for (index, block) in interfaces.into_iter().enumerate() {
+            if index > 0 {
+                document.add_text("\n");
+            }
+            document.add_unordered_list(block);
+        }
+    }
+
     document
 }
 
-fn build_snapshot_section(network: &sniff::NetworkInfo) -> Section {
-    let mut section = Section::new(HeadingLevel::h2, "Snapshot");
+fn build_summary_list(network: &sniff::NetworkInfo, verbose: u8) -> UnorderedList {
     let mut list = UnorderedList::empty();
+    let active_non_loopback = network
+        .interfaces
+        .iter()
+        .filter(|interface| interface.flags.is_up && !interface.flags.is_loopback)
+        .count();
 
     list.add(Prose::new(format!(
         "<bold>Primary interface:</bold> {}",
@@ -47,83 +70,102 @@ fn build_snapshot_section(network: &sniff::NetworkInfo) -> Section {
             .as_deref()
             .unwrap_or("Not detected")
     )));
+
+    if let Some(wan_ip) = &network.wan_ip_address {
+        list.add(Prose::new(format!("<bold>WAN IP address:</bold> {wan_ip}")));
+    }
+
     list.add(Prose::new(format!(
-        "<bold>WAN IP address:</bold> {}",
-        network.wan_ip_address.as_deref().unwrap_or("Unavailable")
-    )));
-    list.add(Prose::new(format!(
-        "<bold>Interfaces detected:</bold> {}",
+        "<bold>Active interfaces:</bold> {} of {}",
+        active_non_loopback,
         network.interfaces.len()
     )));
-    list.add(Prose::new(format!(
-        "<bold>IPv4 addresses:</bold> {}",
-        network.ip_addresses.v4.len()
-    )));
-    list.add(Prose::new(format!(
-        "<bold>IPv6 addresses:</bold> {}",
-        network.ip_addresses.v6.len()
-    )));
 
-    section.push(list);
-    section
-}
-
-fn build_interfaces_section(network: &sniff::NetworkInfo) -> Section {
-    let mut section = Section::new(HeadingLevel::h2, "Interfaces");
-
-    if network.interfaces.is_empty() {
-        section.push(Prose::new("No interfaces were returned by the host."));
-        return section;
+    if !network.ip_addresses.v4.is_empty() {
+        let primary_v4 = addresses_for_interface_v4(network, network.primary_interface.as_deref());
+        let summary = if primary_v4.is_empty() {
+            format!("{} total", network.ip_addresses.v4.len())
+        } else {
+            primary_v4.join(", ")
+        };
+        list.add(Prose::new(format!("<bold>IPv4:</bold> {summary}")));
     }
 
-    for interface in &network.interfaces {
-        section.push(build_interface_section(
-            interface,
-            network.primary_interface.as_deref(),
-        ));
+    if !network.ip_addresses.v6.is_empty() {
+        let primary_v6 = addresses_for_interface_v6(network, network.primary_interface.as_deref());
+        let summary = if primary_v6.is_empty() {
+            format!("{} total", network.ip_addresses.v6.len())
+        } else {
+            primary_v6.join(", ")
+        };
+        list.add(Prose::new(format!("<bold>IPv6:</bold> {summary}")));
     }
 
-    section
+    if verbose > 1 {
+        list.add(Prose::new(format!(
+            "<bold>Total local addresses:</bold> {}",
+            network.ip_addresses.v4.len() + network.ip_addresses.v6.len()
+        )));
+    }
+
+    list
 }
 
-fn build_interface_section(
-    interface: &sniff::network::NetworkInterface,
-    primary_interface: Option<&str>,
-) -> Section {
-    let mut section = Section::new(HeadingLevel::h3, &interface.name);
-    let mut list = UnorderedList::empty();
+fn build_interface_blocks(network: &sniff::NetworkInfo, verbose: u8) -> Vec<UnorderedList> {
+    network
+        .interfaces
+        .iter()
+        .filter(|interface| verbose > 1 || interface.flags.is_up || interface.flags.is_loopback)
+        .map(|interface| {
+            let mut block = UnorderedList::empty();
+            let label = format!(
+                "<bold>{}</bold> <dim>({})</dim>",
+                interface.name,
+                format_interface_status(interface, network.primary_interface.as_deref())
+            );
+            block.add(Prose::new(label));
 
-    list.add(Prose::new(format!(
-        "<bold>Status:</bold> {}",
-        format_interface_status(interface, primary_interface)
-    )));
-    list.add(Prose::new(format!(
-        "<bold>MAC address:</bold> {}",
-        interface.mac_address.as_deref().unwrap_or("Unavailable")
-    )));
-    list.add(Prose::new(format!(
-        "<bold>IPv4 addresses:</bold> {}",
-        format_addresses(
-            interface
-                .ipv4_addresses
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect()
-        )
-    )));
-    list.add(Prose::new(format!(
-        "<bold>IPv6 addresses:</bold> {}",
-        format_addresses(
-            interface
-                .ipv6_addresses
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect()
-        )
-    )));
+            if let Some(mac_address) = &interface.mac_address
+                && verbose > 1
+            {
+                block.add(indented_line(format!(
+                    "<bold>MAC address:</bold> {mac_address}"
+                )));
+            }
 
-    section.push(list);
-    section
+            if !interface.ipv4_addresses.is_empty() {
+                block.add(indented_line(format!(
+                    "<bold>IPv4:</bold> {}",
+                    interface
+                        .ipv4_addresses
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+
+            if !interface.ipv6_addresses.is_empty() {
+                block.add(indented_line(format!(
+                    "<bold>IPv6:</bold> {}",
+                    interface
+                        .ipv6_addresses
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+
+            block
+        })
+        .collect()
+}
+
+fn indented_line(content: String) -> RenderableContent {
+    Prose::new(content)
+        .with_left_margin(Margin::Chars(2))
+        .into()
 }
 
 fn format_interface_status(
@@ -133,30 +175,56 @@ fn format_interface_status(
     let mut states = Vec::with_capacity(4);
 
     states.push(if interface.flags.is_up {
-        "<green>up</green>".to_string()
+        "up".to_string()
     } else {
-        "<red>down</red>".to_string()
+        "down".to_string()
     });
 
     if interface.flags.is_running {
-        states.push("<cyan>running</cyan>".to_string());
+        states.push("running".to_string());
     }
 
     if interface.flags.is_loopback {
-        states.push("<dim>loopback</dim>".to_string());
+        states.push("loopback".to_string());
     }
 
     if primary_interface == Some(interface.name.as_str()) {
-        states.push("<yellow>primary</yellow>".to_string());
+        states.push("primary".to_string());
     }
 
     states.join(", ")
 }
 
-fn format_addresses(addresses: Vec<String>) -> String {
-    if addresses.is_empty() {
-        "None".to_string()
-    } else {
-        addresses.join(", ")
-    }
+fn addresses_for_interface_v4(
+    network: &sniff::NetworkInfo,
+    interface_name: Option<&str>,
+) -> Vec<String> {
+    let Some(interface_name) = interface_name else {
+        return Vec::new();
+    };
+
+    network
+        .ip_addresses
+        .v4
+        .iter()
+        .filter(|address| address.interface == interface_name)
+        .map(|address| address.address.clone())
+        .collect()
+}
+
+fn addresses_for_interface_v6(
+    network: &sniff::NetworkInfo,
+    interface_name: Option<&str>,
+) -> Vec<String> {
+    let Some(interface_name) = interface_name else {
+        return Vec::new();
+    };
+
+    network
+        .ip_addresses
+        .v6
+        .iter()
+        .filter(|address| address.interface == interface_name)
+        .map(|address| address.address.clone())
+        .collect()
 }

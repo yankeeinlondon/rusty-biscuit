@@ -275,7 +275,7 @@ pub fn print_text(
                 print_hardware_section(hardware, verbose, repo_root);
             }
             if let Some(ref network) = result.network {
-                print_network_section(network);
+                print_network_section(network, verbose);
             }
             if let Some(ref filesystem) = result.filesystem {
                 print_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested);
@@ -294,7 +294,7 @@ pub fn print_text(
         }
         OutputFilter::Network => {
             if let Some(ref network) = result.network {
-                print_network_section(network);
+                print_network_section(network, verbose);
             }
         }
         OutputFilter::Filesystem => {
