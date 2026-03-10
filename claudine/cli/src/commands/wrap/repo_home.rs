@@ -154,6 +154,7 @@ pub fn build_repo_home_env(
     repo_only: bool,
 ) -> Result<(HashMap<OsString, OsString>, Option<PathBuf>)> {
     let manager = RepoHomeManager::new(provider);
+    let user_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let shadow_home = manager.ensure_shadow_home()?;
     manager.sync_shadow_home(repo_only)?;
 
@@ -172,11 +173,8 @@ pub fn build_repo_home_env(
     let shadow_home_root = shadow_home
         .parent()
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("~"))
-                .join(".claudine")
-        });
+        .unwrap_or_else(|| user_home.join(".claudine"));
+    materialize_root_level_state(provider, &user_home, &shadow_home_root)?;
     env.insert(OsString::from("HOME"), OsString::from(shadow_home_root));
 
     Ok((env, Some(shadow_home)))
@@ -199,6 +197,34 @@ fn materialize_repo_scoped_resources(
     }
 
     Ok(())
+}
+
+fn materialize_root_level_state(
+    provider: Provider,
+    user_home: &Path,
+    shadow_home_root: &Path,
+) -> Result<()> {
+    for relative_path in root_level_state_files(provider) {
+        let source = user_home.join(relative_path);
+        if !source.exists() {
+            continue;
+        }
+
+        let dest = shadow_home_root.join(relative_path);
+        remove_existing_path(&dest)?;
+        link_or_copy_file(&source, &dest)?;
+    }
+
+    Ok(())
+}
+
+fn root_level_state_files(provider: Provider) -> &'static [&'static str] {
+    match provider {
+        // Claude keeps global state such as onboarding/theme/auth outside
+        // `~/.claude/`, so repo isolation must preserve this root-level file.
+        Provider::Claude => &[".claude.json"],
+        _ => &[],
+    }
 }
 
 fn codex_repo_prompts_source(repo_root: &Path) -> Option<PathBuf> {
@@ -454,5 +480,42 @@ mod tests {
             fs::read_link(prompts_dir.join("review.md")).unwrap(),
             second_review
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_root_level_state_preserves_claude_global_state() {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().join("home");
+        let shadow_home_root = tmp.path().join("shadow");
+        let source = user_home.join(".claude.json");
+        let dest = shadow_home_root.join(".claude.json");
+
+        fs::create_dir_all(&user_home).unwrap();
+        fs::create_dir_all(&shadow_home_root).unwrap();
+        fs::write(&source, "{\"hasCompletedOnboarding\":true}").unwrap();
+
+        materialize_root_level_state(Provider::Claude, &user_home, &shadow_home_root).unwrap();
+
+        assert_eq!(fs::read_link(&dest).unwrap(), source);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_root_level_state_replaces_stale_shadow_file() {
+        let tmp = TempDir::new().unwrap();
+        let user_home = tmp.path().join("home");
+        let shadow_home_root = tmp.path().join("shadow");
+        let source = user_home.join(".claude.json");
+        let dest = shadow_home_root.join(".claude.json");
+
+        fs::create_dir_all(&user_home).unwrap();
+        fs::create_dir_all(&shadow_home_root).unwrap();
+        fs::write(&source, "{\"userID\":\"real\"}").unwrap();
+        fs::write(&dest, "{\"userID\":\"stale\"}").unwrap();
+
+        materialize_root_level_state(Provider::Claude, &user_home, &shadow_home_root).unwrap();
+
+        assert_eq!(fs::read_link(&dest).unwrap(), source);
     }
 }
