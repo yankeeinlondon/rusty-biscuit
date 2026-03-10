@@ -169,7 +169,8 @@ fn run_list(json_output: bool) -> Result<()> {
     log::data(&"-".repeat(95));
     for server in servers {
         let transport = format!("{:?}", server.transport).to_lowercase();
-        let defaults = format_defaults(&server.id, &user_defaults, &repo_defaults, &active_defaults);
+        let defaults =
+            format_defaults(&server.id, &user_defaults, &repo_defaults, &active_defaults);
         let providers = collect_provider_presence(&state, &server.id, repo_root.as_deref())
             .into_iter()
             .map(|value| {
@@ -395,7 +396,10 @@ fn run_alias(args: AliasArgs, json_output: bool) -> Result<()> {
                     "alias": add.alias,
                 }))?);
             } else {
-                log::data(&format!("Alias '{}' added to server '{}'", add.alias, add.id));
+                log::data(&format!(
+                    "Alias '{}' added to server '{}'",
+                    add.alias, add.id
+                ));
             }
         }
         AliasCommand::Remove(remove) => {
@@ -441,7 +445,9 @@ fn run_sync(args: SyncExportArgs, json_output: bool) -> Result<()> {
     let mut state = McpProviderStateStore::load()?;
 
     let scope = match args.scope.as_str() {
-        "repo" => Scope::Repo(current_repo_root()?.ok_or_else(|| eyre!("failed to resolve repo root"))?),
+        "repo" => {
+            Scope::Repo(current_repo_root()?.ok_or_else(|| eyre!("failed to resolve repo root"))?)
+        }
         "user" => Scope::User,
         other => return Err(eyre!("unknown scope '{}'; expected user or repo", other)),
     };
@@ -649,5 +655,9 @@ fn truncate_column(value: &str, max_len: usize) -> String {
         return value.to_string();
     }
 
-    value.chars().take(max_len.saturating_sub(3)).collect::<String>() + "..."
+    value
+        .chars()
+        .take(max_len.saturating_sub(3))
+        .collect::<String>()
+        + "..."
 }

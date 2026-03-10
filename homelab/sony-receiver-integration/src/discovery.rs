@@ -37,9 +37,15 @@ impl DeviceDiscovery for SonyDiscovery {
                         "wireless_mac_addr".to_string(),
                         info.wireless_mac_addr.map(|value| json!(value)),
                     ),
-                    ("generation".to_string(), info.generation.map(|value| json!(value))),
+                    (
+                        "generation".to_string(),
+                        info.generation.map(|value| json!(value)),
+                    ),
                     ("region".to_string(), info.region.map(|value| json!(value))),
-                    ("product".to_string(), info.product.map(|value| json!(value))),
+                    (
+                        "product".to_string(),
+                        info.product.map(|value| json!(value)),
+                    ),
                 ]
                 .into_iter()
                 .filter_map(|(key, value)| value.map(|value| (key, value)))

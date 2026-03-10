@@ -333,7 +333,11 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
 
     /// Refresh only devices assigned to a specific Remote.
     pub async fn refresh_remote(&self, remote_id: &str) {
-        let device_ids: Vec<String> = self.assigned_device_ids(remote_id).await.into_iter().collect();
+        let device_ids: Vec<String> = self
+            .assigned_device_ids(remote_id)
+            .await
+            .into_iter()
+            .collect();
         for id in device_ids {
             let _ = self.refresh_device(&id).await;
         }
@@ -392,11 +396,13 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
                                 &update.entity_type,
                                 update.attributes.clone(),
                             ) {
-                                subscriptions.broadcast_raw(entity_change_event(
-                                    &changed.entity_id,
-                                    &changed.entity_type,
-                                    &changed.attributes,
-                                )).await;
+                                subscriptions
+                                    .broadcast_raw(entity_change_event(
+                                        &changed.entity_id,
+                                        &changed.entity_type,
+                                        &changed.attributes,
+                                    ))
+                                    .await;
                             }
                         }
                         drop(cache);
@@ -406,7 +412,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
                         if conn.mark_connected(&device_id) {
                             let state = conn.overall();
                             subscriptions
-                                .broadcast_raw(device_state_event(state.as_uc_state())).await;
+                                .broadcast_raw(device_state_event(state.as_uc_state()))
+                                .await;
                         }
                     }
                     Err(_) => {
@@ -414,7 +421,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
                         if conn.mark_disconnected(&device_id) {
                             let state = conn.overall();
                             subscriptions
-                                .broadcast_raw(device_state_event(state.as_uc_state())).await;
+                                .broadcast_raw(device_state_event(state.as_uc_state()))
+                                .await;
                         }
                     }
                 }
@@ -430,11 +438,13 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
                 &update.entity_type,
                 update.attributes.clone(),
             ) {
-                self.subscriptions.broadcast_raw(entity_change_event(
-                    &changed.entity_id,
-                    &changed.entity_type,
-                    &changed.attributes,
-                )).await;
+                self.subscriptions
+                    .broadcast_raw(entity_change_event(
+                        &changed.entity_id,
+                        &changed.entity_type,
+                        &changed.attributes,
+                    ))
+                    .await;
             }
         }
     }
@@ -444,7 +454,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         if conn.mark_connected(device_id) {
             let state = conn.overall();
             self.subscriptions
-                .broadcast_raw(device_state_event(state.as_uc_state())).await;
+                .broadcast_raw(device_state_event(state.as_uc_state()))
+                .await;
         }
     }
 
@@ -453,7 +464,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         if conn.mark_disconnected(device_id) {
             let state = conn.overall();
             self.subscriptions
-                .broadcast_raw(device_state_event(state.as_uc_state())).await;
+                .broadcast_raw(device_state_event(state.as_uc_state()))
+                .await;
         }
     }
 
@@ -461,7 +473,8 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         let conn = self.connectivity.read().await;
         let state = conn.overall();
         self.subscriptions
-            .broadcast_raw(device_state_event(state.as_uc_state())).await;
+            .broadcast_raw(device_state_event(state.as_uc_state()))
+            .await;
     }
 
     async fn assigned_device_ids(&self, remote_id: &str) -> HashSet<String> {

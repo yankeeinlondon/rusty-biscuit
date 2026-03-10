@@ -4,9 +4,9 @@
 //! exposing Sony ES receivers (STR-AZ7000ES and similar) as power switch
 //! and media player entities with volume, mute, and input source control.
 
+mod discovery;
 #[allow(dead_code)]
 mod dispatch;
-mod discovery;
 mod driver;
 #[allow(dead_code)]
 mod error;

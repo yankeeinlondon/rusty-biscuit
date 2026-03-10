@@ -106,14 +106,10 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
 
     assert_eq!(languages.primary, Some(ProgrammingLanguage::Rust));
     assert_eq!(languages.total_files_scanned, 2);
-    assert!(languages
-        .languages
-        .iter()
-        .any(|lang| lang.language == ProgrammingLanguage::Rust));
-    assert!(!languages
-        .languages
-        .iter()
-        .any(|lang| lang.language == ProgrammingLanguage::TypeScript));
+    assert!(languages.languages.iter().any(|lang| lang.language == ProgrammingLanguage::Rust));
+    assert!(
+        !languages.languages.iter().any(|lang| lang.language == ProgrammingLanguage::TypeScript)
+    );
 }
 
 // === Regression tests for JSON serialization of partial results ===

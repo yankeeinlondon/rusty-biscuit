@@ -3,9 +3,9 @@
 //! Standalone WebSocket server that speaks the UC Integration protocol,
 //! exposing Arcam PA-series amplifiers as switch entities (power, mute).
 
+mod discovery;
 #[allow(dead_code)]
 mod dispatch;
-mod discovery;
 mod driver;
 #[allow(dead_code)]
 mod error;

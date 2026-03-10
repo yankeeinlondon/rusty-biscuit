@@ -1735,7 +1735,8 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
 
 fn refresh_package_boundaries(packages: &mut [Package]) {
     let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
-    let package_roots: Vec<PathBuf> = packages.iter().map(|pkg| canonicalize_path(&pkg.path)).collect();
+    let package_roots: Vec<PathBuf> =
+        packages.iter().map(|pkg| canonicalize_path(&pkg.path)).collect();
     let package_names: Vec<String> = packages.iter().map(|pkg| pkg.name.clone()).collect();
 
     for (index, package) in packages.iter_mut().enumerate() {
@@ -1789,10 +1790,8 @@ fn discover_packages_from_manifests_in_tree(
 ) -> Vec<Package> {
     let mut discovered_dirs = HashSet::new();
 
-    let walker = walkdir::WalkDir::new(search_root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
+    let walker =
+        walkdir::WalkDir::new(search_root).follow_links(false).into_iter().filter_entry(|entry| {
             if !entry.file_type().is_dir() {
                 return true;
             }
@@ -1868,16 +1867,13 @@ fn is_fixture_manifest(path: &Path) -> bool {
         .filter_map(|component| component.as_os_str().to_str().map(|s| s.to_lowercase()))
         .collect();
 
-    if components
-        .iter()
-        .any(|component| matches!(component.as_str(), "__fixtures__" | "testdata"))
+    if components.iter().any(|component| matches!(component.as_str(), "__fixtures__" | "testdata"))
     {
         return true;
     }
 
     components.windows(2).any(|window| {
-        matches!(window[0].as_str(), "test" | "tests" | "spec" | "specs")
-            && window[1] == "fixtures"
+        matches!(window[0].as_str(), "test" | "tests" | "spec" | "specs") && window[1] == "fixtures"
     })
 }
 
@@ -2451,11 +2447,12 @@ mod tests {
 
         let scan = detect_package_languages("", dir.path(), &[]);
         assert_eq!(scan.language_breakdown.primary, Some(ProgrammingLanguage::Rust));
-        assert!(scan
-            .language_breakdown
-            .languages
-            .iter()
-            .any(|language| language.language == ProgrammingLanguage::Rust));
+        assert!(
+            scan.language_breakdown
+                .languages
+                .iter()
+                .any(|language| language.language == ProgrammingLanguage::Rust)
+        );
     }
 
     #[test]
@@ -2465,11 +2462,12 @@ mod tests {
 
         let scan = detect_package_languages("", dir.path(), &[]);
         assert_eq!(scan.language_breakdown.primary, Some(ProgrammingLanguage::JavaScript));
-        assert!(scan
-            .language_breakdown
-            .languages
-            .iter()
-            .any(|language| language.language == ProgrammingLanguage::JavaScript));
+        assert!(
+            scan.language_breakdown
+                .languages
+                .iter()
+                .any(|language| language.language == ProgrammingLanguage::JavaScript)
+        );
     }
 
     #[test]
@@ -2973,7 +2971,10 @@ version = "1.0.128"
         assert_eq!(result.monorepo_tool, Some(MonorepoTool::CargoWorkspace));
         assert_eq!(
             result.workspace_tools,
-            vec![MonorepoTool::CargoWorkspace, MonorepoTool::PnpmWorkspaces]
+            vec![
+                MonorepoTool::CargoWorkspace,
+                MonorepoTool::PnpmWorkspaces
+            ]
         );
 
         let packages = result.packages.unwrap();
@@ -2982,10 +2983,12 @@ version = "1.0.128"
         let server = packages.iter().find(|pkg| pkg.name == "homelab-server").unwrap();
         assert_eq!(server.ecosystem, PackageEcosystem::Cargo);
         assert_eq!(server.primary_language, Some(ProgrammingLanguage::Rust));
-        assert!(!server
-            .languages
-            .iter()
-            .any(|language| language.language == ProgrammingLanguage::TypeScript));
+        assert!(
+            !server
+                .languages
+                .iter()
+                .any(|language| language.language == ProgrammingLanguage::TypeScript)
+        );
         assert_eq!(server.nested_packages, vec!["homelab-frontend".to_string()]);
         assert!(server.discovery_sources.contains(&PackageDiscoverySource::CargoWorkspace));
 
@@ -3030,11 +3033,8 @@ version = "1.0.128"
     #[test]
     fn test_manifest_scan_skips_generated_nested_cargo_package() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"schema\", \"gen\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"schema\", \"gen\"]\n")
+            .unwrap();
 
         let schema_dir = dir.path().join("schema");
         fs::create_dir_all(schema_dir.join("src")).unwrap();

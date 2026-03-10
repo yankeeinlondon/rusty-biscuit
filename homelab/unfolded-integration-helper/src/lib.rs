@@ -21,7 +21,9 @@ pub mod test_fixtures;
 pub use std::collections::HashMap as StdHashMap;
 
 pub use connectivity::{ConnectivityState, ConnectivityTracker};
-pub use device_manager::{CommandResult, DeviceDriver, DeviceError, DeviceManager, Entity, EntityUpdate};
+pub use device_manager::{
+    CommandResult, DeviceDriver, DeviceError, DeviceManager, Entity, EntityUpdate,
+};
 pub use discovery::{DeviceDiscovery, bounded_scan, build_candidate_list, local_ipv4_candidates};
 pub use envelope::{
     EnvelopeError, IntegrationRequest, RequestEnvelope, available_entities_response,
@@ -31,13 +33,12 @@ pub use envelope::{
 };
 pub use persistent_registry::PersistentRegistry;
 pub use registry::{
-    ConfiguredDevice, DeviceMetadata, DiscoverySource, KnownDevice, RegistryData,
-    RemoteAssignment,
+    ConfiguredDevice, DeviceMetadata, DiscoverySource, KnownDevice, RegistryData, RemoteAssignment,
 };
 pub use setup::{
-    SetupSession, SetupSessions, SetupState, device_selection_schema,
-    device_selection_setup_data, remote_id_from_context, setup_driver_response,
-    setup_progress_event, setup_wait_user_action_event,
+    SetupSession, SetupSessions, SetupState, device_selection_schema, device_selection_setup_data,
+    remote_id_from_context, setup_driver_response, setup_progress_event,
+    setup_wait_user_action_event,
 };
 pub use state_cache::{CachedEntityState, EntityState, StateCache};
 pub use subscriptions::SubscriptionRegistry;

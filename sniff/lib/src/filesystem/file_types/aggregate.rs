@@ -218,11 +218,8 @@ mod tests {
     #[test]
     fn framework_default_language_counts_toward_js() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Component.vue"),
-            "<template><div>Hello</div></template>",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Component.vue"), "<template><div>Hello</div></template>")
+            .unwrap();
 
         let inventory = scan_file_inventory(dir.path()).unwrap();
         let summary = summarize_languages(&inventory);

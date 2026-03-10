@@ -66,10 +66,7 @@ pub fn scan_file_inventory_with_exclusions(
 }
 
 fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
-    if exclude_roots
-        .iter()
-        .any(|root| entry.path() == root || entry.path().starts_with(root))
-    {
+    if exclude_roots.iter().any(|root| entry.path() == root || entry.path().starts_with(root)) {
         return true;
     }
 
@@ -140,7 +137,8 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if descriptor.association == FileAssociation::FrameworkFile
             && let Some(framework) = descriptor.framework
         {
-            let (related_languages, confidence, source) = framework::related_languages(framework, path);
+            let (related_languages, confidence, source) =
+                framework::related_languages(framework, path);
             classification.related_languages = related_languages;
             classification.confidence = confidence;
             classification.source = source;
@@ -159,8 +157,7 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
         }
         if is_probably_text(bytes)
             && let Ok(Some(detection)) = hyperpolyglot::detect(path)
-            && let Some(language) =
-                ProgrammingLanguage::from_hyperpolyglot(detection.language())
+            && let Some(language) = ProgrammingLanguage::from_hyperpolyglot(detection.language())
         {
             return FileClassification {
                 path: relative_path,
@@ -250,10 +247,18 @@ fn classify_by_binary_signature(
         FileAssociation::Audio
     } else if bytes.starts_with(b"\x7fELF")
         || bytes.starts_with(b"MZ")
-        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
-        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
-        || bytes.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
-        || bytes.starts_with(&[0xca, 0xfe, 0xba, 0xbe])
+        || bytes.starts_with(&[
+            0xfe, 0xed, 0xfa, 0xce,
+        ])
+        || bytes.starts_with(&[
+            0xfe, 0xed, 0xfa, 0xcf,
+        ])
+        || bytes.starts_with(&[
+            0xcf, 0xfa, 0xed, 0xfe,
+        ])
+        || bytes.starts_with(&[
+            0xca, 0xfe, 0xba, 0xbe,
+        ])
     {
         if is_shared_library(path) {
             FileAssociation::Binary

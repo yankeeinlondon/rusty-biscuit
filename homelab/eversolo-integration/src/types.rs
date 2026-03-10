@@ -248,13 +248,21 @@ pub fn build_entities(device_name: &str, catalog: &EntityCatalog) -> Vec<Eversol
         entities.push(sensor_entity(device_name, "firmware_sensor", "Firmware"));
     }
     if catalog.identity.ip.is_some() {
-        entities.push(sensor_entity(device_name, "network_address_sensor", "Network Address"));
+        entities.push(sensor_entity(
+            device_name,
+            "network_address_sensor",
+            "Network Address",
+        ));
     }
     if catalog.identity.net_mac.is_some() {
         entities.push(sensor_entity(device_name, "mac_sensor", "MAC Address"));
     }
     if catalog.identity.able_remote_boot.is_some() {
-        entities.push(sensor_entity(device_name, "remote_boot_sensor", "Remote Boot"));
+        entities.push(sensor_entity(
+            device_name,
+            "remote_boot_sensor",
+            "Remote Boot",
+        ));
     }
 
     entities
@@ -356,9 +364,9 @@ pub fn resolve_command(entity_id: &str, cmd_id: &str, params: &Value) -> Option<
             let source = params.get("source")?.as_str()?.to_string();
             Some(EversoloOperation::SelectSource(source))
         }
-        ("input_select", _) => {
-            Some(EversoloOperation::SelectInput(parse_selection_command(cmd_id, params)?))
-        }
+        ("input_select", _) => Some(EversoloOperation::SelectInput(parse_selection_command(
+            cmd_id, params,
+        )?)),
         ("output_select", _) => Some(EversoloOperation::SelectOutput(parse_selection_command(
             cmd_id, params,
         )?)),
@@ -452,7 +460,11 @@ fn light_entity(device_name: &str, kind: &str, label: &str) -> EversoloEntity {
         entity_id: format!("eversolo.{device_name}.{kind}"),
         entity_type: "light".to_string(),
         name: HashMap::from([("en".to_string(), label.to_string())]),
-        features: vec!["on_off".to_string(), "toggle".to_string(), "dim".to_string()],
+        features: vec![
+            "on_off".to_string(),
+            "toggle".to_string(),
+            "dim".to_string(),
+        ],
         options: None,
     }
 }
@@ -467,12 +479,20 @@ fn sensor_entity(device_name: &str, kind: &str, label: &str) -> EversoloEntity {
     }
 }
 
-fn select_state(device_name: &str, kind: &str, options: Vec<String>, current_option: String) -> EntityState {
+fn select_state(
+    device_name: &str,
+    kind: &str,
+    options: Vec<String>,
+    current_option: String,
+) -> EntityState {
     EntityState::new(
         format!("eversolo.{device_name}.{kind}"),
         "select",
         HashMap::from([
-            ("current_option".to_string(), serde_json::json!(current_option)),
+            (
+                "current_option".to_string(),
+                serde_json::json!(current_option),
+            ),
             ("options".to_string(), serde_json::json!(options)),
         ]),
     )
@@ -557,12 +577,16 @@ mod tests {
         assert_eq!(entities[1].entity_id, "eversolo.living.player");
         assert_eq!(entities[1].entity_type, "media_player");
         assert_eq!(entities[1].options.as_ref().unwrap()["volume_steps"], 160);
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_id == "eversolo.living.power_action_reboot"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_id == "eversolo.living.screen_brightness"));
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_id == "eversolo.living.power_action_reboot")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_id == "eversolo.living.screen_brightness")
+        );
     }
 
     #[test]
@@ -582,9 +606,11 @@ mod tests {
         assert!(states.len() >= 7);
         assert_eq!(states[0].attributes["state"], "UNKNOWN");
         assert_eq!(states[1].attributes["source"], "");
-        assert!(states
-            .iter()
-            .any(|state| state.entity_id == "eversolo.living.input_select"));
+        assert!(
+            states
+                .iter()
+                .any(|state| state.entity_id == "eversolo.living.input_select")
+        );
     }
 
     #[test]

@@ -60,9 +60,8 @@ impl RequestEnvelope {
     ///
     /// Returns an error if the payload is not a valid UC request envelope.
     pub fn parse(value: Value) -> Result<Self, EnvelopeError> {
-        let kind: IntegrationWsEnvelopeKind = serde_json::from_value(
-            value.get("kind").cloned().unwrap_or(Value::Null),
-        )?;
+        let kind: IntegrationWsEnvelopeKind =
+            serde_json::from_value(value.get("kind").cloned().unwrap_or(Value::Null))?;
         if kind != IntegrationWsEnvelopeKind::Req {
             return Err(EnvelopeError::UnexpectedKind(kind));
         }
@@ -128,7 +127,8 @@ pub fn remote_setup_abort_error(value: &Value) -> Option<&str> {
     if envelope_kind(value) == Some("event")
         && envelope_message_name(value) == Some("abort_driver_setup")
     {
-        value.get("msg_data")
+        value
+            .get("msg_data")
             .and_then(|msg_data| msg_data.get("error"))
             .and_then(Value::as_str)
     } else {

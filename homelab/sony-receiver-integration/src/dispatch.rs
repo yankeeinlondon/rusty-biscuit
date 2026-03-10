@@ -248,7 +248,10 @@ fn resolve_uri_to_category(
     })
 }
 
-fn available_source_categories(native: &[NativeInputConfig], inputs: &[InputSource]) -> Vec<String> {
+fn available_source_categories(
+    native: &[NativeInputConfig],
+    inputs: &[InputSource],
+) -> Vec<String> {
     let mut source_list = Vec::new();
 
     for item in native {
@@ -477,7 +480,10 @@ mod tests {
             },
         ];
 
-        assert_eq!(available_source_categories(&native, &inputs), vec!["GAME", "TV"]);
+        assert_eq!(
+            available_source_categories(&native, &inputs),
+            vec!["GAME", "TV"]
+        );
     }
 
     fn sony_real_target() -> Option<(String, u16)> {

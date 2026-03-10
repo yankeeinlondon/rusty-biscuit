@@ -3,9 +3,9 @@
 //! Standalone WebSocket server that speaks the UC Integration protocol,
 //! exposing an Eversolo streamer as a power switch and media player entity.
 
+mod discovery;
 #[allow(dead_code)]
 mod dispatch;
-mod discovery;
 mod driver;
 #[allow(dead_code)]
 mod error;

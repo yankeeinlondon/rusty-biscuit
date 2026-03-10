@@ -1318,7 +1318,9 @@ mod tests {
             Some(Provider::Claude)
         );
         assert_eq!(
-            Provider::detect_from_payload(&serde_json::json!({"hook_event_name":"UserPromptSubmit"})),
+            Provider::detect_from_payload(
+                &serde_json::json!({"hook_event_name":"UserPromptSubmit"})
+            ),
             Some(Provider::Claude)
         );
 

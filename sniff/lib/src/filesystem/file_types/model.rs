@@ -152,12 +152,9 @@ impl ProgrammingLanguage {
 
     pub const fn language_type(self) -> ProgrammingLanguageType {
         match self {
-            Self::Rust
-            | Self::Go
-            | Self::C
-            | Self::Cpp
-            | Self::Swift
-            | Self::Zig => ProgrammingLanguageType::CompiledBinary,
+            Self::Rust | Self::Go | Self::C | Self::Cpp | Self::Swift | Self::Zig => {
+                ProgrammingLanguageType::CompiledBinary
+            }
             Self::Java
             | Self::Kotlin
             | Self::Scala
@@ -165,12 +162,9 @@ impl ProgrammingLanguage {
             | Self::CSharp
             | Self::FSharp
             | Self::Wat => ProgrammingLanguageType::CompiledIntermediate,
-            Self::Shell
-            | Self::Bash
-            | Self::Zsh
-            | Self::Fish
-            | Self::PowerShell
-            | Self::Batch => ProgrammingLanguageType::ShellScript,
+            Self::Shell | Self::Bash | Self::Zsh | Self::Fish | Self::PowerShell | Self::Batch => {
+                ProgrammingLanguageType::ShellScript
+            }
             Self::JavaScript
             | Self::TypeScript
             | Self::Python

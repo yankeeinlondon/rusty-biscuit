@@ -1456,7 +1456,12 @@ fn refresh_remote_tracking_refs(repo: &Repository) {
         let _ = Command::new("git")
             .current_dir(repo_root)
             .env("GIT_TERMINAL_PROMPT", "0")
-            .args(["fetch", "--quiet", "--prune", remote_name])
+            .args([
+                "fetch",
+                "--quiet",
+                "--prune",
+                remote_name,
+            ])
             .status();
     }
 }

@@ -114,12 +114,8 @@ impl SonyIntegrationHandler {
             warn!(error = %error, "failed to send Sony discovery progress");
         }
 
-        let selection_schema = device_selection_schema(
-            &candidates,
-            &configured_devices,
-            &remote_id,
-            &assignments,
-        );
+        let selection_schema =
+            device_selection_schema(&candidates, &configured_devices, &remote_id, &assignments);
         let selection_event = setup_wait_user_action_event(
             &selection_schema["title"],
             selection_schema["settings"]
@@ -176,7 +172,9 @@ impl SonyIntegrationHandler {
             "Sony setup user data received"
         );
 
-        let mut config = if let Some(device_id) = selected_device_id.as_deref().filter(|value| !value.is_empty())
+        let mut config = if let Some(device_id) = selected_device_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
         {
             if registry.is_assigned(&remote_id, device_id).await {
                 return self
@@ -315,7 +313,10 @@ impl SonyIntegrationHandler {
             device_name = completed_name,
             "Sony setup completed"
         );
-        if let Err(error) = context.send(setup_progress_event(&SetupState::Complete)).await {
+        if let Err(error) = context
+            .send(setup_progress_event(&SetupState::Complete))
+            .await
+        {
             warn!(error = %error, "failed to send Sony setup completion");
         }
 
@@ -481,7 +482,10 @@ mod tests {
                 metadata: Default::default(),
                 driver_config: Default::default(),
             };
-            manager.registry().add_configured_device(config.clone()).await;
+            manager
+                .registry()
+                .add_configured_device(config.clone())
+                .await;
             manager.add_device(config, SonyDeviceDriver).await.unwrap();
         }
 

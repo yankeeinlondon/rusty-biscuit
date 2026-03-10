@@ -133,7 +133,6 @@ fn topics_table_snapshot() {
     );
 }
 
-
 #[test]
 fn os_json_snapshot() {
     let stdout = run_stdout(&["os", "--json"]);

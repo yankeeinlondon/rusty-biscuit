@@ -33,7 +33,10 @@ impl DeviceDiscovery for ArcamDiscovery {
                     .or_else(|| Some(format!("Arcam @ {host}"))),
                 firmware: status.software_version,
                 extras: [
-                    ("ip_address".to_string(), status.ip_address.map(|value| json!(value))),
+                    (
+                        "ip_address".to_string(),
+                        status.ip_address.map(|value| json!(value)),
+                    ),
                     (
                         "amplifier_mode".to_string(),
                         status.amplifier_mode.map(|value| json!(value)),

@@ -419,7 +419,12 @@ mod tests {
         assert_eq!(inner_hook["timeout"], 30000);
         let name = inner_hook["name"].as_str().unwrap();
         assert!(name.starts_with("claudine-"));
-        assert!(inner_hook["description"].as_str().unwrap().contains("Claudine"));
+        assert!(
+            inner_hook["description"]
+                .as_str()
+                .unwrap()
+                .contains("Claudine")
+        );
     }
 
     #[test]

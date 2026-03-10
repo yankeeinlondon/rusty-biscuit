@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use homelab::eversolo::{
-    DisplayModeListResponse, EffectivePowerState, Eversolo, GetModelResponse,
-    GetStateResponse, InputOutputListResponse, PowerOptionsResponse, infer_effective_power_state,
+    DisplayModeListResponse, EffectivePowerState, Eversolo, GetModelResponse, GetStateResponse,
+    InputOutputListResponse, PowerOptionsResponse, infer_effective_power_state,
     is_actively_playing,
 };
 use homelab::network::parse_host;
@@ -68,12 +68,26 @@ pub async fn fetch_snapshot(
 
     let mut first_error = None;
 
-    let model = optional_domain(model_result, |response| ensure_status(response.status), &mut first_error);
-    let state =
-        optional_domain(state_result, |response| ensure_optional_status(response.status), &mut first_error);
-    let routing = optional_domain(routing_result, |response| ensure_status(response.status), &mut first_error);
-    let power_options =
-        optional_domain(power_options_result, |response| ensure_status(response.status), &mut first_error);
+    let model = optional_domain(
+        model_result,
+        |response| ensure_status(response.status),
+        &mut first_error,
+    );
+    let state = optional_domain(
+        state_result,
+        |response| ensure_optional_status(response.status),
+        &mut first_error,
+    );
+    let routing = optional_domain(
+        routing_result,
+        |response| ensure_status(response.status),
+        &mut first_error,
+    );
+    let power_options = optional_domain(
+        power_options_result,
+        |response| ensure_status(response.status),
+        &mut first_error,
+    );
     let screen_brightness = optional_domain(
         screen_brightness_result,
         |response| ensure_optional_status(response.status),
@@ -84,14 +98,23 @@ pub async fn fetch_snapshot(
         |response| ensure_optional_status(response.status),
         &mut first_error,
     );
-    let vu_modes = optional_domain(vu_modes_result, |response| ensure_status(response.status), &mut first_error);
-    let spectrum_modes =
-        optional_domain(spectrum_modes_result, |response| ensure_status(response.status), &mut first_error);
+    let vu_modes = optional_domain(
+        vu_modes_result,
+        |response| ensure_status(response.status),
+        &mut first_error,
+    );
+    let spectrum_modes = optional_domain(
+        spectrum_modes_result,
+        |response| ensure_status(response.status),
+        &mut first_error,
+    );
 
     let effective_power_state = state.as_ref().map(|playback_state| {
         infer_effective_power_state(
             playback_state.state,
-            screen_brightness.as_ref().map(|response| response.current_value),
+            screen_brightness
+                .as_ref()
+                .map(|response| response.current_value),
         )
     });
 
@@ -109,20 +132,14 @@ pub async fn fetch_snapshot(
             .map(power_option_list)
             .unwrap_or_default(),
         vu_modes: vu_modes.as_ref().map(mode_titles).unwrap_or_default(),
-        spectrum_modes: spectrum_modes
-            .as_ref()
-            .map(mode_titles)
-            .unwrap_or_default(),
+        spectrum_modes: spectrum_modes.as_ref().map(mode_titles).unwrap_or_default(),
         volume_steps: state
             .as_ref()
             .map(volume_steps_from_state)
             .unwrap_or(DEFAULT_VOLUME_STEPS),
         screen_brightness_max: screen_brightness.as_ref().and_then(|response| response.max),
         knob_brightness_max: knob_brightness.as_ref().and_then(|response| response.max),
-        identity: model
-            .as_ref()
-            .map(identity_from_model)
-            .unwrap_or_default(),
+        identity: model.as_ref().map(identity_from_model).unwrap_or_default(),
     };
 
     let mut updates = Vec::new();
@@ -339,9 +356,7 @@ pub async fn execute_operation(
             ensure_status(resp.status)?;
             snapshot_updates(config, timeout).await
         }
-        EversoloOperation::SelectInput(selection) => {
-            select_input(config, selection, timeout).await
-        }
+        EversoloOperation::SelectInput(selection) => select_input(config, selection, timeout).await,
         EversoloOperation::SelectOutput(selection) => {
             select_output(config, selection, timeout).await
         }
@@ -626,7 +641,11 @@ fn power_option_list(response: &PowerOptionsResponse) -> Vec<NamedOption> {
 }
 
 fn mode_titles(response: &DisplayModeListResponse) -> Vec<String> {
-    response.data.iter().map(|mode| mode.title.clone()).collect()
+    response
+        .data
+        .iter()
+        .map(|mode| mode.title.clone())
+        .collect()
 }
 
 fn current_mode_title(response: &DisplayModeListResponse) -> Option<String> {
@@ -732,8 +751,12 @@ fn resolve_output_tag(routing: &InputOutputListResponse, output: &str) -> Option
     routing
         .output_data
         .iter()
-        .filter(|item| item.enable || current_output_name(routing).as_deref() == Some(item.name.as_str()))
-        .find(|item| item.name.eq_ignore_ascii_case(output) || item.tag.eq_ignore_ascii_case(output))
+        .filter(|item| {
+            item.enable || current_output_name(routing).as_deref() == Some(item.name.as_str())
+        })
+        .find(|item| {
+            item.name.eq_ignore_ascii_case(output) || item.tag.eq_ignore_ascii_case(output)
+        })
         .map(|item| item.tag.clone())
 }
 
@@ -768,7 +791,9 @@ fn apply_selection_command(
             let index = options
                 .iter()
                 .position(|option| option.eq_ignore_ascii_case(&current))?;
-            options.get((index + 1).min(options.len().saturating_sub(1))).cloned()
+            options
+                .get((index + 1).min(options.len().saturating_sub(1)))
+                .cloned()
         }
         SelectionCommand::Previous => {
             let current = current?;
@@ -843,9 +868,7 @@ async fn select_input(
         EversoloIntegrationError::InvalidParameter("unable to resolve input selection".to_string())
     })?;
     let tag = resolve_input_tag(&routing, &selected).ok_or_else(|| {
-        EversoloIntegrationError::InvalidParameter(format!(
-            "unknown input source \"{selected}\""
-        ))
+        EversoloIntegrationError::InvalidParameter(format!("unknown input source \"{selected}\""))
     })?;
     let resp = run_with_timeout(timeout, client.set_input(&tag)).await?;
     ensure_status(resp.status)?;
@@ -870,9 +893,7 @@ async fn select_output(
         EversoloIntegrationError::InvalidParameter("unable to resolve output selection".to_string())
     })?;
     let tag = resolve_output_tag(&routing, &selected).ok_or_else(|| {
-        EversoloIntegrationError::InvalidParameter(format!(
-            "unknown output route \"{selected}\""
-        ))
+        EversoloIntegrationError::InvalidParameter(format!("unknown output route \"{selected}\""))
     })?;
     let resp = run_with_timeout(timeout, client.set_output(&tag)).await?;
     ensure_status(resp.status)?;
@@ -888,7 +909,9 @@ async fn select_display_mode(
     let client = build_client(config)?;
     let response = match target {
         DisplayModeTarget::Vu => run_with_timeout(timeout, client.get_vu_modes()).await?,
-        DisplayModeTarget::Spectrum => run_with_timeout(timeout, client.get_spectrum_modes()).await?,
+        DisplayModeTarget::Spectrum => {
+            run_with_timeout(timeout, client.get_spectrum_modes()).await?
+        }
     };
     ensure_status(response.status)?;
 
@@ -901,12 +924,12 @@ async fn select_display_mode(
         EversoloIntegrationError::InvalidParameter("unable to resolve display mode".to_string())
     })?;
     let index = resolve_mode_index(&response, &selected).ok_or_else(|| {
-        EversoloIntegrationError::InvalidParameter(format!(
-            "unknown display mode \"{selected}\""
-        ))
+        EversoloIntegrationError::InvalidParameter(format!("unknown display mode \"{selected}\""))
     })?;
     let resp = match target {
-        DisplayModeTarget::Vu => run_with_timeout(timeout, client.set_vu_mode(i64::from(index))).await?,
+        DisplayModeTarget::Vu => {
+            run_with_timeout(timeout, client.set_vu_mode(i64::from(index))).await?
+        }
         DisplayModeTarget::Spectrum => {
             run_with_timeout(timeout, client.set_spectrum_mode(i64::from(index))).await?
         }
@@ -923,7 +946,9 @@ async fn set_brightness(
 ) -> Result<Vec<EntityUpdate>, EversoloIntegrationError> {
     let client = build_client(config)?;
     let response = match target {
-        BrightnessTarget::Screen => run_with_timeout(timeout, client.get_screen_brightness()).await?,
+        BrightnessTarget::Screen => {
+            run_with_timeout(timeout, client.get_screen_brightness()).await?
+        }
         BrightnessTarget::Knob => run_with_timeout(timeout, client.get_knob_brightness()).await?,
     };
     ensure_optional_status(response.status)?;
@@ -954,7 +979,11 @@ async fn set_brightness(
 
     let resp = match target {
         BrightnessTarget::Screen => {
-            run_with_timeout(timeout, client.set_screen_brightness(i64::from(target_index))).await?
+            run_with_timeout(
+                timeout,
+                client.set_screen_brightness(i64::from(target_index)),
+            )
+            .await?
         }
         BrightnessTarget::Knob => {
             run_with_timeout(timeout, client.set_knob_brightness(i64::from(target_index))).await?
@@ -1045,7 +1074,10 @@ mod tests {
             playback_state_label(2, EffectivePowerState::Active),
             "PAUSED"
         );
-        assert_eq!(playback_state_label(0, EffectivePowerState::Active), "STOPPED");
+        assert_eq!(
+            playback_state_label(0, EffectivePowerState::Active),
+            "STOPPED"
+        );
         assert_eq!(
             playback_state_label(0, EffectivePowerState::Standby),
             "STANDBY"
@@ -1297,7 +1329,11 @@ mod tests {
         let mut state = sample_state();
         state.state = 0;
 
-        let attrs = player_attrs(&state, Some(&sample_routing()), EffectivePowerState::Standby);
+        let attrs = player_attrs(
+            &state,
+            Some(&sample_routing()),
+            EffectivePowerState::Standby,
+        );
         assert_eq!(attrs["state"], "STANDBY");
     }
 

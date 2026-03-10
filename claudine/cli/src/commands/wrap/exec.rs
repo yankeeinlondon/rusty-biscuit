@@ -79,7 +79,10 @@ pub(crate) fn run_child(
     // suppress lines matching any noise prefix.
     let stdout_handle = if filter_stdout {
         let pipe = child.stdout.take().expect("stdout was set to piped");
-        let prefixes: Vec<String> = stdout_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        let prefixes: Vec<String> = stdout_noise_prefixes
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut out = std::io::stdout().lock();
@@ -97,7 +100,10 @@ pub(crate) fn run_child(
 
     let stderr_handle = if filter_stderr {
         let pipe = child.stderr.take().expect("stderr was set to piped");
-        let prefixes: Vec<String> = stderr_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        let prefixes: Vec<String> = stderr_noise_prefixes
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut err = std::io::stderr().lock();

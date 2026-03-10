@@ -118,12 +118,8 @@ impl EversoloIntegrationHandler {
             warn!(error = %error, "failed to send Eversolo discovery progress");
         }
 
-        let selection_schema = device_selection_schema(
-            &candidates,
-            &configured_devices,
-            &remote_id,
-            &assignments,
-        );
+        let selection_schema =
+            device_selection_schema(&candidates, &configured_devices, &remote_id, &assignments);
         let selection_event = setup_wait_user_action_event(
             &selection_schema["title"],
             selection_schema["settings"]
@@ -180,7 +176,9 @@ impl EversoloIntegrationHandler {
             "Eversolo setup user data received"
         );
 
-        let mut config = if let Some(device_id) = selected_device_id.as_deref().filter(|value| !value.is_empty())
+        let mut config = if let Some(device_id) = selected_device_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
         {
             if registry.is_assigned(&remote_id, device_id).await {
                 return self
@@ -319,7 +317,10 @@ impl EversoloIntegrationHandler {
             device_name = completed_name,
             "Eversolo setup completed"
         );
-        if let Err(error) = context.send(setup_progress_event(&SetupState::Complete)).await {
+        if let Err(error) = context
+            .send(setup_progress_event(&SetupState::Complete))
+            .await
+        {
             warn!(error = %error, "failed to send Eversolo setup completion");
         }
 
@@ -485,8 +486,14 @@ mod tests {
                 metadata: Default::default(),
                 driver_config: Default::default(),
             };
-            manager.registry().add_configured_device(config.clone()).await;
-            manager.add_device(config, EversoloDeviceDriver).await.unwrap();
+            manager
+                .registry()
+                .add_configured_device(config.clone())
+                .await;
+            manager
+                .add_device(config, EversoloDeviceDriver)
+                .await
+                .unwrap();
         }
 
         EversoloIntegrationHandler::new(manager)
@@ -554,14 +561,26 @@ mod tests {
 
         let entities = resp["msg_data"]["available_entities"].as_array().unwrap();
         assert_eq!(entities.len(), 10);
-        assert!(entities.iter().any(|entity| entity["entity_id"] == "eversolo.living.power"));
-        assert!(entities.iter().any(|entity| entity["entity_id"] == "eversolo.living.player"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity["entity_id"] == "eversolo.living.power_on_button"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity["entity_id"] == "eversolo.living.input_select"));
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity["entity_id"] == "eversolo.living.power")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity["entity_id"] == "eversolo.living.player")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity["entity_id"] == "eversolo.living.power_on_button")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity["entity_id"] == "eversolo.living.input_select")
+        );
     }
 
     #[tokio::test]
@@ -592,14 +611,26 @@ mod tests {
         assert_eq!(resp["msg"], "entity_states");
         let states = resp["msg_data"].as_array().unwrap();
         assert_eq!(states.len(), 8);
-        assert!(states.iter().any(|state| state["entity_id"] == "eversolo.living.power"));
-        assert!(states.iter().any(|state| state["entity_id"] == "eversolo.living.player"));
-        assert!(states
-            .iter()
-            .any(|state| state["entity_id"] == "eversolo.living.screen_brightness"));
-        assert!(states
-            .iter()
-            .any(|state| state["entity_id"] == "eversolo.living.vu_mode_select"));
+        assert!(
+            states
+                .iter()
+                .any(|state| state["entity_id"] == "eversolo.living.power")
+        );
+        assert!(
+            states
+                .iter()
+                .any(|state| state["entity_id"] == "eversolo.living.player")
+        );
+        assert!(
+            states
+                .iter()
+                .any(|state| state["entity_id"] == "eversolo.living.screen_brightness")
+        );
+        assert!(
+            states
+                .iter()
+                .any(|state| state["entity_id"] == "eversolo.living.vu_mode_select")
+        );
     }
 
     #[tokio::test]

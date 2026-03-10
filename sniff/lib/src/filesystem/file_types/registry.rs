@@ -147,17 +147,14 @@ pub fn lookup_extension(extension: &str) -> Option<FileTypeDescriptor> {
         "svelte" => framework_descriptor(FrameworkKind::Svelte),
         "astro" => framework_descriptor(FrameworkKind::Astro),
         "html" | "htm" => text_descriptor(FileAssociation::Documentation),
-        "css" | "scss" | "sass" | "less" | "pcss" => {
-            text_descriptor(FileAssociation::Styling)
+        "css" | "scss" | "sass" | "less" | "pcss" => text_descriptor(FileAssociation::Styling),
+        "json" | "json5" | "jsonl" | "toml" | "yaml" | "yml" | "ini" | "cfg" | "conf" | "lock" => {
+            text_descriptor(FileAssociation::Configuration)
         }
-        "json" | "json5" | "jsonl" | "toml" | "yaml" | "yml" | "ini" | "cfg" | "conf"
-        | "lock" => text_descriptor(FileAssociation::Configuration),
         "md" | "mdx" | "txt" | "rst" | "adoc" | "org" | "tex" => {
             text_descriptor(FileAssociation::Documentation)
         }
-        "csv" | "tsv" | "xml" | "graphql" | "gql" | "sql" => {
-            text_descriptor(FileAssociation::Data)
-        }
+        "csv" | "tsv" | "xml" | "graphql" | "gql" | "sql" => text_descriptor(FileAssociation::Data),
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "ico" | "bmp" | "tif"
         | "tiff" => text_descriptor(FileAssociation::Image),
         "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "tgz" => {

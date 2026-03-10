@@ -826,10 +826,7 @@ mod tests {
         );
         assert_eq!(
             lines,
-            vec![
-                "hello immediate-mode".to_string(),
-                "rendering".to_string(),
-            ]
+            vec!["hello immediate-mode".to_string(), "rendering".to_string(),]
         );
     }
 
@@ -843,10 +840,7 @@ mod tests {
         );
         assert_eq!(
             lines,
-            vec![
-                "hello immediate-mode".to_string(),
-                "rendering".to_string(),
-            ]
+            vec!["hello immediate-mode".to_string(), "rendering".to_string(),]
         );
     }
 

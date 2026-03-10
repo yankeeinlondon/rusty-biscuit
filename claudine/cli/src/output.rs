@@ -6,8 +6,8 @@ use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{NON_INTERACTIVE, REPO_FLAG, YOLO};
 use std::path::Path;
 
-use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::McpRuntimeInfo;
+use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
 use crate::log;
 

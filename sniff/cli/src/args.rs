@@ -1174,8 +1174,8 @@ mod tests {
 
         #[test]
         fn scoped_flags_parse_for_supported_commands() {
-            let filesystem = parse_args(&["filesystem", "--refresh-remotes", "--latest-versions"])
-                .unwrap();
+            let filesystem =
+                parse_args(&["filesystem", "--refresh-remotes", "--latest-versions"]).unwrap();
             assert!(matches!(
                 filesystem.command,
                 Some(Commands::Filesystem {
@@ -1185,16 +1185,10 @@ mod tests {
             ));
 
             let git = parse_args(&["git", "--refresh-remotes"]).unwrap();
-            assert!(git
-                .command
-                .as_ref()
-                .is_some_and(Commands::refresh_remotes));
+            assert!(git.command.as_ref().is_some_and(Commands::refresh_remotes));
 
             let repo = parse_args(&["repo", "--latest-versions"]).unwrap();
-            assert!(repo
-                .command
-                .as_ref()
-                .is_some_and(Commands::latest_versions));
+            assert!(repo.command.as_ref().is_some_and(Commands::latest_versions));
         }
 
         #[test]

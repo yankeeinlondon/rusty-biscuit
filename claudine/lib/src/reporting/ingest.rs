@@ -132,7 +132,10 @@ fn discover_log_files(logs_dir: &Path, request: SyncRequest) -> Result<Vec<PathB
     Ok(files)
 }
 
-fn sync_file(conn: &mut Connection, path: &Path) -> std::result::Result<FileSyncStats, SyncFailure> {
+fn sync_file(
+    conn: &mut Connection,
+    path: &Path,
+) -> std::result::Result<FileSyncStats, SyncFailure> {
     let source_file_str = path.display().to_string();
 
     macro_rules! fail {
@@ -157,9 +160,9 @@ fn sync_file(conn: &mut Connection, path: &Path) -> std::result::Result<FileSync
 
     let state = load_state(conn, path).map_err(|e| fail!(0, e))?;
 
-    let rebuild = state.as_ref().is_some_and(|state| {
-        file_size < state.file_size || fingerprint != state.fingerprint
-    });
+    let rebuild = state
+        .as_ref()
+        .is_some_and(|state| file_size < state.file_size || fingerprint != state.fingerprint);
     let start_offset = if rebuild {
         0
     } else {

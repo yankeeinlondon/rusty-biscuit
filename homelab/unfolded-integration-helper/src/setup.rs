@@ -215,10 +215,9 @@ pub fn setup_progress_event(state: &SetupState) -> Value {
                 "state": "SETUP",
             }
         }),
-        SetupState::DeviceSelection { .. } => setup_wait_user_action_event(
-            &json!({ "en": "Device Configuration" }),
-            &[],
-        ),
+        SetupState::DeviceSelection { .. } => {
+            setup_wait_user_action_event(&json!({ "en": "Device Configuration" }), &[])
+        }
         SetupState::Complete => json!({
             "kind": "event",
             "msg": "driver_setup_change",
@@ -362,9 +361,7 @@ mod tests {
         let discovering = setup_progress_event(&SetupState::Discovering);
         assert_eq!(discovering["msg_data"]["state"], "SETUP");
 
-        let selection = setup_progress_event(&SetupState::DeviceSelection {
-            candidates: vec![],
-        });
+        let selection = setup_progress_event(&SetupState::DeviceSelection { candidates: vec![] });
         assert_eq!(selection["msg_data"]["state"], "WAIT_USER_ACTION");
 
         let complete = setup_progress_event(&SetupState::Complete);

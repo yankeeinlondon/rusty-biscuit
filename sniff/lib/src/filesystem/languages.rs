@@ -114,7 +114,12 @@ mod tests {
         let result = detect_languages(dir.path()).unwrap();
         assert_eq!(result.primary, Some(ProgrammingLanguage::Rust));
         assert_eq!(result.total_language_files, 1);
-        assert!(result.languages.iter().all(|language| language.language != ProgrammingLanguage::Unknown));
+        assert!(
+            result
+                .languages
+                .iter()
+                .all(|language| language.language != ProgrammingLanguage::Unknown)
+        );
     }
 
     #[test]

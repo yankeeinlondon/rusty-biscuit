@@ -148,10 +148,7 @@ impl PersistentRegistry {
             assignment.device_ids.retain(|id| id != device_id);
         }
         // Remove empty assignments
-        inner
-            .data
-            .assignments
-            .retain(|a| !a.device_ids.is_empty());
+        inner.data.assignments.retain(|a| !a.device_ids.is_empty());
     }
 
     /// Assign a device to a Remote.
@@ -209,10 +206,7 @@ impl PersistentRegistry {
             assignment.device_ids.retain(|id| id != device_id);
         }
         // Clean up empty assignments
-        inner
-            .data
-            .assignments
-            .retain(|a| !a.device_ids.is_empty());
+        inner.data.assignments.retain(|a| !a.device_ids.is_empty());
     }
 
     /// Get all configured devices.

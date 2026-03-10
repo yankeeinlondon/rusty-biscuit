@@ -164,8 +164,7 @@ mod tests {
     use crate::mcp::types::{McpServerMetadata, McpTransport};
 
     fn make_catalog_with_servers(names: &[&str]) -> McpCatalogStore {
-        let mut catalog =
-            McpCatalogStore::load_from(std::path::Path::new("/nonexistent")).unwrap();
+        let mut catalog = McpCatalogStore::load_from(std::path::Path::new("/nonexistent")).unwrap();
         for name in names {
             let server = McpServer {
                 id: name.to_string(),
@@ -234,13 +233,7 @@ mod tests {
     #[test]
     fn session_set_with_tags() {
         let catalog = make_catalog_with_servers(&["calendar", "slack"]);
-        let session = compute_session_set(
-            &catalog,
-            None,
-            &[],
-            &["calendar".into()],
-        )
-        .unwrap();
+        let session = compute_session_set(&catalog, None, &[], &["calendar".into()]).unwrap();
         assert_eq!(session.servers.len(), 1);
         assert_eq!(session.resolved_tags.len(), 1);
         assert_eq!(session.resolved_tags[0].match_tier, MatchTier::ExactId);
@@ -249,13 +242,7 @@ mod tests {
     #[test]
     fn session_set_warnings_for_missing() {
         let catalog = make_catalog_with_servers(&["calendar"]);
-        let session = compute_session_set(
-            &catalog,
-            None,
-            &["nonexistent".into()],
-            &[],
-        )
-        .unwrap();
+        let session = compute_session_set(&catalog, None, &["nonexistent".into()], &[]).unwrap();
         assert_eq!(session.warnings.len(), 1);
         assert!(session.warnings[0].contains("nonexistent"));
     }

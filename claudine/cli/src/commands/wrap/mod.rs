@@ -219,8 +219,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         use claudine::mcp::inject::injector_for_provider;
         use claudine::mcp::session::{compute_session_set, extract_tags};
 
-        let catalog = McpCatalogStore::load()
-            .map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+        let catalog =
+            McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let repo_root_ref = env_plan.repo_root.as_deref();
         let (cleaned_prompt, prompt_tags) = if non_interactive_requested {
             extract_tags_from_child_args(provider, &mut child_args, &catalog, extract_tags)
@@ -256,7 +256,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                 let shadow = env_plan.shadow_home_path.as_deref();
                 // Injector works with String env; bridge to OsString env plan
                 let mut string_env = std::collections::HashMap::new();
-                let result = injector.inject(&session.servers, &mut string_env, shadow)
+                let result = injector
+                    .inject(&session.servers, &mut string_env, shadow)
                     .map_err(|e| eyre!("MCP injection failed: {e}"))?;
 
                 // Merge injected env vars into the OsString env plan
@@ -423,10 +424,7 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptLocation {
     Value(usize),
-    Inline {
-        index: usize,
-        prefix: &'static str,
-    },
+    Inline { index: usize, prefix: &'static str },
 }
 
 fn extract_tags_from_child_args(
@@ -526,8 +524,7 @@ fn find_positional_prompt_location(args: &[String], start_index: usize) -> Optio
 fn takes_value(arg: &str) -> bool {
     matches!(
         arg,
-        "-m"
-            | "--model"
+        "-m" | "--model"
             | "-o"
             | "--output"
             | "--output-format"

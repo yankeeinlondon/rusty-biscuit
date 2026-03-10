@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use serde_json::{Map, Value, json};
 
-use crate::config::backup::create_backup;
 use crate::config::atomic::atomic_write;
+use crate::config::backup::create_backup;
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
@@ -115,7 +115,9 @@ impl<'a> McpExporter<'a> {
             Provider::Claude => write_claude_mcp(&export_servers, &config_path, &managed_names)?,
             Provider::Codex => write_codex_mcp(&export_servers, &config_path, &managed_names)?,
             Provider::Gemini => write_gemini_mcp(&export_servers, &config_path, &managed_names)?,
-            Provider::OpenCode => write_opencode_mcp(&export_servers, &config_path, &managed_names)?,
+            Provider::OpenCode => {
+                write_opencode_mcp(&export_servers, &config_path, &managed_names)?
+            }
             Provider::RooCode => write_roo_mcp(&export_servers, &config_path, &managed_names)?,
             _ => {
                 return Err(ClaudineError::McpProviderNotSupported {
@@ -130,7 +132,8 @@ impl<'a> McpExporter<'a> {
             .iter()
             .filter(|entry| !desired_names.contains(&entry.native_name))
         {
-            self.state.remove_entry(provider, scope, &removed.catalog_id);
+            self.state
+                .remove_entry(provider, scope, &removed.catalog_id);
         }
 
         for entry in &export_servers {
@@ -382,9 +385,7 @@ fn write_codex_mcp(
         {
             table["env_vars"] = toml_edit::value(to_toml_array(&value));
         }
-        if let Some(value) =
-            provider_override_string(server_def, "codex", "bearer_token_env_var")
-        {
+        if let Some(value) = provider_override_string(server_def, "codex", "bearer_token_env_var") {
             table["bearer_token_env_var"] = toml_edit::value(value.as_str());
         }
         if let Some(value) = provider_override_string_map(server_def, "codex", "env_http_headers")
@@ -606,11 +607,7 @@ fn provider_override_i64(server: &McpServer, provider_slug: &str, key: &str) -> 
     provider_override_value(server, provider_slug, key).and_then(Value::as_i64)
 }
 
-fn provider_override_string(
-    server: &McpServer,
-    provider_slug: &str,
-    key: &str,
-) -> Option<String> {
+fn provider_override_string(server: &McpServer, provider_slug: &str, key: &str) -> Option<String> {
     provider_override_value(server, provider_slug, key)
         .and_then(Value::as_str)
         .map(str::to_string)
@@ -646,9 +643,7 @@ fn provider_override_string_map(
     })
 }
 
-fn sorted_string_pairs(
-    map: &std::collections::HashMap<String, String>,
-) -> Vec<(String, String)> {
+fn sorted_string_pairs(map: &std::collections::HashMap<String, String>) -> Vec<(String, String)> {
     let mut pairs: Vec<_> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     pairs.sort_by(|a, b| a.0.cmp(&b.0));
     pairs
@@ -675,8 +670,8 @@ mod tests {
     use crate::mcp::types::ProviderStateEntry;
 
     fn make_stdio_server(id: &str) -> McpServer {
-        use chrono::Utc;
         use super::super::types::McpServerMetadata;
+        use chrono::Utc;
 
         McpServer {
             id: id.into(),
@@ -721,8 +716,7 @@ mod tests {
 
         write_claude_mcp(&export_servers(&servers), &config, &[]).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         assert!(content["mcpServers"]["test"].is_object());
     }
 
@@ -739,8 +733,7 @@ mod tests {
 
         write_claude_mcp(&export_servers(&servers), &config, &[]).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         // existing server preserved
         assert!(content["mcpServers"]["existing"].is_object());
         // new server added
@@ -762,8 +755,7 @@ mod tests {
 
         write_claude_mcp(&export_servers(&servers), &config, &["managed-one".into()]).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         // managed entry removed
         assert!(content["mcpServers"]["managed-one"].is_null());
         // foreign entry preserved
@@ -796,8 +788,7 @@ mod tests {
 
         write_opencode_mcp(&export_servers(&servers), &config, &[]).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(content["mcp"]["test"]["type"], "local");
     }
 
@@ -809,8 +800,7 @@ mod tests {
 
         write_roo_mcp(&export_servers(&servers), &config, &[]).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(content["mcpServers"]["test"]["transportType"], "stdio");
     }
 
@@ -831,11 +821,13 @@ args = ["-y", "@test/google-calendar"]
         )
         .unwrap();
 
-        let mut catalog = McpCatalogStore::load_from(tmp.path().join("catalog.json").as_path()).unwrap();
+        let mut catalog =
+            McpCatalogStore::load_from(tmp.path().join("catalog.json").as_path()).unwrap();
         let server = make_stdio_server("google-calendar");
         catalog.add_server(server.clone());
 
-        let mut state = McpProviderStateStore::load_from(tmp.path().join("state.json").as_path()).unwrap();
+        let mut state =
+            McpProviderStateStore::load_from(tmp.path().join("state.json").as_path()).unwrap();
         let scope = Scope::Repo(repo_root.clone());
         state.record_import(
             Provider::Codex,
@@ -879,11 +871,13 @@ args = ["-y", "@test/google-calendar"]
         )
         .unwrap();
 
-        let mut catalog = McpCatalogStore::load_from(tmp.path().join("catalog.json").as_path()).unwrap();
+        let mut catalog =
+            McpCatalogStore::load_from(tmp.path().join("catalog.json").as_path()).unwrap();
         let server = make_stdio_server("new");
         catalog.add_server(server.clone());
 
-        let mut state = McpProviderStateStore::load_from(tmp.path().join("state.json").as_path()).unwrap();
+        let mut state =
+            McpProviderStateStore::load_from(tmp.path().join("state.json").as_path()).unwrap();
         let scope = Scope::Repo(repo_root.clone());
         state.record_managed(
             Provider::Claude,
@@ -905,13 +899,14 @@ args = ["-y", "@test/google-calendar"]
         assert_eq!(report.removed, vec!["managed-one"]);
         assert_eq!(report.preserved, vec!["foreign"]);
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         assert!(content["mcpServers"]["managed-one"].is_null());
         assert!(content["mcpServers"]["foreign"].is_object());
         assert!(content["mcpServers"]["new"].is_object());
-        assert!(state
-            .entry_for_catalog_id(Provider::Claude, &scope, "old")
-            .is_none());
+        assert!(
+            state
+                .entry_for_catalog_id(Provider::Claude, &scope, "old")
+                .is_none()
+        );
     }
 }

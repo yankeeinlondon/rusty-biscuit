@@ -8,13 +8,13 @@ use biscuit_terminal::components::mermaid::MermaidRenderer;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
-use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats, FrameworkStats};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
+use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats, FrameworkStats};
 
-use crate::args::FilesFilter;
 use super::{format_number, relative_path};
+use crate::args::FilesFilter;
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,14 +90,12 @@ fn area_parent(area: &str) -> Option<String> {
 }
 
 fn build_area_hierarchy(
-    areas: &[String]
-) -> (
-    Vec<String>,
-    std::collections::HashMap<String, Vec<String>>,
-) {
+    areas: &[String],
+) -> (Vec<String>, std::collections::HashMap<String, Vec<String>>) {
     let area_set: std::collections::HashSet<&str> = areas.iter().map(String::as_str).collect();
     let mut top_areas = Vec::new();
-    let mut children: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut children: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
 
     for area in areas {
         match area_parent(area) {
@@ -117,8 +115,10 @@ fn append_package_items(items: &mut Vec<RenderableContent>, pkg: &Package, verbo
     items.push(RenderableContent::String(main));
 
     if formatted.len() > 1 {
-        let detail_items: Vec<String> =
-            formatted[1..].iter().map(|s| Prose::new(s).render_optimistic(None)).collect();
+        let detail_items: Vec<String> = formatted[1..]
+            .iter()
+            .map(|s| Prose::new(s).render_optimistic(None))
+            .collect();
         let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
         items.push(RenderableContent::Component(Rc::new(detail_list)));
     }
@@ -143,7 +143,13 @@ fn append_area_section(
 
     if let Some(children) = area_children.get(area) {
         for child in children {
-            append_area_section(&mut inner_items, child, area_packages, area_children, verbose);
+            append_area_section(
+                &mut inner_items,
+                child,
+                area_packages,
+                area_children,
+                verbose,
+            );
         }
     }
 
@@ -862,11 +868,12 @@ fn collect_dependency_updates(
             .actual_version
             .as_deref()
             .unwrap_or(dep.targeted_version.as_str());
-        let prefix = package_name.map(|name| format!("{name}: ")).unwrap_or_default();
-        target.sample_transitions.push(format!(
-            "{}{} {} -> {}",
-            prefix, dep.name, current, latest
-        ));
+        let prefix = package_name
+            .map(|name| format!("{name}: "))
+            .unwrap_or_default();
+        target
+            .sample_transitions
+            .push(format!("{}{} {} -> {}", prefix, dep.name, current, latest));
     }
 }
 
@@ -1351,7 +1358,13 @@ pub fn print_repo_section(
 
         let mut outer_items: Vec<RenderableContent> = Vec::new();
         for area in &top_areas {
-            append_area_section(&mut outer_items, area, &area_packages, &area_children, verbose);
+            append_area_section(
+                &mut outer_items,
+                area,
+                &area_packages,
+                &area_children,
+                verbose,
+            );
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
@@ -1444,7 +1457,8 @@ pub fn print_language_section(
     if !langs.secondary.is_empty() {
         println!(
             "Secondary languages: {}",
-            langs.secondary
+            langs
+                .secondary
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
@@ -1481,7 +1495,10 @@ pub fn print_language_section(
     println!();
 
     if verbose > 0 && !langs.frameworks.is_empty() {
-        println!("Frameworks: {}", render_framework_summary(&langs.frameworks));
+        println!(
+            "Frameworks: {}",
+            render_framework_summary(&langs.frameworks)
+        );
     }
 
     let footer = Prose::new(format!(
@@ -1525,11 +1542,7 @@ pub(crate) fn filter_file_breakdown(
     }
 }
 
-pub fn print_files_section(
-    files: &FileAssociationBreakdown,
-    verbose: u8,
-    filter: &FilesFilter,
-) {
+pub fn print_files_section(files: &FileAssociationBreakdown, verbose: u8, filter: &FilesFilter) {
     use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
@@ -1558,7 +1571,10 @@ pub fn print_files_section(
     println!();
 
     if verbose > 0 && !filtered.by_framework.is_empty() {
-        println!("Frameworks: {}", render_framework_summary(&filtered.by_framework));
+        println!(
+            "Frameworks: {}",
+            render_framework_summary(&filtered.by_framework)
+        );
     }
     if verbose > 0 && !filtered.by_language.is_empty() {
         println!(
@@ -1610,7 +1626,8 @@ pub fn print_filesystem_section(
         if !langs.secondary.is_empty() {
             println!(
                 "  Secondary: {}",
-                langs.secondary
+                langs
+                    .secondary
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
@@ -1643,7 +1660,10 @@ pub fn print_filesystem_section(
             println!("  ... and {} more", langs.languages.len() - show_count);
         }
         if verbose > 0 && !langs.frameworks.is_empty() {
-            println!("  Frameworks: {}", render_framework_summary(&langs.frameworks));
+            println!(
+                "  Frameworks: {}",
+                render_framework_summary(&langs.frameworks)
+            );
         }
     }
     if let Some(ref files) = fs.files {

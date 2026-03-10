@@ -7,8 +7,7 @@ use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 
 use crate::args::{
-    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, FilesFilter,
-    ServiceStateArg,
+    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, FilesFilter, ServiceStateArg,
 };
 use crate::output::{self, OutputFilter};
 

@@ -110,7 +110,11 @@ impl<'a> McpImporter<'a> {
     }
 
     /// Import from a specific provider's config.
-    pub fn import_provider(&mut self, provider: Provider, repo_root: Option<&Path>) -> ImportReport {
+    pub fn import_provider(
+        &mut self,
+        provider: Provider,
+        repo_root: Option<&Path>,
+    ) -> ImportReport {
         let mut report = ImportReport::default();
 
         let configs = discover_provider_configs(provider, repo_root);
@@ -129,7 +133,14 @@ impl<'a> McpImporter<'a> {
             };
 
             for (native_name, server) in parsed {
-                self.process_import(provider, &scope, &config_path, &native_name, server, &mut report);
+                self.process_import(
+                    provider,
+                    &scope,
+                    &config_path,
+                    &native_name,
+                    server,
+                    &mut report,
+                );
             }
         }
 
@@ -244,7 +255,10 @@ impl<'a> McpImporter<'a> {
 // Provider config discovery
 // ---------------------------------------------------------------------------
 
-fn discover_provider_configs(provider: Provider, repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+fn discover_provider_configs(
+    provider: Provider,
+    repo_root: Option<&Path>,
+) -> Vec<(PathBuf, Scope)> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
 
@@ -255,7 +269,9 @@ fn discover_provider_configs(provider: Provider, repo_root: Option<&Path>) -> Ve
             if user_config.exists() {
                 configs.push((user_config, Scope::User));
             }
-            for plugin_config in discover_claude_plugin_configs(&home.join(".claude").join("plugins")) {
+            for plugin_config in
+                discover_claude_plugin_configs(&home.join(".claude").join("plugins"))
+            {
                 configs.push((plugin_config, Scope::User));
             }
             // Repo: .mcp.json
@@ -368,10 +384,7 @@ fn discover_claude_plugin_configs(plugin_root: &Path) -> Vec<PathBuf> {
 /// Parse MCP servers from a provider config file.
 ///
 /// Returns a list of `(native_name, McpServer)` tuples.
-fn parse_provider_mcp(
-    provider: Provider,
-    config_path: &Path,
-) -> Result<Vec<(String, McpServer)>> {
+fn parse_provider_mcp(provider: Provider, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     match provider {
         Provider::Claude => parse_claude_mcp(config_path),
         Provider::Codex => parse_codex_mcp(config_path),
@@ -403,13 +416,13 @@ fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             _ => McpTransport::Stdio,
         };
 
-        let command = def.get("command").and_then(|v| v.as_str()).map(String::from);
+        let command = def
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let args = parse_string_array(def.get("args"));
         let env = parse_string_map(def.get("env"));
-        let cwd = def
-            .get("cwd")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
+        let cwd = def.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
         let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
 
         let mut server = McpServer {
@@ -507,10 +520,7 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             })
             .unwrap_or_default();
 
-        let cwd = table
-            .get("cwd")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
+        let cwd = table.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
 
         let mut headers = HashMap::new();
         if let Some(h) = table.get("http_headers").and_then(|v| v.as_table()) {
@@ -544,22 +554,15 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             provider_overrides: HashMap::new(),
         };
 
-        if let Some(env_vars) = table
-            .get("env_vars")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|value| value.as_str().map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            && !env_vars.is_empty()
+        if let Some(env_vars) = table.get("env_vars").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        }) && !env_vars.is_empty()
         {
             server.set_provider_override("codex", "env_vars", json!(env_vars));
         }
-        if let Some(value) = table
-            .get("bearer_token_env_var")
-            .and_then(|v| v.as_str())
-        {
+        if let Some(value) = table.get("bearer_token_env_var").and_then(|v| v.as_str()) {
             server.set_provider_override("codex", "bearer_token_env_var", json!(value));
         }
         if let Some(value) = table.get("env_http_headers").and_then(|v| v.as_table()) {
@@ -580,10 +583,7 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
         {
             server.set_provider_override("codex", "startup_timeout_sec", json!(value));
         }
-        if let Some(value) = table
-            .get("tool_timeout_sec")
-            .and_then(|v| v.as_integer())
-        {
+        if let Some(value) = table.get("tool_timeout_sec").and_then(|v| v.as_integer()) {
             server.set_provider_override("codex", "tool_timeout_sec", json!(value));
         }
 
@@ -635,7 +635,10 @@ fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             _ => McpTransport::Stdio,
         };
 
-        let command = def.get("command").and_then(|v| v.as_str()).map(String::from);
+        let command = def
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let args = parse_string_array(def.get("args"));
         let env = parse_string_map(def.get("env"));
         let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
@@ -759,7 +762,10 @@ fn parse_roo_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
             _ => McpTransport::Stdio,
         };
 
-        let command = def.get("command").and_then(|v| v.as_str()).map(String::from);
+        let command = def
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let args = parse_string_array(def.get("args"));
         let env = parse_string_map(def.get("env"));
         let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
@@ -823,7 +829,9 @@ fn parse_command_and_args(value: Option<&Value>) -> (Option<String>, Vec<String>
     match value {
         Some(Value::String(command)) => (Some(command.clone()), Vec::new()),
         Some(Value::Array(parts)) => {
-            let mut parts = parts.iter().filter_map(|part| part.as_str().map(str::to_string));
+            let mut parts = parts
+                .iter()
+                .filter_map(|part| part.as_str().map(str::to_string));
             let command = parts.next();
             let args = parts.collect();
             (command, args)
@@ -890,10 +898,7 @@ GOOGLE_TOKEN = "secret-123"
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].0, "calendar");
         assert_eq!(servers[0].1.command.as_deref(), Some("npx"));
-        assert_eq!(
-            servers[0].1.env.get("GOOGLE_TOKEN").unwrap(),
-            "secret-123"
-        );
+        assert_eq!(servers[0].1.env.get("GOOGLE_TOKEN").unwrap(), "secret-123");
     }
 
     #[test]

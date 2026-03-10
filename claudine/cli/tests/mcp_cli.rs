@@ -194,8 +194,7 @@ fn mcp_show_json_includes_provenance() {
         .assert()
         .success();
 
-    let value: serde_json::Value =
-        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
     assert_eq!(value["server"]["id"], "calendar");
     assert_eq!(value["provenance"][0]["provider"], "codex");
     assert_eq!(value["provenance"][0]["native_name"], "calendar-native");
@@ -275,12 +274,13 @@ args = ["-y", "@test/google-calendar"]
         .current_dir(&nested)
         .env("HOME", &home)
         .env("NO_COLOR", "1")
-        .args(["mcp", "sync", "codex", "--scope", "repo", "--apply", "--json"])
+        .args([
+            "mcp", "sync", "codex", "--scope", "repo", "--apply", "--json",
+        ])
         .assert()
         .success();
 
-    let value: serde_json::Value =
-        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
     assert_eq!(value["written"][0], "calendar");
     assert_eq!(value["unresolved"][0], "missing-server");
 

@@ -52,29 +52,23 @@ impl McpProviderStateStore {
     }
 
     /// Record an imported entry (origin = Imported).
-    pub fn record_import(
-        &mut self,
-        provider: Provider,
-        scope: &Scope,
-        entry: ProviderStateEntry,
-    ) {
+    pub fn record_import(&mut self, provider: Provider, scope: &Scope, entry: ProviderStateEntry) {
         let entries = self.get_or_create_entries(provider, scope);
         Self::upsert_entry(entries, entry, scope);
     }
 
     /// Record a managed entry (origin = Managed).
-    pub fn record_managed(
-        &mut self,
-        provider: Provider,
-        scope: &Scope,
-        entry: ProviderStateEntry,
-    ) {
+    pub fn record_managed(&mut self, provider: Provider, scope: &Scope, entry: ProviderStateEntry) {
         let entries = self.get_or_create_entries(provider, scope);
         Self::upsert_entry(entries, entry, scope);
     }
 
     /// Get all entries for a provider at a given scope.
-    pub fn entries_for_provider(&self, provider: Provider, scope: &Scope) -> Vec<&ProviderStateEntry> {
+    pub fn entries_for_provider(
+        &self,
+        provider: Provider,
+        scope: &Scope,
+    ) -> Vec<&ProviderStateEntry> {
         let slug = provider.as_slug();
         match scope {
             Scope::User => self
@@ -83,14 +77,13 @@ impl McpProviderStateStore {
                 .get(slug)
                 .map(|e| e.user.iter().collect())
                 .unwrap_or_default(),
-            Scope::Repo(path) => {
-                self.resolve_repo_key(path)
-                    .as_ref()
-                    .and_then(|key| self.state.repos.get(key))
-                    .and_then(|repo| repo.providers.get(slug))
-                    .map(|e| e.repo.iter().collect())
-                    .unwrap_or_default()
-            }
+            Scope::Repo(path) => self
+                .resolve_repo_key(path)
+                .as_ref()
+                .and_then(|key| self.state.repos.get(key))
+                .and_then(|repo| repo.providers.get(slug))
+                .map(|e| e.repo.iter().collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -119,12 +112,7 @@ impl McpProviderStateStore {
     }
 
     /// Remove a specific entry by catalog_id.
-    pub fn remove_entry(
-        &mut self,
-        provider: Provider,
-        scope: &Scope,
-        catalog_id: &str,
-    ) {
+    pub fn remove_entry(&mut self, provider: Provider, scope: &Scope, catalog_id: &str) {
         let slug = provider.as_slug();
         match scope {
             Scope::User => {
@@ -155,20 +143,12 @@ impl McpProviderStateStore {
     ) -> &mut ProviderScopeEntries {
         let slug = provider.as_slug().to_string();
         match scope {
-            Scope::User => self
-                .state
-                .providers
-                .entry(slug)
-                .or_default(),
+            Scope::User => self.state.providers.entry(slug).or_default(),
             Scope::Repo(path) => {
                 let path_str = self
                     .resolve_repo_key(path)
                     .unwrap_or_else(|| Self::preferred_repo_key(path));
-                let repo = self
-                    .state
-                    .repos
-                    .entry(path_str)
-                    .or_default();
+                let repo = self.state.repos.entry(path_str).or_default();
                 repo.providers.entry(slug).or_default()
             }
         }
@@ -233,8 +213,7 @@ impl McpProviderStateStore {
     }
 
     fn canonical_repo_key(path: &Path) -> Option<String> {
-        Self::canonical_repo_path(path)
-            .map(|canonical| canonical.to_string_lossy().to_string())
+        Self::canonical_repo_path(path).map(|canonical| canonical.to_string_lossy().to_string())
     }
 
     fn canonical_repo_path(path: &Path) -> Option<PathBuf> {
@@ -316,10 +295,7 @@ mod tests {
             ProviderStateEntry {
                 catalog_id: "calendar".into(),
                 native_name: "calendar-native".into(),
-                source: repo_root
-                    .join(".codex/config.toml")
-                    .display()
-                    .to_string(),
+                source: repo_root.join(".codex/config.toml").display().to_string(),
                 origin: McpOrigin::Managed,
                 last_seen: Utc::now(),
             },
@@ -332,9 +308,11 @@ mod tests {
         assert_eq!(entry.native_name, "calendar-native");
 
         store.remove_entry(Provider::Codex, &lookup_scope, "calendar");
-        assert!(store
-            .entries_for_provider(Provider::Codex, &Scope::Repo(repo_root))
-            .is_empty());
+        assert!(
+            store
+                .entries_for_provider(Provider::Codex, &Scope::Repo(repo_root))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -355,9 +333,11 @@ mod tests {
         );
 
         store.remove_entry(Provider::Codex, &Scope::User, "to-remove");
-        assert!(store
-            .entries_for_provider(Provider::Codex, &Scope::User)
-            .is_empty());
+        assert!(
+            store
+                .entries_for_provider(Provider::Codex, &Scope::User)
+                .is_empty()
+        );
     }
 
     #[test]

@@ -814,4 +814,3 @@ fn parse_event(slug: &str) -> Result<AgenticEvent> {
 fn parse_timestamp(raw: &str) -> Result<DateTime<Utc>> {
     Ok(DateTime::parse_from_rfc3339(raw)?.with_timezone(&Utc))
 }
-

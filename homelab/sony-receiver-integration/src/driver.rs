@@ -20,7 +20,8 @@ impl DeviceDriver for SonyDeviceDriver {
         mut device: ConfiguredDevice,
         timeout: Duration,
     ) -> Result<ConfiguredDevice, DeviceError> {
-        if let Ok(source_list) = dispatch::fetch_source_list(&device.host, device.port, timeout).await
+        if let Ok(source_list) =
+            dispatch::fetch_source_list(&device.host, device.port, timeout).await
         {
             device
                 .driver_config

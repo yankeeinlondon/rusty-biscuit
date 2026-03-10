@@ -138,9 +138,11 @@ impl McpInjector for CodexInjector {
         _env: &mut HashMap<String, String>,
         shadow_home: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.ok_or_else(|| ClaudineError::ConfigValidation(
-            "Codex runtime MCP injection requires a shadow HOME".into(),
-        ))?;
+        let home = shadow_home.ok_or_else(|| {
+            ClaudineError::ConfigValidation(
+                "Codex runtime MCP injection requires a shadow HOME".into(),
+            )
+        })?;
         let config_dir = home.join(".codex");
         let config_path = config_dir.join("config.toml");
 
@@ -209,13 +211,10 @@ impl McpInjector for CodexInjector {
             {
                 table["env_vars"] = toml_edit::value(to_toml_array(&env_vars));
             }
-            if let Some(value) =
-                provider_override_string(server, "codex", "bearer_token_env_var")
-            {
+            if let Some(value) = provider_override_string(server, "codex", "bearer_token_env_var") {
                 table["bearer_token_env_var"] = toml_edit::value(value.as_str());
             }
-            if let Some(headers) =
-                provider_override_string_map(server, "codex", "env_http_headers")
+            if let Some(headers) = provider_override_string_map(server, "codex", "env_http_headers")
                 && !headers.is_empty()
             {
                 let mut header_table = toml_edit::Table::new();
@@ -276,9 +275,11 @@ impl McpInjector for GeminiInjector {
         _env: &mut HashMap<String, String>,
         shadow_home: Option<&Path>,
     ) -> Result<InjectionResult> {
-        let home = shadow_home.ok_or_else(|| ClaudineError::ConfigValidation(
-            "Gemini runtime MCP injection requires a shadow HOME".into(),
-        ))?;
+        let home = shadow_home.ok_or_else(|| {
+            ClaudineError::ConfigValidation(
+                "Gemini runtime MCP injection requires a shadow HOME".into(),
+            )
+        })?;
         let config_dir = home.join(".gemini");
         let config_path = config_dir.join("settings.json");
 
@@ -387,11 +388,7 @@ fn provider_override_i64(server: &McpServer, provider_slug: &str, key: &str) -> 
     provider_override_value(server, provider_slug, key).and_then(serde_json::Value::as_i64)
 }
 
-fn provider_override_string(
-    server: &McpServer,
-    provider_slug: &str,
-    key: &str,
-) -> Option<String> {
+fn provider_override_string(server: &McpServer, provider_slug: &str, key: &str) -> Option<String> {
     provider_override_value(server, provider_slug, key)
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
@@ -528,7 +525,9 @@ mod tests {
         let injector = CodexInjector;
         let servers = vec![make_server("slack")];
         let mut env = HashMap::new();
-        injector.inject(&servers, &mut env, Some(tmp.path())).unwrap();
+        injector
+            .inject(&servers, &mut env, Some(tmp.path()))
+            .unwrap();
 
         let content = fs::read_to_string(config_dir.join("config.toml")).unwrap();
         let doc: toml_edit::DocumentMut = content.parse().unwrap();
@@ -555,7 +554,11 @@ mod tests {
         assert!(content["mcpServers"]["linear"].is_object());
 
         // Should include extra args for allowed server names
-        assert!(result.extra_args.contains(&"--allowed-mcp-server-names".to_string()));
+        assert!(
+            result
+                .extra_args
+                .contains(&"--allowed-mcp-server-names".to_string())
+        );
     }
 
     #[test]
@@ -577,7 +580,9 @@ mod tests {
         let injector = GeminiInjector;
         let servers = vec![make_server("linear")];
         let mut env = HashMap::new();
-        injector.inject(&servers, &mut env, Some(tmp.path())).unwrap();
+        injector
+            .inject(&servers, &mut env, Some(tmp.path()))
+            .unwrap();
 
         let settings: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(config_dir.join("settings.json")).unwrap())

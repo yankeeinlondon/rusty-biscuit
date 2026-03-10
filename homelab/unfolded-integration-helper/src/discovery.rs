@@ -255,10 +255,7 @@ mod tests {
 
     #[test]
     fn ipv4_subnet_hosts_clamps_large_subnets_to_local_24() {
-        let hosts = ipv4_subnet_hosts(
-            Ipv4Addr::new(10, 42, 7, 99),
-            Ipv4Addr::new(255, 255, 0, 0),
-        );
+        let hosts = ipv4_subnet_hosts(Ipv4Addr::new(10, 42, 7, 99), Ipv4Addr::new(255, 255, 0, 0));
 
         assert_eq!(hosts.len(), 253);
         assert!(hosts.contains(&Ipv4Addr::new(10, 42, 7, 1)));

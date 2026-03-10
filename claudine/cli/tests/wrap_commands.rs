@@ -749,6 +749,7 @@ exit 0
 "#,
     );
 
+    // --quiet shows header but suppresses env details and info
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -758,8 +759,26 @@ exit 0
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     assert!(
+        stderr.contains("Claudine"),
+        "Quiet mode should show header but stderr was: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Environment Variables"),
+        "Quiet mode should suppress env details but stderr was: {stderr}"
+    );
+
+    // --silent suppresses everything
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["codex", "--silent", "--", "--version"])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
         !stderr.contains("Claudine"),
-        "Quiet mode should suppress summary but stderr was: {stderr}"
+        "Silent mode should suppress all output but stderr was: {stderr}"
     );
 }
 

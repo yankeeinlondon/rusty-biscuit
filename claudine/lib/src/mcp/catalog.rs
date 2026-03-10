@@ -192,7 +192,9 @@ impl McpCatalogStore {
                 .iter()
                 .filter(|(id, s)| {
                     normalize_for_match(id) == normalized
-                        || s.aliases.iter().any(|a| normalize_for_match(a) == normalized)
+                        || s.aliases
+                            .iter()
+                            .any(|a| normalize_for_match(a) == normalized)
                 })
                 .map(|(_, s)| s)
                 .collect(),
@@ -264,7 +266,10 @@ impl McpCatalogStore {
     }
 }
 
-fn resolve_match_list<'a>(query: &str, matches: Vec<&'a McpServer>) -> Result<Option<&'a McpServer>> {
+fn resolve_match_list<'a>(
+    query: &str,
+    matches: Vec<&'a McpServer>,
+) -> Result<Option<&'a McpServer>> {
     if matches.len() == 1 {
         return Ok(matches.into_iter().next());
     }
@@ -363,11 +368,13 @@ mod tests {
 
         // Add alias
         store.add_alias("my-server", "ms").unwrap();
-        assert!(store
-            .get_server("my-server")
-            .unwrap()
-            .aliases
-            .contains(&"ms".into()));
+        assert!(
+            store
+                .get_server("my-server")
+                .unwrap()
+                .aliases
+                .contains(&"ms".into())
+        );
 
         // Duplicate alias to same server is ok
         store.add_alias("my-server", "ms").unwrap();
@@ -380,11 +387,13 @@ mod tests {
 
         // Remove alias
         store.remove_alias("ms").unwrap();
-        assert!(!store
-            .get_server("my-server")
-            .unwrap()
-            .aliases
-            .contains(&"ms".into()));
+        assert!(
+            !store
+                .get_server("my-server")
+                .unwrap()
+                .aliases
+                .contains(&"ms".into())
+        );
     }
 
     #[test]
@@ -435,7 +444,10 @@ mod tests {
         store.add_server(make_server("google-calendar"));
         store.add_server(make_server("google-drive"));
         let result = store.resolve("google");
-        assert!(matches!(result, Err(ClaudineError::McpAmbiguousMatch { .. })));
+        assert!(matches!(
+            result,
+            Err(ClaudineError::McpAmbiguousMatch { .. })
+        ));
     }
 
     #[test]
