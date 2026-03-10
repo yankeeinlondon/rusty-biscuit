@@ -239,8 +239,12 @@ const OPENCODE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
     },
     SharedNativeEventMapping {
         event: AgenticEvent::AfterModel,
-        native_name: "message.part.updated",
-        parse_aliases: &["message.part.updated", "experimental.text.complete"],
+        native_name: "message.updated",
+        parse_aliases: &[
+            "message.updated",
+            "message.part.updated",
+            "experimental.text.complete",
+        ],
     },
     SharedNativeEventMapping {
         event: AgenticEvent::TurnComplete,
@@ -1232,7 +1236,7 @@ mod tests {
         );
         assert_eq!(
             Provider::OpenCode.registration_native_event_name(&AfterModel),
-            Some("message.part.updated")
+            Some("message.updated")
         );
 
         assert_eq!(

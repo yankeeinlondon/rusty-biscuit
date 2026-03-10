@@ -69,9 +69,15 @@ export const ClaudineBridge: Plugin = async () => {
     // Event bus hook - handles session.*, message.*, permission.* events
     event: async ({ event }) => {
       const mapped = EVENT_MAP[event.type];
-      if (mapped) {
-        invokeClaudine(mapped, event as object);
+      if (!mapped) return;
+
+      // Usage and cost land on completed assistant message updates.
+      if (event.type === "message.updated") {
+        const info = (event as any)?.properties?.info;
+        if (!info || info.role !== "assistant" || !info.time?.completed) return;
       }
+
+      invokeClaudine(mapped, event as object);
     },
     // Tool hooks - these are NOT on the event bus and require explicit registration
     "tool.execute.before": async (input, output) => {
@@ -548,7 +554,9 @@ mod tests {
         assert!(source.contains("\"tool.execute.before\": \"before_tool\""));
         assert!(source.contains("\"tool.execute.after\": \"after_tool\""));
         assert!(source.contains("\"chat.params\": \"before_model\""));
-        assert!(source.contains("\"message.part.updated\": \"after_model\""));
+        assert!(source.contains("\"message.updated\": \"after_model\""));
+        assert!(source.contains("info.role !== \"assistant\""));
+        assert!(source.contains("!info.time?.completed"));
     }
 
     #[test]

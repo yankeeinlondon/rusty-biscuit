@@ -25,16 +25,48 @@ impl ProviderAdapter for OpenCodeAdapter {
             .ok_or(AdapterError::MissingField("event_type"))?;
 
         let event = map_event(event_type)?;
+        let properties = raw.get("properties");
+        let event_context = properties.unwrap_or(raw);
+        let info = event_context.get("info");
+        let part = event_context.get("part");
         let mut meta = EventMeta {
             provider: Provider::OpenCode,
             event,
             timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id"),
-            cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
-            tool_input: raw.get("tool_input").cloned(),
-            tool_response: raw.get("tool_response").cloned(),
-            error: str_field(raw, "error"),
+            session_id: str_field(raw, "session_id")
+                .or_else(|| str_field(raw, "sessionId"))
+                .or_else(|| str_field(raw, "sessionID"))
+                .or_else(|| str_field(event_context, "session_id"))
+                .or_else(|| str_field(event_context, "sessionId"))
+                .or_else(|| str_field(event_context, "sessionID"))
+                .or_else(|| str_field(info.unwrap_or(&Value::Null), "sessionID"))
+                .or_else(|| str_field(info.unwrap_or(&Value::Null), "id")),
+            cwd: str_field(raw, "cwd")
+                .or_else(|| value_path_string(raw, &["path", "cwd"]))
+                .or_else(|| str_field(event_context, "directory"))
+                .or_else(|| value_path_string(info.unwrap_or(&Value::Null), &["path", "cwd"]))
+                .or_else(|| str_field(info.unwrap_or(&Value::Null), "directory")),
+            tool_name: str_field(raw, "tool_name")
+                .or_else(|| str_field(raw, "toolName"))
+                .or_else(|| str_field(raw, "tool"))
+                .or_else(|| str_field(event_context, "tool_name"))
+                .or_else(|| str_field(event_context, "toolName"))
+                .or_else(|| str_field(event_context, "tool")),
+            tool_input: raw
+                .get("tool_input")
+                .cloned()
+                .or_else(|| raw.get("args").cloned())
+                .or_else(|| event_context.get("tool_input").cloned())
+                .or_else(|| event_context.get("args").cloned()),
+            tool_response: raw
+                .get("tool_response")
+                .cloned()
+                .or_else(|| raw.get("output").cloned())
+                .or_else(|| event_context.get("tool_response").cloned())
+                .or_else(|| event_context.get("output").cloned()),
+            error: str_field(raw, "error")
+                .or_else(|| value_path_string(event_context, &["error", "message"]))
+                .or_else(|| str_field(event_context, "error")),
             prompt: str_field(raw, "prompt"),
             agent_type: str_field(raw, "agent_type"),
             notification_type: if event == AgenticEvent::Notification {
@@ -42,7 +74,8 @@ impl ProviderAdapter for OpenCodeAdapter {
             } else {
                 None
             },
-            notification_message: str_field(raw, "message"),
+            notification_message: str_field(raw, "message")
+                .or_else(|| str_field(event_context, "message")),
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         };
@@ -51,6 +84,20 @@ impl ProviderAdapter for OpenCodeAdapter {
             if let Some(value) = raw.get(key) {
                 meta.extra.insert(key.to_string(), value.clone());
             }
+        }
+
+        if let Some(value) = properties {
+            meta.extra.insert("properties".to_string(), value.clone());
+        }
+
+        if let Some(value) = info {
+            meta.extra.insert("message_info".to_string(), value.clone());
+            capture_usage_fields(&mut meta.extra, value);
+        }
+
+        if let Some(value) = part {
+            meta.extra.insert("message_part".to_string(), value.clone());
+            capture_usage_fields(&mut meta.extra, value);
         }
 
         Ok((event, meta))
@@ -121,6 +168,7 @@ fn map_event(event_type: &str) -> Result<AgenticEvent, AdapterError> {
         "chat.message" => Ok(AgenticEvent::BeforePrompt),
         "tool.execute.before" => Ok(AgenticEvent::BeforeTool),
         "tool.execute.after" => Ok(AgenticEvent::AfterTool),
+        "message.updated" => Ok(AgenticEvent::AfterModel),
         "chat.params"
         | "chat.headers"
         | "experimental.chat.system.transform"
@@ -132,6 +180,57 @@ fn map_event(event_type: &str) -> Result<AgenticEvent, AdapterError> {
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+fn value_path_string(raw: &Value, path: &[&str]) -> Option<String> {
+    let mut current = raw;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(ToOwned::to_owned)
+}
+
+fn capture_usage_fields(extra: &mut HashMap<String, Value>, value: &Value) {
+    if let (Some(provider_id), Some(model_id)) = (
+        str_field(value, "providerID"),
+        str_field(value, "modelID"),
+    ) {
+        extra.insert(
+            "model".to_string(),
+            Value::String(format!("{provider_id}/{model_id}")),
+        );
+        extra.insert("provider_id".to_string(), Value::String(provider_id));
+        extra.insert("model_id".to_string(), Value::String(model_id));
+    }
+
+    if let Some(cost) = value.get("cost") {
+        extra.insert("cost_usd".to_string(), cost.clone());
+    }
+
+    if let Some(finish) = value.get("finish") {
+        extra.insert("finish".to_string(), finish.clone());
+    }
+
+    if let Some(tokens) = value.get("tokens") {
+        extra.insert("token_usage".to_string(), normalize_token_usage(tokens));
+    }
+}
+
+fn normalize_token_usage(tokens: &Value) -> Value {
+    json!({
+        "total": tokens.get("total").and_then(Value::as_u64),
+        "input": tokens.get("input").and_then(Value::as_u64),
+        "output": tokens.get("output").and_then(Value::as_u64),
+        "reasoning": tokens.get("reasoning").and_then(Value::as_u64),
+        "cache_read": tokens
+            .get("cache")
+            .and_then(|cache| cache.get("read"))
+            .and_then(Value::as_u64),
+        "cache_write": tokens
+            .get("cache")
+            .and_then(|cache| cache.get("write"))
+            .and_then(Value::as_u64),
+    })
 }
 
 #[cfg(test)]
@@ -188,5 +287,62 @@ mod tests {
             .unwrap();
         assert_eq!(body["__action"], "mutate");
         assert_eq!(body["status"], "allow");
+    }
+
+    #[test]
+    fn parse_tool_bridge_payload_uses_tool_and_args_fields() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "event_type": "tool.execute.before",
+            "session_id": "ses_123",
+            "tool": "bash",
+            "args": { "command": "git status" }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::BeforeTool);
+        assert_eq!(meta.session_id.as_deref(), Some("ses_123"));
+        assert_eq!(meta.tool_name.as_deref(), Some("bash"));
+        assert_eq!(meta.tool_input, Some(json!({ "command": "git status" })));
+    }
+
+    #[test]
+    fn parse_message_updated_extracts_usage_fields() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "message.updated",
+            "properties": {
+                "info": {
+                    "role": "assistant",
+                    "sessionID": "ses_456",
+                    "providerID": "minimax",
+                    "modelID": "MiniMax-M2.5-highspeed",
+                    "path": { "cwd": "/tmp/project" },
+                    "cost": 0.00409764,
+                    "finish": "stop",
+                    "tokens": {
+                        "total": 49712,
+                        "input": 583,
+                        "output": 294,
+                        "reasoning": 0,
+                        "cache": {
+                            "read": 48479,
+                            "write": 356
+                        }
+                    }
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::AfterModel);
+        assert_eq!(meta.session_id.as_deref(), Some("ses_456"));
+        assert_eq!(meta.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(meta.extra["model"], json!("minimax/MiniMax-M2.5-highspeed"));
+        assert_eq!(meta.extra["cost_usd"], json!(0.00409764));
+        assert_eq!(meta.extra["finish"], json!("stop"));
+        assert_eq!(meta.extra["token_usage"]["total"], json!(49712));
+        assert_eq!(meta.extra["token_usage"]["cache_read"], json!(48479));
+        assert_eq!(meta.extra["token_usage"]["cache_write"], json!(356));
     }
 }
