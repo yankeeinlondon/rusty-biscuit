@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1"
 bytes = "1"
+futures = "0.3"
 pulldown-cmark = "0.13"
 reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
 secrecy = "0.10"
