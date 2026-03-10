@@ -201,6 +201,50 @@ fn mcp_show_json_includes_provenance() {
 }
 
 #[test]
+fn mcp_config_json_uses_new_command_name() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let mut server = make_server("calendar");
+    server.aliases.push("gcal".into());
+    seed_catalog(&home, std::slice::from_ref(&server));
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "config", "gcal", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(value["server"]["id"], "calendar");
+    assert_eq!(value["server"]["aliases"][0], "gcal");
+}
+
+#[test]
+fn mcp_check_json_reports_invalid_servers() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let mut invalid = make_server("broken");
+    invalid.command = None;
+    seed_catalog(&home, &[invalid]);
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "check", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert!(value["issues"].as_array().is_some_and(|issues| !issues.is_empty()));
+    assert_eq!(value["issues"][0]["code"], "stdio-missing-command");
+}
+
+#[test]
 fn mcp_default_repo_uses_repo_root_from_nested_directory() {
     let workspace = TestWorkspace::new();
     let home = workspace.path().join("home");
@@ -409,5 +453,5 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
         ])
         .assert()
         .failure()
-        .stderr(contains("Use `claudine mcp sync claude`"));
+        .stderr(contains("Use `claudine mcp export claude --apply`"));
 }
