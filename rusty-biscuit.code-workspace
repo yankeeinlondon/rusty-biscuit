@@ -19,6 +19,9 @@
         {
             "name": "biscuit-hash",
             "path": "biscuit-hash"
+        },{
+            "name": "biscuit-location",
+            "path": "biscuit-location"
         },
         {
             "name": "biscuit-speaks",
