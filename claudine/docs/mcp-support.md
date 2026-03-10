@@ -22,7 +22,7 @@ Claudine ships a normalized MCP catalog with three distinct workflows:
 | `claudine mcp alias <id-or-alias> <alias>` | Add a catalog alias |
 | `claudine mcp remove <id-or-alias>` | Remove a catalog entry or just an alias |
 | `claudine mcp check` | Validate transport combinations, aliases, defaults, and provider-state |
-| `claudine mcp sync` | Refresh the catalog from provider configs |
+| `claudine mcp sync` | Refresh the catalog from provider configs (pull-only; use `export` to push) |
 | `claudine mcp export <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a native provider config |
 
 `--json` is available across the command family. Text `config` output redacts env/header values by key name; `claudine mcp config --json` returns the stored definition, including env/header values.

@@ -1,4 +1,4 @@
-The claudine CLI and library offers "MCP mode" as a feature to users. This was initially implemented with minimal specification but has just recently been re-specified in greater detail and that detailed specification used to implement a more complete solution.
+The claudine CLI and library offers a "MCP mode" as a feature to users. This was initially implemented with minimal specification but has just recently been re-specified in greater detail and that detailed specification used to implement a more complete solution.
 
 There was an effort to document all of the "features" (organized into feature areas) that would be required to achieve the goals of the functional specification. In addition 
 

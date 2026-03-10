@@ -272,7 +272,7 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
 }
 
 #[test]
-fn mcp_sync_reports_unresolved_defaults_and_uses_native_name() {
+fn mcp_export_reports_unresolved_defaults_and_uses_native_name() {
     let workspace = TestWorkspace::new();
     let home = workspace.path().join("home");
     let repo_root = workspace.path().join("repo");
@@ -319,7 +319,7 @@ args = ["-y", "@test/google-calendar"]
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .args([
-            "mcp", "sync", "codex", "--scope", "repo", "--apply", "--json",
+            "mcp", "export", "codex", "--scope", "repo", "--apply", "--json",
         ])
         .assert()
         .success();
@@ -454,4 +454,298 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
         .assert()
         .failure()
         .stderr(contains("Use `claudine mcp export claude --apply`"));
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #1: repo-root detection returns None outside a repo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_list_outside_repo_returns_no_repo_defaults() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let non_repo = workspace.path().join("not-a-repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&non_repo).unwrap();
+
+    seed_catalog(&home, &[make_server("calendar")]);
+    seed_defaults(&home, &["calendar"]);
+
+    let assert = cargo_bin_cmd!("claudine")
+        .current_dir(&non_repo)
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    let entry = &value[0];
+    assert_eq!(entry["defaults"]["user"], true);
+    // Outside a repo, repo defaults should not be set
+    assert_eq!(entry["defaults"]["repo"], false);
+}
+
+#[test]
+fn mcp_default_repo_fails_outside_repo() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let non_repo = workspace.path().join("not-a-repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&non_repo).unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&non_repo)
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "default", "--repo", "calendar"])
+        .assert()
+        .failure()
+        .stderr(contains("repo root"));
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #2: mcp remove cascades to defaults
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_remove_cascades_to_user_defaults() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let non_repo = workspace.path().join("not-a-repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&non_repo).unwrap();
+
+    let server = make_server("calendar");
+    let other = make_server("slack");
+    seed_catalog(&home, &[server, other]);
+    seed_defaults(&home, &["calendar", "slack"]);
+
+    // Remove calendar (--json to skip interactive confirmation)
+    let assert = cargo_bin_cmd!("claudine")
+        .current_dir(&non_repo)
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "remove", "calendar", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(value["removed_server"], "calendar");
+    assert!(value["defaults_cleaned"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "user")));
+
+    // Verify calendar was removed from defaults
+    let defaults: McpDefaults = serde_json::from_str(
+        &fs::read_to_string(home.join(".claudine/mcp/defaults.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(!defaults.defaults.contains(&"calendar".to_string()));
+    assert!(defaults.defaults.contains(&"slack".to_string()));
+}
+
+#[test]
+fn mcp_remove_cascades_to_repo_defaults() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let repo_root = workspace.path().join("repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&repo_root).unwrap();
+
+    if !init_git_repo(&repo_root) {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    }
+
+    let server = make_server("calendar");
+    seed_catalog(&home, &[server]);
+    seed_defaults(&home, &["calendar"]);
+    write_json(
+        &repo_root.join(".claudine/mcp.json"),
+        &McpDefaults {
+            version: 1,
+            defaults: vec!["calendar".into()],
+        },
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .current_dir(&repo_root)
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "remove", "calendar", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert!(value["defaults_cleaned"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "repo")));
+
+    // Verify calendar removed from repo defaults
+    let repo_defaults: McpDefaults = serde_json::from_str(
+        &fs::read_to_string(repo_root.join(".claudine/mcp.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(!repo_defaults.defaults.contains(&"calendar".to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #6: sync no longer accepts <provider> positional arg
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_sync_rejects_positional_provider() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "sync", "codex"])
+        .assert()
+        .failure();
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #7: repo defaults replace user defaults
+// ---------------------------------------------------------------------------
+
+#[test]
+fn effective_defaults_repo_replaces_user() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let repo_root = workspace.path().join("repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&repo_root).unwrap();
+
+    if !init_git_repo(&repo_root) {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    }
+
+    let server_a = make_server("user-only");
+    let server_b = make_server("repo-only");
+    seed_catalog(&home, &[server_a, server_b]);
+    seed_defaults(&home, &["user-only"]);
+    write_json(
+        &repo_root.join(".claudine/mcp.json"),
+        &McpDefaults {
+            version: 1,
+            defaults: vec!["repo-only".into()],
+        },
+    );
+
+    // List from repo context — active defaults should be repo-only, not user-only
+    let assert = cargo_bin_cmd!("claudine")
+        .current_dir(&repo_root)
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "--json"])
+        .assert()
+        .success();
+
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    let repo_only = entries.iter().find(|e| e["id"] == "repo-only").unwrap();
+    let user_only = entries.iter().find(|e| e["id"] == "user-only").unwrap();
+
+    assert_eq!(repo_only["defaults"]["active"], true);
+    assert_eq!(user_only["defaults"]["active"], false);
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #8: --strict behavior tests
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn strict_mode_errors_on_missing_tag() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+
+    seed_catalog(&home, &[make_server("calendar")]);
+    seed_defaults(&home, &["calendar"]);
+
+    cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "opencode",
+            "--mcp",
+            "--strict",
+            "--dry-run",
+            "--non-interactive",
+            "--",
+            "fix #nonexistent bugs",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("unresolved MCP tag(s)"));
+}
+
+#[cfg(unix)]
+#[test]
+fn strict_mode_errors_on_ambiguous_tag() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+
+    seed_catalog(&home, &[make_server("calendar"), make_server("calendar-beta")]);
+    seed_defaults(&home, &[]);
+
+    cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "opencode",
+            "--mcp",
+            "--strict",
+            "--dry-run",
+            "--non-interactive",
+            "--",
+            "fix #cal bugs",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("ambiguous MCP tag(s)"));
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation #8: mcp remove alias reports owner and remaining aliases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_remove_alias_reports_owner_and_remaining() {
+    let workspace = TestWorkspace::new();
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let mut server = make_server("calendar");
+    server.aliases = vec!["gcal".into(), "cal".into()];
+    seed_catalog(&home, std::slice::from_ref(&server));
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .args(["mcp", "remove", "gcal", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(value["removed_alias"], "gcal");
+    assert_eq!(value["owner"], "calendar");
+    assert!(value["remaining_aliases"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "cal")));
 }

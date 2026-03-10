@@ -26,4 +26,5 @@ Options:
       --repo                         Use only repo-scoped skills, commands, and agents via a shadow HOME
       --mcp                          Enable Claudine-managed MCP session composition
       --use <ID>                     Activate specific MCP servers by ID or alias (comma-separated)
+      --strict                       Treat unresolved or ambiguous MCP tags as hard errors
   -h, --help                         Print help

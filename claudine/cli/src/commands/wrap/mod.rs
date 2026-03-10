@@ -223,6 +223,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     )?;
 
     let mut mcp_runtime = None;
+    let mut mcp_cleanup: Option<(Box<dyn claudine::mcp::inject::McpInjector>, claudine::mcp::inject::InjectionResult)> = None;
 
     // MCP session composition
     if args.mcp || !args.mcp_use.is_empty() {
@@ -282,13 +283,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
             }
         }
         if !session.ambiguous_tags.is_empty() {
-            let message = session
-                .ambiguous_tags
-                .iter()
-                .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(eyre!("ambiguous MCP tag(s): {message}"));
+            if args.strict || non_interactive_requested {
+                let message = session
+                    .ambiguous_tags
+                    .iter()
+                    .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(eyre!("ambiguous MCP tag(s): {message}"));
+            }
+            // Interactive non-strict: warn and drop ambiguous tags
+            for tag in &session.ambiguous_tags {
+                deferred_warnings.push(format!(
+                    "tag `#{}` is ambiguous ({}); dropped from session",
+                    tag.tag,
+                    tag.candidates.join(", ")
+                ));
+            }
+            session.ambiguous_tags.clear();
         }
 
         let mut runtime = McpRuntimeInfo {
@@ -337,9 +349,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                     child_args.push(arg.clone());
                 }
 
-                runtime.env_vars_set = result.env_vars_set;
-                runtime.temp_files = result.temp_files;
-                runtime.extra_args = result.extra_args;
+                runtime.env_vars_set = result.env_vars_set.clone();
+                runtime.temp_files = result.temp_files.clone();
+                runtime.extra_args = result.extra_args.clone();
+
+                mcp_cleanup = Some((injector, result));
             }
         } else {
             return Err(eyre!(
@@ -430,7 +444,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     };
     let stderr_noise = profile.stderr_noise_prefixes();
 
-    exec::run_child(
+    let exit_code = exec::run_child(
         binary_path.as_path(),
         &child_args,
         &env_plan.env,
@@ -438,7 +452,16 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         args.timeout,
         stdout_noise,
         stderr_noise,
-    )
+    );
+
+    // MCP injector cleanup: remove temp files written during injection
+    if let Some((injector, injection_result)) = mcp_cleanup {
+        if let Err(e) = injector.cleanup(&injection_result) {
+            tracing::warn!("MCP injector cleanup failed: {e}");
+        }
+    }
+
+    exit_code
 }
 
 impl WrapperArgs {

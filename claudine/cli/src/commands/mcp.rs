@@ -61,7 +61,7 @@ pub enum McpCommand {
     Remove(RemoveArgs),
     /// Validate the current MCP state.
     Check,
-    /// Refresh the catalog from provider configs.
+    /// Refresh the catalog from provider configs (pull-style only).
     Sync(SyncArgs),
     /// Export effective defaults back into a provider config.
     Export(ExportArgs),
@@ -145,18 +145,7 @@ pub struct RemoveArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct SyncArgs {
-    /// Deprecated compatibility form: provider to export to.
-    pub provider: Option<String>,
-
-    /// Scope for the deprecated compatibility export path.
-    #[arg(long, default_value = "user")]
-    pub scope: String,
-
-    /// Actually apply changes for the deprecated compatibility export path.
-    #[arg(long)]
-    pub apply: bool,
-}
+pub struct SyncArgs {}
 
 #[derive(Debug, Args)]
 pub struct ExportArgs {
@@ -188,7 +177,7 @@ pub fn run(args: McpArgs) -> Result<()> {
         Some(McpCommand::Remove(remove_args)) => run_remove(remove_args.query.as_deref(), json_output),
         Some(McpCommand::Check) => run_check(json_output),
         Some(McpCommand::Sync(sync_args)) => run_sync(sync_args, json_output),
-        Some(McpCommand::Export(export_args)) => run_export(export_args, json_output, false),
+        Some(McpCommand::Export(export_args)) => run_export(export_args, json_output),
     }
 }
 
@@ -292,10 +281,19 @@ fn run_init(json_output: bool) -> Result<()> {
 
     if user_defaults_exists && repo_root.is_some() && !repo_defaults_exists {
         let catalog = McpCatalogStore::load()?;
+        let user_defaults = load_user_defaults()?;
+
+        if !user_defaults.defaults.is_empty() {
+            log::data(&format!(
+                "Current user defaults: {}",
+                user_defaults.defaults.join(", ")
+            ));
+        }
+
         let selected = prompt_for_defaults(
             &catalog,
             "Select repo-default MCP servers:",
-            &[],
+            &user_defaults.defaults,
         )?;
         let repo_root = repo_root.expect("repo root should exist");
         save_repo_defaults(
@@ -510,11 +508,25 @@ fn run_remove(query: Option<&str>, json_output: bool) -> Result<()> {
         && let Some(owner) = catalog.find_alias_owner(&query)
     {
         let owner_id = owner.id.clone();
+        let remaining_aliases: Vec<String> = owner
+            .aliases
+            .iter()
+            .filter(|a| a.as_str() != query)
+            .cloned()
+            .collect();
         catalog.remove_alias(&query)?;
         catalog.save()?;
+
+        if !json_output && !remaining_aliases.is_empty() {
+            log::data(&format!(
+                "Owner `{owner_id}` still has aliases: {}",
+                remaining_aliases.join(", ")
+            ));
+        }
+
         return render_json_or_text(
             json_output,
-            json!({ "removed_alias": query, "owner": owner_id }),
+            json!({ "removed_alias": query, "owner": owner_id, "remaining_aliases": remaining_aliases }),
             format!("Removed alias `{query}` from `{owner_id}`."),
         );
     }
@@ -524,13 +536,49 @@ fn run_remove(query: Option<&str>, json_output: bool) -> Result<()> {
         .get_server(&server_id)
         .map(|server| server.aliases.clone())
         .unwrap_or_default();
-    confirm_remove_server(&server_id, &aliases)?;
+    if !json_output {
+        confirm_remove_server(&server_id, &aliases)?;
+    }
     catalog.remove_server(&server_id)?;
     catalog.save()?;
 
+    // Cascade: remove server from user defaults
+    let mut defaults_cleaned = Vec::new();
+    let user_defaults = load_user_defaults()?;
+    if user_defaults.defaults.contains(&server_id) {
+        let cleaned: Vec<String> = user_defaults
+            .defaults
+            .into_iter()
+            .filter(|id| id != &server_id)
+            .collect();
+        defaults::set_user_defaults(cleaned)?;
+        defaults_cleaned.push("user");
+    }
+
+    // Cascade: remove server from repo defaults (if in a repo)
+    if let Some(repo_root) = current_repo_root()?
+        && let Some(repo_defaults) = load_repo_defaults(&repo_root)?
+        && repo_defaults.defaults.contains(&server_id)
+    {
+        let cleaned: Vec<String> = repo_defaults
+            .defaults
+            .into_iter()
+            .filter(|id| id != &server_id)
+            .collect();
+        defaults::set_repo_defaults(&repo_root, cleaned)?;
+        defaults_cleaned.push("repo");
+    }
+
+    if !json_output && !defaults_cleaned.is_empty() {
+        log::data(&format!(
+            "Also removed from {} defaults.",
+            defaults_cleaned.join(" and ")
+        ));
+    }
+
     render_json_or_text(
         json_output,
-        json!({ "removed_server": server_id, "aliases_removed": aliases }),
+        json!({ "removed_server": server_id, "aliases_removed": aliases, "defaults_cleaned": defaults_cleaned }),
         format!("Removed MCP server `{server_id}`."),
     )
 }
@@ -561,24 +609,7 @@ fn run_check(json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_sync(args: SyncArgs, json_output: bool) -> Result<()> {
-    if let Some(provider) = args.provider {
-        if !json_output {
-            log::message(
-                "Warning: `claudine mcp sync <provider>` is deprecated; use `claudine mcp export <provider>`.",
-            );
-        }
-        return run_export(
-            ExportArgs {
-                provider,
-                scope: args.scope,
-                apply: args.apply,
-            },
-            json_output,
-            true,
-        );
-    }
-
+fn run_sync(_args: SyncArgs, json_output: bool) -> Result<()> {
     let report = bootstrap_mcp_state(current_repo_root()?.as_deref())?;
 
     if json_output {
@@ -597,7 +628,7 @@ fn run_sync(args: SyncArgs, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_export(args: ExportArgs, json_output: bool, deprecated_alias: bool) -> Result<()> {
+fn run_export(args: ExportArgs, json_output: bool) -> Result<()> {
     let provider = Provider::fuzzy_match_cli_name(&args.provider)
         .ok_or_else(|| eyre!("unknown provider: {}", args.provider))?;
     let catalog = McpCatalogStore::load()?;
@@ -638,7 +669,6 @@ fn run_export(args: ExportArgs, json_output: bool, deprecated_alias: bool) -> Re
             "provider": provider.as_slug(),
             "scope": scope_name(&scope),
             "applied": args.apply,
-            "deprecated_alias": deprecated_alias,
             "written": report.written,
             "removed": report.removed,
             "preserved": report.preserved,
@@ -707,8 +737,26 @@ fn prompt_for_defaults(
         .map(|server| (server_label(server), server.id.clone()))
         .collect();
 
-    let _ = current;
-    let selected = MultiSelect::new(prompt, options).prompt()?;
+    let preselected: Vec<usize> = if current.is_empty() {
+        Vec::new()
+    } else {
+        options
+            .iter()
+            .enumerate()
+            .filter_map(|(index, label)| {
+                lookup
+                    .get(label)
+                    .filter(|id| current.contains(id))
+                    .map(|_| index)
+            })
+            .collect()
+    };
+
+    let mut multi = MultiSelect::new(prompt, options);
+    if !preselected.is_empty() {
+        multi = multi.with_default(&preselected);
+    }
+    let selected = multi.prompt()?;
 
     Ok(selected
         .iter()
@@ -1026,7 +1074,16 @@ fn split_args(value: &str) -> Vec<String> {
 
 fn current_repo_root() -> Result<Option<PathBuf>> {
     let cwd = std::env::current_dir()?;
-    Ok(Some(resolve_repo_root(&cwd)))
+    if sniff::filesystem::detect_git(&cwd, false, 1)
+        .ok()
+        .flatten()
+        .is_some()
+        || sniff::filesystem::detect_repo(&cwd).ok().flatten().is_some()
+    {
+        Ok(Some(resolve_repo_root(&cwd)))
+    } else {
+        Ok(None)
+    }
 }
 
 fn collect_provider_presence(
