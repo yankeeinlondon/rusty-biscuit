@@ -73,7 +73,12 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
 
     config.save()?;
 
-    println!("\n{}", styled(format!("<green>Route <b>{route_name}</b> configured.</green>")));
+    println!(
+        "\n{}",
+        styled(format!(
+            "<green>Route <b>{route_name}</b> configured.</green>"
+        ))
+    );
     println!(
         "{}",
         styled(format!(
@@ -127,9 +132,7 @@ fn handle_existing(provider: &RouteProvider, existing: &[String]) -> Result<Exis
         options.push(format!("Modify \"{route}\""));
     }
 
-    let selected = Select::new("", options)
-        .prompt()
-        .map_err(handle_cancel)?;
+    let selected = Select::new("", options).prompt().map_err(handle_cancel)?;
 
     if selected == "Exit" {
         return Ok(ExistingAction::Exit);
@@ -138,7 +141,10 @@ fn handle_existing(provider: &RouteProvider, existing: &[String]) -> Result<Exis
         return Ok(ExistingAction::AddAnother);
     }
     // Extract route name from "Modify "route""
-    if let Some(name) = selected.strip_prefix("Modify \"").and_then(|s| s.strip_suffix('"')) {
+    if let Some(name) = selected
+        .strip_prefix("Modify \"")
+        .and_then(|s| s.strip_suffix('"'))
+    {
         return Ok(ExistingAction::Modify(name.to_string()));
     }
     Ok(ExistingAction::Exit)
@@ -147,7 +153,12 @@ fn handle_existing(provider: &RouteProvider, existing: &[String]) -> Result<Exis
 fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Result<RouteConfig> {
     println!(
         "\n{}",
-        styled(format!("Configuring <b>{provider}</b>{}", route_name.map(|n| format!(" (route: <blue>{n}</blue>)")).unwrap_or_default()))
+        styled(format!(
+            "Configuring <b>{provider}</b>{}",
+            route_name
+                .map(|n| format!(" (route: <blue>{n}</blue>)"))
+                .unwrap_or_default()
+        ))
     );
 
     match provider {
@@ -170,7 +181,9 @@ fn configure_discord() -> Result<RouteConfig> {
     );
     println!(
         "{}",
-        styled("<dim>Find the Channel ID by right-clicking a channel with Developer Mode enabled.</dim>")
+        styled(
+            "<dim>Find the Channel ID by right-clicking a channel with Developer Mode enabled.</dim>"
+        )
     );
 
     let bot_token = Text::new("Bot token:")
@@ -209,15 +222,21 @@ fn configure_slack() -> Result<RouteConfig> {
     );
     println!(
         "{}",
-        styled("<dim>Create an app at https://api.slack.com/apps and install it to your workspace.</dim>")
+        styled(
+            "<dim>Create an app at https://api.slack.com/apps and install it to your workspace.</dim>"
+        )
     );
     println!(
         "{}",
-        styled("<dim>The bot token starts with xoxb- and is found under OAuth & Permissions.</dim>")
+        styled(
+            "<dim>The bot token starts with xoxb- and is found under OAuth & Permissions.</dim>"
+        )
     );
     println!(
         "{}",
-        styled("<dim>Find the Channel ID by right-clicking a channel and selecting \"View channel details\".</dim>")
+        styled(
+            "<dim>Find the Channel ID by right-clicking a channel and selecting \"View channel details\".</dim>"
+        )
     );
 
     let bot_token = Text::new("Bot token:")
@@ -286,7 +305,9 @@ fn configure_signal() -> Result<RouteConfig> {
 
     let account = Text::new("Account phone number:")
         .with_placeholder("+1234567890")
-        .with_help_message("Your registered Signal phone number (leave empty to use env var instead)")
+        .with_help_message(
+            "Your registered Signal phone number (leave empty to use env var instead)",
+        )
         .prompt()
         .map_err(handle_cancel)?;
     let account = non_empty(account);
@@ -331,11 +352,15 @@ fn configure_whatsapp() -> Result<RouteConfig> {
     );
     println!(
         "{}",
-        styled("<dim>The phone number ID identifies which WhatsApp Business number sends messages.</dim>")
+        styled(
+            "<dim>The phone number ID identifies which WhatsApp Business number sends messages.</dim>"
+        )
     );
 
     let access_token = Text::new("Access token:")
-        .with_help_message("Your WhatsApp Cloud API access token (leave empty to use env var instead)")
+        .with_help_message(
+            "Your WhatsApp Cloud API access token (leave empty to use env var instead)",
+        )
         .prompt()
         .map_err(handle_cancel)?;
     let access_token = non_empty(access_token);
@@ -351,7 +376,9 @@ fn configure_whatsapp() -> Result<RouteConfig> {
     };
 
     let phone_number_id = Text::new("Phone number ID:")
-        .with_help_message("Your WhatsApp Business phone number ID (leave empty to use env var instead)")
+        .with_help_message(
+            "Your WhatsApp Business phone number ID (leave empty to use env var instead)",
+        )
         .prompt()
         .map_err(handle_cancel)?;
     let phone_number_id = non_empty(phone_number_id);
@@ -396,7 +423,9 @@ fn configure_telegram() -> Result<RouteConfig> {
     );
     println!(
         "{}",
-        styled("<dim>Find your Chat ID by messaging @userinfobot or using the Bot API's getUpdates.</dim>")
+        styled(
+            "<dim>Find your Chat ID by messaging @userinfobot or using the Bot API's getUpdates.</dim>"
+        )
     );
 
     let bot_token = Text::new("Bot token:")

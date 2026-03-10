@@ -1,8 +1,28 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
 use secrecy::SecretString;
+
+const COMPLETIONS_HELP: &str = r#"
+SHELL COMPLETIONS
+
+Enable dynamic shell completions for messenger.
+
+Examples:
+  # Bash - add to ~/.bashrc or ~/.bash_profile
+  echo 'source <(COMPLETE=bash messenger)' >> ~/.bashrc
+
+  # Zsh - add to ~/.zshrc
+  echo 'source <(COMPLETE=zsh messenger)' >> ~/.zshrc
+
+  # Fish - add to config
+  echo 'COMPLETE=fish messenger | source' >> ~/.config/fish/config.fish
+
+  # Disable completions
+  COMPLETE=0
+"#;
 
 mod config;
 mod receipt_store;
@@ -12,12 +32,14 @@ use config::{Config, RouteConfig, RouteProvider};
 
 #[derive(Parser)]
 #[command(name = "messenger", about = "Send messages to any platform")]
+#[command(disable_help_subcommand = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
+#[command(disable_help_subcommand = true)]
 enum Commands {
     /// Send a message.
     Send {
@@ -59,6 +81,10 @@ enum Commands {
         /// Send as plain text (disable Markdown rendering).
         #[arg(long)]
         plain: bool,
+
+        /// Attach a geographic location (format: "LAT,LON").
+        #[arg(long, value_name = "LAT,LON")]
+        location: Option<String>,
     },
     /// Interactive provider configuration.
     Setup {
@@ -70,6 +96,9 @@ enum Commands {
         /// Provider to configure.
         provider: Option<RouteProvider>,
     },
+    /// Show shell completions setup instructions.
+    #[command(after_help = COMPLETIONS_HELP)]
+    Completions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +109,8 @@ struct ResolvedRoute {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     color_eyre::install()?;
     tracing_subscriber::fmt::init();
 
@@ -97,23 +128,19 @@ async fn main() -> Result<()> {
             silent,
             strict,
             plain,
+            location,
         } => {
             send_message(
-                &message,
-                provider,
-                channel,
-                route,
-                reply_to,
-                image,
-                file,
-                silent,
-                strict,
-                plain,
+                &message, provider, channel, route, reply_to, image, file, silent, strict, plain,
+                location,
             )
             .await?;
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
             setup::run(provider)?;
+        }
+        Commands::Completions => {
+            print!("{}", COMPLETIONS_HELP.trim_start());
         }
     }
 
@@ -132,6 +159,7 @@ async fn send_message(
     silent: bool,
     strict: bool,
     plain: bool,
+    location: Option<String>,
 ) -> Result<()> {
     let config = Config::load()?;
     let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
@@ -145,6 +173,10 @@ async fn send_message(
         messenger::Message::markdown(message_text)
     };
 
+    if let Some(ref loc) = location {
+        let (lat, lon) = parse_location(loc)?;
+        message = message.with_location(lat, lon);
+    }
     if let Some(image_path) = image {
         message = message.image(image_path);
     }
@@ -165,7 +197,10 @@ async fn send_message(
         dispatch = dispatch.strict();
     }
 
-    let receipt = messenger.send(dispatch, &message).await?;
+    let plan = messenger.plan_send(dispatch, &message)?;
+    emit_compatibility_warnings(&plan.warnings);
+
+    let receipt = messenger.send_planned(plan).await?;
     let receipt_path = receipt_store::save_receipt(&receipt, resolved_route.name.as_deref())?;
     eprintln!(
         "Sent via {} (id: {})\nReceipt: {}",
@@ -175,6 +210,12 @@ async fn send_message(
     );
 
     Ok(())
+}
+
+fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
+    for warning in warnings {
+        eprintln!("{warning}");
+    }
 }
 
 fn resolve_route(
@@ -222,10 +263,7 @@ fn resolve_route(
     ))
 }
 
-fn register_provider(
-    messenger: &mut messenger::Messenger,
-    route: &RouteConfig,
-) -> Result<()> {
+fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) -> Result<()> {
     match route {
         RouteConfig::Discord {
             bot_token,
@@ -247,14 +285,12 @@ fn register_provider(
             ..
         } => {
             let token = resolve_secret(bot_token.as_deref(), bot_token_env)?;
-            messenger.register(Box::new(
-                messenger::provider::slack::SlackProvider::new(
-                    messenger::provider::slack::SlackConfig {
-                        bot_token: SecretString::from(token),
-                        api_base_url: None,
-                    },
-                ),
-            ));
+            messenger.register(Box::new(messenger::provider::slack::SlackProvider::new(
+                messenger::provider::slack::SlackConfig {
+                    bot_token: SecretString::from(token),
+                    api_base_url: None,
+                },
+            )));
         }
         RouteConfig::Signal {
             rpc_url,
@@ -265,11 +301,9 @@ fn register_provider(
         } => {
             let rpc_url = resolve_secret(rpc_url.as_deref(), rpc_url_env)?;
             let account = resolve_secret(account.as_deref(), account_env)?;
-            messenger.register(Box::new(
-                messenger::provider::signal::SignalProvider::new(
-                    messenger::provider::signal::SignalConfig { rpc_url, account },
-                ),
-            ));
+            messenger.register(Box::new(messenger::provider::signal::SignalProvider::new(
+                messenger::provider::signal::SignalConfig { rpc_url, account },
+            )));
         }
         RouteConfig::WhatsApp {
             access_token,
@@ -312,7 +346,9 @@ fn register_provider(
 
 fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
     match route {
-        RouteConfig::Discord { channel_id, .. } => Ok(messenger::Target::discord_channel(channel_id)),
+        RouteConfig::Discord { channel_id, .. } => {
+            Ok(messenger::Target::discord_channel(channel_id))
+        }
         RouteConfig::Slack { channel_id, .. } => Ok(messenger::Target::slack_channel(channel_id)),
         RouteConfig::Signal { recipient, .. } => {
             if recipient.starts_with('+') {
@@ -348,6 +384,23 @@ fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
              Either store the value in your route config or set {env_name}."
         )
     })
+}
+
+/// Parse a "LAT,LON" string into (f64, f64).
+fn parse_location(s: &str) -> Result<(f64, f64)> {
+    let parts: Vec<&str> = s.splitn(2, ',').collect();
+    if parts.len() != 2 {
+        return Err(eyre!(
+            "invalid location format: expected \"LAT,LON\" (e.g. \"34.05,-118.24\")"
+        ));
+    }
+    let lat: f64 = parts[0].trim().parse().map_err(|_| {
+        eyre!("invalid latitude: \"{}\"", parts[0].trim())
+    })?;
+    let lon: f64 = parts[1].trim().parse().map_err(|_| {
+        eyre!("invalid longitude: \"{}\"", parts[1].trim())
+    })?;
+    Ok((lat, lon))
 }
 
 #[cfg(test)]
@@ -407,9 +460,10 @@ mod tests {
         })
         .unwrap();
 
-        assert!(
-            matches!(target, messenger::Target::Signal(messenger::target::SignalTarget::User(_)))
-        );
+        assert!(matches!(
+            target,
+            messenger::Target::Signal(messenger::target::SignalTarget::User(_))
+        ));
     }
 
     #[test]
@@ -428,5 +482,18 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn compatibility_warning_format_matches_cli_output() {
+        let warning = messenger::CompatibilityWarning {
+            provider: messenger::ProviderKind::Slack,
+            feature: "attachments",
+        };
+
+        assert_eq!(
+            warning.to_string(),
+            "⚠️ the attachments feature is not supported on Slack and will be dropped"
+        );
     }
 }

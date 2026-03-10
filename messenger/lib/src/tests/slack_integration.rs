@@ -110,12 +110,10 @@ async fn auth_error_maps_to_authentication() {
 
     Mock::given(method("POST"))
         .and(path("/chat.postMessage"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "ok": false,
-                "error": "invalid_auth"
-            })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": false,
+            "error": "invalid_auth"
+        })))
         .mount(&server)
         .await;
 
@@ -150,9 +148,7 @@ async fn rate_limit_maps_to_rate_limited() {
 
     let err = provider.send(&dispatch, &message).await.unwrap_err();
     match err {
-        crate::MessengerError::RateLimited {
-            retry_after_ms, ..
-        } => {
+        crate::MessengerError::RateLimited { retry_after_ms, .. } => {
             assert_eq!(retry_after_ms, Some(30_000));
         }
         other => panic!("expected RateLimited, got {other:?}"),

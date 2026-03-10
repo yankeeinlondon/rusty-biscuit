@@ -27,6 +27,25 @@ pub struct Location {
     pub address: Option<String>,
 }
 
+impl Location {
+    /// Format as a text line for providers without native location support.
+    ///
+    /// ## Examples
+    ///
+    /// - `📍 Griffith Observatory (2800 E Observatory Rd) — 34.0500, -118.2400`
+    /// - `📍 Griffith Observatory — 34.0500, -118.2400`
+    /// - `📍 34.0500, -118.2400`
+    pub fn format_text_line(&self) -> String {
+        let coords = format!("{:.4}, {:.4}", self.latitude, self.longitude);
+        match (&self.name, &self.address) {
+            (Some(name), Some(addr)) => format!("📍 {name} ({addr}) — {coords}"),
+            (Some(name), None) => format!("📍 {name} — {coords}"),
+            (None, Some(addr)) => format!("📍 {addr} — {coords}"),
+            (None, None) => format!("📍 {coords}"),
+        }
+    }
+}
+
 impl Message {
     /// Create a plain-text message.
     pub fn text(text: impl Into<String>) -> Self {
@@ -61,6 +80,17 @@ impl Message {
             }),
             metadata: BTreeMap::new(),
         }
+    }
+
+    /// Attach a location to the message.
+    pub fn with_location(mut self, lat: f64, lon: f64) -> Self {
+        self.location = Some(Location {
+            latitude: lat,
+            longitude: lon,
+            name: None,
+            address: None,
+        });
+        self
     }
 
     /// Add an attachment to the message.

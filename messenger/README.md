@@ -19,7 +19,7 @@ messenger.send(Dispatch::to(Target::discord_channel("123456")), &message).await?
 
 | Provider | Feature Flag | Transport | Capabilities |
 |----------|-------------|-----------|-------------|
-| Discord | `discord` (default) | `twilight-http` | Markdown, replies |
+| Discord | `discord` (default) | `twilight-http` | Markdown, replies, file attachments |
 | Slack | `slack` (default) | `reqwest` → Web API | Markdown (mrkdwn), replies, link preview control |
 | Telegram | `telegram` | `reqwest` → Bot API | Markdown (HTML), replies, location, silent, link preview |
 | WhatsApp | `whatsapp` | `reqwest` → Cloud API | Replies, location |
@@ -29,7 +29,7 @@ messenger.send(Dispatch::to(Target::discord_channel("123456")), &message).await?
 
 - **`Message` is reusable content** — destination and reply context live in `Dispatch`, not in the message itself
 - **Markdown rendering pipeline** — parsed once into an internal AST, then rendered per-provider (Discord Markdown, Slack mrkdwn, Telegram HTML, plain text)
-- **Best-effort by default** — formatting downgrades silently; use `Dispatch::strict()` to error on unsupported features
+- **Best-effort by default** — unsupported features are dropped with warnings; use `Dispatch::strict()` to error instead
 - **Provider-typed receipts** — `SendReceipt` contains a `MessageRef` for replies (Slack `thread_ts`, Discord `message_reference`, etc.)
 - **Receipt-backed CLI replies** — each CLI send stores a JSON receipt so later replies can reuse the typed `MessageRef`
 - **Feature-gated providers** — only `discord` + `slack` compile by default; Stage 2 providers are opt-in
@@ -79,7 +79,7 @@ messenger --strict "Error if provider can't handle this"
 messenger --route slack.ops --reply-to ~/.messenger/receipts/1712345678000-slack.json "Follow-up"
 ```
 
-`--reply-to` accepts either a saved receipt path or a JSON `SendReceipt`/`MessageRef`. `--image` and `--file` now flow end-to-end through validation, so unsupported providers fail explicitly instead of silently discarding attachments.
+`--reply-to` accepts either a saved receipt path or a JSON `SendReceipt`/`MessageRef`. In default mode, unsupported features are warned about on `stderr` and dropped before send; `--strict` turns those cases back into errors. Discord uploads local-path and in-memory attachments as multipart files.
 
 ### Configuration
 

@@ -8,9 +8,7 @@ use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
 use crate::message::MessageBody;
 use crate::prepared::PreparedMessage;
-use crate::receipt::{
-    MessageRef, ProviderKind, SendReceipt, SignalAuthor, SignalThreadKey,
-};
+use crate::receipt::{MessageRef, ProviderKind, SendReceipt, SignalAuthor, SignalThreadKey};
 use crate::target::{SignalAddress, SignalTarget, Target};
 
 /// Configuration for the Signal provider.
@@ -86,7 +84,7 @@ impl super::Provider for SignalProvider {
             supports_markdown_rendering: false,
             supports_reply: true,
             supports_attachments: false,
-            supports_location: false,
+            supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
         }
@@ -102,14 +100,17 @@ impl super::Provider for SignalProvider {
             _ => {
                 return Err(MessengerError::InvalidMessage(
                     "expected Signal target".into(),
-                ))
+                ));
             }
         };
 
-        // Render body as plain text
+        // Render body as plain text (with location text fallback)
         let text = match message.body() {
             Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                message.render_body_for_provider(ProviderKind::Signal)
+                message.render_body_with_location(ProviderKind::Signal)
+            }
+            None if message.location().is_some() => {
+                message.render_body_with_location(ProviderKind::Signal)
             }
             None => String::new(),
         };
@@ -193,9 +194,7 @@ impl super::Provider for SignalProvider {
                 })?;
 
         if let Some(error) = resp.error {
-            let msg = error
-                .message
-                .unwrap_or_else(|| "unknown error".to_string());
+            let msg = error.message.unwrap_or_else(|| "unknown error".to_string());
             return Err(MessengerError::Provider {
                 provider: ProviderKind::Signal,
                 code: error.code.map(|c| c.to_string()),
@@ -212,15 +211,11 @@ impl super::Provider for SignalProvider {
             .unwrap_or(0);
 
         let thread_key = match target {
-            SignalTarget::User(addr) => {
-                SignalThreadKey::Direct(address_to_string(addr))
-            }
+            SignalTarget::User(addr) => SignalThreadKey::Direct(address_to_string(addr)),
             SignalTarget::Group { group_id_base64 } => {
                 SignalThreadKey::Group(group_id_base64.clone())
             }
-            SignalTarget::NoteToSelf => {
-                SignalThreadKey::Direct(self.account.clone())
-            }
+            SignalTarget::NoteToSelf => SignalThreadKey::Direct(self.account.clone()),
         };
 
         let author = match &self.account {

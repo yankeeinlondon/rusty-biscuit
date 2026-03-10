@@ -4,8 +4,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
 use crate::message::Message;
-use crate::provider::telegram::{TelegramConfig, TelegramProvider};
 use crate::provider::Provider;
+use crate::provider::telegram::{TelegramConfig, TelegramProvider};
 use crate::receipt::{MessageRef, ProviderKind, TelegramChatRef};
 use crate::target::{Target, TelegramChatId};
 
@@ -119,12 +119,13 @@ async fn includes_reply_parameters() {
         .await;
 
     let provider = telegram_provider(&server.uri());
-    let dispatch = Dispatch::to(Target::telegram_chat(TelegramChatId::Id(12345)))
-        .reply_to(MessageRef::Telegram {
+    let dispatch = Dispatch::to(Target::telegram_chat(TelegramChatId::Id(12345))).reply_to(
+        MessageRef::Telegram {
             chat_id: TelegramChatRef::Id(12345),
             message_id: 10,
             thread_id: None,
-        });
+        },
+    );
     let message = Message::text("reply");
 
     let receipt = provider.send(&dispatch, &message).await.unwrap();
@@ -220,8 +221,8 @@ async fn disables_link_preview_in_payload() {
         .await;
 
     let provider = telegram_provider(&server.uri());
-    let dispatch = Dispatch::to(Target::telegram_chat(TelegramChatId::Id(12345)))
-        .disable_link_preview();
+    let dispatch =
+        Dispatch::to(Target::telegram_chat(TelegramChatId::Id(12345))).disable_link_preview();
     let message = Message::text("https://example.com");
 
     let receipt = provider.send(&dispatch, &message).await.unwrap();

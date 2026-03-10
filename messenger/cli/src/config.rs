@@ -451,9 +451,8 @@ impl Config {
     }
 
     pub fn config_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            color_eyre::eyre::eyre!("could not determine home directory")
-        })?;
+        let home = dirs::home_dir()
+            .ok_or_else(|| color_eyre::eyre::eyre!("could not determine home directory"))?;
         Ok(home.join(".messenger.json"))
     }
 

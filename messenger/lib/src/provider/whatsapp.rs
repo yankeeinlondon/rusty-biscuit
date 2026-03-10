@@ -132,7 +132,7 @@ impl super::Provider for WhatsAppProvider {
             _ => {
                 return Err(MessengerError::InvalidMessage(
                     "expected WhatsApp target".into(),
-                ))
+                ));
             }
         };
 
@@ -224,9 +224,7 @@ impl super::Provider for WhatsAppProvider {
 
         if let Some(error) = resp.error {
             let code = error.code.unwrap_or(0);
-            let msg = error
-                .message
-                .unwrap_or_else(|| "unknown error".to_string());
+            let msg = error.message.unwrap_or_else(|| "unknown error".to_string());
 
             if code == 190 {
                 return Err(MessengerError::Authentication {

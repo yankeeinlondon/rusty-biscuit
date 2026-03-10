@@ -72,7 +72,7 @@ impl super::Provider for SlackProvider {
             supports_markdown_rendering: true,
             supports_reply: true,
             supports_attachments: false, // Deferred: Slack file upload is complex
-            supports_location: false,
+            supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: true,
         }
@@ -88,14 +88,17 @@ impl super::Provider for SlackProvider {
             _ => {
                 return Err(MessengerError::InvalidMessage(
                     "expected Slack target".into(),
-                ))
+                ));
             }
         };
 
-        // Render the message body to Slack mrkdwn
+        // Render the message body to Slack mrkdwn (with location text fallback)
         let text = match message.body() {
             Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                message.render_body_for_provider(ProviderKind::Slack)
+                message.render_body_with_location(ProviderKind::Slack)
+            }
+            None if message.location().is_some() => {
+                message.render_body_with_location(ProviderKind::Slack)
             }
             None => String::new(),
         };

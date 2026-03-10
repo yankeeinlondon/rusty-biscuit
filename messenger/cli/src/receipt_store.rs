@@ -10,10 +10,7 @@ pub struct StoredReceipt {
     pub receipt: messenger::SendReceipt,
 }
 
-pub fn save_receipt(
-    receipt: &messenger::SendReceipt,
-    route_name: Option<&str>,
-) -> Result<PathBuf> {
+pub fn save_receipt(receipt: &messenger::SendReceipt, route_name: Option<&str>) -> Result<PathBuf> {
     let receipts_dir = receipts_dir()?;
     std::fs::create_dir_all(&receipts_dir)?;
 

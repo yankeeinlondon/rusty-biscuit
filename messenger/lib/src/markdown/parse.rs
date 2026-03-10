@@ -227,7 +227,9 @@ mod tests {
     fn parse_link() {
         let nodes = parse_markdown("[click](https://example.com)");
         if let RichNode::Paragraph(children) = &nodes[0] {
-            assert!(matches!(&children[0], RichNode::Link { url, .. } if url == "https://example.com"));
+            assert!(
+                matches!(&children[0], RichNode::Link { url, .. } if url == "https://example.com")
+            );
         } else {
             panic!("expected paragraph");
         }

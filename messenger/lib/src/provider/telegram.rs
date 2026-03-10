@@ -171,7 +171,7 @@ impl super::Provider for TelegramProvider {
             _ => {
                 return Err(MessengerError::InvalidMessage(
                     "expected Telegram target".into(),
-                ))
+                ));
             }
         };
 
@@ -180,11 +180,9 @@ impl super::Provider for TelegramProvider {
 
         // Build reply parameters
         let reply_params = match &dispatch.reply_to {
-            Some(MessageRef::Telegram { message_id, .. }) => {
-                Some(ReplyParameters {
-                    message_id: *message_id,
-                })
-            }
+            Some(MessageRef::Telegram { message_id, .. }) => Some(ReplyParameters {
+                message_id: *message_id,
+            }),
             _ => None,
         };
 
@@ -200,7 +198,9 @@ impl super::Provider for TelegramProvider {
                 chat_id: &chat_id_str,
                 latitude: location.latitude,
                 longitude: location.longitude,
-                reply_parameters: reply_params.as_ref().map(|r| ReplyParameters { message_id: r.message_id }),
+                reply_parameters: reply_params.as_ref().map(|r| ReplyParameters {
+                    message_id: r.message_id,
+                }),
                 message_thread_id: thread_id,
                 disable_notification,
             };
@@ -269,16 +269,12 @@ impl TelegramProvider {
         url: &str,
         body: &T,
     ) -> Result<TelegramMessage, MessengerError> {
-        let response = self
-            .client
-            .post(url)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| MessengerError::Transport {
+        let response = self.client.post(url).json(body).send().await.map_err(|e| {
+            MessengerError::Transport {
                 provider: ProviderKind::Telegram,
                 message: e.to_string(),
-            })?;
+            }
+        })?;
 
         if response.status().is_server_error() {
             return Err(MessengerError::Transport {

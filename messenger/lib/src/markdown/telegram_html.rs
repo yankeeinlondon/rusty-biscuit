@@ -33,7 +33,10 @@ fn render_nodes(out: &mut String, nodes: &[RichNode], top_level: bool) {
             }
             RichNode::CodeBlock { language, code } => {
                 if let Some(lang) = language {
-                    out.push_str(&format!("<pre><code class=\"language-{}\">", escape_html(lang)));
+                    out.push_str(&format!(
+                        "<pre><code class=\"language-{}\">",
+                        escape_html(lang)
+                    ));
                 } else {
                     out.push_str("<pre><code>");
                 }

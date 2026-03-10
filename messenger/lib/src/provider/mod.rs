@@ -19,7 +19,9 @@ use crate::error::MessengerError;
 use crate::message::Message;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{ProviderKind, SendReceipt};
-use crate::validate::{target_provider_kind, validate_dispatch, validate_message};
+use crate::validate::{
+    CompatibilityWarning, normalize_dispatch, target_provider_kind, validate_message,
+};
 
 /// A messaging provider that can send messages to a specific platform.
 #[async_trait::async_trait]
@@ -37,9 +39,20 @@ pub trait Provider: Send + Sync {
         dispatch: &Dispatch,
         message: &Message,
     ) -> Result<SendReceipt, MessengerError> {
-        let prepared = PreparedMessage::new(message);
-        self.send_prepared(dispatch, &prepared).await
+        validate_message(message)?;
+        let normalized = normalize_dispatch(dispatch, message, &self.capabilities(), self.kind())?;
+        let prepared = PreparedMessage::new(&normalized.message);
+        self.send_prepared(&normalized.dispatch, &prepared).await
     }
+}
+
+/// A provider-aware send plan after compatibility normalization.
+#[derive(Debug, Clone)]
+pub struct SendPlan {
+    pub provider: ProviderKind,
+    pub dispatch: Dispatch,
+    pub message: Message,
+    pub warnings: Vec<CompatibilityWarning>,
 }
 
 /// The main coordinator that routes dispatches to registered providers.
@@ -66,34 +79,50 @@ impl Messenger {
         dispatch: Dispatch,
         message: &Message,
     ) -> Result<SendReceipt, MessengerError> {
-        let prepared = PreparedMessage::new(message);
-        self.send_prepared(dispatch, &prepared).await
+        let plan = self.plan_send(dispatch, message)?;
+        self.send_planned(plan).await
     }
 
-    async fn send_prepared(
+    /// Build a send plan, collecting any best-effort compatibility warnings.
+    pub fn plan_send(
         &self,
         dispatch: Dispatch,
-        message: &PreparedMessage,
-    ) -> Result<SendReceipt, MessengerError> {
-        validate_message(message.original())?;
+        message: &Message,
+    ) -> Result<SendPlan, MessengerError> {
+        validate_message(message)?;
 
         let provider_kind = target_provider_kind(&dispatch.target);
-        let provider = self
-            .providers
-            .get(&provider_kind)
-            .ok_or(MessengerError::MissingConfiguration {
-                provider: provider_kind,
-                field: "provider registration",
-            })?;
+        let provider =
+            self.providers
+                .get(&provider_kind)
+                .ok_or(MessengerError::MissingConfiguration {
+                    provider: provider_kind,
+                    field: "provider registration",
+                })?;
 
-        validate_dispatch(
-            &dispatch,
-            message.original(),
-            &provider.capabilities(),
-            provider_kind,
-        )?;
+        let normalized =
+            normalize_dispatch(&dispatch, message, &provider.capabilities(), provider_kind)?;
 
-        provider.send_prepared(&dispatch, message).await
+        Ok(SendPlan {
+            provider: provider_kind,
+            dispatch: normalized.dispatch,
+            message: normalized.message,
+            warnings: normalized.warnings,
+        })
+    }
+
+    /// Send a previously planned message.
+    pub async fn send_planned(&self, plan: SendPlan) -> Result<SendReceipt, MessengerError> {
+        let provider =
+            self.providers
+                .get(&plan.provider)
+                .ok_or(MessengerError::MissingConfiguration {
+                    provider: plan.provider,
+                    field: "provider registration",
+                })?;
+
+        let prepared = PreparedMessage::new(&plan.message);
+        provider.send_prepared(&plan.dispatch, &prepared).await
     }
 
     /// Send a message to multiple targets, collecting all results.
@@ -102,11 +131,10 @@ impl Messenger {
         dispatches: Vec<Dispatch>,
         message: &Message,
     ) -> Vec<Result<SendReceipt, MessengerError>> {
-        let prepared = PreparedMessage::new(message);
         join_all(
             dispatches
                 .into_iter()
-                .map(|dispatch| self.send_prepared(dispatch, &prepared)),
+                .map(|dispatch| self.send(dispatch, message)),
         )
         .await
     }

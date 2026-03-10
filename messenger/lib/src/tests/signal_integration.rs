@@ -3,8 +3,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
 use crate::message::Message;
-use crate::provider::signal::{SignalConfig, SignalProvider};
 use crate::provider::Provider;
+use crate::provider::signal::{SignalConfig, SignalProvider};
 use crate::receipt::{MessageRef, ProviderKind, SignalAuthor, SignalThreadKey};
 use crate::target::{SignalAddress, Target};
 
@@ -41,9 +41,7 @@ async fn sends_direct_message() {
                 "message": "hello"
             }
         })))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345678000)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345678000)))
         .expect(1)
         .mount(&server)
         .await;
@@ -74,9 +72,7 @@ async fn sends_group_message() {
                 "message": "group message"
             }
         })))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345679000)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345679000)))
         .expect(1)
         .mount(&server)
         .await;
@@ -106,9 +102,7 @@ async fn sends_reply_with_quote() {
                 "quoteTimestamp": 1712345670000_i64
             }
         })))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345680000)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345680000)))
         .expect(1)
         .mount(&server)
         .await;
@@ -191,9 +185,7 @@ async fn markdown_rendered_as_plain_text() {
                 "message": "bold text"
             }
         })))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345681000)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345681000)))
         .expect(1)
         .mount(&server)
         .await;

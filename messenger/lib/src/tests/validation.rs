@@ -1,9 +1,8 @@
+use crate::receipt::MessageRef;
 use crate::{
     Attachment, AttachmentSource, CapabilitySet, CompatibilityMode, Dispatch, Message,
-    MessengerError, ProviderKind, Target,
-    validate_dispatch, validate_message,
+    MessengerError, ProviderKind, Target, normalize_dispatch, validate_dispatch, validate_message,
 };
-use crate::receipt::MessageRef;
 
 #[test]
 fn empty_message_is_invalid() {
@@ -25,11 +24,10 @@ fn non_empty_message_is_valid() {
 #[cfg(all(feature = "discord", feature = "slack"))]
 #[test]
 fn mismatched_reply_to_target() {
-    let dispatch = Dispatch::to(Target::discord_channel("123"))
-        .reply_to(MessageRef::Slack {
-            channel_id: "C123".into(),
-            thread_ts: "123.456".into(),
-        });
+    let dispatch = Dispatch::to(Target::discord_channel("123")).reply_to(MessageRef::Slack {
+        channel_id: "C123".into(),
+        thread_ts: "123.456".into(),
+    });
     let msg = Message::text("hi");
     let caps = CapabilitySet::all();
 
@@ -40,11 +38,10 @@ fn mismatched_reply_to_target() {
 #[cfg(feature = "discord")]
 #[test]
 fn matched_reply_to_target_ok() {
-    let dispatch = Dispatch::to(Target::discord_channel("123"))
-        .reply_to(MessageRef::Discord {
-            channel_id: "123".into(),
-            message_id: "456".into(),
-        });
+    let dispatch = Dispatch::to(Target::discord_channel("123")).reply_to(MessageRef::Discord {
+        channel_id: "123".into(),
+        message_id: "456".into(),
+    });
     let msg = Message::text("hi");
     let caps = CapabilitySet::all();
 
@@ -64,7 +61,10 @@ fn strict_mode_rejects_unsupported_markdown() {
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(
         err,
-        MessengerError::UnsupportedFeature { feature: "markdown rendering", .. }
+        MessengerError::UnsupportedFeature {
+            feature: "markdown rendering",
+            ..
+        }
     ));
 }
 
@@ -90,7 +90,10 @@ fn strict_mode_rejects_unsupported_attachments() {
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(
         err,
-        MessengerError::UnsupportedFeature { feature: "attachments", .. }
+        MessengerError::UnsupportedFeature {
+            feature: "attachments",
+            ..
+        }
     ));
 }
 
@@ -107,14 +110,19 @@ fn strict_mode_rejects_unsupported_location() {
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(
         err,
-        MessengerError::UnsupportedFeature { feature: "location", .. }
+        MessengerError::UnsupportedFeature {
+            feature: "location",
+            ..
+        }
     ));
 }
 
 #[cfg(feature = "discord")]
 #[test]
 fn strict_mode_rejects_unsupported_silent() {
-    let dispatch = Dispatch::to(Target::discord_channel("123")).strict().silent();
+    let dispatch = Dispatch::to(Target::discord_channel("123"))
+        .strict()
+        .silent();
     let msg = Message::text("hi");
     let caps = CapabilitySet {
         supports_silent_delivery: false,
@@ -124,7 +132,10 @@ fn strict_mode_rejects_unsupported_silent() {
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(
         err,
-        MessengerError::UnsupportedFeature { feature: "silent delivery", .. }
+        MessengerError::UnsupportedFeature {
+            feature: "silent delivery",
+            ..
+        }
     ));
 }
 
@@ -135,13 +146,22 @@ fn best_effort_mode_allows_markdown_downgrade() {
     let msg = Message::markdown("**bold**");
     let caps = CapabilitySet::none();
 
-    assert_eq!(dispatch.options.compatibility, CompatibilityMode::BestEffort);
-    assert!(validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).is_ok());
+    assert_eq!(
+        dispatch.options.compatibility,
+        CompatibilityMode::BestEffort
+    );
+    let normalized = normalize_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap();
+    assert_eq!(normalized.warnings.len(), 1);
+    assert_eq!(normalized.warnings[0].feature, "markdown rendering");
+    assert!(matches!(
+        normalized.message.body,
+        Some(crate::MessageBody::Markdown(_))
+    ));
 }
 
 #[cfg(feature = "discord")]
 #[test]
-fn best_effort_mode_rejects_unsupported_attachments() {
+fn best_effort_mode_drops_unsupported_attachments() {
     let dispatch = Dispatch::to(Target::discord_channel("123"));
     let msg = Message::text("hi").attachment(Attachment {
         kind: crate::AttachmentKind::Document,
@@ -155,25 +175,71 @@ fn best_effort_mode_rejects_unsupported_attachments() {
     });
     let caps = CapabilitySet::none();
 
-    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
-    assert!(matches!(
-        err,
-        MessengerError::UnsupportedFeature { feature: "attachments", .. }
-    ));
+    let normalized = normalize_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap();
+    assert!(normalized.message.attachments.is_empty());
+    assert_eq!(normalized.warnings.len(), 1);
+    assert_eq!(normalized.warnings[0].feature, "attachments");
 }
 
 #[cfg(feature = "discord")]
 #[test]
-fn best_effort_mode_rejects_unsupported_location() {
+fn best_effort_mode_drops_unsupported_location() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"));
+    let msg = Message::text("hi").metadata("k", "v");
+    let mut msg = msg;
+    msg.location = Some(crate::Location {
+        latitude: 0.0,
+        longitude: 0.0,
+        name: None,
+        address: None,
+    });
+    let caps = CapabilitySet::none();
+
+    let normalized = normalize_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap();
+    assert!(normalized.message.location.is_none());
+    assert_eq!(normalized.warnings.len(), 1);
+    assert_eq!(normalized.warnings[0].feature, "location");
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn best_effort_mode_drops_reply_silent_and_link_preview() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"))
+        .reply_to(MessageRef::Discord {
+            channel_id: "123".into(),
+            message_id: "456".into(),
+        })
+        .silent()
+        .disable_link_preview();
+    let msg = Message::text("hi");
+    let caps = CapabilitySet {
+        supports_reply: false,
+        supports_silent_delivery: false,
+        supports_link_preview_control: false,
+        ..CapabilitySet::all()
+    };
+
+    let normalized = normalize_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap();
+    assert!(normalized.dispatch.reply_to.is_none());
+    assert!(!normalized.dispatch.options.silent);
+    assert!(!normalized.dispatch.options.disable_link_preview);
+    assert_eq!(normalized.warnings.len(), 3);
+    assert_eq!(normalized.warnings[0].feature, "replies");
+    assert_eq!(normalized.warnings[1].feature, "silent delivery");
+    assert_eq!(normalized.warnings[2].feature, "link preview control");
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn best_effort_mode_errors_if_everything_is_dropped() {
     let dispatch = Dispatch::to(Target::discord_channel("123"));
     let msg = Message::location(0.0, 0.0);
     let caps = CapabilitySet::none();
 
-    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
-    assert!(matches!(
-        err,
-        MessengerError::UnsupportedFeature { feature: "location", .. }
-    ));
+    let err = normalize_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(
+        matches!(err, MessengerError::InvalidMessage(message) if message.contains("after dropping unsupported features"))
+    );
 }
 
 #[cfg(feature = "discord")]

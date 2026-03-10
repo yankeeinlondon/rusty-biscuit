@@ -11,7 +11,9 @@ fn render_nodes(out: &mut String, nodes: &[RichNode], top_level: bool) {
     for (i, node) in nodes.iter().enumerate() {
         match node {
             RichNode::Text(s) => out.push_str(s),
-            RichNode::Bold(children) | RichNode::Italic(children) | RichNode::Strikethrough(children) => {
+            RichNode::Bold(children)
+            | RichNode::Italic(children)
+            | RichNode::Strikethrough(children) => {
                 render_nodes(out, children, false);
             }
             RichNode::Code(s) => out.push_str(s),

@@ -34,11 +34,26 @@ mod tests {
     fn render_for_each_provider() {
         let md = "**bold** and _italic_";
 
-        assert_eq!(render_for_provider(md, ProviderKind::Discord), "**bold** and *italic*");
-        assert_eq!(render_for_provider(md, ProviderKind::Slack), "*bold* and _italic_");
-        assert_eq!(render_for_provider(md, ProviderKind::Telegram), "<b>bold</b> and <i>italic</i>");
-        assert_eq!(render_for_provider(md, ProviderKind::Signal), "bold and italic");
-        assert_eq!(render_for_provider(md, ProviderKind::WhatsApp), "bold and italic");
+        assert_eq!(
+            render_for_provider(md, ProviderKind::Discord),
+            "**bold** and *italic*"
+        );
+        assert_eq!(
+            render_for_provider(md, ProviderKind::Slack),
+            "*bold* and _italic_"
+        );
+        assert_eq!(
+            render_for_provider(md, ProviderKind::Telegram),
+            "<b>bold</b> and <i>italic</i>"
+        );
+        assert_eq!(
+            render_for_provider(md, ProviderKind::Signal),
+            "bold and italic"
+        );
+        assert_eq!(
+            render_for_provider(md, ProviderKind::WhatsApp),
+            "bold and italic"
+        );
     }
 
     #[test]

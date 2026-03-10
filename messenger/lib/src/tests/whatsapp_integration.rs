@@ -4,8 +4,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
 use crate::message::Message;
-use crate::provider::whatsapp::{WhatsAppConfig, WhatsAppProvider};
 use crate::provider::Provider;
+use crate::provider::whatsapp::{WhatsAppConfig, WhatsAppProvider};
 use crate::receipt::{MessageRef, ProviderKind};
 use crate::target::Target;
 
@@ -112,8 +112,8 @@ async fn sends_reply() {
         .await;
 
     let provider = whatsapp_provider(&server.uri());
-    let dispatch = Dispatch::to(Target::whatsapp_recipient("+15551234567"))
-        .reply_to(MessageRef::WhatsApp {
+    let dispatch =
+        Dispatch::to(Target::whatsapp_recipient("+15551234567")).reply_to(MessageRef::WhatsApp {
             message_id: "wamid.original123".into(),
         });
     let message = Message::text("reply");
@@ -195,9 +195,7 @@ async fn markdown_rendered_as_plain_text() {
                 "body": "bold text"
             }
         })))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.md123")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.md123")))
         .expect(1)
         .mount(&server)
         .await;
