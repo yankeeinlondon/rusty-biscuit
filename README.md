@@ -6,7 +6,7 @@
 
 ## Usage
 
-We use the [`just`]() runner for packages in this repo to organize all key operations. The first step is to make sure your host has **jest** installed.
+We use the [`just`](https://github.com/casey/just) runner for packages in this repo to organize all key operations. The first step is to make sure your host has **jest** installed.
 
 ```sh
 # macOS
@@ -15,10 +15,13 @@ brew install just
 apt install just
 # ...
 asdf install just
+apk add just
+dnf install just
 nix-env -iA nixpkgs.just
 npm install -g rust-just
-uv tool install rust-just
+pacman -S just
 snap install --edge --classic just
+uv tool install rust-just
 ```
 
 Once installed you should run `just init` from the repo's root which will:

@@ -278,7 +278,7 @@ You do not need a giant release system on day one. Use tools in layers.
 Cargo already gives you the core release commands:
 
 - `cargo package --list`
-- `cargo publish --dry-run`
+- `cargo publish --dry-run`cd .
 - `cargo publish`
 - `cargo owner`
 - `cargo yank`
