@@ -1,5 +1,5 @@
 use secrecy::SecretString;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
@@ -33,6 +33,14 @@ async fn sends_text_message() {
     Mock::given(method("POST"))
         .and(path("/messages"))
         .and(header("Authorization", "Bearer test-access-token"))
+        .and(body_json(serde_json::json!({
+            "messaging_product": "whatsapp",
+            "to": "+15551234567",
+            "type": "text",
+            "text": {
+                "body": "hello"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.abc123")),
         )
@@ -55,6 +63,15 @@ async fn sends_location() {
 
     Mock::given(method("POST"))
         .and(path("/messages"))
+        .and(body_json(serde_json::json!({
+            "messaging_product": "whatsapp",
+            "to": "+15551234567",
+            "type": "location",
+            "location": {
+                "latitude": 34.05,
+                "longitude": -118.24
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.loc456")),
         )
@@ -76,6 +93,17 @@ async fn sends_reply() {
 
     Mock::given(method("POST"))
         .and(path("/messages"))
+        .and(body_json(serde_json::json!({
+            "messaging_product": "whatsapp",
+            "to": "+15551234567",
+            "type": "text",
+            "text": {
+                "body": "reply"
+            },
+            "context": {
+                "message_id": "wamid.original123"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.reply789")),
         )
@@ -159,6 +187,14 @@ async fn markdown_rendered_as_plain_text() {
 
     Mock::given(method("POST"))
         .and(path("/messages"))
+        .and(body_json(serde_json::json!({
+            "messaging_product": "whatsapp",
+            "to": "+15551234567",
+            "type": "text",
+            "text": {
+                "body": "bold text"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(whatsapp_ok_response("wamid.md123")),
         )

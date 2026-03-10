@@ -1,5 +1,6 @@
 use crate::{
-    CapabilitySet, CompatibilityMode, Dispatch, Message, MessengerError, ProviderKind, Target,
+    Attachment, AttachmentSource, CapabilitySet, CompatibilityMode, Dispatch, Message,
+    MessengerError, ProviderKind, Target,
     validate_dispatch, validate_message,
 };
 use crate::receipt::MessageRef;
@@ -71,7 +72,16 @@ fn strict_mode_rejects_unsupported_markdown() {
 #[test]
 fn strict_mode_rejects_unsupported_attachments() {
     let dispatch = Dispatch::to(Target::discord_channel("123")).strict();
-    let msg = Message::text("hi").image("/tmp/img.png");
+    let msg = Message::text("hi").attachment(Attachment {
+        kind: crate::AttachmentKind::Document,
+        source: AttachmentSource::Bytes {
+            filename: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            data: bytes::Bytes::from_static(b"ok"),
+        },
+        caption: None,
+        alt_text: None,
+    });
     let caps = CapabilitySet {
         supports_attachments: false,
         ..CapabilitySet::none()
@@ -120,14 +130,83 @@ fn strict_mode_rejects_unsupported_silent() {
 
 #[cfg(feature = "discord")]
 #[test]
-fn best_effort_mode_allows_unsupported_features() {
+fn best_effort_mode_allows_markdown_downgrade() {
     let dispatch = Dispatch::to(Target::discord_channel("123"));
-    assert_eq!(dispatch.options.compatibility, CompatibilityMode::BestEffort);
-
-    let msg = Message::markdown("**bold**").image("/tmp/img.png");
+    let msg = Message::markdown("**bold**");
     let caps = CapabilitySet::none();
 
+    assert_eq!(dispatch.options.compatibility, CompatibilityMode::BestEffort);
     assert!(validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).is_ok());
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn best_effort_mode_rejects_unsupported_attachments() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"));
+    let msg = Message::text("hi").attachment(Attachment {
+        kind: crate::AttachmentKind::Document,
+        source: AttachmentSource::Bytes {
+            filename: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            data: bytes::Bytes::from_static(b"ok"),
+        },
+        caption: None,
+        alt_text: None,
+    });
+    let caps = CapabilitySet::none();
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(matches!(
+        err,
+        MessengerError::UnsupportedFeature { feature: "attachments", .. }
+    ));
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn best_effort_mode_rejects_unsupported_location() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"));
+    let msg = Message::location(0.0, 0.0);
+    let caps = CapabilitySet::none();
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(matches!(
+        err,
+        MessengerError::UnsupportedFeature { feature: "location", .. }
+    ));
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn attachment_path_must_exist() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"));
+    let msg = Message::text("hi").image("/definitely/missing/file.png");
+    let caps = CapabilitySet {
+        supports_attachments: true,
+        ..CapabilitySet::all()
+    };
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(matches!(err, MessengerError::InvalidMessage(_)));
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn attachment_provider_file_id_must_be_non_empty() {
+    let dispatch = Dispatch::to(Target::discord_channel("123"));
+    let msg = Message::text("hi").attachment(Attachment {
+        kind: crate::AttachmentKind::Document,
+        source: AttachmentSource::ProviderFileId(" \n".into()),
+        caption: None,
+        alt_text: None,
+    });
+    let caps = CapabilitySet {
+        supports_attachments: true,
+        ..CapabilitySet::all()
+    };
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(matches!(err, MessengerError::InvalidMessage(_)));
 }
 
 #[test]

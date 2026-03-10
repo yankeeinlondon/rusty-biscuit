@@ -1,4 +1,4 @@
-use wiremock::matchers::{method, header};
+use wiremock::matchers::{body_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
@@ -31,6 +31,16 @@ async fn sends_direct_message() {
 
     Mock::given(method("POST"))
         .and(header("Content-Type", "application/json"))
+        .and(body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "send",
+            "id": 1,
+            "params": {
+                "account": "+15551234567",
+                "recipient": ["+15559876543"],
+                "message": "hello"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345678000)),
         )
@@ -54,6 +64,16 @@ async fn sends_group_message() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
+        .and(body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "sendGroupMessage",
+            "id": 1,
+            "params": {
+                "account": "+15551234567",
+                "groupId": "base64groupid",
+                "message": "group message"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345679000)),
         )
@@ -74,6 +94,18 @@ async fn sends_reply_with_quote() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
+        .and(body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "send",
+            "id": 1,
+            "params": {
+                "account": "+15551234567",
+                "recipient": ["+15559876543"],
+                "message": "reply",
+                "quoteAuthor": "+15559876543",
+                "quoteTimestamp": 1712345670000_i64
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345680000)),
         )
@@ -149,6 +181,16 @@ async fn markdown_rendered_as_plain_text() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
+        .and(body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "send",
+            "id": 1,
+            "params": {
+                "account": "+15551234567",
+                "recipient": ["+15559876543"],
+                "message": "bold text"
+            }
+        })))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(jsonrpc_ok_response(1712345681000)),
         )

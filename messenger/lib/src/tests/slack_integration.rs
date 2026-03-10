@@ -1,5 +1,5 @@
 use secrecy::SecretString;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dispatch::Dispatch;
@@ -36,6 +36,10 @@ async fn sends_text_message_with_correct_payload() {
         .and(path("/chat.postMessage"))
         .and(header("Authorization", "Bearer xoxb-test-token"))
         .and(header("Content-Type", "application/json"))
+        .and(body_json(serde_json::json!({
+            "channel": "C012345",
+            "text": "hello"
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(slack_ok_response()))
         .expect(1)
         .mount(&server)
@@ -56,6 +60,10 @@ async fn sends_markdown_as_mrkdwn() {
 
     Mock::given(method("POST"))
         .and(path("/chat.postMessage"))
+        .and(body_json(serde_json::json!({
+            "channel": "C012345",
+            "text": "*bold* text"
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(slack_ok_response()))
         .expect(1)
         .mount(&server)
@@ -75,6 +83,11 @@ async fn includes_thread_ts_for_reply() {
 
     Mock::given(method("POST"))
         .and(path("/chat.postMessage"))
+        .and(body_json(serde_json::json!({
+            "channel": "C012345",
+            "text": "reply",
+            "thread_ts": "1712345678.000100"
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(slack_ok_response()))
         .expect(1)
         .mount(&server)
@@ -144,6 +157,30 @@ async fn rate_limit_maps_to_rate_limited() {
         }
         other => panic!("expected RateLimited, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn disables_link_preview_in_payload() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat.postMessage"))
+        .and(body_json(serde_json::json!({
+            "channel": "C012345",
+            "text": "https://example.com",
+            "unfurl_links": false,
+            "unfurl_media": false
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(slack_ok_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = slack_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::slack_channel("C012345")).disable_link_preview();
+    let message = Message::text("https://example.com");
+
+    provider.send(&dispatch, &message).await.unwrap();
 }
 
 #[tokio::test]
