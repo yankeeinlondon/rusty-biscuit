@@ -6,5 +6,6 @@ pub mod inject;
 pub mod session;
 pub mod state;
 pub mod types;
+pub mod validation;
 
 pub use types::*;

@@ -10,8 +10,7 @@ use super::types::{McpCatalog, McpServer, catalog_path};
 pub enum MatchTier {
     ExactId,
     ExactAlias,
-    Normalized,
-    Prefix,
+    CaselessExact,
     Substring,
 }
 
@@ -20,6 +19,17 @@ pub enum MatchTier {
 pub struct ResolvedMatch<'a> {
     pub server: &'a McpServer,
     pub tier: MatchTier,
+}
+
+/// A structured outcome for MCP query resolution.
+#[derive(Debug, Clone)]
+pub enum Resolution<'a> {
+    Resolved(ResolvedMatch<'a>),
+    Ambiguous {
+        tier: MatchTier,
+        candidates: Vec<&'a McpServer>,
+    },
+    Missing,
 }
 
 /// Catalog store for MCP server definitions.
@@ -89,6 +99,14 @@ impl McpCatalogStore {
         self.catalog.servers.get_mut(id)
     }
 
+    /// Find the server that owns an alias by exact alias match.
+    pub fn find_alias_owner(&self, alias: &str) -> Option<&McpServer> {
+        self.catalog
+            .servers
+            .values()
+            .find(|server| server.aliases.iter().any(|candidate| candidate == alias))
+    }
+
     /// Find a server by its content fingerprint.
     pub fn find_by_fingerprint(&self, fingerprint: &str) -> Option<&McpServer> {
         self.catalog
@@ -147,13 +165,12 @@ impl McpCatalogStore {
         })
     }
 
-    /// Resolve a query to a server using 5-tier priority:
+    /// Resolve a query to a server using spec-order priority:
     ///
     /// 1. Exact catalog ID
     /// 2. Exact alias
-    /// 3. Normalized match (case-insensitive, `-`/`_` equivalent)
-    /// 4. Prefix match
-    /// 5. Substring match
+    /// 3. Case-insensitive exact match
+    /// 4. Case-insensitive substring match
     ///
     /// Returns `McpAmbiguousMatch` if multiple candidates match at the same tier.
     pub fn resolve(&self, query: &str) -> Result<&McpServer> {
@@ -162,90 +179,101 @@ impl McpCatalogStore {
 
     /// Resolve a query and return both the matched server and match tier.
     pub fn resolve_match(&self, query: &str) -> Result<ResolvedMatch<'_>> {
+        match self.resolve_outcome(query) {
+            Resolution::Resolved(resolved) => Ok(resolved),
+            Resolution::Ambiguous { candidates, .. } => Err(ClaudineError::McpAmbiguousMatch {
+                query: query.into(),
+                candidates: candidates.iter().map(|server| server.id.clone()).collect(),
+            }),
+            Resolution::Missing => Err(ClaudineError::McpServerNotFound { id: query.into() }),
+        }
+    }
+
+    /// Resolve a query into a structured outcome rather than collapsing it to an error.
+    pub fn resolve_outcome(&self, query: &str) -> Resolution<'_> {
         if let Some(server) = self.catalog.servers.get(query) {
-            return Ok(ResolvedMatch {
+            return Resolution::Resolved(ResolvedMatch {
                 server,
                 tier: MatchTier::ExactId,
             });
         }
 
-        if let Some(server) = resolve_match_list(
-            query,
+        match resolve_match_list(
             self.catalog
                 .servers
                 .values()
                 .filter(|s| s.aliases.iter().any(|a| a == query))
-                .collect(),
-        )? {
-            return Ok(ResolvedMatch {
-                server,
-                tier: MatchTier::ExactAlias,
-            });
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(Some(server)) => {
+                return Resolution::Resolved(ResolvedMatch {
+                    server,
+                    tier: MatchTier::ExactAlias,
+                });
+            }
+            Err(candidates) => {
+                return Resolution::Ambiguous {
+                    tier: MatchTier::ExactAlias,
+                    candidates,
+                };
+            }
+            Ok(None) => {}
         }
 
-        let normalized = normalize_for_match(query);
-
-        if let Some(server) = resolve_match_list(
-            query,
+        match resolve_match_list(
             self.catalog
                 .servers
                 .iter()
                 .filter(|(id, s)| {
-                    normalize_for_match(id) == normalized
-                        || s.aliases
-                            .iter()
-                            .any(|a| normalize_for_match(a) == normalized)
+                    id.eq_ignore_ascii_case(query)
+                        || s.aliases.iter().any(|a| a.eq_ignore_ascii_case(query))
                 })
                 .map(|(_, s)| s)
-                .collect(),
-        )? {
-            return Ok(ResolvedMatch {
-                server,
-                tier: MatchTier::Normalized,
-            });
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(Some(server)) => {
+                return Resolution::Resolved(ResolvedMatch {
+                    server,
+                    tier: MatchTier::CaselessExact,
+                });
+            }
+            Err(candidates) => {
+                return Resolution::Ambiguous {
+                    tier: MatchTier::CaselessExact,
+                    candidates,
+                };
+            }
+            Ok(None) => {}
         }
 
-        if let Some(server) = resolve_match_list(
-            query,
+        let caseless = query.to_ascii_lowercase();
+        if caseless.is_empty() {
+            return Resolution::Missing;
+        }
+
+        match resolve_match_list(
             self.catalog
                 .servers
                 .iter()
                 .filter(|(id, s)| {
-                    normalize_for_match(id).starts_with(&normalized)
+                    id.to_ascii_lowercase().contains(&caseless)
                         || s.aliases
                             .iter()
-                            .any(|a| normalize_for_match(a).starts_with(&normalized))
+                            .any(|a| a.to_ascii_lowercase().contains(&caseless))
                 })
                 .map(|(_, s)| s)
-                .collect(),
-        )? {
-            return Ok(ResolvedMatch {
-                server,
-                tier: MatchTier::Prefix,
-            });
-        }
-
-        if let Some(server) = resolve_match_list(
-            query,
-            self.catalog
-                .servers
-                .iter()
-                .filter(|(id, s)| {
-                    normalize_for_match(id).contains(&normalized)
-                        || s.aliases
-                            .iter()
-                            .any(|a| normalize_for_match(a).contains(&normalized))
-                })
-                .map(|(_, s)| s)
-                .collect(),
-        )? {
-            return Ok(ResolvedMatch {
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(Some(server)) => Resolution::Resolved(ResolvedMatch {
                 server,
                 tier: MatchTier::Substring,
-            });
+            }),
+            Err(candidates) => Resolution::Ambiguous {
+                tier: MatchTier::Substring,
+                candidates,
+            },
+            Ok(None) => Resolution::Missing,
         }
-
-        Err(ClaudineError::McpServerNotFound { id: query.into() })
     }
 
     /// List all servers in the catalog.
@@ -266,27 +294,16 @@ impl McpCatalogStore {
     }
 }
 
-fn resolve_match_list<'a>(
-    query: &str,
-    matches: Vec<&'a McpServer>,
-) -> Result<Option<&'a McpServer>> {
+fn resolve_match_list<'a>(matches: Vec<&'a McpServer>) -> std::result::Result<Option<&'a McpServer>, Vec<&'a McpServer>> {
     if matches.len() == 1 {
         return Ok(matches.into_iter().next());
     }
 
     if matches.len() > 1 {
-        return Err(ClaudineError::McpAmbiguousMatch {
-            query: query.into(),
-            candidates: matches.iter().map(|server| server.id.clone()).collect(),
-        });
+        return Err(matches);
     }
 
     Ok(None)
-}
-
-/// Normalize a string for matching: lowercase, replace `_` with `-`.
-fn normalize_for_match(s: &str) -> String {
-    s.to_ascii_lowercase().replace('_', "-")
 }
 
 #[cfg(test)]
@@ -414,11 +431,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_normalized() {
+    fn resolve_caseless_exact() {
         let mut store = McpCatalogStore::load_from(std::path::Path::new("/nonexistent")).unwrap();
         store.add_server(make_server("my-server"));
-        // my_server matches my-server after normalization
-        let s = store.resolve("my_server").unwrap();
+        let s = store.resolve("MY-SERVER").unwrap();
         assert_eq!(s.id, "my-server");
     }
 

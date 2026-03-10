@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Component;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -351,6 +352,93 @@ pub fn slugify(name: &str) -> String {
     slug
 }
 
+/// Derive a stable server name when a provider does not supply one explicitly.
+///
+/// The derivation order is:
+/// 1. explicit name, when present
+/// 2. launcher-aware executable or script name for local servers
+/// 3. xxHash fallback of the normalized server definition
+pub fn derive_server_name(server: &McpServer, explicit_name: Option<&str>) -> String {
+    if let Some(name) = explicit_name.map(str::trim).filter(|value| !value.is_empty()) {
+        return name.to_string();
+    }
+
+    if let Some(name) = derive_launcher_aware_name(server.command.as_deref(), &server.args) {
+        return name;
+    }
+
+    let canonical = serde_json::json!({
+        "transport": server.transport,
+        "command": server.command,
+        "args": server.args,
+        "cwd": server.cwd,
+        "env": server.env,
+        "url": server.url,
+        "headers": server.headers,
+        "enabled_tools": server.enabled_tools,
+        "disabled_tools": server.disabled_tools,
+        "required": server.required,
+    });
+
+    let hash = biscuit_hash::xx_hash(&canonical.to_string());
+    format!("mcp-{hash:016x}")
+}
+
+/// Derive a stable catalog ID from an optional explicit name or the server definition.
+pub fn derive_server_id(server: &McpServer, explicit_name: Option<&str>) -> String {
+    slugify(&derive_server_name(server, explicit_name))
+}
+
+fn derive_launcher_aware_name(command: Option<&str>, args: &[String]) -> Option<String> {
+    let command = command?;
+    let executable = Path::new(command)
+        .components()
+        .next_back()
+        .and_then(component_name)
+        .unwrap_or(command);
+    let lowered = executable.to_ascii_lowercase();
+
+    let launchers = [
+        "uv", "uvx", "python", "python3", "node", "npm", "npx", "pnpm", "yarn", "bun",
+    ];
+
+    if launchers.contains(&lowered.as_str()) {
+        for arg in args {
+            if arg.starts_with('-') {
+                continue;
+            }
+
+            let candidate = if lowered == "npm"
+                || lowered == "npx"
+                || lowered == "pnpm"
+                || lowered == "yarn"
+                || lowered == "bun"
+            {
+                arg.rsplit('/').next().unwrap_or(arg)
+            } else {
+                Path::new(arg)
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or(arg)
+            };
+
+            if !candidate.trim().is_empty() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    if executable.trim().is_empty() {
+        None
+    } else {
+        Some(executable.to_string())
+    }
+}
+
+fn component_name(component: Component<'_>) -> Option<&str> {
+    component.as_os_str().to_str()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -456,6 +544,36 @@ mod tests {
         assert_eq!(slugify("UPPER-CASE"), "upper-case");
         assert_eq!(slugify("a--b"), "a-b");
         assert_eq!(slugify("sequential-thinking"), "sequential-thinking");
+    }
+
+    #[test]
+    fn derive_server_name_prefers_explicit_name() {
+        let server = test_server("ignored");
+        assert_eq!(derive_server_name(&server, Some("Calendar MCP")), "Calendar MCP");
+    }
+
+    #[test]
+    fn derive_server_name_uses_launcher_aware_argument() {
+        let mut server = test_server("ignored");
+        server.command = Some("npx".into());
+        server.args = vec!["-y".into(), "@upstash/context7-mcp".into()];
+        assert_eq!(
+            derive_server_name(&server, None),
+            "context7-mcp".to_string()
+        );
+        assert_eq!(derive_server_id(&server, None), "context7-mcp");
+    }
+
+    #[test]
+    fn derive_server_name_falls_back_to_hash() {
+        let mut server = test_server("ignored");
+        server.command = None;
+        server.args.clear();
+        server.url = Some("https://example.com/mcp".into());
+
+        let derived = derive_server_name(&server, None);
+        assert!(derived.starts_with("mcp-"));
+        assert_eq!(derived.len(), 20);
     }
 
     fn test_server(id: &str) -> McpServer {

@@ -255,10 +255,41 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
         ))));
     }
 
+    if !mcp_runtime.default_servers.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>defaults</green><dim>={}</dim>",
+            mcp_runtime.default_servers.join(", ")
+        ))));
+    }
+    if !mcp_runtime.explicit_servers.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>use</green><dim>={}</dim>",
+            mcp_runtime.explicit_servers.join(", ")
+        ))));
+    }
+    if !mcp_runtime.tag_servers.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>tag_servers</green><dim>={}</dim>",
+            mcp_runtime.tag_servers.join(", ")
+        ))));
+    }
+
     if !mcp_runtime.resolved_tags.is_empty() {
         items.push(RenderableContent::from(Prose::new(format!(
             "<green>tags</green><dim>={}</dim>",
             mcp_runtime.resolved_tags.join(", ")
+        ))));
+    }
+    if !mcp_runtime.missing_tags.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<orange>missing_tags</orange><dim>={}</dim>",
+            mcp_runtime.missing_tags.join(", ")
+        ))));
+    }
+    if !mcp_runtime.ambiguous_tags.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<orange>ambiguous_tags</orange><dim>={}</dim>",
+            mcp_runtime.ambiguous_tags.join(", ")
         ))));
     }
     if let Some(cleaned_prompt) = &mcp_runtime.cleaned_prompt {

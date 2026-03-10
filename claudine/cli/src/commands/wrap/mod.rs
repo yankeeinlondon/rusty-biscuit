@@ -7,8 +7,10 @@ use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use claudine::events::Provider;
 use color_eyre::eyre::{Result, eyre};
+use inquire::Select;
 use profile::{OutputFormat, WrapperProfile};
 use sniff::programs::InstalledAiClients;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use crate::log;
@@ -16,7 +18,12 @@ use crate::log;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct McpRuntimeInfo {
     pub(crate) servers: Vec<String>,
+    pub(crate) default_servers: Vec<String>,
+    pub(crate) explicit_servers: Vec<String>,
+    pub(crate) tag_servers: Vec<String>,
     pub(crate) resolved_tags: Vec<String>,
+    pub(crate) missing_tags: Vec<String>,
+    pub(crate) ambiguous_tags: Vec<String>,
     pub(crate) cleaned_prompt: Option<String>,
     pub(crate) env_vars_set: Vec<String>,
     pub(crate) temp_files: Vec<PathBuf>,
@@ -81,6 +88,10 @@ pub struct WrapperArgs {
     /// Activate specific MCP servers by ID or alias (comma-separated).
     #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
     pub mcp_use: Vec<String>,
+
+    /// Treat unresolved or ambiguous MCP tags as hard errors.
+    #[arg(long)]
+    pub strict: bool,
 
     /// Arguments forwarded to the wrapped provider CLI.
     #[arg(
@@ -217,23 +228,67 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     if args.mcp || !args.mcp_use.is_empty() {
         use claudine::mcp::catalog::McpCatalogStore;
         use claudine::mcp::inject::injector_for_provider;
-        use claudine::mcp::session::{compute_session_set, extract_tags};
+        use claudine::mcp::session::{compute_session_set, lex_tags};
 
+        let repo_root_ref = env_plan.repo_root.as_deref();
+        if bootstrap_mcp_state(repo_root_ref)? {
+            deferred_messages.push(
+                "MCP bootstrap: created Claudine MCP state from discoverable provider configs."
+                    .to_string(),
+            );
+        }
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
-        let repo_root_ref = env_plan.repo_root.as_deref();
-        let (cleaned_prompt, prompt_tags) = if non_interactive_requested {
-            extract_tags_from_child_args(provider, &mut child_args, &catalog, extract_tags)
-        } else {
-            (None, Vec::new())
-        };
-
-        let mut session = compute_session_set(&catalog, repo_root_ref, &args.mcp_use, &prompt_tags)
-            .map_err(|e| eyre!("MCP session error: {e}"))?;
+        let (cleaned_prompt, prompt_tags) =
+            extract_tags_from_child_args(provider, &mut child_args, lex_tags);
+        let prompt_is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        let mut session = compute_session_set(
+            &catalog,
+            repo_root_ref,
+            &args.mcp_use,
+            &prompt_tags,
+            |tag, _tier, candidates| {
+                if args.strict || non_interactive_requested || !prompt_is_interactive {
+                    return None;
+                }
+                Select::new(
+                    &format!("`#{tag}` matched multiple MCP servers. Choose one:"),
+                    candidates.to_vec(),
+                )
+                .prompt()
+                .ok()
+            },
+        )
+        .map_err(|e| eyre!("MCP session error: {e}"))?;
         session.cleaned_prompt = cleaned_prompt.clone();
 
         for warning in &session.warnings {
             deferred_warnings.push(warning.clone());
+        }
+        if !session.missing_tags.is_empty() {
+            if args.strict {
+                return Err(eyre!(
+                    "unresolved MCP tag(s): {}",
+                    session
+                        .missing_tags
+                        .iter()
+                        .map(|tag| format!("#{tag}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            for tag in &session.missing_tags {
+                deferred_warnings.push(format!("tag `#{tag}` was not found in the MCP catalog"));
+            }
+        }
+        if !session.ambiguous_tags.is_empty() {
+            let message = session
+                .ambiguous_tags
+                .iter()
+                .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(eyre!("ambiguous MCP tag(s): {message}"));
         }
 
         let mut runtime = McpRuntimeInfo {
@@ -242,17 +297,30 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                 .iter()
                 .map(|server| server.id.clone())
                 .collect(),
+            default_servers: session.default_servers.clone(),
+            explicit_servers: session.explicit_servers.clone(),
+            tag_servers: session.tag_servers.clone(),
             resolved_tags: session
                 .resolved_tags
                 .iter()
                 .map(|tag| format!("#{} -> {} ({:?})", tag.tag, tag.resolved_to, tag.match_tier))
                 .collect(),
+            missing_tags: session
+                .missing_tags
+                .iter()
+                .map(|tag| format!("#{tag}"))
+                .collect(),
+            ambiguous_tags: session
+                .ambiguous_tags
+                .iter()
+                .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
+                .collect(),
             cleaned_prompt: session.cleaned_prompt.clone(),
             ..McpRuntimeInfo::default()
         };
 
-        if !session.servers.is_empty() {
-            if let Some(injector) = injector_for_provider(provider) {
+        if let Some(injector) = injector_for_provider(provider) {
+            if !session.servers.is_empty() {
                 let shadow = env_plan.shadow_home_path.as_deref();
                 // Injector works with String env; bridge to OsString env plan
                 let mut string_env = std::collections::HashMap::new();
@@ -272,14 +340,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                 runtime.env_vars_set = result.env_vars_set;
                 runtime.temp_files = result.temp_files;
                 runtime.extra_args = result.extra_args;
-            } else {
-                return Err(eyre!(
-                    "provider {} does not support runtime MCP injection.\n\
-                     Use `claudine mcp sync {}` to write servers to its native config instead.",
-                    provider,
-                    provider.as_slug()
-                ));
             }
+        } else {
+            return Err(eyre!(
+                "provider {} does not support runtime MCP injection.\n\
+                 Use `claudine mcp export {} --apply` to write servers to its native config instead.",
+                provider,
+                provider.as_slug()
+            ));
         }
 
         deferred_messages.push(if runtime.servers.is_empty() {
@@ -430,8 +498,7 @@ enum PromptLocation {
 fn extract_tags_from_child_args(
     provider: Provider,
     args: &mut [String],
-    catalog: &claudine::mcp::catalog::McpCatalogStore,
-    extract_tags: fn(&str, &claudine::mcp::catalog::McpCatalogStore) -> (String, Vec<String>),
+    extract_tags: fn(&str) -> (String, Vec<String>),
 ) -> (Option<String>, Vec<String>) {
     let Some(location) = find_prompt_location(provider, args) else {
         return (None, Vec::new());
@@ -445,7 +512,7 @@ fn extract_tags_from_child_args(
             .to_string(),
     };
 
-    let (cleaned_prompt, tags) = extract_tags(&prompt, catalog);
+    let (cleaned_prompt, tags) = extract_tags(&prompt);
     if tags.is_empty() {
         return (None, tags);
     }
@@ -458,6 +525,47 @@ fn extract_tags_from_child_args(
     }
 
     (Some(cleaned_prompt), tags)
+}
+
+fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
+    use claudine::mcp::defaults::{save_repo_defaults, save_user_defaults};
+    use claudine::mcp::import::McpImporter;
+    use claudine::mcp::state::McpProviderStateStore;
+    use claudine::mcp::types::{McpDefaults, defaults_path, repo_defaults_path};
+
+    let needs_bootstrap = !claudine::mcp::types::catalog_path().exists()
+        || !defaults_path().exists()
+        || !claudine::mcp::types::provider_state_path().exists()
+        || repo_root.is_some_and(|root| !repo_defaults_path(root).exists());
+    if !needs_bootstrap {
+        return Ok(false);
+    }
+
+    let mut catalog = claudine::mcp::catalog::McpCatalogStore::load()
+        .map_err(|e| eyre!("failed to load MCP catalog for bootstrap: {e}"))?;
+    let mut state = McpProviderStateStore::load()
+        .map_err(|e| eyre!("failed to load MCP provider-state for bootstrap: {e}"))?;
+    let mut importer = McpImporter::new(&mut catalog, &mut state);
+    let _ = importer.import_all(repo_root);
+    catalog
+        .save()
+        .map_err(|e| eyre!("failed to save bootstrapped MCP catalog: {e}"))?;
+    state
+        .save()
+        .map_err(|e| eyre!("failed to save bootstrapped MCP provider-state: {e}"))?;
+
+    if !defaults_path().exists() {
+        save_user_defaults(&McpDefaults::default())
+            .map_err(|e| eyre!("failed to create bootstrapped MCP defaults: {e}"))?;
+    }
+    if let Some(repo_root) = repo_root
+        && !repo_defaults_path(repo_root).exists()
+    {
+        save_repo_defaults(repo_root, &McpDefaults::default())
+            .map_err(|e| eyre!("failed to create bootstrapped repo MCP defaults: {e}"))?;
+    }
+
+    Ok(true)
 }
 
 fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
@@ -589,11 +697,9 @@ fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::path::Path;
 
     use chrono::Utc;
-    use claudine::mcp::catalog::McpCatalogStore;
-    use claudine::mcp::session::extract_tags;
+    use claudine::mcp::session::lex_tags;
     use claudine::mcp::types::{McpServer, McpServerMetadata, McpTransport};
 
     #[test]
@@ -681,10 +787,10 @@ mod tests {
         assert_eq!(result, "You are a helpful assistant.");
     }
 
-    fn make_catalog_with_servers(names: &[&str]) -> McpCatalogStore {
-        let mut catalog = McpCatalogStore::load_from(Path::new("/nonexistent")).unwrap();
+    fn make_catalog_with_servers(names: &[&str]) -> Vec<McpServer> {
+        let mut servers = Vec::new();
         for name in names {
-            catalog.add_server(McpServer {
+            servers.push(McpServer {
                 id: (*name).to_string(),
                 aliases: Vec::new(),
                 transport: McpTransport::Stdio,
@@ -707,20 +813,19 @@ mod tests {
                 provider_overrides: HashMap::new(),
             });
         }
-        catalog
+        servers
     }
 
     #[test]
     fn extracts_tags_from_codex_prompt_position() {
-        let catalog = make_catalog_with_servers(&["calendar"]);
+        let _ = make_catalog_with_servers(&["calendar"]);
         let mut args = vec![
             "exec".to_string(),
             "--json".to_string(),
             "fix #calendar bugs".to_string(),
         ];
 
-        let (cleaned, tags) =
-            extract_tags_from_child_args(Provider::Codex, &mut args, &catalog, extract_tags);
+        let (cleaned, tags) = extract_tags_from_child_args(Provider::Codex, &mut args, lex_tags);
 
         assert_eq!(tags, vec!["calendar"]);
         assert_eq!(cleaned.as_deref(), Some("fix bugs"));
@@ -729,11 +834,10 @@ mod tests {
 
     #[test]
     fn extracts_tags_from_gemini_prompt_flag() {
-        let catalog = make_catalog_with_servers(&["slack"]);
+        let _ = make_catalog_with_servers(&["slack"]);
         let mut args = vec!["--prompt".to_string(), "debug #slack auth".to_string()];
 
-        let (cleaned, tags) =
-            extract_tags_from_child_args(Provider::Gemini, &mut args, &catalog, extract_tags);
+        let (cleaned, tags) = extract_tags_from_child_args(Provider::Gemini, &mut args, lex_tags);
 
         assert_eq!(tags, vec!["slack"]);
         assert_eq!(cleaned.as_deref(), Some("debug auth"));
