@@ -189,21 +189,15 @@ GPUs:
 Storage:
   / (apfs, SSD)
 
-# Network
-Local interface inventory for this host, plus an external WAN lookup when available.
-## Snapshot
+Network
 • Primary interface: en0
 • WAN IP address: 203.0.113.10
-• Interfaces detected: 12
-• IPv4 addresses: 3
-• IPv6 addresses: 6
+• Active interfaces: 2 of 12
+• IPv4: 192.168.1.100
+• IPv6: fe80::1
 
-## Interfaces
-### en0
-• Status: up, running, primary
-• MAC address: 12:34:56:78:9a:bc
-• IPv4 addresses: 192.168.1.100
-• IPv6 addresses: fe80::1
+With `sniff network -v`, the command expands into a per-interface inventory and omits
+empty IPv4/IPv6 lines for interfaces that do not carry those address families.
 
 === Filesystem ===
 Languages (212 contributing files out of 1,234 scanned):
