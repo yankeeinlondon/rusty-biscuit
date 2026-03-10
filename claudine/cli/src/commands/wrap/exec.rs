@@ -40,6 +40,7 @@ pub(crate) fn run_child(
     cwd: &Path,
     timeout: Option<u64>,
     stdout_noise_prefixes: &[&str],
+    stderr_noise_prefixes: &[&str],
 ) -> Result<i32> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
@@ -51,7 +52,8 @@ pub(crate) fn run_child(
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
 
-    let filtering = !stdout_noise_prefixes.is_empty();
+    let filter_stdout = !stdout_noise_prefixes.is_empty();
+    let filter_stderr = !stderr_noise_prefixes.is_empty();
 
     let mut command = Command::new(binary);
     command
@@ -60,18 +62,22 @@ pub(crate) fn run_child(
         .envs(env)
         .current_dir(cwd)
         .stdin(Stdio::inherit())
-        .stdout(if filtering {
+        .stdout(if filter_stdout {
             Stdio::piped()
         } else {
             Stdio::inherit()
         })
-        .stderr(Stdio::inherit());
+        .stderr(if filter_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        });
 
     let mut child = command.spawn()?;
 
-    // Spawn a filter thread that reads child stdout line-by-line and
-    // suppresses lines matching any noise prefix.
-    let filter_handle = if filtering {
+    // Spawn filter threads that read child output line-by-line and
+    // suppress lines matching any noise prefix.
+    let stdout_handle = if filter_stdout {
         let pipe = child.stdout.take().expect("stdout was set to piped");
         let prefixes: Vec<String> = stdout_noise_prefixes.iter().map(|s| s.to_string()).collect();
         Some(thread::spawn(move || {
@@ -89,13 +95,34 @@ pub(crate) fn run_child(
         None
     };
 
+    let stderr_handle = if filter_stderr {
+        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let prefixes: Vec<String> = stderr_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        Some(thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            let mut err = std::io::stderr().lock();
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+                    continue;
+                }
+                let _ = writeln!(err, "{line}");
+            }
+        }))
+    } else {
+        None
+    };
+
     let exit_code = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
     };
 
-    if let Some(handle) = filter_handle {
+    if let Some(handle) = stdout_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = stderr_handle {
         let _ = handle.join();
     }
 

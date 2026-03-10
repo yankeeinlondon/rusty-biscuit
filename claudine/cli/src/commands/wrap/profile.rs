@@ -149,6 +149,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
         &[]
     }
 
+    // -- Stderr noise filtering -----------------------------------------------
+
+    /// Line prefixes that should be stripped from stderr in all modes.
+    ///
+    /// Some CLIs print warnings (e.g. skill conflict notices) to stderr that
+    /// are noisy but harmless. Lines starting with any of these prefixes are
+    /// suppressed.
+    ///
+    /// Default: empty (no filtering).
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     // -- Provider-required env vars ------------------------------------------
 
     /// Env var names that this provider requires and should bypass the
@@ -426,6 +439,10 @@ impl WrapperProfile for GeminiWrapper {
             "Hook execution for ",
             "Skill conflict detected: ",
         ]
+    }
+
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        &["Skill conflict detected: "]
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {

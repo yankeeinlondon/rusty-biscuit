@@ -58,9 +58,13 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Suppress the Claudine preflight summary banner.
+    /// Show only the header line; suppress env details and info messages.
     #[arg(short = 'q', long)]
     pub quiet: bool,
+
+    /// Suppress all Claudine preflight output (header, env, info, warnings).
+    #[arg(long, conflicts_with = "quiet")]
+    pub silent: bool,
 
     /// Enable provider-specific sandboxing.
     #[arg(long)]
@@ -121,6 +125,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     let mut yolo_enabled = yolo_requested;
     let non_interactive_requested = args.non_interactive || extracted.non_interactive;
     let repo_requested = args.repo || extracted.repo;
+    let quiet_requested = args.quiet || extracted.quiet;
+    let silent_requested = args.silent || extracted.silent;
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
@@ -303,47 +309,57 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         return Ok(0);
     }
 
-    // --quiet: skip all summary output
-    if !args.quiet {
-        crate::output::log_wrapper_summary(
+    // Output verbosity: --silent suppresses everything, --quiet shows header only
+    if !silent_requested {
+        // Header line (shown for both default and --quiet)
+        crate::output::log_wrapper_header(
             profile,
             yolo_enabled,
             non_interactive_requested,
             repo_requested,
             &child_args,
             &env_plan,
-            mcp_runtime.as_ref(),
             &term,
-            args.verbose_level(),
         );
 
-        if let Some(info_message) =
-            crate::output::removed_env_info_message(&env_plan.removed, &term)
-        {
-            log::message(&info_message);
-        }
-        if repo_requested {
-            log::message(&crate::output::repo_flag_info_message(
+        // Everything below is suppressed by --quiet
+        if !quiet_requested {
+            crate::output::log_wrapper_env_details(
+                &env_plan,
+                mcp_runtime.as_ref(),
                 &term,
-                env_plan.shadow_home_path.as_deref(),
-            ));
-        }
-        for warning in &env_plan.warnings {
-            log::message(&crate::output::post_env_warning_message(warning, &term));
-        }
-        for warning in &deferred_warnings {
-            log::message(&crate::output::post_env_warning_message(warning, &term));
-        }
-        for message in &deferred_messages {
-            log::message(&crate::output::post_env_message(message, &term));
+                args.verbose_level(),
+            );
+
+            if let Some(info_message) =
+                crate::output::removed_env_info_message(&env_plan.removed, &term)
+            {
+                log::message(&info_message);
+            }
+            if repo_requested {
+                log::message(&crate::output::repo_flag_info_message(
+                    &term,
+                    env_plan.shadow_home_path.as_deref(),
+                ));
+            }
+            for warning in &env_plan.warnings {
+                log::message(&crate::output::post_env_warning_message(warning, &term));
+            }
+            for warning in &deferred_warnings {
+                log::message(&crate::output::post_env_warning_message(warning, &term));
+            }
+            for message in &deferred_messages {
+                log::message(&crate::output::post_env_message(message, &term));
+            }
         }
     }
 
-    let noise_prefixes = if non_interactive_requested {
+    let stdout_noise = if non_interactive_requested {
         profile.stdout_noise_prefixes()
     } else {
         &[]
     };
+    let stderr_noise = profile.stderr_noise_prefixes();
 
     exec::run_child(
         binary_path.as_path(),
@@ -351,7 +367,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         &env_plan.env,
         child_cwd,
         args.timeout,
-        noise_prefixes,
+        stdout_noise,
+        stderr_noise,
     )
 }
 
@@ -528,6 +545,8 @@ struct ExtractedWrapperFlags {
     yolo: bool,
     non_interactive: bool,
     repo: bool,
+    quiet: bool,
+    silent: bool,
 }
 
 fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWrapperFlags {
@@ -543,6 +562,14 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
         }
         "--repo" => {
             extracted.repo = true;
+            false
+        }
+        "-q" | "--quiet" => {
+            extracted.quiet = true;
+            false
+        }
+        "--silent" => {
+            extracted.silent = true;
             false
         }
         _ => true,
@@ -729,7 +756,7 @@ mod tests {
 
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
-                flags in prop::collection::vec("-y|--yolo|-n|--non-interactive|--ni", 0..5),
+                flags in prop::collection::vec("-y|--yolo|-n|--non-interactive|--ni|-q|--quiet|--silent", 0..5),
                 others in prop::collection::vec("[a-z0-9]+", 0..10)
             ) {
                 let mut args = Vec::new();
