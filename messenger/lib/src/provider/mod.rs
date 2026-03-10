@@ -11,10 +11,13 @@ pub mod whatsapp;
 
 use std::collections::HashMap;
 
+use futures::future::join_all;
+
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
 use crate::message::Message;
+use crate::prepared::PreparedMessage;
 use crate::receipt::{ProviderKind, SendReceipt};
 use crate::validate::{target_provider_kind, validate_dispatch, validate_message};
 
@@ -23,11 +26,20 @@ use crate::validate::{target_provider_kind, validate_dispatch, validate_message}
 pub trait Provider: Send + Sync {
     fn kind(&self) -> ProviderKind;
     fn capabilities(&self) -> CapabilitySet;
+    async fn send_prepared(
+        &self,
+        dispatch: &Dispatch,
+        message: &PreparedMessage,
+    ) -> Result<SendReceipt, MessengerError>;
+
     async fn send(
         &self,
         dispatch: &Dispatch,
         message: &Message,
-    ) -> Result<SendReceipt, MessengerError>;
+    ) -> Result<SendReceipt, MessengerError> {
+        let prepared = PreparedMessage::new(message);
+        self.send_prepared(dispatch, &prepared).await
+    }
 }
 
 /// The main coordinator that routes dispatches to registered providers.
@@ -54,7 +66,16 @@ impl Messenger {
         dispatch: Dispatch,
         message: &Message,
     ) -> Result<SendReceipt, MessengerError> {
-        validate_message(message)?;
+        let prepared = PreparedMessage::new(message);
+        self.send_prepared(dispatch, &prepared).await
+    }
+
+    async fn send_prepared(
+        &self,
+        dispatch: Dispatch,
+        message: &PreparedMessage,
+    ) -> Result<SendReceipt, MessengerError> {
+        validate_message(message.original())?;
 
         let provider_kind = target_provider_kind(&dispatch.target);
         let provider = self
@@ -65,9 +86,14 @@ impl Messenger {
                 field: "provider registration",
             })?;
 
-        validate_dispatch(&dispatch, message, &provider.capabilities(), provider_kind)?;
+        validate_dispatch(
+            &dispatch,
+            message.original(),
+            &provider.capabilities(),
+            provider_kind,
+        )?;
 
-        provider.send(&dispatch, message).await
+        provider.send_prepared(&dispatch, message).await
     }
 
     /// Send a message to multiple targets, collecting all results.
@@ -76,11 +102,13 @@ impl Messenger {
         dispatches: Vec<Dispatch>,
         message: &Message,
     ) -> Vec<Result<SendReceipt, MessengerError>> {
-        let mut results = Vec::with_capacity(dispatches.len());
-        for dispatch in dispatches {
-            results.push(self.send(dispatch, message).await);
-        }
-        results
+        let prepared = PreparedMessage::new(message);
+        join_all(
+            dispatches
+                .into_iter()
+                .map(|dispatch| self.send_prepared(dispatch, &prepared)),
+        )
+        .await
     }
 }
 
@@ -129,10 +157,10 @@ mod tests {
             CapabilitySet::all()
         }
 
-        async fn send(
+        async fn send_prepared(
             &self,
             _dispatch: &Dispatch,
-            _message: &Message,
+            _message: &PreparedMessage,
         ) -> Result<SendReceipt, MessengerError> {
             self.send_count.fetch_add(1, Ordering::Relaxed);
             if self.should_fail {
