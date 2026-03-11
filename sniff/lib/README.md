@@ -283,7 +283,7 @@ Network interface enumeration using `getifaddrs` system call.
 **Features:**
 
 - IPv4 and IPv6 address collection
-- Primary interface detection (first non-loopback with IPv4)
+- Primary interface detection (default-route interface when detectable)
 - WAN IP lookup when the `network` feature is enabled
 - Permission denied error handling
 - Interface filtering utilities
