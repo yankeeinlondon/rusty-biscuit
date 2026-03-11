@@ -429,6 +429,7 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     })
 }
 
+#[cfg(target_os = "linux")]
 fn parse_linux_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         let tokens: Vec<_> = line.split_whitespace().collect();
@@ -1056,6 +1057,7 @@ destination: default
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_parse_linux_default_route_interface() {
         let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
         assert_eq!(parse_linux_default_route_interface(output), Some("wlp3s0".to_string()));
