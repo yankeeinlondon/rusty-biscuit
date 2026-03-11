@@ -29,6 +29,7 @@ schematic/
 ├── define/       # Primitives for describing REST APIs (types, auth, endpoints)
 ├── definitions/  # Actual API definitions using those primitives (OpenAI, etc.)
 ├── gen/          # Code generator binary and library
+├── oauth/        # OAuth2 runtime (token lifecycle, storage, manager)
 └── schema/       # Generated API clients ready for consumption
 ```
 
@@ -54,6 +55,11 @@ schematic/
                │      schematic-schema       │
                │   (generated API clients)   │
                └─────────────────────────────┘
+
+                              ┌─────────────────────────────┐
+                              │      schematic-oauth        │
+                              │  (OAuth2 runtime library)   │
+                              └─────────────────────────────┘
 ```
 
 ## Quick Start
@@ -131,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [schematic-define](./define/)           | REST API definition primitives | [README](./define/README.md)      |
 | [schematic-definitions](./definitions/) | Pre-built API definitions      | [README](./definitions/README.md) |
 | [schematic-gen](./gen/)                 | Code generator CLI/library     | [README](./gen/README.md)         |
+| [schematic-oauth](./oauth/)             | OAuth2 runtime library         | Token lifecycle, storage          |
 | [schematic-schema](./schema/)           | Generated API clients          | [README](./schema/README.md)      |
 
 ## Available APIs
@@ -161,7 +168,7 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
 - **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors
 - **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
-- **Automatic authentication**: Bearer, API Key, and Basic auth with env var fallback chains
+- **Automatic authentication**: Bearer, API Key, Basic, and OAuth2 auth with env var fallback chains
 - **Runtime configuration**: `DOCS_URL` constant on API structs, `variant()` builder for alternate environments
 - **Response hooks**: Pre-response JSON transformation and type-safe post-response mutation via `VariantBuilder`
 - **Proper error handling**: `MissingCredential` errors with documented error handling patterns
@@ -212,6 +219,25 @@ let client = OpenAI::new()
 ```
 
 When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. No need to also set `AuthStrategy::None`.
+
+### OAuth2 Authentication
+
+For APIs using OAuth2, obtain a token via `schematic-oauth` and inject it programmatically:
+
+```rust
+use schematic_oauth::{OAuth2Manager, OAuth2RuntimeConfig, MemoryTokenStore};
+use schematic_define::Headers;
+
+// Configure OAuth2 manager from API's OAuth2Config
+let manager = OAuth2Manager::new(runtime_config, Box::new(MemoryTokenStore::new()));
+
+// Get a valid token (refreshes automatically if expired)
+let token = manager.get_valid_token().await?;
+
+// Inject into any API client
+let client = GitHub::new()
+    .variant_with_headers(Headers::default().use_bearer_token(token));
+```
 
 ### Builder Pattern with Hooks
 

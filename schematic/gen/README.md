@@ -632,6 +632,28 @@ RestApi {
 
 No authentication headers are added.
 
+### OAuth2
+
+```rust
+RestApi {
+    auth: AuthStrategy::OAuth2(OAuth2Config {
+        grant_type: OAuth2GrantType::AuthorizationCodePkce,
+        authorization_url: Some("https://example.com/authorize".into()),
+        token_url: "https://example.com/token".into(),
+        ..// other config
+    }),
+    env_auth: vec![],
+    // ...
+}
+```
+
+Generated code returns `SchematicError::OAuthAuthenticationRequired` if no bearer token has been set via `Headers`. Users obtain tokens via `schematic-oauth` and inject them programmatically:
+
+```rust
+let client = Api::new()
+    .variant_with_headers(Headers::default().use_bearer_token(token));
+```
+
 ## HTTP Methods
 
 All standard HTTP methods are supported:
@@ -654,6 +676,7 @@ Path parameters use `{param}` syntax and are automatically extracted:
 // API definition
 Endpoint {
     path: "/threads/{thread_id}/messages/{message_id}",
+    oauth_scopes: None,
     ...
 }
 
@@ -690,6 +713,7 @@ Endpoints with request bodies get a `body` field and a `new()` constructor:
 // API definition
 Endpoint {
     request: Some(ApiRequest::json_type("CreateCompletionBody")),
+    oauth_scopes: None,
     ...
 }
 
@@ -841,6 +865,7 @@ Generated runtime error types (`SchematicError`):
 | `SerializationError` | Request body serialization failed |
 | `MissingCredential` | Required auth env vars not found |
 | `InternalError` | Internal runtime error (type mismatch in variant hooks) |
+| `OAuthAuthenticationRequired` | OAuth2 auth required but no token provided |
 
 ## Ergonomic Conversions
 

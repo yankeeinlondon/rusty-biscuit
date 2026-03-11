@@ -17,8 +17,12 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS); supports `FromStr`, `TryFrom<String>` |
-| `AuthStrategy` | Authentication configuration (Bearer, API Key header/query/cookie, Basic, None) |
+| `AuthStrategy` | Authentication configuration (Bearer, API Key header/query/cookie, Basic, OAuth2, None) |
 | `ApiKeyLocation` | Location for API key auth (Query, Cookie) |
+| `OAuth2Config` | OAuth2 provider configuration (endpoints, grant type, PKCE) |
+| `OAuth2GrantType` | OAuth2 grant type (AuthorizationCodePkce, ClientCredentials, DeviceCode) |
+| `PkceRequirement` | PKCE requirement level (Required, Supported, NotUsed) |
+| `OAuth2ClientAuthMethod` | Client credential delivery method (ClientSecretBasic, ClientSecretPost, None) |
 | `UpdateStrategy` | Strategy for updating auth in API variants (NoChange, ChangeTo) |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
@@ -184,6 +188,54 @@ let api = RestApi {
     // ...
 };
 ```
+
+### OAuth2 Authentication
+
+For APIs that use OAuth2, configure the provider details declaratively:
+
+```rust
+use schematic_define::{RestApi, AuthStrategy, OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};
+
+let api = RestApi {
+    auth: AuthStrategy::OAuth2(OAuth2Config {
+        grant_type: OAuth2GrantType::AuthorizationCodePkce,
+        authorization_url: Some("https://github.com/login/oauth/authorize".into()),
+        token_url: "https://github.com/login/oauth/access_token".into(),
+        revocation_url: None,
+        device_authorization_url: None,
+        default_scopes: vec!["repo".into(), "read:user".into()],
+        pkce: PkceRequirement::Required,
+        client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+    }),
+    env_auth: vec![],
+    env_username: None,
+    // ...
+};
+```
+
+OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients return `SchematicError::OAuthAuthenticationRequired` if no bearer token is provided, directing users to obtain a token via `schematic-oauth` and inject it with `variant_with_headers()`.
+
+### Endpoint-Level OAuth2 Scopes
+
+Individual endpoints can specify OAuth2 scopes that override the API-level defaults:
+
+```rust
+use schematic_define::{Endpoint, RestMethod, ApiResponse};
+
+Endpoint {
+    id: "ListRepos".to_string(),
+    method: RestMethod::Get,
+    path: "/repos".to_string(),
+    description: "List repositories".to_string(),
+    request: None,
+    response: ApiResponse::json_type("ListReposResponse"),
+    headers: vec![],
+    params: None,
+    oauth_scopes: Some(vec!["repo".into(), "read:org".into()]),
+};
+```
+
+If `oauth_scopes` is `None`, the API-level `default_scopes` from `OAuth2Config` are used.
 
 ### Missing Credentials
 
@@ -378,6 +430,7 @@ let api = RestApi {
         basic_user: Some(EnvList::single("SERVICE_USER")),
         basic_pass: Some(EnvList::single("SERVICE_PASS")),
         api_key: None,
+        ..Default::default()
     }),
     // Legacy fields still work for backward compatibility
     env_auth: vec![],
@@ -385,6 +438,8 @@ let api = RestApi {
     // ...
 };
 ```
+
+The `EnvMapping` struct also includes OAuth2-specific fields (`oauth_client_id`, `oauth_client_secret`, `oauth_redirect_uri`) which default to `None`.
 
 The `RestApi::default_env_mapping()` method returns an `EnvMapping` built from:
 1. Explicit `env_mapping` if set
@@ -474,11 +529,12 @@ match auth {
     AuthStrategy::ApiKey { header } => { /* ... */ }
     AuthStrategy::ApiKeyParam { name, location } => { /* ... */ }
     AuthStrategy::Basic => { /* ... */ }
+    AuthStrategy::OAuth2(config) => { /* ... */ }
     _ => { /* future variants */ }
 }
 ```
 
-This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`, `QueryParamType`, `ParamStyle`, `PaginationStyle`, `PaginationResponse`, `MessageDirection`, `ParamType`.
+This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`, `QueryParamType`, `ParamStyle`, `PaginationStyle`, `PaginationResponse`, `MessageDirection`, `ParamType`, `OAuth2GrantType`, `PkceRequirement`, `OAuth2ClientAuthMethod`.
 
 ## Response Types
 
@@ -623,6 +679,7 @@ let api = RestApi {
             response: ApiResponse::json_type("HealthStatus"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetVersion".to_string(),
@@ -633,6 +690,7 @@ let api = RestApi {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ],
 };
@@ -666,6 +724,8 @@ let api = RestApi {
             request: None,
             response: ApiResponse::json_type("ListUsersResponse"),
             headers: vec![],
+            params: None,
+            oauth_scopes: None,
         },
         // Get a specific user by ID (path parameter)
         Endpoint {
@@ -677,6 +737,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Create a new user (with JSON request body)
         Endpoint {
@@ -688,6 +749,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Update a user
         Endpoint {
@@ -699,6 +761,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Delete a user
         Endpoint {
@@ -710,6 +773,7 @@ let api = RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ],
 };
@@ -743,6 +807,8 @@ let api = RestApi {
             request: None,
             response: ApiResponse::json_type("FileList"),
             headers: vec![],
+            params: None,
+            oauth_scopes: None,
         },
         // Upload file - multipart form-data
         Endpoint {
@@ -758,6 +824,7 @@ let api = RestApi {
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Download file - returns binary data
         Endpoint {
@@ -769,6 +836,7 @@ let api = RestApi {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Get file metadata - returns JSON
         Endpoint {
@@ -780,6 +848,7 @@ let api = RestApi {
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Delete file - returns empty
         Endpoint {
@@ -791,6 +860,7 @@ let api = RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ],
 };
@@ -836,6 +906,7 @@ Endpoint {
     params: Some(EndpointParams::default()
         .with_pagination(PaginationStyle::github())
         .with_response_pagination(PaginationResponse::LinkHeader)),
+    oauth_scopes: None,
 }
 ```
 
@@ -891,7 +962,8 @@ use schematic_define::prelude::*;
 
 // Now you have access to all core types:
 // REST: RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse,
-//       FormField, FormFieldKind, Schema
+//       FormField, FormFieldKind, Schema, OAuth2Config, OAuth2GrantType,
+//       PkceRequirement, OAuth2ClientAuthMethod
 // WebSocket: WebSocketApi, WebSocketEndpoint, ConnectionParam, ParamType,
 //            ConnectionLifecycle, MessageSchema, MessageDirection
 ```

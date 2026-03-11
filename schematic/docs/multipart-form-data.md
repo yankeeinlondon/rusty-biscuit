@@ -20,7 +20,7 @@ This document describes the design for extending `schematic-define` to support m
 
 **Message Structure:**
 
-```
+```txt
 --boundary-value
 Content-Disposition: form-data; name="field_name"
 Content-Type: text/plain
