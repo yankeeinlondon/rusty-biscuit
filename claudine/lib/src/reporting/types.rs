@@ -84,6 +84,8 @@ pub struct ProviderSplit {
     pub count: u64,
     /// Number of turn_complete events for this provider.
     pub turns: u64,
+    /// Number of tool_error + turn_error events for this provider.
+    pub error_count: u64,
 }
 
 /// Aggregated token and cost usage.
@@ -203,6 +205,9 @@ pub struct ErrorRecord {
     pub prompt: Option<String>,
     pub tool_input_json: Option<String>,
     pub notification_message: Option<String>,
+    /// Raw extra JSON from the event, used as fallback context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_json: Option<String>,
 }
 
 /// Error list wrapper for JSON output.
@@ -244,13 +249,17 @@ pub struct ToolsReport {
 pub struct TrendPoint {
     pub date: NaiveDate,
     pub events: u64,
-    pub sessions: u64,
+    pub wrapped: u64,
+    pub unwrapped: u64,
+    pub non_interactive: u64,
+    pub yolo_percent: f64,
     pub turns: u64,
     pub tool_calls: u64,
     pub tool_errors: u64,
     pub turn_errors: u64,
     pub total_tokens: u64,
     pub cost_usd: f64,
+    pub repos: Vec<String>,
     pub providers: Vec<ProviderSplit>,
 }
 

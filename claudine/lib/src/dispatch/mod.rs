@@ -62,10 +62,15 @@ pub async fn dispatch(
     }
 
     // Propagate wrapper interactivity flag into extra for reporting.
-    if let Ok(interactive) = std::env::var("CLAUDINE_INTERACTIVE") {
+    if let Some(interactive) = wrapper_interactive_flag() {
         meta.extra
             .entry("interactive".to_string())
             .or_insert_with(|| Value::String(interactive));
+    }
+    if let Some(yolo) = wrapper_yolo_flag() {
+        meta.extra
+            .entry("yolo".to_string())
+            .or_insert_with(|| Value::String(yolo));
     }
 
     info!(%provider, %event, "Dispatching event");
@@ -205,6 +210,33 @@ fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
         .or_else(|| env.repo.as_ref().map(|repo| repo.root.as_path()))
 }
 
+fn wrapper_interactive_flag() -> Option<String> {
+    wrapper_interactive_flag_from(|key| std::env::var(key).ok())
+}
+
+fn wrapper_yolo_flag() -> Option<String> {
+    wrapper_flag_from(&["YOLO", "CLAUDINE_YOLO"], |key| std::env::var(key).ok())
+}
+
+fn wrapper_interactive_flag_from<F>(lookup: F) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    wrapper_flag_from(&["INTERACTIVE", "CLAUDINE_INTERACTIVE"], lookup)
+}
+
+fn wrapper_flag_from<F>(keys: &[&str], lookup: F) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    keys.iter()
+        .copied()
+        .into_iter()
+        .filter_map(|key| lookup(key))
+        .map(|value| value.trim().to_string())
+        .find(|value| !value.is_empty())
+}
+
 fn finalize_response(
     adapter: &dyn adapters::ProviderAdapter,
     event: &crate::events::AgenticEvent,
@@ -317,6 +349,38 @@ mod tests {
 
         let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
         assert_eq!(outcome, DispatchOutcome::default());
+    }
+
+    #[test]
+    fn wrapper_interactive_flag_prefers_canonical_interactive_env() {
+        let value = wrapper_interactive_flag_from(|key| match key {
+            "INTERACTIVE" => Some("true".to_string()),
+            "CLAUDINE_INTERACTIVE" => Some("false".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(value.as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn wrapper_interactive_flag_falls_back_to_legacy_claudine_env() {
+        let value = wrapper_interactive_flag_from(|key| match key {
+            "CLAUDINE_INTERACTIVE" => Some("false".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(value.as_deref(), Some("false"));
+    }
+
+    #[test]
+    fn wrapper_yolo_flag_prefers_canonical_yolo_env() {
+        let value = wrapper_flag_from(&["YOLO", "CLAUDINE_YOLO"], |key| match key {
+            "YOLO" => Some("true".to_string()),
+            "CLAUDINE_YOLO" => Some("false".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(value.as_deref(), Some("true"));
     }
 
     #[tokio::test]

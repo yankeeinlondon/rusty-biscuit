@@ -6,8 +6,9 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::table::table::{Table, TableColumn};
+use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Margin, WordWrap};
 use claudine::events::Provider;
 use claudine::reporting::{
     DailySummary, DateRange, ErrorsReport, LabeledCount, ProviderSplit, ReportingFilters,
@@ -61,16 +62,28 @@ pub struct LogsArgs {
     pub top: usize,
 }
 
-#[derive(Subcommand, Clone, Copy)]
+#[derive(Args, Debug, Clone, Default)]
+pub struct WindowArgs {
+    #[command(subcommand)]
+    pub command: Option<WindowCommand>,
+}
+
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowCommand {
+    /// List errors for this time window.
+    Errors,
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum LogsCommand {
     /// Daily summary for today.
-    Today,
+    Today(WindowArgs),
     /// Daily summary for yesterday.
-    Yesterday,
+    Yesterday(WindowArgs),
     /// Seven-day trend report.
-    Week,
+    Week(WindowArgs),
     /// Thirty-day trend report.
-    Month,
+    Month(WindowArgs),
     /// Explicitly sync JSONL logs into SQLite.
     Sync,
     /// Session report for the selected date or range.
@@ -89,7 +102,10 @@ pub enum LogsCommand {
 pub async fn run(args: LogsArgs) -> Result<()> {
     let mut store = ReportingStore::open_default()?;
     let filters = parse_filters(&args)?;
-    let command = args.command.unwrap_or(LogsCommand::Today);
+    let command = args
+        .command
+        .clone()
+        .unwrap_or(LogsCommand::Today(WindowArgs::default()));
 
     match command {
         LogsCommand::Sync => {
@@ -101,35 +117,37 @@ pub async fn run(args: LogsArgs) -> Result<()> {
                 render_sync_summary(&summary);
             }
         }
-        LogsCommand::Today => {
-            let date = parse_single_date(args.date.as_deref())?
-                .unwrap_or_else(|| Local::now().date_naive());
-            best_effort_sync(&mut store, SyncRequest::Date(date));
-            let summary = store.daily_summary(date, &filters)?;
-            output_json_or(args.json, &summary, || render_daily_summary(&summary))?;
-        }
-        LogsCommand::Yesterday => {
+        LogsCommand::Today(window) => run_day_window(
+            &mut store,
+            &args,
+            &filters,
+            window,
+            "today",
+            Local::now().date_naive(),
+        )?,
+        LogsCommand::Yesterday(window) => {
             let fallback = Local::now()
                 .date_naive()
                 .checked_sub_days(Days::new(1))
                 .unwrap_or_else(|| Local::now().date_naive());
-            let date = parse_single_date(args.date.as_deref())?.unwrap_or(fallback);
-            best_effort_sync(&mut store, SyncRequest::Date(date));
-            let summary = store.daily_summary(date, &filters)?;
-            output_json_or(args.json, &summary, || render_daily_summary(&summary))?;
+            run_day_window(&mut store, &args, &filters, window, "yesterday", fallback)?
         }
-        LogsCommand::Week => {
-            let range = default_window(7);
-            best_effort_sync(&mut store, SyncRequest::Range(range));
-            let report = store.trends(range, &filters, args.top)?;
-            output_json_or(args.json, &report, || render_trends_report(&report))?;
-        }
-        LogsCommand::Month => {
-            let range = default_window(30);
-            best_effort_sync(&mut store, SyncRequest::Range(range));
-            let report = store.trends(range, &filters, args.top)?;
-            output_json_or(args.json, &report, || render_trends_report(&report))?;
-        }
+        LogsCommand::Week(window) => run_range_window(
+            &mut store,
+            &args,
+            &filters,
+            window,
+            "week",
+            default_window(7),
+        )?,
+        LogsCommand::Month(window) => run_range_window(
+            &mut store,
+            &args,
+            &filters,
+            window,
+            "month",
+            default_window(30),
+        )?,
         LogsCommand::Sessions => {
             let range = range_from_args(&args, Local::now().date_naive())?;
             best_effort_sync(&mut store, SyncRequest::Range(range));
@@ -158,7 +176,61 @@ pub async fn run(args: LogsArgs) -> Result<()> {
             let range = range_from_args(&args, default_window(7).to)?;
             best_effort_sync(&mut store, SyncRequest::Range(range));
             let report = store.trends(range, &filters, args.top)?;
-            output_json_or(args.json, &report, || render_trends_report(&report))?;
+            output_json_or(args.json, &report, || render_trends_report(&report, None))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_day_window(
+    store: &mut ReportingStore,
+    args: &LogsArgs,
+    filters: &ReportingFilters,
+    window: WindowArgs,
+    label: &'static str,
+    fallback_date: NaiveDate,
+) -> Result<()> {
+    let date = parse_single_date(args.date.as_deref())?.unwrap_or(fallback_date);
+    let range = DateRange::single(date);
+    best_effort_sync(store, SyncRequest::Date(date));
+
+    match window.command {
+        Some(WindowCommand::Errors) => {
+            let report = store.errors(range, filters, args.top)?;
+            output_json_or(args.json, &report, || render_errors_report(&report))?;
+        }
+        None => {
+            let summary = store.daily_summary(date, filters)?;
+            output_json_or(args.json, &summary, || {
+                render_daily_summary(&summary, Some(label))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_range_window(
+    store: &mut ReportingStore,
+    args: &LogsArgs,
+    filters: &ReportingFilters,
+    window: WindowArgs,
+    label: &'static str,
+    range: DateRange,
+) -> Result<()> {
+    best_effort_sync(store, SyncRequest::Range(range));
+
+    match window.command {
+        Some(WindowCommand::Errors) => {
+            let report = store.errors(range, filters, args.top)?;
+            output_json_or(args.json, &report, || render_errors_report(&report))?;
+        }
+        None => {
+            let report = store.trends(range, filters, args.top)?;
+            output_json_or(args.json, &report, || {
+                render_trends_report(&report, Some(label))
+            })?;
         }
     }
 
@@ -291,7 +363,7 @@ fn render_sync_summary(summary: &SyncSummary) {
     }
 }
 
-fn render_daily_summary(summary: &DailySummary) {
+fn render_daily_summary(summary: &DailySummary, error_hint: Option<&str>) {
     let term = Terminal::new();
 
     log::data("");
@@ -342,27 +414,32 @@ fn render_daily_summary(summary: &DailySummary) {
     render_usage_line(&summary.usage);
     render_metrics_line(&summary.metrics);
 
-    if summary.top_tools.is_empty() {
-        return;
+    if !summary.top_tools.is_empty() {
+        log::data("");
+        log::data(&Prose::new("<bold>Top Tools</bold>").render(&term));
+        let mut table = base_table(vec![
+            TableColumn::new("Tool"),
+            TableColumn::new("Calls").with_alignment(Alignment::Right),
+            TableColumn::new("Errors").with_alignment(Alignment::Right),
+            TableColumn::new("Class"),
+        ]);
+        for tool in &summary.top_tools {
+            table.add_row(vec![
+                tool.tool_name.clone().into(),
+                tool.call_count.to_string().into(),
+                format_errors(tool.error_count).into(),
+                format!("{:?}", tool.classification).to_lowercase().into(),
+            ]);
+        }
+        log::data(&table.render(&term));
     }
 
-    log::data("");
-    log::data(&Prose::new("<bold>Top Tools</bold>").render(&term));
-    let mut table = base_table(vec![
-        TableColumn::new("Tool"),
-        TableColumn::new("Calls").with_alignment(Alignment::Right),
-        TableColumn::new("Errors").with_alignment(Alignment::Right),
-        TableColumn::new("Class"),
-    ]);
-    for tool in &summary.top_tools {
-        table.add_row(vec![
-            tool.tool_name.clone().into(),
-            tool.call_count.to_string().into(),
-            format_errors(tool.error_count).into(),
-            format!("{:?}", tool.classification).to_lowercase().into(),
-        ]);
+    if summary.total_tool_errors + summary.total_turn_errors > 0 {
+        if !summary.top_tools.is_empty() {
+            log::data("");
+        }
+        render_error_hint(&term, error_hint.unwrap_or("today"));
     }
-    log::data(&table.render(&term));
 }
 
 fn render_sessions_report(report: &SessionsReport) {
@@ -482,6 +559,7 @@ fn render_errors_report(report: &ErrorsReport) {
             .as_deref()
             .or(item.tool_input_json.as_deref())
             .or(item.notification_message.as_deref())
+            .or(item.extra_json.as_deref())
             .map(|value| truncate_str(value, 120))
             .unwrap_or_else(|| "—".to_string());
         table.add_row(vec![
@@ -495,7 +573,12 @@ fn render_errors_report(report: &ErrorsReport) {
                 .clone()
                 .unwrap_or_else(|| "—".to_string())
                 .into(),
-            truncate_str(&item.error, 120).into(),
+            if item.error.is_empty() {
+                "(no details)".to_string()
+            } else {
+                truncate_str(&item.error, 120)
+            }
+            .into(),
             context.into(),
         ]);
     }
@@ -538,8 +621,9 @@ fn render_repos_report(report: &ReposReport) {
     log::data(&table.render(&term));
 }
 
-fn render_trends_report(report: &TrendsReport) {
+fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
     let term = Terminal::new();
+    let compact_repos = term.width() < 150;
     log::data("");
     log::data(
         &Prose::new(format!(
@@ -548,34 +632,67 @@ fn render_trends_report(report: &TrendsReport) {
         ))
         .render(&term),
     );
-    if !report.top_tools.is_empty() {
-        let top_tools = report
-            .top_tools
-            .iter()
-            .map(|tool| format!("{} {}", tool.tool_name, tool.call_count))
-            .collect::<Vec<_>>()
-            .join(", ");
-        log::data(&format!("Top tools: {top_tools}"));
-    }
+    log::data("");
+    // if !report.top_tools.is_empty() {
+    //     let top_tools = report
+    //         .top_tools
+    //         .iter()
+    //         .map(|tool| format!("{} {}", tool.tool_name, tool.call_count))
+    //         .collect::<Vec<_>>()
+    //         .join(", ");
+    //     log::data(&format!("Top tools: {top_tools}"));
+    // }
+
+    let tool_calls = if term.width() > 120 {
+        Some(TableColumn::new("Tool\nCalls")
+            .with_type(ColumnType::Integer)
+        )
+    } else {
+        None
+    };
+
 
     let mut table = base_table(vec![
-        TableColumn::new("Date").with_min_width(10),
-        TableColumn::new("Sessions").with_alignment(Alignment::Right),
-        TableColumn::new("Turns").with_alignment(Alignment::Right),
-        TableColumn::new("Tools").with_alignment(Alignment::Right),
-        TableColumn::new("Tool Err").with_alignment(Alignment::Right),
-        TableColumn::new("Turn Err").with_alignment(Alignment::Right),
-        TableColumn::new("Providers"),
-    ]);
+        TableColumn::new("Date").with_fixed_width(10),
+        TableColumn::new("Wrap")
+            .with_type(ColumnType::Integer)
+            .with_alignment(Alignment::Center),
+        TableColumn::new("Unwrap")
+            .with_type(ColumnType::Integer)
+            .with_alignment(Alignment::Center),
+        TableColumn::new("Non-\nInt")
+            .with_type(ColumnType::Integer)
+            .with_alignment(Alignment::Center),
+        TableColumn::new("Yolo")
+            .with_alignment(Alignment::Center)
+            .with_fixed_width(4),
+        TableColumn::new("Tool\nCalls")
+            .with_type(ColumnType::Integer)
+            .with_word_wrap(WordWrap::None),
+        // TableColumn::new("Tool\nErrs")
+        //     .with_type(ColumnType::Integer)
+        //     .with_alignment(Alignment::Center),
+        TableColumn::new("Turn\nErrs")
+            .with_type(ColumnType::Integer)
+            .with_alignment(Alignment::Center)
+            .with_fixed_width(4),
+        TableColumn::new("Repos")
+            .with_word_wrap(WordWrap::WrapProse(None, None)),
+        TableColumn::new("Providers")
+            .with_word_wrap(WordWrap::WrapProse(None, None)),
+    ]).alternate_background_color();
 
     for point in &report.points {
         table.add_row(vec![
             point.date.to_string().into(),
-            point.sessions.to_string().into(),
-            point.turns.to_string().into(),
+            format_dim_zero(point.wrapped).into(),
+            format_dim_zero(point.unwrapped).into(),
+            format_dim_zero(point.non_interactive).into(),
+            format_percent(point.yolo_percent).into(),
             point.tool_calls.to_string().into(),
-            format_errors(point.tool_errors).into(),
+            // format_errors(point.tool_errors).into(),
             format_errors(point.turn_errors).into(),
+            render_repos(&point.repos, compact_repos).into(),
             render_provider_split(&point.providers).into(),
         ]);
     }
@@ -583,31 +700,50 @@ fn render_trends_report(report: &TrendsReport) {
     log::data(&table.render(&term));
 
     // Definitions footer
-    let definitions = UnorderedList::from(vec![
+    let mut definitions = vec![
         RenderableContent::from(Prose::new(
-            "<b>Session:</b> <i><dim>one continuous interaction with a provider (start → exit)</dim></i>",
+            "<b>Wrapped:</b> <i><dim>interactive sessions where <blue>claudine</blue> is wrapping the execution of an Agent (e.g. `claudine claude`, `claudine codex`, etc.)</dim></i>",
         )),
         RenderableContent::from(Prose::new(
-            "<b>Turn:</b> <i><dim>one prompt → response cycle within a session</dim></i>",
+            "<b>Unwrapped:</b> <i><dim>sessions detected via hooks, execution was not wrapped by <blue>claudine</blue></dim></i>",
         )),
         RenderableContent::from(Prose::new(
-            "<b>Tools:</b> <i><dim>total tool invocations across all turns (Read, Edit, Bash, etc.)</dim></i>",
+            "<b>Non Interactive:</b> <i><dim>non-interactive sessions wrapped by <blue>claudine</blue></dim></i>",
         )),
         RenderableContent::from(Prose::new(
-            "<b>Tool Err:</b> <i><dim>failed tool invocations (e.g. file not found, permission denied, command failed)</dim></i>",
+            "<b>Yolo:</b> <i><dim>percentage of daily sessions that ran with YOLO enabled</dim></i>",
         )),
         RenderableContent::from(Prose::new(
-            "<b>Turn Err:</b> <i><dim>failed response cycles (e.g. API errors, rate limits, context overflow)</dim></i>",
+            "<b>Tools:</b> <i><dim>total tool invocations across all sessions (Read, Edit, Bash, etc.)</dim></i>",
         )),
         RenderableContent::from(Prose::new(
-            "<b>Providers:</b> <i><dim>active providers, linked to usage dashboards (only providers with turns shown)</dim></i>",
+            "<b>Tool Err:</b> <i><dim>failed tool calls (file not found, permission denied, command failed)</dim></i>",
         )),
-    ]).with_bullet("  ");
+        RenderableContent::from(Prose::new(
+            "<b>Turn Err:</b> <i><dim>failed response cycles (API errors, rate limits, context overflow)</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Repos:</b> <i><dim>repositories worked on that day</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Providers:</b> <i><dim>active agentic providers with usage dashboard links; providers with errors are shown in red</dim></i>",
+        )),
+    ];
+    if report
+        .points
+        .iter()
+        .any(|point| point.tool_errors + point.turn_errors > 0)
+    {
+        definitions.push(RenderableContent::from(Prose::new(error_hint_markup(
+            error_hint.unwrap_or("week"),
+        ))));
+    }
+    let definitions = UnorderedList::from(definitions).with_bullet("  ");
     log::data(&definitions.render(&term));
 }
 
 fn base_table(columns: Vec<TableColumn>) -> Table {
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new().with_columns(columns);
     table.layout_mut().left_margin = Margin::Chars(1);
     table
 }
@@ -617,7 +753,7 @@ fn render_provider_split(items: &[ProviderSplit]) -> String {
         return "—".to_string();
     }
 
-    // Sort by turns descending, then by provider name
+    // Sort by turns descending, then by provider name.
     let mut sorted: Vec<&ProviderSplit> = items.iter().collect();
     sorted.sort_by(|a, b| {
         b.turns
@@ -628,22 +764,27 @@ fn render_provider_split(items: &[ProviderSplit]) -> String {
     sorted
         .iter()
         .filter_map(|item| {
-            if item.turns == 0 {
+            if item.count == 0 {
                 return None;
             }
-            Some(render_provider_link(&item.provider))
+            Some(render_provider_link(&item.provider, item.error_count > 0))
         })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
 /// Render a provider name as an OSC8 hyperlink to its usage dashboard.
-fn render_provider_link(provider: &Provider) -> String {
+fn render_provider_link(provider: &Provider, had_error: bool) -> String {
     match provider.usage_dashboard_url() {
         Some(url) => {
-            let markup = format!("<a href=\"{url}\">{provider}</a>");
+            let markup = if had_error {
+                format!("<red><a href=\"{url}\">{provider}</a></red>")
+            } else {
+                format!("<a href=\"{url}\">{provider}</a>")
+            };
             Prose::new(markup).render_optimistic(None)
         }
+        None if had_error => Prose::new(format!("<red>{provider}</red>")).render_optimistic(None),
         None => provider.to_string(),
     }
 }
@@ -655,6 +796,58 @@ fn format_errors(count: u64) -> String {
     } else {
         Prose::new(format!("<red>{text}</red>")).render_optimistic(None)
     }
+}
+
+fn format_dim_zero(count: u64) -> String {
+    let text = count.to_string();
+    if count == 0 {
+        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+    } else {
+        text
+    }
+}
+
+fn format_percent(value: f64) -> String {
+    let text = format!("{value:.0}%");
+    if value <= 0.0 {
+        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+    } else {
+        text
+    }
+}
+
+fn render_repos(repos: &[String], compact: bool) -> String {
+    if repos.is_empty() {
+        return "—".to_string();
+    }
+
+    repos
+        .iter()
+        .map(|repo| render_repo_entry(repo, compact))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_repo_entry(repo: &str, compact: bool) -> String {
+    match repo.split_once('/') {
+        Some((_org, name)) if compact => name.to_string(),
+        Some((org, name)) => Prose::new(format!("<dim>{org}/</dim>{name}")).render_optimistic(None),
+        None => repo.to_string(),
+    }
+}
+
+fn render_error_hint(term: &Terminal, window: &str) {
+    let list = UnorderedList::from(vec![RenderableContent::from(Prose::new(
+        error_hint_markup(window),
+    ))])
+    .with_bullet("  ");
+    log::data(&list.render(term));
+}
+
+fn error_hint_markup(window: &str) -> String {
+    format!(
+        "<i><dim>use the <red>claudine logs {window} errors</red> command to list the errors</dim></i>"
+    )
 }
 
 fn render_labeled_counts(items: &[LabeledCount]) -> String {
@@ -778,5 +971,49 @@ fn render_metrics_line(metrics: &claudine::reporting::DerivedMetrics) {
 
     if !items.is_empty() {
         log::data(&format!("Metrics: {}", items.join("  ")));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestLogsCli {
+        #[command(flatten)]
+        logs: LogsArgs,
+    }
+
+    #[test]
+    fn parses_week_errors_as_nested_window_subcommand() {
+        let cli = TestLogsCli::parse_from(["claudine", "week", "errors"]);
+
+        match cli.logs.command {
+            Some(LogsCommand::Week(window)) => {
+                assert_eq!(window.command, Some(WindowCommand::Errors));
+            }
+            other => panic!("expected week errors, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn render_provider_split_keeps_error_only_provider_visible() {
+        let rendered = render_provider_split(&[ProviderSplit {
+            provider: Provider::Claude,
+            count: 2,
+            turns: 0,
+            error_count: 1,
+        }]);
+
+        assert!(rendered.contains("Claude"));
+    }
+
+    #[test]
+    fn render_repo_entry_drops_org_in_compact_mode() {
+        assert_eq!(
+            render_repo_entry("yankeeinlondon/rusty-biscuit", true),
+            "rusty-biscuit"
+        );
     }
 }
