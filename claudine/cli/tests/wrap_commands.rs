@@ -20,6 +20,22 @@ fn write_executable(path: &Path, content: &str) {
     }
 }
 
+fn redact_session_id(input: &str) -> String {
+    const PREFIX: &str = "CLAUDINE_SESSION_ID=";
+    let Some(start) = input.find(PREFIX) else {
+        return input.to_string();
+    };
+    let value_start = start + PREFIX.len();
+    // UUID is 36 chars: 8-4-4-4-12
+    let value_end = (value_start + 36).min(input.len());
+    format!(
+        "{}{}<redacted>{}",
+        &input[..start],
+        PREFIX,
+        &input[value_end..]
+    )
+}
+
 fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -202,7 +218,7 @@ exit 0
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    insta::assert_snapshot!(strip_ansi(&stderr));
+    insta::assert_snapshot!(redact_session_id(&strip_ansi(&stderr)));
 }
 
 #[cfg(unix)]

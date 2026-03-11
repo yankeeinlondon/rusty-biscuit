@@ -1,6 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
-expression: strip_ansi(&stderr)
+expression: redact_session_id(&strip_ansi(&stderr))
 ---
 
 Claudine ▸ Codex PACKAGE_NAME: claudine-cli (area: claudine) --version
@@ -9,7 +9,7 @@ Environment Variables:
 • OPENAI_API_KEY
 • AGENT=codex
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
-• CLAUDINE_SESSION_ID=7fa2d8bd-3ef5-428a-9312-67177978325b
+• CLAUDINE_SESSION_ID=<redacted>
 • INTERACTIVE=true
 • PACKAGE=claudine-cli
 • PACKAGE_AREA=claudine
