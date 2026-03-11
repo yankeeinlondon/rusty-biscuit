@@ -74,6 +74,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
         auth: AuthStrategy::ApiKey {
             header: "xi-api-key".to_string(),
         },
+        auth_policy: None,
         env_auth: vec![
             "ELEVEN_LABS_API_KEY".to_string(),
             "ELEVENLABS_API_KEY".to_string(),
@@ -611,6 +612,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::new(vec![
@@ -658,6 +660,7 @@ pub fn define_elevenlabs_websocket_api() -> schematic_define::WebSocketApi {
             "ELEVEN_LABS_API_KEY".to_string(),
             "ELEVENLABS_API_KEY".to_string(),
         ],
+        version: None,
         endpoints: vec![
             WebSocketEndpoint {
                 id: "TextToSpeech".to_string(),

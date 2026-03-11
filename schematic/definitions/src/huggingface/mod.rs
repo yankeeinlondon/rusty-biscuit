@@ -90,6 +90,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
         base_url: "https://huggingface.co/api".to_string(),
         docs_url: Some("https://huggingface.co/docs/hub/api".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec![
             "HF_TOKEN".to_string(),
             "HUGGING_FACE_API_KEY".to_string(),
@@ -406,6 +407,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             bearer_token: Some(EnvList::new(vec![
                 "HF_TOKEN".to_string(),

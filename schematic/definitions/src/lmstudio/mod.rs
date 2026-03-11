@@ -69,6 +69,7 @@ pub fn define_lmstudio_api() -> RestApi {
         base_url: "http://localhost:1234".to_string(),
         docs_url: Some("https://lmstudio.ai/docs/developer/rest".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec!["LM_API_TOKEN".to_string()],
         env_username: None,
         headers: vec![],
@@ -148,6 +149,7 @@ pub fn define_lmstudio_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping::default()),
     }
 }

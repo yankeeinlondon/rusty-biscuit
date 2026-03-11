@@ -99,6 +99,7 @@ pub fn define_unfolded_circle_integration_ws_api() -> WebSocketApi {
             header: "auth-token".to_string(),
         },
         env_auth: vec!["UCR_INTEGRATION_TOKEN".to_string()],
+        version: None,
         endpoints: vec![WebSocketEndpoint {
             id: "Integration".to_string(),
             path: "/intg".to_string(),

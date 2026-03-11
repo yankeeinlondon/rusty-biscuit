@@ -79,6 +79,7 @@ pub fn define_anthropic_api() -> RestApi {
         auth: AuthStrategy::ApiKey {
             header: "X-Api-Key".to_string(),
         },
+        auth_policy: None,
         env_auth: vec!["ANTHROPIC_API_KEY".to_string()],
         env_username: None,
         headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
@@ -134,6 +135,7 @@ pub fn define_anthropic_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::new(vec!["ANTHROPIC_API_KEY".to_string()]),

@@ -45,12 +45,14 @@ pub fn define_eversolo_api() -> RestApi {
         base_url: "http://192.168.1.1:9529".to_string(),
         docs_url: Some("https://eversolo.com/Support/developer/".to_string()),
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         headers: vec![],
         endpoints: build_endpoints(),
         module_path: Some("eversolo".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping::default()),
     }
 }

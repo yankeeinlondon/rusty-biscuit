@@ -96,6 +96,7 @@ pub fn define_gitlab_api() -> RestApi {
         auth: AuthStrategy::ApiKey {
             header: "PRIVATE-TOKEN".to_string(),
         },
+        auth_policy: None,
         env_auth: vec![
             "GITLAB_TOKEN".to_string(),
             "GITLAB_PRIVATE_TOKEN".to_string(),
@@ -469,6 +470,7 @@ pub fn define_gitlab_api() -> RestApi {
         ],
         module_path: Some("gitlab".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 header: "PRIVATE-TOKEN".to_string(),

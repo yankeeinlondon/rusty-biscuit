@@ -78,12 +78,14 @@ pub fn define_samsung_smart_tv_api() -> RestApi {
             "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html".to_string(),
         ),
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         headers: vec![],
         endpoints: build_samsung_smart_tv_endpoints(),
         module_path: Some("samsung_smart_tv".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping::default()),
     }
 }

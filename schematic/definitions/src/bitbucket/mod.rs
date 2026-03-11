@@ -104,6 +104,7 @@ pub fn define_bitbucket_api() -> RestApi {
         base_url: "https://api.bitbucket.org/2.0".to_string(),
         docs_url: Some("https://developer.atlassian.com/cloud/bitbucket/rest/".to_string()),
         auth: AuthStrategy::Basic,
+        auth_policy: None,
         env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
         env_username: Some("BITBUCKET_USERNAME".to_string()),
         headers: vec![],
@@ -304,6 +305,7 @@ pub fn define_bitbucket_api() -> RestApi {
         ],
         module_path: Some("bitbucket".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             basic_user: Some(EnvList::new(vec!["BITBUCKET_USERNAME".to_string()])),
             basic_pass: Some(EnvList::new(vec!["BITBUCKET_APP_PASSWORD".to_string()])),

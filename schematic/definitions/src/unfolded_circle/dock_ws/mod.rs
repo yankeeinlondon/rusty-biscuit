@@ -81,6 +81,7 @@ pub fn define_unfolded_circle_dock_ws_api() -> WebSocketApi {
         docs_url: Some("https://unfoldedcircle.github.io/core-api/dock/".to_string()),
         auth: AuthStrategy::None,
         env_auth: vec!["UCR_DOCK_TOKEN".to_string()],
+        version: None,
         endpoints: vec![WebSocketEndpoint {
             id: "DockRoot".to_string(),
             path: "/".to_string(),

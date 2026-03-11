@@ -68,6 +68,7 @@ pub fn define_openai_api() -> RestApi {
         base_url: "https://api.openai.com/v1".to_string(),
         docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
         headers: vec![],
@@ -108,6 +109,7 @@ pub fn define_openai_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             bearer_token: Some(EnvList::new(vec!["OPENAI_API_KEY".to_string()])),
             ..Default::default()

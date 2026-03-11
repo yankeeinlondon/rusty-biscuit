@@ -68,6 +68,7 @@ pub fn define_ollama_native_api() -> RestApi {
         base_url: "http://localhost:11434".to_string(),
         docs_url: Some("https://github.com/ollama/ollama/blob/main/docs/api.md".to_string()),
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         headers: vec![],
@@ -204,6 +205,7 @@ pub fn define_ollama_native_api() -> RestApi {
         ],
         module_path: Some("ollama".to_string()),
         request_suffix: Some("NativeRequest".to_string()),
+        version: None,
         env_mapping: Some(EnvMapping::default()),
     }
 }
@@ -239,6 +241,7 @@ pub fn define_ollama_openai_api() -> RestApi {
         base_url: "http://localhost:11434".to_string(),
         docs_url: Some("https://github.com/ollama/ollama/blob/main/docs/openai.md".to_string()),
         auth: AuthStrategy::None, // Ollama ignores API keys but accepts them
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         headers: vec![],
@@ -290,6 +293,7 @@ pub fn define_ollama_openai_api() -> RestApi {
         ],
         module_path: Some("ollama".to_string()),
         request_suffix: Some("OaiRequest".to_string()),
+        version: None,
         env_mapping: Some(EnvMapping::default()),
     }
 }

@@ -188,6 +188,7 @@ pub fn define_unfolded_circle_core_ws_api() -> WebSocketApi {
             "UCR_CORE_API_KEY".to_string(),
             "UNFOLDED_CIRCLE_API_KEY".to_string(),
         ],
+        version: None,
         endpoints,
         runtime: None,
     }

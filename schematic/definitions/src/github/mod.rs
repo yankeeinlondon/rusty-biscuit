@@ -92,6 +92,7 @@ pub fn define_github_api() -> RestApi {
         base_url: "https://api.github.com".to_string(),
         docs_url: Some("https://docs.github.com/en/rest".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
         env_username: None,
         headers: vec![
@@ -447,6 +448,7 @@ pub fn define_github_api() -> RestApi {
         ],
         module_path: Some("github".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: Some(EnvMapping {
             bearer_token: Some(EnvList::new(vec![
                 "GITHUB_TOKEN".to_string(),

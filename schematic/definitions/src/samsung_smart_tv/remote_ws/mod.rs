@@ -208,6 +208,7 @@ pub fn define_samsung_smart_tv_remote_ws_api() -> WebSocketApi {
         ),
         auth: AuthStrategy::None,
         env_auth: vec![],
+        version: None,
         endpoints,
         runtime: Some(WebSocketRuntimeHints {
             frame_format: FrameFormat::JsonText,

@@ -113,6 +113,7 @@ pub fn define_gitea_api() -> RestApi {
         auth: AuthStrategy::ApiKey {
             header: "Authorization".to_string(),
         },
+        auth_policy: None,
         env_auth: vec!["GITEA_TOKEN".to_string()],
         env_username: None,
         headers: vec![("Accept".to_string(), "application/json".to_string())],
@@ -375,6 +376,7 @@ pub fn define_gitea_api() -> RestApi {
         ],
         module_path: Some("gitea".to_string()),
         request_suffix: None,
+        version: None,
         env_mapping: None,
     }
 }

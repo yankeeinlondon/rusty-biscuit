@@ -610,6 +610,7 @@ mod tests {
             base_url: "https://test.com".to_string(),
             docs_url: None,
             auth: schematic_define::AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
@@ -639,6 +640,7 @@ mod tests {
             ],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 
@@ -662,6 +664,7 @@ mod tests {
             base_url: "https://test.com".to_string(),
             docs_url: None,
             auth: schematic_define::AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
@@ -702,6 +705,7 @@ mod tests {
             ],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 

@@ -166,6 +166,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         base_url: "http://remote.local/api".to_string(),
         docs_url: Some("https://unfoldedcircle.github.io/core-api/rest/".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec![
             "UCR_CORE_API_KEY".to_string(),
             "UNFOLDED_CIRCLE_API_KEY".to_string(),
@@ -175,6 +176,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         endpoints,
         module_path: Some("unfolded_circle_core_rest".to_string()),
         request_suffix: Some("CoreRestRequest".to_string()),
+        version: None,
         env_mapping: Some(EnvMapping {
             bearer_token: Some(EnvList::from_strs(&[
                 "UCR_CORE_API_KEY",
