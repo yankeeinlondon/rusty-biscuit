@@ -1,5 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 66
 expression: strip_ansi(&stdout)
 ---
 Wrap Codex CLI with Claudine preflight/env handling
@@ -10,7 +11,7 @@ Arguments:
   [ARGS]...  Arguments forwarded to the wrapped provider CLI
 
 Options:
-  -v, --verbose...                   Increase verbosity (-v for info, -vv for debug)
+  -v, --verbose...                   Increase verbosity (-v for verbose, -vv for debug)
   -y, --yolo                         Enable provider-specific YOLO/auto-approval mode
       --include <ENV_NAME>           Preserve this env var even when it matches sensitive-name filters
   -n, --non-interactive              Force provider-specific non-interactive mode [aliases: --ni]
