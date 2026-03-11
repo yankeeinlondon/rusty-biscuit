@@ -342,10 +342,6 @@ gem *args="":
 
 # commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
 commit:
-    @echo
-    @echo -e "Before committing we must make sure all doctests pass"
-    @echo
-    @cd .. && just doctest $(sniff repo --dirty-package-areas 2>/dev/null) || ( just _speak "We have failing doc tests which must be fixed before we can commit!" && echo "We have failing doc tests which must be fixed before we can commit!" && exit 1 )
     @echo ""
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"

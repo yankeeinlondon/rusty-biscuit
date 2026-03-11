@@ -23,6 +23,7 @@ members = [
     "schematic/define",
     "schematic/definitions",
     "schematic/gen",
+    "schematic/oauth",
     "sniff/cli",
     "sniff/lib",
     "tabby",

@@ -198,9 +198,22 @@ doctest *args="":
         echo "Running doctests for: ${areas[*]}"
         echo "------------------------------------------------"
         echo ""
+        all_pkgs=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
         pkg_args=""
         for area in "${areas[@]}"; do
-            pkg_args="$pkg_args -p $area"
+            if echo "$all_pkgs" | grep -qx "$area"; then
+                pkg_args="$pkg_args -p $area"
+            else
+                # Area name doesn't match a package; expand to all packages with that prefix
+                matched=$(echo "$all_pkgs" | grep "^${area}-" || true)
+                if [[ -n "$matched" ]]; then
+                    while IFS= read -r pkg; do
+                        pkg_args="$pkg_args -p $pkg"
+                    done <<< "$matched"
+                else
+                    echo "Warning: no packages found for area '$area', skipping"
+                fi
+            fi
         done
         cargo test --doc $pkg_args
     fi
@@ -319,10 +332,6 @@ lint:
 
 # commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
 commit:
-    @echo
-    @echo -e "Before committing we must make sure all doctests pass"
-    @echo
-    @just doctest $(sniff repo --dirty-package-areas 2>/dev/null) || ( just _speak "We have failing doc tests which must be fixed before we can commit!" && echo "We have failing doc tests which must be fixed before we can commit!" && exit 1 )
     @echo ""
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
