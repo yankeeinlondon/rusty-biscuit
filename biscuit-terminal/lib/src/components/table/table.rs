@@ -991,7 +991,7 @@ impl Table {
                         return if dropped_column_indices.is_empty() {
                             Err(error)
                         } else {
-                            Err(self.into_after_drop_error(error, dropped_column_indices.clone()))
+                            Err(self.to_after_drop_error(error, dropped_column_indices.clone()))
                         };
                     };
 
@@ -1358,7 +1358,7 @@ impl Table {
         }
     }
 
-    fn into_after_drop_error(
+    fn to_after_drop_error(
         &self,
         error: TableWidthError,
         dropped_column_indices: Vec<usize>,
