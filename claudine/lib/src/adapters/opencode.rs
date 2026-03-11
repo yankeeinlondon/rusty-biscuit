@@ -80,12 +80,7 @@ impl ProviderAdapter for OpenCodeAdapter {
             env: EnvironmentContext::default(),
         };
 
-        for key in ["bus_event_type", "plugin_context", "auth_method"] {
-            if let Some(value) = raw.get(key) {
-                meta.extra.insert(key.to_string(), value.clone());
-            }
-        }
-
+        // Capture well-known structured fields into extra with semantic keys.
         if let Some(value) = properties {
             meta.extra.insert("properties".to_string(), value.clone());
         }
@@ -98,6 +93,24 @@ impl ProviderAdapter for OpenCodeAdapter {
         if let Some(value) = part {
             meta.extra.insert("message_part".to_string(), value.clone());
             capture_usage_fields(&mut meta.extra, value);
+        }
+
+        // Capture all remaining raw keys into extra so we never lose data
+        // from fields we don't explicitly extract.
+        let extracted_keys: &[&str] = &[
+            "event_type", "eventType", "type", "event",
+            "session_id", "sessionId", "sessionID",
+            "cwd", "tool_name", "toolName", "tool",
+            "tool_input", "args", "tool_response", "output",
+            "error", "prompt", "message", "agent_type",
+            "properties", "path",
+        ];
+        if let Some(obj) = raw.as_object() {
+            for (key, value) in obj {
+                if !extracted_keys.contains(&key.as_str()) && !meta.extra.contains_key(key) {
+                    meta.extra.insert(key.to_string(), value.clone());
+                }
+            }
         }
 
         Ok((event, meta))
