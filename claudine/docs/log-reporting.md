@@ -273,9 +273,13 @@ CREATE TABLE ingestion_state (
 |---------------------|----------------------------------------------------------------------|
 | `claudine logs`     | Quick daily summary for today (default)                              |
 | `claudine logs today` | Same as bare `claudine logs`                                      |
+| `claudine logs today errors` | Errors encountered today                                  |
 | `claudine logs yesterday` | Quick daily summary for yesterday                              |
+| `claudine logs yesterday errors` | Errors encountered yesterday                        |
 | `claudine logs week` | 7-day rolling summary with sparklines                               |
+| `claudine logs week errors` | Errors encountered during the rolling week                  |
 | `claudine logs month` | 30-day rolling summary                                             |
+| `claudine logs month errors` | Errors encountered during the rolling month                |
 | `claudine logs sync` | Ingest new JSONL data into SQLite                                   |
 | `claudine logs sessions [--date DATE]` | List sessions with duration, turns, tools    |
 | `claudine logs tools [--date DATE] [--top N]` | Tool usage breakdown                 |

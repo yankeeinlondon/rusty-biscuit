@@ -76,7 +76,7 @@ Test what would happen for an event without side effects. Accepts event names in
 
 ### `claudine logs [subcommand] [flags]`
 
-Query the local reporting index built from JSONL hook logs. Shared filters include `--provider`, `--repo`, `--package-area`, and `--package`, and read commands perform a best-effort sync before querying.
+Query the local reporting index built from JSONL hook logs. Shared filters include `--provider`, `--repo`, `--package-area`, and `--package`, and read commands perform a best-effort sync before querying. Time-window commands also accept nested error drill-downs such as `claudine logs week errors` and `claudine logs today errors`.
 
 ### `claudine mcp [subcommand] [--json]`
 
