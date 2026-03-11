@@ -204,6 +204,7 @@ pub fn define_emqx_bearer_api() -> RestApi {
             response: ApiResponse::json_type("LoginResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // Logout endpoint
         Endpoint {
@@ -215,6 +216,7 @@ pub fn define_emqx_bearer_api() -> RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ];
     endpoints.extend(build_common_endpoints());
@@ -253,6 +255,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListNodesResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetNode".to_string(),
@@ -263,6 +266,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("NodeInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetCluster".to_string(),
@@ -273,6 +277,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ClusterStatus"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Client Endpoints
@@ -286,6 +291,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListClientsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetClient".to_string(),
@@ -296,6 +302,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ClientInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "DisconnectClient".to_string(),
@@ -306,6 +313,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "SubscribeClient".to_string(),
@@ -316,6 +324,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "UnsubscribeClient".to_string(),
@@ -326,6 +335,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Subscription Endpoints
@@ -339,6 +349,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListSubscriptionsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Publishing Endpoints
@@ -352,6 +363,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "PublishBulk".to_string(),
@@ -362,6 +374,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Rules Engine Endpoints
@@ -375,6 +388,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListRulesResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "CreateRule".to_string(),
@@ -385,6 +399,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetRule".to_string(),
@@ -395,6 +410,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "UpdateRule".to_string(),
@@ -405,6 +421,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "DeleteRule".to_string(),
@@ -415,6 +432,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "TestRule".to_string(),
@@ -425,6 +443,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("TestRuleResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Authentication Endpoints
@@ -438,6 +457,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAuthenticatorsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetAuthenticator".to_string(),
@@ -448,6 +468,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AuthenticatorInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "ListAuthUsers".to_string(),
@@ -458,6 +479,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("AuthUser"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "CreateAuthUser".to_string(),
@@ -468,6 +490,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AuthUser"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "DeleteAuthUser".to_string(),
@@ -478,6 +501,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Authorization Endpoints
@@ -491,6 +515,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAuthzSourcesResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Listener Endpoints
@@ -504,6 +529,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListListenersResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetListener".to_string(),
@@ -514,6 +540,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListenerInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Metrics & Stats Endpoints
@@ -527,6 +554,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListMetricsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "ListStats".to_string(),
@@ -537,6 +565,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListStatsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetPrometheus".to_string(),
@@ -547,6 +576,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Topics Endpoints
@@ -560,6 +590,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListTopicsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Retained Messages Endpoints
@@ -573,6 +604,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListRetainedResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetRetained".to_string(),
@@ -583,6 +615,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RetainedMessage"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "DeleteRetained".to_string(),
@@ -593,6 +626,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Alarms Endpoints
@@ -606,6 +640,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAlarmsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         // =====================================================================
         // Banned Clients Endpoints
@@ -619,6 +654,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListBannedResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "CreateBan".to_string(),
@@ -629,6 +665,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("BanInfo"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "DeleteBan".to_string(),
@@ -640,6 +677,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ]
 }

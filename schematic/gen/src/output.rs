@@ -1415,6 +1415,7 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -1442,6 +1443,7 @@ mod tests {
                     response: ApiResponse::json_type("ListModelsResponse"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "RetrieveModel".to_string(),
@@ -1452,6 +1454,7 @@ mod tests {
                     response: ApiResponse::json_type("Model"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "CreateCompletion".to_string(),
@@ -1462,6 +1465,7 @@ mod tests {
                     response: ApiResponse::json_type("Completion"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
             module_path: None,
@@ -1807,6 +1811,7 @@ mod tests {
                     response: ApiResponse::json_type("TestResponse"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 }],
                 module_path: None,
                 request_suffix: None,
@@ -1842,6 +1847,7 @@ mod tests {
                 response: ApiResponse::json_type("Response"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             })
             .collect();
 
@@ -1937,6 +1943,7 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: Some("foo".to_string()),
             request_suffix: Some("NativeRequest".to_string()),
@@ -1961,6 +1968,7 @@ mod tests {
                 response: ApiResponse::json_type("CompatListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: Some("foo".to_string()),
             request_suffix: Some("CompatRequest".to_string()),

@@ -2,8 +2,9 @@ use chrono::{Days, Local, NaiveDate};
 use clap::{Args, Subcommand};
 use color_eyre::eyre::{Result, eyre};
 
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
@@ -11,7 +12,7 @@ use claudine::events::Provider;
 use claudine::reporting::{
     DailySummary, DateRange, ErrorsReport, LabeledCount, ProviderSplit, ReportingFilters,
     ReportingStore, ReposReport, SessionsReport, SyncRequest, SyncSummary, ToolsReport,
-    TrendsReport,
+    TrendsReport, UsageTotals,
 };
 
 use crate::log;
@@ -338,6 +339,7 @@ fn render_daily_summary(summary: &DailySummary) {
         ));
     }
 
+    render_usage_line(&summary.usage);
     render_metrics_line(&summary.metrics);
 
     if summary.top_tools.is_empty() {
@@ -356,7 +358,7 @@ fn render_daily_summary(summary: &DailySummary) {
         table.add_row(vec![
             tool.tool_name.clone().into(),
             tool.call_count.to_string().into(),
-            tool.error_count.to_string().into(),
+            format_errors(tool.error_count).into(),
             format!("{:?}", tool.classification).to_lowercase().into(),
         ]);
     }
@@ -383,6 +385,8 @@ fn render_sessions_report(report: &SessionsReport) {
         TableColumn::new("Turns").with_alignment(Alignment::Right),
         TableColumn::new("Tools").with_alignment(Alignment::Right),
         TableColumn::new("Errors").with_alignment(Alignment::Right),
+        TableColumn::new("Tokens").with_alignment(Alignment::Right),
+        TableColumn::new("Cost").with_alignment(Alignment::Right),
         TableColumn::new("Model"),
     ]);
 
@@ -400,7 +404,9 @@ fn render_sessions_report(report: &SessionsReport) {
             format_duration(session.duration_seconds).into(),
             session.turn_count.to_string().into(),
             session.tool_call_count.to_string().into(),
-            errors.to_string().into(),
+            format_errors(errors).into(),
+            format_tokens(session.total_tokens).into(),
+            format_cost(session.total_cost_usd).into(),
             session
                 .model
                 .clone()
@@ -441,7 +447,7 @@ fn render_tools_report(report: &ToolsReport) {
         table.add_row(vec![
             tool.tool_name.clone().into(),
             tool.call_count.to_string().into(),
-            tool.error_count.to_string().into(),
+            format_errors(tool.error_count).into(),
             format!("{error_rate:.1}").into(),
             format!("{:?}", tool.classification).to_lowercase().into(),
         ]);
@@ -542,11 +548,6 @@ fn render_trends_report(report: &TrendsReport) {
         ))
         .render(&term),
     );
-    log::data(&format!(
-        "Provider split: {}",
-        render_provider_split(&report.provider_split)
-    ));
-
     if !report.top_tools.is_empty() {
         let top_tools = report
             .top_tools
@@ -558,28 +559,51 @@ fn render_trends_report(report: &TrendsReport) {
     }
 
     let mut table = base_table(vec![
-        TableColumn::new("Date"),
-        TableColumn::new("Events").with_alignment(Alignment::Right),
+        TableColumn::new("Date").with_min_width(10),
         TableColumn::new("Sessions").with_alignment(Alignment::Right),
         TableColumn::new("Turns").with_alignment(Alignment::Right),
         TableColumn::new("Tools").with_alignment(Alignment::Right),
-        TableColumn::new("Errors").with_alignment(Alignment::Right),
+        TableColumn::new("Tool Err").with_alignment(Alignment::Right),
+        TableColumn::new("Turn Err").with_alignment(Alignment::Right),
         TableColumn::new("Providers"),
     ]);
 
     for point in &report.points {
         table.add_row(vec![
             point.date.to_string().into(),
-            point.events.to_string().into(),
             point.sessions.to_string().into(),
             point.turns.to_string().into(),
             point.tool_calls.to_string().into(),
-            point.errors.to_string().into(),
+            format_errors(point.tool_errors).into(),
+            format_errors(point.turn_errors).into(),
             render_provider_split(&point.providers).into(),
         ]);
     }
 
     log::data(&table.render(&term));
+
+    // Definitions footer
+    let definitions = UnorderedList::from(vec![
+        RenderableContent::from(Prose::new(
+            "<b>Session:</b> <i><dim>one continuous interaction with a provider (start → exit)</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Turn:</b> <i><dim>one prompt → response cycle within a session</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Tools:</b> <i><dim>total tool invocations across all turns (Read, Edit, Bash, etc.)</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Tool Err:</b> <i><dim>failed tool invocations (e.g. file not found, permission denied, command failed)</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Turn Err:</b> <i><dim>failed response cycles (e.g. API errors, rate limits, context overflow)</dim></i>",
+        )),
+        RenderableContent::from(Prose::new(
+            "<b>Providers:</b> <i><dim>active providers, linked to usage dashboards (only providers with turns shown)</dim></i>",
+        )),
+    ]).with_bullet("  ");
+    log::data(&definitions.render(&term));
 }
 
 fn base_table(columns: Vec<TableColumn>) -> Table {
@@ -593,11 +617,44 @@ fn render_provider_split(items: &[ProviderSplit]) -> String {
         return "—".to_string();
     }
 
-    items
+    // Sort by turns descending, then by provider name
+    let mut sorted: Vec<&ProviderSplit> = items.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.turns
+            .cmp(&a.turns)
+            .then_with(|| a.provider.to_string().cmp(&b.provider.to_string()))
+    });
+
+    sorted
         .iter()
-        .map(|item| format!("{} {}", item.provider, item.count))
+        .filter_map(|item| {
+            if item.turns == 0 {
+                return None;
+            }
+            Some(render_provider_link(&item.provider))
+        })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Render a provider name as an OSC8 hyperlink to its usage dashboard.
+fn render_provider_link(provider: &Provider) -> String {
+    match provider.usage_dashboard_url() {
+        Some(url) => {
+            let markup = format!("<a href=\"{url}\">{provider}</a>");
+            Prose::new(markup).render_optimistic(None)
+        }
+        None => provider.to_string(),
+    }
+}
+
+fn format_errors(count: u64) -> String {
+    let text = count.to_string();
+    if count == 0 {
+        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+    } else {
+        Prose::new(format!("<red>{text}</red>")).render_optimistic(None)
+    }
 }
 
 fn render_labeled_counts(items: &[LabeledCount]) -> String {
@@ -639,6 +696,58 @@ fn format_duration(seconds: i64) -> String {
         format!("{hours}h {minutes}m")
     } else {
         format!("{minutes}m")
+    }
+}
+
+fn render_usage_line(usage: &UsageTotals) {
+    if usage.total_tokens == 0 && usage.total_cost_usd == 0.0 {
+        return;
+    }
+
+    let mut parts = Vec::new();
+    if usage.total_tokens > 0 {
+        parts.push(format!("tokens {}", format_tokens(usage.total_tokens)));
+    }
+    if usage.total_input_tokens > 0 {
+        parts.push(format!("in {}", format_tokens(usage.total_input_tokens)));
+    }
+    if usage.total_output_tokens > 0 {
+        parts.push(format!("out {}", format_tokens(usage.total_output_tokens)));
+    }
+    if usage.total_cache_read_tokens > 0 {
+        parts.push(format!(
+            "cached {}",
+            format_tokens(usage.total_cache_read_tokens)
+        ));
+    }
+    if usage.total_cost_usd > 0.0 {
+        parts.push(format!("cost {}", format_cost(usage.total_cost_usd)));
+    }
+
+    log::data(&format!("Usage: {}", parts.join("  ")));
+}
+
+fn format_tokens(count: u64) -> String {
+    if count == 0 {
+        return "—".to_string();
+    }
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}k", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
+    }
+}
+
+fn format_cost(cost: f64) -> String {
+    if cost == 0.0 {
+        return "—".to_string();
+    }
+    if cost < 0.01 {
+        format!("${cost:.4}")
+    } else {
+        format!("${cost:.2}")
     }
 }
 

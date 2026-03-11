@@ -129,6 +129,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_type("RepositoryInfo"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Git Trees (for file discovery)
@@ -142,6 +143,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_type("GitTreeResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetGitTreeRecursive".to_string(),
@@ -153,6 +155,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_type("GitTreeResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Repository Contents (raw file access)
@@ -166,6 +169,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::Text,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Pull Requests
@@ -205,6 +209,7 @@ pub fn define_gitea_api() -> RestApi {
                             Some("Sort order for results"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListPullRequestFiles".to_string(),
@@ -215,6 +220,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
+                oauth_scopes: None,
             },
             // =================================================================
             // Issues
@@ -251,6 +257,7 @@ pub fn define_gitea_api() -> RestApi {
                             Some("Filter by type (issues, pulls, or all)"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -261,6 +268,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_type("IssueSummary"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListIssueComments".to_string(),
@@ -271,6 +279,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
@@ -281,6 +290,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
+                oauth_scopes: None,
             },
             // =================================================================
             // Tags and Releases
@@ -294,6 +304,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListReleases".to_string(),
@@ -319,6 +330,7 @@ pub fn define_gitea_api() -> RestApi {
                             Some("Include pre-releases"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             // Note: Gitea's /git/refs/{ref} returns an ARRAY, unlike GitHub's single object
             // Path uses {git_ref} instead of {ref} to avoid Rust keyword collision
@@ -333,6 +345,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("GitRef"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetAnnotatedTag".to_string(),
@@ -343,6 +356,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_type("AnnotatedTagObject"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Organization Repositories
@@ -356,6 +370,7 @@ pub fn define_gitea_api() -> RestApi {
                 response: ApiResponse::json_vec_type("RepositoryInfo"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
+                oauth_scopes: None,
             },
         ],
         module_path: Some("gitea".to_string()),

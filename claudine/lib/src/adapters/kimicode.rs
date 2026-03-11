@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
@@ -53,6 +53,13 @@ impl ProviderAdapter for KimiCodeAdapter {
                 meta.extra.insert(key.to_string(), value.clone());
             }
         }
+
+        // Capture usage from StatusUpdate events (flat or nested under `payload`).
+        let usage_source = raw
+            .get("payload")
+            .filter(|p| p.is_object())
+            .unwrap_or(raw);
+        capture_kimi_usage(&mut meta.extra, usage_source);
 
         Ok((event, meta))
     }
@@ -137,6 +144,53 @@ fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
+/// Capture and normalize Kimi Code usage fields.
+///
+/// Kimi `StatusUpdate` may include:
+/// - `context_usage`: context-window utilization (promoted to top-level extra)
+/// - `token_usage`: `{ input_other, output, input_cache_read, input_cache_creation }`
+///
+/// Both raw objects are preserved, and `token_usage` is additionally normalized
+/// into the shared shape.
+fn capture_kimi_usage(extra: &mut HashMap<String, Value>, source: &Value) {
+    if let Some(context_usage) = source.get("context_usage") {
+        extra.insert("context_usage".to_string(), context_usage.clone());
+    }
+
+    if let Some(token_usage) = source.get("token_usage") {
+        // Preserve raw provider-native object
+        extra.insert("raw_token_usage".to_string(), token_usage.clone());
+
+        let input_other = token_usage.get("input_other").and_then(Value::as_u64);
+        let output = token_usage.get("output").and_then(Value::as_u64);
+        let cache_read = token_usage.get("input_cache_read").and_then(Value::as_u64);
+        let cache_write = token_usage
+            .get("input_cache_creation")
+            .and_then(Value::as_u64);
+
+        // Compute input as sum of all input components when all are present
+        let input = match (input_other, cache_read, cache_write) {
+            (Some(o), Some(cr), Some(cw)) => Some(o + cr + cw),
+            _ => input_other,
+        };
+
+        // Compute total only when input and output are both known
+        let total = match (input, output) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        };
+
+        let normalized = json!({
+            "total": total,
+            "input": input,
+            "output": output,
+            "cache_read": cache_read,
+            "cache_write": cache_write,
+        });
+        extra.insert("token_usage".to_string(), normalized);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -171,6 +225,74 @@ mod tests {
         assert!(adapter.can_block(&AgenticEvent::BeforeTool));
         assert!(adapter.can_block(&AgenticEvent::PermissionRequest));
         assert!(!adapter.can_block(&AgenticEvent::AfterTool));
+    }
+
+    #[test]
+    fn status_update_captures_token_and_context_usage() {
+        let adapter = KimiCodeAdapter;
+        let raw = json!({
+            "event_name": "StatusUpdate",
+            "context_usage": { "used": 8000, "total": 128000 },
+            "token_usage": {
+                "input_other": 500,
+                "output": 300,
+                "input_cache_read": 7000,
+                "input_cache_creation": 200
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::Notification);
+
+        // Context usage promoted to top-level
+        assert_eq!(meta.extra["context_usage"]["used"], json!(8000));
+        assert_eq!(meta.extra["context_usage"]["total"], json!(128000));
+
+        // Raw token_usage preserved
+        assert_eq!(meta.extra["raw_token_usage"]["input_other"], json!(500));
+
+        // Normalized token_usage
+        assert_eq!(meta.extra["token_usage"]["output"], json!(300));
+        assert_eq!(meta.extra["token_usage"]["cache_read"], json!(7000));
+        assert_eq!(meta.extra["token_usage"]["cache_write"], json!(200));
+        // input = input_other + cache_read + cache_creation = 500 + 7000 + 200
+        assert_eq!(meta.extra["token_usage"]["input"], json!(7700));
+        // total = input + output = 7700 + 300
+        assert_eq!(meta.extra["token_usage"]["total"], json!(8000));
+    }
+
+    #[test]
+    fn status_update_nested_payload_captures_usage() {
+        let adapter = KimiCodeAdapter;
+        let raw = json!({
+            "event_name": "StatusUpdate",
+            "payload": {
+                "context_usage": { "used": 4000, "total": 64000 },
+                "token_usage": {
+                    "input_other": 100,
+                    "output": 50,
+                    "input_cache_read": 3000,
+                    "input_cache_creation": 100
+                }
+            }
+        });
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(meta.extra["context_usage"]["used"], json!(4000));
+        assert_eq!(meta.extra["token_usage"]["output"], json!(50));
+        assert_eq!(meta.extra["token_usage"]["cache_read"], json!(3000));
+    }
+
+    #[test]
+    fn no_cost_usd_without_provider_cost() {
+        let adapter = KimiCodeAdapter;
+        let raw = json!({
+            "event_name": "StatusUpdate",
+            "token_usage": { "input_other": 100, "output": 50 }
+        });
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert!(!meta.extra.contains_key("cost_usd"));
     }
 
     #[test]

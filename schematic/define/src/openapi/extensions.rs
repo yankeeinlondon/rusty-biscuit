@@ -77,6 +77,7 @@ impl From<SchematicDocExtension> for serde_json::Value {
 ///     request: Some(ApiRequest::json_type("CreateUserBody")),
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![("X-Custom".to_string(), "value".to_string())],
+///     oauth_scopes: None,
 /// };
 ///
 /// let json: serde_json::Value = ext.into();
@@ -94,6 +95,10 @@ pub struct SchematicOpExtension {
     /// Endpoint-specific headers.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
+
+    /// OAuth2 scopes required for this operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_scopes: Option<Vec<String>>,
 }
 
 impl From<SchematicOpExtension> for serde_json::Value {
@@ -264,6 +269,7 @@ mod tests {
             request: Some(ApiRequest::json_type("CreateBody")),
             response: ApiResponse::json_type("Response"),
             headers: vec![],
+            oauth_scopes: None,
         };
         assert!(ext.request.is_some());
     }
@@ -277,6 +283,7 @@ mod tests {
             ])),
             response: ApiResponse::json_type("UploadResponse"),
             headers: vec![],
+            oauth_scopes: None,
         };
 
         if let Some(ApiRequest::FormData { fields }) = &ext.request {
@@ -294,6 +301,7 @@ mod tests {
             request: None,
             response: ApiResponse::Binary,
             headers: vec![],
+            oauth_scopes: None,
         };
         assert!(ext.response.is_binary());
     }
@@ -304,6 +312,7 @@ mod tests {
             request: None,
             response: ApiResponse::Empty,
             headers: vec![("X-Custom-Header".to_string(), "custom-value".to_string())],
+            oauth_scopes: None,
         };
         assert_eq!(ext.headers.len(), 1);
     }
@@ -314,6 +323,7 @@ mod tests {
             request: Some(ApiRequest::json_type("TestBody")),
             response: ApiResponse::Text,
             headers: vec![],
+            oauth_scopes: None,
         };
 
         let json: serde_json::Value = ext.into();
@@ -328,6 +338,7 @@ mod tests {
             request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
             response: ApiResponse::json_type("Result"),
             headers: vec![("X-Header".to_string(), "value".to_string())],
+            oauth_scopes: None,
         };
 
         let json = serde_json::to_string(&ext).unwrap();

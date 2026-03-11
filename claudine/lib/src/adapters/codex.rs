@@ -68,7 +68,6 @@ impl ProviderAdapter for CodexAdapter {
         for key in [
             "thread_id",
             "thread-id",
-            "token_usage",
             "session_id",
             "triggered_at",
         ] {
@@ -76,6 +75,10 @@ impl ProviderAdapter for CodexAdapter {
                 meta.extra.insert(key.to_string(), value.clone());
             }
         }
+
+        // Capture and normalize usage from both documented field names.
+        // Codex `turn.completed` uses `usage`; some payloads use `token_usage`.
+        capture_codex_usage(&mut meta.extra, raw);
 
         if let Some(value) = hook_event {
             meta.extra.insert("hook_event".to_string(), value.clone());
@@ -203,6 +206,43 @@ fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
+/// Capture Codex usage fields and normalize into `token_usage`.
+///
+/// Codex documents two usage shapes:
+/// - `usage` on `turn.completed`: `{ input_tokens, cached_input_tokens, output_tokens }`
+/// - `token_usage` (legacy/alternative): opaque object preserved as-is
+///
+/// When `usage` is present, we normalize into the shared `token_usage` shape and
+/// also preserve the raw `usage` object for future reference.
+fn capture_codex_usage(extra: &mut HashMap<String, Value>, raw: &Value) {
+    if let Some(usage) = raw.get("usage") {
+        // Preserve raw provider-native object
+        extra.insert("usage".to_string(), usage.clone());
+
+        let input = usage.get("input_tokens").and_then(Value::as_u64);
+        let cached = usage.get("cached_input_tokens").and_then(Value::as_u64);
+        let output = usage.get("output_tokens").and_then(Value::as_u64);
+
+        // Codex docs say input_tokens already includes cached_input_tokens,
+        // so total = input_tokens + output_tokens.
+        let total = match (input, output) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        };
+
+        let normalized = serde_json::json!({
+            "total": total,
+            "input": input,
+            "output": output,
+            "cache_read": cached,
+        });
+        extra.insert("token_usage".to_string(), normalized);
+    } else if let Some(token_usage) = raw.get("token_usage") {
+        // Legacy/alternative shape — preserve as-is
+        extra.insert("token_usage".to_string(), token_usage.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -291,6 +331,64 @@ mod tests {
             meta.extra["hook_event"]["event_type"],
             json!("after_tool_use")
         );
+    }
+
+    #[test]
+    fn parse_turn_completed_with_usage_normalizes_token_usage() {
+        let adapter = CodexAdapter;
+        let raw = json!({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 1500,
+                "cached_input_tokens": 1000,
+                "output_tokens": 200
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnComplete);
+
+        // Raw usage preserved
+        assert_eq!(meta.extra["usage"]["input_tokens"], json!(1500));
+        assert_eq!(meta.extra["usage"]["cached_input_tokens"], json!(1000));
+        assert_eq!(meta.extra["usage"]["output_tokens"], json!(200));
+
+        // Normalized token_usage
+        assert_eq!(meta.extra["token_usage"]["input"], json!(1500));
+        assert_eq!(meta.extra["token_usage"]["output"], json!(200));
+        assert_eq!(meta.extra["token_usage"]["cache_read"], json!(1000));
+        assert_eq!(meta.extra["token_usage"]["total"], json!(1700));
+    }
+
+    #[test]
+    fn parse_legacy_token_usage_preserved_as_is() {
+        let adapter = CodexAdapter;
+        let raw = json!({
+            "type": "turn.completed",
+            "token_usage": { "in": 100, "out": 50 }
+        });
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(meta.extra["token_usage"]["in"], json!(100));
+        assert_eq!(meta.extra["token_usage"]["out"], json!(50));
+        // No "usage" key when only token_usage present
+        assert!(!meta.extra.contains_key("usage"));
+    }
+
+    #[test]
+    fn parse_usage_preferred_over_token_usage() {
+        let adapter = CodexAdapter;
+        let raw = json!({
+            "type": "turn.completed",
+            "usage": { "input_tokens": 500, "output_tokens": 100 },
+            "token_usage": { "in": 1, "out": 2 }
+        });
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        // When both present, `usage` wins and gets normalized
+        assert_eq!(meta.extra["token_usage"]["input"], json!(500));
+        assert_eq!(meta.extra["token_usage"]["output"], json!(100));
+        assert_eq!(meta.extra["usage"]["input_tokens"], json!(500));
     }
 
     #[test]

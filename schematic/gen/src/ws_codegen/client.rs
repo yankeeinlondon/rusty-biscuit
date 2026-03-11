@@ -159,6 +159,7 @@ fn generate_env_mapping(
                         names: schematic_define::EnvList::new(vec![#(#env_auth.to_string()),*]),
                         header: #header.to_string(),
                     }),
+                    ..Default::default()
                 }
             }
         }
@@ -169,6 +170,7 @@ fn generate_env_mapping(
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
+                    ..Default::default()
                 }
             }
         }
@@ -179,6 +181,7 @@ fn generate_env_mapping(
                     basic_user: Some(schematic_define::EnvList::new(vec![#(#env_auth.to_string()),*])),
                     basic_pass: None,
                     api_key: None,
+                    ..Default::default()
                 }
             }
         }
@@ -189,6 +192,7 @@ fn generate_env_mapping(
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
+                    ..Default::default()
                 }
             }
         }

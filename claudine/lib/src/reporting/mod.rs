@@ -15,7 +15,7 @@ pub use types::{
     DailySummary, DailyToolStat, DateRange, DerivedMetrics, ErrorRecord, ErrorsReport,
     LabeledCount, ProviderSplit, RepoActivity, ReportingFilters, ReposReport, SessionInfo,
     SessionsReport, SyncFailure, SyncRequest, SyncSummary, ToolActionClass, ToolsReport,
-    TrendPoint, TrendsReport,
+    TrendPoint, TrendsReport, UsageTotals,
 };
 
 /// SQLite-backed reporting index built from Claudine JSONL event logs.

@@ -85,6 +85,15 @@ pub enum SchematicError {
     /// Should never occur in normal operation.
     #[error("Internal error: {0}")]
     InternalError(String),
+    /// OAuth2 authentication is required but no token was provided.
+    ///
+    /// Use the `schematic-oauth` runtime to obtain a token, then
+    /// pass it via `.variant_with_headers(Headers::default().use_bearer_token(token))`.
+    #[error("OAuth2 authentication required: {message}")]
+    OAuthAuthenticationRequired {
+        /// Description of the OAuth2 requirement.
+        message: String,
+    },
 }
 /// Context passed to response hooks containing request/response metadata.
 ///
@@ -195,9 +204,10 @@ pub trait EndpointSpec {
 ///     })
 ///     .build();
 /// ```
-pub type PreResponseJsonHook = dyn Fn(&ResponseContext, serde_json::Value) -> Result<serde_json::Value, SchematicError>
-    + Send
-    + Sync;
+pub type PreResponseJsonHook = dyn Fn(
+    &ResponseContext,
+    serde_json::Value,
+) -> Result<serde_json::Value, SchematicError> + Send + Sync;
 /// Type-erased trait for response mutation hooks.
 ///
 /// This trait allows storing hooks for different response types in
@@ -228,7 +238,8 @@ pub trait AnyResponseMutator: Send + Sync {
 pub struct TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     hook: F,
     _marker: std::marker::PhantomData<T>,
@@ -236,7 +247,8 @@ where
 impl<T, F> TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     /// Creates a new TypedMutator wrapping the given hook.
     #[must_use]
@@ -250,19 +262,22 @@ where
 impl<T, F> AnyResponseMutator for TypedMutator<T, F>
 where
     T: Send + Sync + 'static,
-    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
 {
     fn mutate(
         &self,
         ctx: &ResponseContext,
         response: &mut dyn std::any::Any,
     ) -> Result<(), SchematicError> {
-        let typed = response.downcast_mut::<T>().ok_or_else(|| {
-            SchematicError::InternalError(format!(
-                "Type mismatch in response mutator for endpoint '{}'",
-                ctx.endpoint_id
-            ))
-        })?;
+        let typed = response
+            .downcast_mut::<T>()
+            .ok_or_else(|| SchematicError::InternalError(
+                format!(
+                    "Type mismatch in response mutator for endpoint '{}'", ctx
+                    .endpoint_id
+                ),
+            ))?;
         (self.hook)(ctx, typed)
     }
 }
@@ -275,8 +290,10 @@ pub struct VariantHooks {
     /// Optional hook for JSON transformation before deserialization.
     pub pre_response_json: Option<std::sync::Arc<PreResponseJsonHook>>,
     /// Per-endpoint response mutators, keyed by endpoint_id.
-    pub response_mutators:
-        std::collections::HashMap<&'static str, std::sync::Arc<dyn AnyResponseMutator>>,
+    pub response_mutators: std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn AnyResponseMutator>,
+    >,
 }
 impl std::fmt::Debug for VariantHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

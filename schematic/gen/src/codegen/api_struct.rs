@@ -502,6 +502,70 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
             quote! { schematic_define::AuthStrategy::ApiKey { header: #header.to_string() } }
         }
         AuthStrategy::Basic => quote! { schematic_define::AuthStrategy::Basic },
+        AuthStrategy::OAuth2(config) => {
+            let grant_type = match &config.grant_type {
+                schematic_define::OAuth2GrantType::AuthorizationCodePkce => {
+                    quote! { schematic_define::OAuth2GrantType::AuthorizationCodePkce }
+                }
+                schematic_define::OAuth2GrantType::ClientCredentials => {
+                    quote! { schematic_define::OAuth2GrantType::ClientCredentials }
+                }
+                schematic_define::OAuth2GrantType::DeviceCode => {
+                    quote! { schematic_define::OAuth2GrantType::DeviceCode }
+                }
+                _ => quote! { schematic_define::OAuth2GrantType::AuthorizationCodePkce },
+            };
+            let token_url = &config.token_url;
+            let authorization_url = match &config.authorization_url {
+                Some(url) => quote! { Some(#url.to_string()) },
+                None => quote! { None },
+            };
+            let revocation_url = match &config.revocation_url {
+                Some(url) => quote! { Some(#url.to_string()) },
+                None => quote! { None },
+            };
+            let device_authorization_url = match &config.device_authorization_url {
+                Some(url) => quote! { Some(#url.to_string()) },
+                None => quote! { None },
+            };
+            let default_scopes = &config.default_scopes;
+            let pkce = match &config.pkce {
+                schematic_define::PkceRequirement::Required => {
+                    quote! { schematic_define::PkceRequirement::Required }
+                }
+                schematic_define::PkceRequirement::Supported => {
+                    quote! { schematic_define::PkceRequirement::Supported }
+                }
+                schematic_define::PkceRequirement::NotUsed => {
+                    quote! { schematic_define::PkceRequirement::NotUsed }
+                }
+                _ => quote! { schematic_define::PkceRequirement::Required },
+            };
+            let client_auth = match &config.client_auth {
+                schematic_define::OAuth2ClientAuthMethod::ClientSecretBasic => {
+                    quote! { schematic_define::OAuth2ClientAuthMethod::ClientSecretBasic }
+                }
+                schematic_define::OAuth2ClientAuthMethod::ClientSecretPost => {
+                    quote! { schematic_define::OAuth2ClientAuthMethod::ClientSecretPost }
+                }
+                schematic_define::OAuth2ClientAuthMethod::None => {
+                    quote! { schematic_define::OAuth2ClientAuthMethod::None }
+                }
+                _ => quote! { schematic_define::OAuth2ClientAuthMethod::ClientSecretBasic },
+            };
+            quote! {
+                schematic_define::AuthStrategy::OAuth2(schematic_define::OAuth2Config {
+                    grant_type: #grant_type,
+                    authorization_url: #authorization_url,
+                    token_url: #token_url.to_string(),
+                    revocation_url: #revocation_url,
+                    device_authorization_url: #device_authorization_url,
+                    default_scopes: vec![#(#default_scopes.to_string()),*],
+                    pkce: #pkce,
+                    client_auth: #client_auth,
+                })
+            }
+        }
         // Handle future variants (non_exhaustive)
         _ => quote! { schematic_define::AuthStrategy::None },
     }
@@ -552,12 +616,36 @@ fn generate_headers_init_from_mapping(api: &RestApi) -> TokenStream {
             quote! { None }
         };
 
+        let oauth_client_id_init = if let Some(ref id_list) = mapping.oauth_client_id {
+            let names = id_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
+        let oauth_client_secret_init = if let Some(ref secret_list) = mapping.oauth_client_secret {
+            let names = secret_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
+        let oauth_redirect_uri_init = if let Some(ref uri_list) = mapping.oauth_redirect_uri {
+            let names = uri_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
         quote! {
             schematic_define::EnvMapping {
                 bearer_token: #bearer_token_init,
                 basic_user: #basic_user_init,
                 basic_pass: #basic_pass_init,
                 api_key: #api_key_init,
+                oauth_client_id: #oauth_client_id_init,
+                oauth_client_secret: #oauth_client_secret_init,
+                oauth_redirect_uri: #oauth_redirect_uri_init,
             }
         }
     };

@@ -216,6 +216,7 @@ fn generate_code_for_various_api_configurations() {
                 response: ApiResponse::json_type("RootResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -241,6 +242,7 @@ fn generate_code_for_various_api_configurations() {
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "Post".to_string(),
@@ -251,6 +253,7 @@ fn generate_code_for_various_api_configurations() {
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "Put".to_string(),
@@ -261,6 +264,7 @@ fn generate_code_for_various_api_configurations() {
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "Patch".to_string(),
@@ -271,6 +275,7 @@ fn generate_code_for_various_api_configurations() {
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "Delete".to_string(),
@@ -281,6 +286,7 @@ fn generate_code_for_various_api_configurations() {
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
             module_path: None,
@@ -306,6 +312,7 @@ fn generate_code_for_various_api_configurations() {
                 response: ApiResponse::json_type("Item"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -390,6 +397,7 @@ fn binary_response_generates_request_bytes_method() {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -454,6 +462,7 @@ fn text_response_generates_request_text_method() {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -505,6 +514,7 @@ fn empty_response_generates_request_empty_method() {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -553,6 +563,7 @@ fn mixed_response_types_generate_all_methods() {
                 response: ApiResponse::json_type("JsonResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetBinary".to_string(),
@@ -563,6 +574,7 @@ fn mixed_response_types_generate_all_methods() {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetText".to_string(),
@@ -573,6 +585,7 @@ fn mixed_response_types_generate_all_methods() {
                 response: ApiResponse::Text,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteItem".to_string(),
@@ -583,6 +596,7 @@ fn mixed_response_types_generate_all_methods() {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         ],
         module_path: None,
@@ -788,6 +802,7 @@ fn paginated_endpoints_generate_paginated_trait() {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
+                oauth_scopes: None,
             },
             // Non-paginated endpoint
             Endpoint {
@@ -799,6 +814,7 @@ fn paginated_endpoints_generate_paginated_trait() {
                 response: ApiResponse::json_type("Item"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         ],
         module_path: None,

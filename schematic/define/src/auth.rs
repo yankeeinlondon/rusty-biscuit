@@ -15,6 +15,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::oauth::OAuth2Config;
+
 /// Authentication strategy for an API.
 ///
 /// Defines how authentication credentials are applied to HTTP requests.
@@ -144,6 +146,30 @@ pub enum AuthStrategy {
         /// Where the API key is sent.
         location: ApiKeyLocation,
     },
+
+    /// OAuth2 authentication.
+    ///
+    /// The configuration describes the OAuth2 provider endpoints, grant type,
+    /// and security requirements. Token lifecycle management is handled by the
+    /// `schematic-oauth` runtime crate.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::{AuthStrategy, OAuth2Config, OAuth2GrantType, PkceRequirement, OAuth2ClientAuthMethod};
+    ///
+    /// let auth = AuthStrategy::OAuth2(OAuth2Config {
+    ///     grant_type: OAuth2GrantType::AuthorizationCodePkce,
+    ///     authorization_url: Some("https://github.com/login/oauth/authorize".into()),
+    ///     token_url: "https://github.com/login/oauth/access_token".into(),
+    ///     revocation_url: None,
+    ///     device_authorization_url: None,
+    ///     default_scopes: vec!["repo".into()],
+    ///     pkce: PkceRequirement::Required,
+    ///     client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+    /// });
+    /// ```
+    OAuth2(OAuth2Config),
 }
 
 /// Location for API key authentication.

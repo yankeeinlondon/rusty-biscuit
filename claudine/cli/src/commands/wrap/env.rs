@@ -81,6 +81,22 @@ pub(crate) fn build_child_env(
         },
     );
     set_added_env(&mut env, &mut added, "AGENT_PARAMS", encoded_agent_params);
+    set_added_env(
+        &mut env,
+        &mut added,
+        "CLAUDINE_SESSION_ID",
+        uuid::Uuid::new_v4().to_string(),
+    );
+    set_added_env(
+        &mut env,
+        &mut added,
+        "CLAUDINE_INTERACTIVE",
+        if interactive {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        },
+    );
 
     for (key, value) in env_overrides {
         set_added_env(&mut env, &mut added, key, value.clone());

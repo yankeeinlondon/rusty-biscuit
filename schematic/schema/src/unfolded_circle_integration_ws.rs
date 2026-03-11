@@ -34,19 +34,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn new() -> Self {
         Self {
             base_url: "ws://remote.local".to_string(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "UCR_INTEGRATION_TOKEN".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
+                        ),
                         header: "auth-token".to_string(),
                     }),
-                },
-            ),
+                    ..Default::default()
+                }),
         }
     }
     /// Create a new client with a custom base URL.
@@ -54,19 +54,19 @@ impl UnfoldedCircleIntegrationWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "UCR_INTEGRATION_TOKEN".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["UCR_INTEGRATION_TOKEN".to_string()],
+                        ),
                         header: "auth-token".to_string(),
                     }),
-                },
-            ),
+                    ..Default::default()
+                }),
         }
     }
     /// Returns the configured base URL.
@@ -81,10 +81,11 @@ impl UnfoldedCircleIntegrationWs {
     ) -> Result<IntegrationClient, super::ws_shared::WsError> {
         let path = "/intg".to_string();
         if path.contains('{') {
-            return Err(super::ws_shared::WsError::Protocol(format!(
-                "unresolved path placeholder in '{}'",
-                path
-            )));
+            return Err(
+                super::ws_shared::WsError::Protocol(
+                    format!("unresolved path placeholder in '{}'", path),
+                ),
+            );
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -103,7 +104,9 @@ impl Default for UnfoldedCircleIntegrationWs {
 ///Client for the Integration endpoint.
 pub struct IntegrationClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
+    event_rx: tokio::sync::mpsc::Receiver<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    >,
     request_timeout: std::time::Duration,
     max_pending: usize,
 }
@@ -123,7 +126,8 @@ impl IntegrationClient {
         for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
+                value
+                    .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
             ) {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
@@ -135,9 +139,9 @@ impl IntegrationClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| {
-                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
-            })??;
+            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
+                options.handshake_timeout.as_secs(),
+            ))??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -148,16 +152,24 @@ impl IntegrationClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
+            _options.outbound_capacity,
+        );
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) =
-            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
+        let (state_tx, state_rx) = tokio::sync::watch::channel(
+            super::ws_shared::WsConnectionState::Connecting,
+        );
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
+                std::collections::HashMap<
+                    u64,
+                    tokio::sync::oneshot::Sender<serde_json::Value>,
+                >,
             >,
-        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        > = std::sync::Arc::new(
+            tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        );
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -175,24 +187,30 @@ impl IntegrationClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx
+                            .send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
+                    let _ = state_tx
+                        .send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(
+                        policy,
+                        reconnect_attempt,
+                    );
                     tokio::time::sleep(delay).await;
                     match IntegrationClient::dial(
-                        &url_for_supervisor,
-                        &options_for_supervisor,
-                        &header_pairs_for_supervisor,
-                    )
-                    .await
+                            &url_for_supervisor,
+                            &options_for_supervisor,
+                            &header_pairs_for_supervisor,
+                        )
+                        .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -272,7 +290,10 @@ impl IntegrationClient {
         })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -296,8 +317,9 @@ impl IntegrationClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
-    {
+    ) -> tokio_stream::wrappers::ReceiverStream<
+        Result<serde_json::Value, super::ws_shared::WsError>,
+    > {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.
@@ -323,9 +345,9 @@ impl IntegrationClient {
         {
             let mut pending = self.transport.pending.lock().await;
             if pending.len() >= self.max_pending {
-                return Err(super::ws_shared::WsError::BackpressureFull(
-                    self.max_pending,
-                ));
+                return Err(
+                    super::ws_shared::WsError::BackpressureFull(self.max_pending),
+                );
             }
             pending.insert(id, tx);
         }
@@ -351,19 +373,16 @@ impl IntegrationClient {
     }
 }
 const HOST_OUTBOUND_CAPACITY: usize = 64;
-
 #[derive(Debug)]
 struct HostConnection {
     sender: tokio::sync::mpsc::Sender<serde_json::Value>,
     subscribed: bool,
 }
-
 #[derive(Debug)]
 struct HostState {
     next_connection_id: std::sync::atomic::AtomicU64,
     connections: tokio::sync::RwLock<std::collections::HashMap<u64, HostConnection>>,
 }
-
 impl Default for HostState {
     fn default() -> Self {
         Self {
@@ -372,40 +391,39 @@ impl Default for HostState {
         }
     }
 }
-
 /// Shared connection registry and event broadcaster for integration hosts.
 #[derive(Clone, Debug, Default)]
 pub struct UnfoldedCircleEventHub {
     state: std::sync::Arc<HostState>,
 }
-
 impl UnfoldedCircleEventHub {
     /// Create a new empty hub.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
-
-    async fn register_connection(&self) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
+    async fn register_connection(
+        &self,
+    ) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
         use std::sync::atomic::Ordering;
-
         let connection_id = self
             .state
             .next_connection_id
             .fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = tokio::sync::mpsc::channel(HOST_OUTBOUND_CAPACITY);
-
-        self.state.connections.write().await.insert(
-            connection_id,
-            HostConnection {
-                sender,
-                subscribed: false,
-            },
-        );
-
+        self.state
+            .connections
+            .write()
+            .await
+            .insert(
+                connection_id,
+                HostConnection {
+                    sender,
+                    subscribed: false,
+                },
+            );
         (connection_id, receiver)
     }
-
     async fn connection_sender(
         &self,
         connection_id: u64,
@@ -417,7 +435,6 @@ impl UnfoldedCircleEventHub {
             .get(&connection_id)
             .map(|connection| connection.sender.clone())
     }
-
     async fn stale_connection_ids(
         &self,
         only_subscribed: bool,
@@ -430,12 +447,13 @@ impl UnfoldedCircleEventHub {
             .await
             .iter()
             .filter(|(_, connection)| !only_subscribed || connection.subscribed)
-            .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
+            .map(|(connection_id, connection)| (
+                *connection_id,
+                connection.sender.clone(),
+            ))
             .collect();
-
         let mut delivered = 0;
         let mut stale = Vec::new();
-
         for (connection_id, sender) in senders {
             match sender.try_send(message.clone()) {
                 Ok(()) => delivered += 1,
@@ -445,25 +463,27 @@ impl UnfoldedCircleEventHub {
                 }
             }
         }
-
         (delivered, stale)
     }
-
     /// Mark a connection as subscribed to unsolicited events.
     pub async fn mark_subscribed(&self, connection_id: u64) -> bool {
-        if let Some(connection) = self.state.connections.write().await.get_mut(&connection_id) {
+        if let Some(connection) = self
+            .state
+            .connections
+            .write()
+            .await
+            .get_mut(&connection_id)
+        {
             connection.subscribed = true;
             true
         } else {
             false
         }
     }
-
     /// Remove a connection from the registry.
     pub async fn remove_connection(&self, connection_id: u64) {
         self.state.connections.write().await.remove(&connection_id);
     }
-
     /// Send a message to a single connection.
     ///
     /// Slow or disconnected clients are removed to prevent stalled fan-out.
@@ -482,14 +502,11 @@ impl UnfoldedCircleEventHub {
         let Some(sender) = self.connection_sender(connection_id).await else {
             return Err(super::ws_shared::WsError::Disconnected);
         };
-
         match sender.try_send(message) {
             Ok(()) => Ok(()),
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 self.remove_connection(connection_id).await;
-                Err(super::ws_shared::WsError::BackpressureFull(
-                    HOST_OUTBOUND_CAPACITY,
-                ))
+                Err(super::ws_shared::WsError::BackpressureFull(HOST_OUTBOUND_CAPACITY))
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 self.remove_connection(connection_id).await;
@@ -497,80 +514,65 @@ impl UnfoldedCircleEventHub {
             }
         }
     }
-
     /// Broadcast a message to all currently connected clients.
     pub async fn broadcast(&self, message: serde_json::Value) -> usize {
         let (delivered, stale) = self.stale_connection_ids(false, &message).await;
-
         if !stale.is_empty() {
             let mut connections = self.state.connections.write().await;
             for connection_id in stale {
                 connections.remove(&connection_id);
             }
         }
-
         delivered
     }
-
     /// Broadcast a message only to clients that previously subscribed.
     pub async fn broadcast_to_subscribers(&self, message: serde_json::Value) -> usize {
         let (delivered, stale) = self.stale_connection_ids(true, &message).await;
-
         if !stale.is_empty() {
             let mut connections = self.state.connections.write().await;
             for connection_id in stale {
                 connections.remove(&connection_id);
             }
         }
-
         delivered
     }
 }
-
 /// Per-connection host context exposed to request handlers.
 #[derive(Clone, Debug)]
 pub struct WsConnectionContext {
     connection_id: u64,
     hub: UnfoldedCircleEventHub,
 }
-
 impl WsConnectionContext {
-    /// Construct a new connection context from a host-assigned connection id and
-    /// shared event hub.
-    #[must_use]
     pub fn new(connection_id: u64, hub: UnfoldedCircleEventHub) -> Self {
         Self { connection_id, hub }
     }
-
     /// Returns the unique connection id assigned by the host.
     #[must_use]
     pub fn connection_id(&self) -> u64 {
         self.connection_id
     }
-
     /// Returns a clone of the shared event hub.
     #[must_use]
     pub fn event_hub(&self) -> UnfoldedCircleEventHub {
         self.hub.clone()
     }
-
     /// Mark this connection as subscribed for unsolicited events.
     pub async fn mark_subscribed(&self) -> bool {
         self.hub.mark_subscribed(self.connection_id).await
     }
-
     /// Send a message directly to the current connection.
     ///
     /// ## Errors
     ///
     /// Propagates queueing errors from the underlying event hub.
-    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
-        self.hub
-            .send_to_connection(self.connection_id, message)
-            .await
+    pub async fn send(
+        &self,
+        message: serde_json::Value,
+    ) -> Result<(), super::ws_shared::WsError> {
+        self.hub.send_to_connection(self.connection_id, message).await
     }
 }
-
 /// WebSocket host server.
 pub struct UnfoldedCircleIntegrationWsHost;
 impl UnfoldedCircleIntegrationWsHost {
@@ -581,21 +583,15 @@ impl UnfoldedCircleIntegrationWsHost {
             .filter(|value| !value.trim().is_empty())
             .collect()
     }
-
     fn auth_is_required() -> bool {
         !Self::configured_auth_tokens().is_empty()
     }
-
     fn authentication_success_response() -> serde_json::Value {
-        serde_json::json!({
-            "kind": "resp",
-            "req_id": 0,
-            "msg": "authentication",
-            "code": 200,
-            "msg_data": {}
-        })
+        serde_json::json!(
+            { "kind" : "resp", "req_id" : 0, "msg" : "authentication", "code" : 200,
+            "msg_data" : {} }
+        )
     }
-
     fn auth_error_response(
         status: tokio_tungstenite::tungstenite::http::StatusCode,
         message: &str,
@@ -604,9 +600,9 @@ impl UnfoldedCircleIntegrationWsHost {
             .status(status)
             .body(Some(message.to_string()))
             .unwrap_or_else(|_| {
-                tokio_tungstenite::tungstenite::http::Response::new(Some(
-                    "Unauthorized".to_string(),
-                ))
+                tokio_tungstenite::tungstenite::http::Response::new(
+                    Some("Unauthorized".to_string()),
+                )
             })
     }
     fn validate_upgrade_request(
@@ -623,20 +619,23 @@ impl UnfoldedCircleIntegrationWsHost {
         let Some(received) = request
             .headers()
             .get("auth-token")
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(Self::auth_error_response(
-                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                "Missing authentication header",
-            ));
+            .and_then(|value| value.to_str().ok()) else {
+            return Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Missing authentication header",
+                ),
+            );
         };
         if expected_values.iter().any(|expected| expected == received) {
             Ok(response)
         } else {
-            Err(Self::auth_error_response(
-                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                "Invalid authentication header",
-            ))
+            Err(
+                Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Invalid authentication header",
+                ),
+            )
         }
     }
     /// Create a new shared event hub for integrations that need unsolicited
@@ -645,7 +644,6 @@ impl UnfoldedCircleIntegrationWsHost {
     pub fn new_event_hub() -> UnfoldedCircleEventHub {
         UnfoldedCircleEventHub::new()
     }
-
     /// Serve WebSocket connections on the given TCP listener.
     pub async fn serve<H: WsHandler + 'static>(
         listener: tokio::net::TcpListener,
@@ -653,7 +651,6 @@ impl UnfoldedCircleIntegrationWsHost {
     ) -> Result<(), super::ws_shared::WsError> {
         Self::serve_with_hub(listener, handler, UnfoldedCircleEventHub::new()).await
     }
-
     /// Serve WebSocket connections with a caller-provided event hub.
     pub async fn serve_with_hub<H: WsHandler + 'static>(
         listener: tokio::net::TcpListener,
@@ -668,9 +665,11 @@ impl UnfoldedCircleIntegrationWsHost {
             let handler = handler.clone();
             let hub = hub.clone();
             tokio::spawn(async move {
-                if let Ok(ws_stream) =
-                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
-                        .await
+                if let Ok(ws_stream) = tokio_tungstenite::accept_hdr_async(
+                        stream,
+                        Self::validate_upgrade_request,
+                    )
+                    .await
                 {
                     Self::handle_connection(ws_stream, handler, hub).await;
                 }
@@ -684,7 +683,6 @@ impl UnfoldedCircleIntegrationWsHost {
     ) -> Result<(), super::ws_shared::WsError> {
         Self::serve_addr_with_hub(addr, handler, UnfoldedCircleEventHub::new()).await
     }
-
     /// Serve WebSocket connections on the given address with a caller-provided
     /// event hub.
     pub async fn serve_addr_with_hub<H: WsHandler + 'static>(
@@ -704,27 +702,25 @@ impl UnfoldedCircleIntegrationWsHost {
     ) {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
-
         let (connection_id, mut outbound_rx) = hub.register_connection().await;
         let (mut write, mut read) = ws_stream.split();
-
         let writer = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {
                 let Ok(text) = serde_json::to_string(&message) else {
                     continue;
                 };
-
                 if write.send(Message::Text(text.into())).await.is_err() {
                     break;
                 }
             }
-
             let _ = write.close().await;
         });
-
         if !Self::auth_is_required()
             && hub
-                .send_to_connection(connection_id, Self::authentication_success_response())
+                .send_to_connection(
+                    connection_id,
+                    Self::authentication_success_response(),
+                )
                 .await
                 .is_err()
         {
@@ -732,14 +728,19 @@ impl UnfoldedCircleIntegrationWsHost {
             let _ = writer.await;
             return;
         }
-
         while let Some(msg_result) = read.next().await {
             match msg_result {
                 Ok(Message::Text(text)) => {
                     match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
                         Ok(request) => {
-                            let context = WsConnectionContext::new(connection_id, hub.clone());
-                            if let Some(response) = handler.handle_message(request, context).await {
+                            let context = WsConnectionContext::new(
+                                connection_id,
+                                hub.clone(),
+                            );
+                            if let Some(response) = handler
+                                .handle_message(request, context)
+                                .await
+                            {
                                 if hub
                                     .send_to_connection(connection_id, response)
                                     .await
@@ -755,8 +756,14 @@ impl UnfoldedCircleIntegrationWsHost {
                 Ok(Message::Binary(data)) => {
                     match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
                         Ok(request) => {
-                            let context = WsConnectionContext::new(connection_id, hub.clone());
-                            if let Some(response) = handler.handle_message(request, context).await {
+                            let context = WsConnectionContext::new(
+                                connection_id,
+                                hub.clone(),
+                            );
+                            if let Some(response) = handler
+                                .handle_message(request, context)
+                                .await
+                            {
                                 if hub
                                     .send_to_connection(connection_id, response)
                                     .await
@@ -773,7 +780,6 @@ impl UnfoldedCircleIntegrationWsHost {
                 _ => {}
             }
         }
-
         hub.remove_connection(connection_id).await;
         let _ = writer.await;
     }
@@ -788,358 +794,4 @@ pub trait WsHandler: Send + Sync {
         message: serde_json::Value,
         context: WsConnectionContext,
     ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use futures_util::{SinkExt, StreamExt};
-    use serde_json::json;
-    use std::{future::Future, sync::OnceLock, time::Duration};
-
-    #[derive(Clone)]
-    struct TestHandler;
-
-    impl WsHandler for TestHandler {
-        async fn handle_message(
-            &self,
-            message: serde_json::Value,
-            context: WsConnectionContext,
-        ) -> Option<serde_json::Value> {
-            let msg = message.get("msg")?.as_str()?;
-            let id = message
-                .get("id")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(0);
-
-            match msg {
-                "ping" => Some(json!({
-                    "kind": "resp",
-                    "req_id": id,
-                    "msg": "result",
-                    "code": 200,
-                    "msg_data": { "echo": "pong" }
-                })),
-                "subscribe_events" => {
-                    context.mark_subscribed().await;
-                    Some(json!({
-                        "kind": "resp",
-                        "req_id": id,
-                        "msg": "subscribe_events_result",
-                        "code": 200,
-                        "msg_data": { "subscribed": true }
-                    }))
-                }
-                _ => Some(json!({
-                    "kind": "resp",
-                    "req_id": id,
-                    "msg": "result",
-                    "code": 400,
-                    "msg_data": { "echo": "bad_request" }
-                })),
-            }
-        }
-    }
-
-    type TestClient = tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >;
-
-    fn auth_env_lock() -> &'static tokio::sync::Mutex<()> {
-        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-    }
-
-    struct AuthTokenEnvGuard {
-        previous: Option<String>,
-    }
-
-    impl AuthTokenEnvGuard {
-        fn set(token: Option<&str>) -> Self {
-            let previous = std::env::var("UCR_INTEGRATION_TOKEN").ok();
-
-            // SAFETY: tests serialize all environment mutation through
-            // `auth_env_lock`, so no concurrent readers/writers within this test
-            // process observe mutation races.
-            unsafe {
-                match token {
-                    Some(token) => std::env::set_var("UCR_INTEGRATION_TOKEN", token),
-                    None => std::env::remove_var("UCR_INTEGRATION_TOKEN"),
-                }
-            }
-
-            Self { previous }
-        }
-    }
-
-    impl Drop for AuthTokenEnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `AuthTokenEnvGuard::set`; restoration is performed
-            // while the same serialized test lock is still held.
-            unsafe {
-                match &self.previous {
-                    Some(token) => std::env::set_var("UCR_INTEGRATION_TOKEN", token),
-                    None => std::env::remove_var("UCR_INTEGRATION_TOKEN"),
-                }
-            }
-        }
-    }
-
-    async fn with_auth_token_env<T, Fut>(token: Option<&str>, f: impl FnOnce() -> Fut) -> T
-    where
-        Fut: Future<Output = T>,
-    {
-        let _lock = auth_env_lock().lock().await;
-        let _guard = AuthTokenEnvGuard::set(token);
-        f().await
-    }
-
-    fn message_to_json(message: tokio_tungstenite::tungstenite::Message) -> serde_json::Value {
-        let text = message.into_text().unwrap();
-        serde_json::from_str(&text).unwrap()
-    }
-
-    async fn recv_json(client: &mut TestClient) -> serde_json::Value {
-        let message = client.next().await.unwrap().unwrap();
-        message_to_json(message)
-    }
-
-    async fn drain_optional_authentication(client: &mut TestClient) {
-        let Ok(Some(Ok(message))) =
-            tokio::time::timeout(Duration::from_millis(100), client.next()).await
-        else {
-            return;
-        };
-
-        let value = message_to_json(message);
-        assert_eq!(value["msg"], "authentication");
-        assert_eq!(value["req_id"], 0);
-        assert_eq!(value["code"], 200);
-    }
-
-    async fn spawn_client(
-        handler: std::sync::Arc<TestHandler>,
-        hub: UnfoldedCircleEventHub,
-    ) -> (TestClient, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
-            UnfoldedCircleIntegrationWsHost::handle_connection(ws_stream, handler, hub).await;
-        });
-
-        let (client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-            .await
-            .unwrap();
-
-        (client, server)
-    }
-
-    async fn spawn_host_server(
-        handler: std::sync::Arc<TestHandler>,
-        hub: UnfoldedCircleEventHub,
-    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let _ = UnfoldedCircleIntegrationWsHost::serve_with_hub(listener, handler, hub).await;
-        });
-
-        (addr, server)
-    }
-
-    #[tokio::test]
-    async fn test_handle_connection_preserves_request_response_flow() {
-        let hub = UnfoldedCircleEventHub::new();
-        let (mut client, server) = spawn_client(std::sync::Arc::new(TestHandler), hub).await;
-        drain_optional_authentication(&mut client).await;
-
-        client
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({
-                    "kind": "req",
-                    "id": 7,
-                    "msg": "ping"
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
-
-        let value = recv_json(&mut client).await;
-
-        assert_eq!(value["req_id"], 7);
-        assert_eq!(value["code"], 200);
-        assert_eq!(value["msg_data"]["echo"], "pong");
-
-        client.close(None).await.unwrap();
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_broadcast_only_reaches_subscribed_clients() {
-        let hub = UnfoldedCircleEventHub::new();
-        let handler = std::sync::Arc::new(TestHandler);
-        let (mut subscribed_client, subscribed_server) =
-            spawn_client(handler.clone(), hub.clone()).await;
-        let (mut idle_client, idle_server) = spawn_client(handler, hub.clone()).await;
-        drain_optional_authentication(&mut subscribed_client).await;
-        drain_optional_authentication(&mut idle_client).await;
-
-        subscribed_client
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({
-                    "kind": "req",
-                    "id": 1,
-                    "msg": "subscribe_events"
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
-
-        let response_value = recv_json(&mut subscribed_client).await;
-        assert_eq!(response_value["code"], 200);
-
-        let delivered = hub
-            .broadcast_to_subscribers(json!({
-                "kind": "event",
-                "msg": "entity_change",
-                "msg_data": {
-                    "entity_id": "demo.entity",
-                    "entity_type": "switch",
-                    "attributes": {
-                        "state": "ON"
-                    }
-                }
-            }))
-            .await;
-        assert_eq!(delivered, 1);
-
-        let subscribed_value = recv_json(&mut subscribed_client).await;
-        assert_eq!(subscribed_value["msg"], "entity_change");
-
-        let idle_event =
-            tokio::time::timeout(std::time::Duration::from_millis(100), idle_client.next()).await;
-        assert!(idle_event.is_err());
-
-        subscribed_client.close(None).await.unwrap();
-        idle_client.close(None).await.unwrap();
-        subscribed_server.await.unwrap();
-        idle_server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_disconnected_subscribers_are_removed() {
-        let hub = UnfoldedCircleEventHub::new();
-        let handler = std::sync::Arc::new(TestHandler);
-        let (mut client, server) = spawn_client(handler, hub.clone()).await;
-        drain_optional_authentication(&mut client).await;
-
-        client
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({
-                    "kind": "req",
-                    "id": 2,
-                    "msg": "subscribe_events"
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
-        let _ = client.next().await.unwrap().unwrap();
-
-        client.close(None).await.unwrap();
-        server.await.unwrap();
-
-        let delivered = hub
-            .broadcast_to_subscribers(json!({
-                "kind": "event",
-                "msg": "device_state",
-                "msg_data": { "state": "DISCONNECTED" }
-            }))
-            .await;
-        assert_eq!(delivered, 0);
-    }
-
-    #[tokio::test]
-    async fn test_optional_auth_upgrade_succeeds_and_emits_authentication() {
-        with_auth_token_env(None, || async {
-            let hub = UnfoldedCircleEventHub::new();
-            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
-
-            let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-                .await
-                .unwrap();
-            let value = recv_json(&mut client).await;
-
-            assert_eq!(value["msg"], "authentication");
-            assert_eq!(value["req_id"], 0);
-            assert_eq!(value["code"], 200);
-            assert_eq!(value["msg_data"], json!({}));
-
-            client.close(None).await.unwrap();
-            server.abort();
-            let _ = server.await;
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_configured_auth_rejects_missing_upgrade_header() {
-        with_auth_token_env(Some("secret-token"), || async {
-            let hub = UnfoldedCircleEventHub::new();
-            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
-
-            let result = tokio_tungstenite::connect_async(format!("ws://{addr}")).await;
-            assert!(result.is_err());
-
-            server.abort();
-            let _ = server.await;
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_configured_auth_accepts_matching_upgrade_header_without_initial_auth() {
-        with_auth_token_env(Some("secret-token"), || async {
-            let hub = UnfoldedCircleEventHub::new();
-            let (addr, server) = spawn_host_server(std::sync::Arc::new(TestHandler), hub).await;
-
-            let request = tokio_tungstenite::tungstenite::http::Request::builder()
-                .uri(format!("ws://{addr}"))
-                .header("auth-token", "secret-token")
-                .body(())
-                .unwrap();
-
-            let (mut client, _) = tokio_tungstenite::connect_async(request).await.unwrap();
-            client
-                .send(tokio_tungstenite::tungstenite::Message::Text(
-                    json!({
-                        "kind": "req",
-                        "id": 9,
-                        "msg": "ping"
-                    })
-                    .to_string()
-                    .into(),
-                ))
-                .await
-                .unwrap();
-
-            let value = recv_json(&mut client).await;
-            assert_eq!(value["msg"], "result");
-            assert_eq!(value["req_id"], 9);
-            assert_eq!(value["msg_data"]["echo"], "pong");
-
-            client.close(None).await.unwrap();
-            server.abort();
-            let _ = server.await;
-        })
-        .await;
-    }
 }

@@ -82,21 +82,19 @@ fn build_summary_list(network: &sniff::NetworkInfo, verbose: u8) -> UnorderedLis
     )));
 
     if !network.ip_addresses.v4.is_empty() {
-        let primary_v4 = addresses_for_interface_v4(network, network.primary_interface.as_deref());
-        let summary = if primary_v4.is_empty() {
-            format!("{} total", network.ip_addresses.v4.len())
+        let summary = if let Some(summary) = summarize_active_ipv4_addresses(network) {
+            summary
         } else {
-            primary_v4.join(", ")
+            format!("{} total", network.ip_addresses.v4.len())
         };
         list.add(Prose::new(format!("<bold>IPv4:</bold> {summary}")));
     }
 
     if !network.ip_addresses.v6.is_empty() {
-        let primary_v6 = addresses_for_interface_v6(network, network.primary_interface.as_deref());
-        let summary = if primary_v6.is_empty() {
-            format!("{} total", network.ip_addresses.v6.len())
+        let summary = if let Some(summary) = summarize_active_ipv6_addresses(network) {
+            summary
         } else {
-            primary_v6.join(", ")
+            format!("{} total", network.ip_addresses.v6.len())
         };
         list.add(Prose::new(format!("<bold>IPv6:</bold> {summary}")));
     }
@@ -195,36 +193,63 @@ fn format_interface_status(
     states.join(", ")
 }
 
-fn addresses_for_interface_v4(
-    network: &sniff::NetworkInfo,
-    interface_name: Option<&str>,
-) -> Vec<String> {
-    let Some(interface_name) = interface_name else {
-        return Vec::new();
-    };
-
-    network
-        .ip_addresses
-        .v4
-        .iter()
-        .filter(|address| address.interface == interface_name)
-        .map(|address| address.address.clone())
-        .collect()
+fn summarize_active_ipv4_addresses(network: &sniff::NetworkInfo) -> Option<String> {
+    summarize_active_interface_addresses(network, |interface| {
+        interface
+            .ipv4_addresses
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect()
+    })
 }
 
-fn addresses_for_interface_v6(
-    network: &sniff::NetworkInfo,
-    interface_name: Option<&str>,
-) -> Vec<String> {
-    let Some(interface_name) = interface_name else {
-        return Vec::new();
-    };
+fn summarize_active_ipv6_addresses(network: &sniff::NetworkInfo) -> Option<String> {
+    summarize_active_interface_addresses(network, |interface| {
+        interface
+            .ipv6_addresses
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect()
+    })
+}
 
-    network
-        .ip_addresses
-        .v6
+fn summarize_active_interface_addresses<F>(
+    network: &sniff::NetworkInfo,
+    address_fn: F,
+) -> Option<String>
+where
+    F: Fn(&sniff::network::NetworkInterface) -> Vec<String>,
+{
+    let summaries: Vec<_> = network
+        .interfaces
         .iter()
-        .filter(|address| address.interface == interface_name)
-        .map(|address| address.address.clone())
-        .collect()
+        .filter(|interface| interface.flags.is_up && !interface.flags.is_loopback)
+        .filter_map(|interface| {
+            let addresses = address_fn(interface);
+            if addresses.is_empty() {
+                None
+            } else {
+                Some((interface.name.as_str(), addresses))
+            }
+        })
+        .collect();
+
+    if summaries.is_empty() {
+        return None;
+    }
+
+    if summaries.len() == 1 {
+        return summaries
+            .into_iter()
+            .next()
+            .map(|(_, addresses)| addresses.join(", "));
+    }
+
+    Some(
+        summaries
+            .into_iter()
+            .map(|(name, addresses)| format!("{name} {}", addresses.join(", ")))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }

@@ -890,6 +890,7 @@ mod tests {
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }
     }
 
@@ -1627,6 +1628,7 @@ mod tests {
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
             params,
+            oauth_scopes: None,
         }
     }
 
@@ -1889,6 +1891,7 @@ mod tests {
                 params: Some(
                     EndpointParams::default().with_pagination(PaginationStyle::github()),
                 ),
+                oauth_scopes: None,
             }
         }
 
@@ -1902,6 +1905,7 @@ mod tests {
                 response: ApiResponse::json_type("TestResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }
         }
 
@@ -1984,6 +1988,7 @@ mod tests {
                 response: ApiResponse::json_type("TestResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             };
             let tokens = generate_paginated_impl(&endpoint, "Request");
 
@@ -2010,6 +2015,7 @@ mod tests {
                     EndpointParams::default()
                         .with_query_param("q", QueryParamType::String, true, Some("Search query")),
                 ),
+                oauth_scopes: None,
             };
             let tokens = generate_paginated_impl(&endpoint, "Request");
 
@@ -2039,6 +2045,7 @@ mod tests {
                 response: ApiResponse::json_type("TestResponse"),
                 headers: vec![],
                 params: Some(params),
+                oauth_scopes: None,
             }
         }
 

@@ -88,6 +88,7 @@ fn github_style_pagination_path() {
         response: ApiResponse::json_vec_type("RepoTag"),
         headers: vec![],
         params: None,
+        oauth_scopes: None,
     };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));
@@ -109,6 +110,7 @@ fn gitlab_style_pagination_with_recursive() {
         response: ApiResponse::json_vec_type("TreeNode"),
         headers: vec![],
         params: None,
+        oauth_scopes: None,
     };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));
@@ -140,6 +142,7 @@ fn gitea_style_pagination_path() {
         response: ApiResponse::json_vec_type("Tag"),
         headers: vec![],
         params: None,
+        oauth_scopes: None,
     };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));

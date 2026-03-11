@@ -72,6 +72,7 @@ async fn test_bearer_auth_with_env_fallback() {
         basic_user: None,
         basic_pass: None,
         api_key: None,
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();
@@ -111,6 +112,7 @@ async fn test_bearer_auth_direct_overrides_env() {
         basic_user: None,
         basic_pass: None,
         api_key: None,
+    ..Default::default()
     };
 
     // Direct token set after env mapping, so direct wins
@@ -177,6 +179,7 @@ async fn test_api_key_header_with_env_fallback() {
             names: EnvList::single("TEST_API_KEY"),
             header: "X-API-Key".to_string(),
         }),
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();
@@ -310,6 +313,7 @@ async fn test_env_mapping_with_primary_and_fallback() {
         basic_user: None,
         basic_pass: None,
         api_key: None,
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();
@@ -352,6 +356,7 @@ async fn test_env_mapping_primary_wins_over_fallback() {
         basic_user: None,
         basic_pass: None,
         api_key: None,
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();
@@ -425,6 +430,7 @@ async fn test_api_key_env_with_env_mapping() {
             names: EnvList::single("TEST_API_KEY_PRIMARY"),
             header: "X-API-Key".to_string(),
         }),
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();
@@ -504,6 +510,7 @@ async fn test_complex_scenario_with_env_mapping() {
             names: EnvList::single("CLIENT_ID"),
             header: "X-Client-ID".to_string(),
         }),
+    ..Default::default()
     };
 
     let headers = Headers::default().with_env_mapping(mapping).from_env();

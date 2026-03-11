@@ -139,6 +139,7 @@ pub fn define_gitlab_api() -> RestApi {
                             Some("Subdirectory path to list"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetRepositoryFile".to_string(),
@@ -150,6 +151,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("FileContent"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Merge Requests
@@ -177,6 +179,7 @@ pub fn define_gitlab_api() -> RestApi {
                             Some("Filter by merge request state"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetMergeRequest".to_string(),
@@ -187,6 +190,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("MergeRequest"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListMergeRequestCommits".to_string(),
@@ -199,6 +203,7 @@ pub fn define_gitlab_api() -> RestApi {
                 params: Some(
                     EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListMergeRequestChanges".to_string(),
@@ -209,6 +214,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("MergeRequestChanges"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Issues
@@ -235,6 +241,7 @@ pub fn define_gitlab_api() -> RestApi {
                             Some("Filter by issue state"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -245,6 +252,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("Issue"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListIssueNotes".to_string(),
@@ -257,6 +265,7 @@ pub fn define_gitlab_api() -> RestApi {
                 params: Some(
                     EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListIssueParticipants".to_string(),
@@ -267,6 +276,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_vec_type("User"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Tags and Releases
@@ -283,6 +293,7 @@ pub fn define_gitlab_api() -> RestApi {
                 params: Some(
                     EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetTag".to_string(),
@@ -293,6 +304,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("Tag"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "ListReleases".to_string(),
@@ -305,6 +317,7 @@ pub fn define_gitlab_api() -> RestApi {
                 params: Some(
                     EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
                 ),
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetRelease".to_string(),
@@ -315,6 +328,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("Release"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetLatestRelease".to_string(),
@@ -325,6 +339,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("Release"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Project Metadata
@@ -338,6 +353,7 @@ pub fn define_gitlab_api() -> RestApi {
                 response: ApiResponse::json_type("Project"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // =================================================================
             // Pipelines (CI/CD)
@@ -390,6 +406,7 @@ pub fn define_gitlab_api() -> RestApi {
                             Some("Filter by commit SHA"),
                         ),
                 ),
+                oauth_scopes: None,
             },
             // =================================================================
             // Group Projects
@@ -447,6 +464,7 @@ pub fn define_gitlab_api() -> RestApi {
                             Some("Include projects from subgroups"),
                         ),
                 ),
+                oauth_scopes: None,
             },
         ],
         module_path: Some("gitlab".to_string()),

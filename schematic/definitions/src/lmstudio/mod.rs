@@ -83,6 +83,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::Binary, // SSE streaming
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // Model listing
             Endpoint {
@@ -94,6 +95,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // Model loading
             Endpoint {
@@ -105,6 +107,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::json_type("LoadModelResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // Model unloading
             Endpoint {
@@ -116,6 +119,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::json_type("UnloadModelResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // Model download
             Endpoint {
@@ -127,6 +131,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::Binary, // SSE streaming for progress
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             // Download status check
             Endpoint {
@@ -138,6 +143,7 @@ pub fn define_lmstudio_api() -> RestApi {
                 response: ApiResponse::json_type("DownloadStatusResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         ],
         module_path: None,

@@ -60,6 +60,7 @@ fn make_endpoint_with_query(
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params,
+        oauth_scopes: None,
     }
 }
 
@@ -434,6 +435,7 @@ fn path_immutable_when_no_query_params() {
         response: ApiResponse::json_type("User"),
         headers: vec![],
         params: None,
+        oauth_scopes: None,
     };
 
     let tokens = generate_request_struct(&endpoint);

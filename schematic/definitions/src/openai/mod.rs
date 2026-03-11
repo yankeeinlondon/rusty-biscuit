@@ -81,6 +81,7 @@ pub fn define_openai_api() -> RestApi {
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -91,6 +92,7 @@ pub fn define_openai_api() -> RestApi {
                 response: ApiResponse::json_type("Model"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteModel".to_string(),
@@ -101,6 +103,7 @@ pub fn define_openai_api() -> RestApi {
                 response: ApiResponse::json_type("DeleteModelResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         ],
         module_path: None,

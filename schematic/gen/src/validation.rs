@@ -80,6 +80,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///             response: ApiResponse::json_type("User"),
 ///             headers: vec![],
 ///             params: None,
+///             oauth_scopes: None,
 ///         },
 ///     ],
 ///     module_path: None,
@@ -177,6 +178,7 @@ mod tests {
             response: ApiResponse::json_type("Response"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }
     }
 
@@ -191,6 +193,7 @@ mod tests {
             response: ApiResponse::json_type("Response"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }
     }
 
@@ -393,6 +396,7 @@ mod tests {
             response: ApiResponse::json_type("UploadResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }];
 
         // FormData doesn't have a body type name, so no collision possible

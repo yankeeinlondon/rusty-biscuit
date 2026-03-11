@@ -184,6 +184,7 @@ fn map_operation<R: SchemaRegistryLike>(
             request: endpoint.request.clone(),
             response: endpoint.response.clone(),
             headers: endpoint.headers.clone(),
+            oauth_scopes: endpoint.oauth_scopes.clone(),
         };
         extensions.insert("x-schematic".to_string(), op_ext.into());
     }
@@ -258,6 +259,53 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
                     location: api_key_location,
                     name: name.clone(),
                     description: Some("API Key authentication".to_string()),
+                    extensions: IndexMap::new(),
+                },
+            ))
+        }
+        AuthStrategy::OAuth2(config) => {
+            let flows = match config.grant_type {
+                crate::oauth::OAuth2GrantType::AuthorizationCodePkce => {
+                    let mut scopes = indexmap::IndexMap::new();
+                    for scope in &config.default_scopes {
+                        scopes.insert(scope.clone(), String::new());
+                    }
+                    openapiv3::OAuth2Flows {
+                        authorization_code: Some(openapiv3::AuthorizationCodeOAuth2Flow {
+                            authorization_url: config
+                                .authorization_url
+                                .clone()
+                                .unwrap_or_default(),
+                            token_url: config.token_url.clone(),
+                            refresh_url: None,
+                            scopes,
+                            extensions: IndexMap::new(),
+                        }),
+                        ..Default::default()
+                    }
+                }
+                crate::oauth::OAuth2GrantType::ClientCredentials => {
+                    let mut scopes = indexmap::IndexMap::new();
+                    for scope in &config.default_scopes {
+                        scopes.insert(scope.clone(), String::new());
+                    }
+                    openapiv3::OAuth2Flows {
+                        client_credentials: Some(openapiv3::ClientCredentialsOAuth2Flow {
+                            token_url: config.token_url.clone(),
+                            refresh_url: None,
+                            scopes,
+                            extensions: IndexMap::new(),
+                        }),
+                        ..Default::default()
+                    }
+                }
+                _ => return None, // DeviceCode has no OpenAPI equivalent
+            };
+            Some((
+                "oauth2Auth".to_string(),
+                SecurityScheme::OAuth2 {
+                    flows,
+                    description: Some("OAuth2 authentication".to_string()),
                     extensions: IndexMap::new(),
                 },
             ))
@@ -584,6 +632,11 @@ fn map_security_requirements(api: &RestApi) -> Vec<SecurityRequirement> {
         AuthStrategy::ApiKeyParam { .. } => {
             let mut req = IndexMap::new();
             req.insert("apiKeyAuth".to_string(), vec![]);
+            vec![req]
+        }
+        AuthStrategy::OAuth2(_) => {
+            let mut req = IndexMap::new();
+            req.insert("oauth2Auth".to_string(), vec![]);
             vec![req]
         }
     }
@@ -1107,6 +1160,7 @@ mod tests {
                     response: ApiResponse::json_type("ListResponse"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "GetItem".to_string(),
@@ -1117,6 +1171,7 @@ mod tests {
                     response: ApiResponse::json_type("Item"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
             module_path: None,

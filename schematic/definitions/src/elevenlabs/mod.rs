@@ -93,6 +93,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "StreamSpeech".to_string(),
@@ -103,6 +104,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "CreateSpeechWithTimestamps".to_string(),
@@ -113,6 +115,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "StreamSpeechWithTimestamps".to_string(),
@@ -123,6 +126,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -137,6 +141,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ListVoicesResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "GetVoice".to_string(),
@@ -147,6 +152,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("VoiceResponseModel"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteVoice".to_string(),
@@ -157,6 +163,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -171,6 +178,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("VoiceSettings"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "GetVoiceSettings".to_string(),
@@ -181,6 +189,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("VoiceSettings"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "UpdateVoiceSettings".to_string(),
@@ -191,6 +200,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -205,6 +215,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteVoiceSample".to_string(),
@@ -215,6 +226,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "AddVoiceSample".to_string(),
@@ -231,6 +243,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("AddSampleResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -245,6 +258,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ListSharedVoicesResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "AddSharedVoice".to_string(),
@@ -255,6 +269,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("AddSharedVoiceResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -269,6 +284,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("AddSharedVoiceResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "UpdatePvcVoice".to_string(),
@@ -279,6 +295,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "TrainPvcVoice".to_string(),
@@ -289,6 +306,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -303,6 +321,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -317,6 +336,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_vec_type("ModelInfo"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -331,6 +351,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("SingleUseTokenResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -345,6 +366,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("GetHistoryResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "GetHistoryItem".to_string(),
@@ -355,6 +377,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("SpeechHistoryItemResponseModel"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteHistoryItem".to_string(),
@@ -365,6 +388,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "GetHistoryItemAudio".to_string(),
@@ -375,6 +399,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DownloadHistoryItems".to_string(),
@@ -385,6 +410,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -399,6 +425,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("UsageStatsResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -413,6 +440,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("UserResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "GetUserSubscription".to_string(),
@@ -423,6 +451,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("SubscriptionModel"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -437,6 +466,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ResourceResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "ShareResource".to_string(),
@@ -447,6 +477,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "UnshareResource".to_string(),
@@ -457,6 +488,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "CopyResourceToWorkspace".to_string(),
@@ -467,6 +499,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -481,6 +514,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ListServiceAccountsResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "ListServiceAccountApiKeys".to_string(),
@@ -491,6 +525,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ListApiKeysResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "CreateApiKey".to_string(),
@@ -501,6 +536,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("CreateApiKeyResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "UpdateApiKey".to_string(),
@@ -511,6 +547,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteApiKey".to_string(),
@@ -521,6 +558,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
 
             // =================================================================
@@ -535,6 +573,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("ListWebhooksResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "CreateWebhook".to_string(),
@@ -545,6 +584,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("CreateWebhookResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "UpdateWebhook".to_string(),
@@ -555,6 +595,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
             Endpoint {
                 id: "DeleteWebhook".to_string(),
@@ -565,6 +606,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
                     params: None,
+                    oauth_scopes: None,
             },
         ],
         module_path: None,

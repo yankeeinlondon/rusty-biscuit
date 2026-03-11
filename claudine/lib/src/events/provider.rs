@@ -459,6 +459,20 @@ impl Provider {
         }
     }
 
+    /// Returns the usage/billing dashboard URL for this provider, if one exists.
+    pub fn usage_dashboard_url(&self) -> Option<&'static str> {
+        match self {
+            Provider::Claude => Some("https://console.anthropic.com/settings/billing"),
+            Provider::Codex => Some("https://platform.openai.com/usage"),
+            Provider::Gemini => Some("https://aistudio.google.com/billing"),
+            Provider::Goose => None,
+            Provider::KimiCode => Some("https://platform.moonshot.cn/console/account"),
+            Provider::OpenCode => None, // depends on upstream provider
+            Provider::QwenCode => Some("https://bailian.console.aliyun.com/"),
+            Provider::RooCode => None,
+        }
+    }
+
     /// Shared native mappings for providers that currently deduplicate
     /// configurator registration and adapter parsing through one source.
     pub(crate) fn shared_native_mappings(&self) -> &'static [SharedNativeEventMapping] {

@@ -82,6 +82,18 @@ pub struct LabeledCount {
 pub struct ProviderSplit {
     pub provider: Provider,
     pub count: u64,
+    /// Number of turn_complete events for this provider.
+    pub turns: u64,
+}
+
+/// Aggregated token and cost usage.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UsageTotals {
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cost_usd: f64,
 }
 
 /// High-level derived metrics for reports.
@@ -134,6 +146,7 @@ pub struct DailySummary {
     pub top_tools: Vec<DailyToolStat>,
     pub permission_modes: Vec<LabeledCount>,
     pub models: Vec<LabeledCount>,
+    pub usage: UsageTotals,
     pub metrics: DerivedMetrics,
 }
 
@@ -162,6 +175,11 @@ pub struct SessionInfo {
     pub tool_error_count: u64,
     pub turn_error_count: u64,
     pub subagent_count: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cost_usd: f64,
 }
 
 /// Session list wrapper for JSON output.
@@ -229,7 +247,10 @@ pub struct TrendPoint {
     pub sessions: u64,
     pub turns: u64,
     pub tool_calls: u64,
-    pub errors: u64,
+    pub tool_errors: u64,
+    pub turn_errors: u64,
+    pub total_tokens: u64,
+    pub cost_usd: f64,
     pub providers: Vec<ProviderSplit>,
 }
 

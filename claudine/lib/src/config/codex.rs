@@ -76,7 +76,8 @@ impl AgentConfigurator for CodexConfigurator {
         let content = fs::read_to_string(&toml_path)?;
         let mut doc: DocumentMut = content.parse()?;
 
-        // Check for existing notify value
+        // Check for existing notify value, but ignore claudine's own
+        // direct-notify or wrapper entries — those aren't user commands.
         let existing_notify = doc.get("notify").and_then(|v| {
             // Extract existing command from array or string
             if let Some(arr) = v.as_array() {
@@ -92,6 +93,9 @@ impl AgentConfigurator for CodexConfigurator {
             } else {
                 v.as_str().map(String::from)
             }
+        }).filter(|_cmd| {
+            // Don't preserve claudine's own commands as "original"
+            !is_claudine_notify(&doc) && !is_claudine_wrapper(&doc, config_dir)
         });
 
         let wrapper_path = wrapper_script_path(config_dir);
@@ -178,6 +182,11 @@ impl AgentConfigurator for CodexConfigurator {
 
 impl CodexConfigurator {
     /// Check if the registered hooks match the expected events from config.
+    ///
+    /// Beyond checking registered vs. should-be-registered, this also detects
+    /// a legacy direct-notify registration (`["claudine", "handle"]`) that
+    /// is missing the wrapper script. The wrapper is required because Codex
+    /// passes the JSON payload as argv[1] but `claudine handle` reads stdin.
     fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
         let is_registered = self.is_registered(config_dir)?;
 
@@ -188,7 +197,32 @@ impl CodexConfigurator {
             .and_then(|p| p.events.get(&AgenticEvent::TurnComplete))
             .is_some_and(|b| b.enabled);
 
-        Ok(is_registered == should_be_registered)
+        if is_registered != should_be_registered {
+            return Ok(false);
+        }
+
+        // If registered, verify the wrapper script exists. A direct-notify
+        // registration (legacy) won't have a wrapper, which means the payload
+        // never reaches stdin — treat that as out-of-sync so `register()`
+        // creates the wrapper.
+        if is_registered {
+            let toml_path = config_path(config_dir);
+            let content = fs::read_to_string(&toml_path)?;
+            let doc: DocumentMut = content.parse()?;
+
+            if is_claudine_notify(&doc) && !is_claudine_wrapper(&doc, config_dir) {
+                // Direct notify without wrapper — needs re-registration
+                return Ok(false);
+            }
+
+            // Also check the wrapper script file actually exists on disk
+            let wrapper = wrapper_script_path(config_dir);
+            if is_claudine_wrapper(&doc, config_dir) && !wrapper.exists() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -496,6 +530,61 @@ mod tests {
         // Verify it's valid TOML
         let content = fs::read_to_string(&config_path).unwrap();
         let _doc: toml_edit::DocumentMut = content.parse().expect("Should be valid TOML");
+    }
+
+    #[test]
+    fn sync_detects_direct_notify_without_wrapper_as_out_of_sync() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        // Legacy direct-notify: claudine handle (no wrapper script)
+        fs::write(
+            &config,
+            "model = \"o3\"\nnotify = [\"/usr/bin/claudine\", \"handle\"]\n",
+        )
+        .unwrap();
+
+        let configurator = CodexConfigurator;
+        let hooker_config = test_config();
+
+        // is_registered sees the direct notify → true
+        assert!(configurator.is_registered(Some(tmp.path())).unwrap());
+        // But is_in_sync should detect missing wrapper → false
+        assert!(!configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
+    }
+
+    #[test]
+    fn sync_detects_missing_wrapper_file_as_out_of_sync() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        let wrapper = tmp.path().join("codex-notify-wrapper.sh");
+        // Config points to wrapper path, but wrapper file doesn't exist
+        fs::write(
+            &config,
+            format!("notify = [\"{}\"]\n", wrapper.display()),
+        )
+        .unwrap();
+
+        let configurator = CodexConfigurator;
+        let hooker_config = test_config();
+
+        // Wrapper path matches but file is missing → out of sync
+        assert!(!configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
+    }
+
+    #[test]
+    fn sync_considers_proper_wrapper_registration_in_sync() {
+        let tmp = TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        fs::write(&config, "model = \"o3\"\n").unwrap();
+
+        let configurator = CodexConfigurator;
+        let hooker_config = test_config();
+
+        // Register properly (creates wrapper + updates config)
+        configurator.register(&hooker_config, Some(tmp.path())).unwrap();
+
+        // Now should be in sync
+        assert!(configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
     }
 
     #[test]

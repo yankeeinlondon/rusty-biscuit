@@ -97,6 +97,23 @@ impl<'a> ModuleDocBuilder<'a> {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
             AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
+            AuthStrategy::OAuth2(config) => {
+                let flow = match config.grant_type {
+                    schematic_define::OAuth2GrantType::AuthorizationCodePkce => "Authorization Code with PKCE",
+                    schematic_define::OAuth2GrantType::ClientCredentials => "Client Credentials",
+                    schematic_define::OAuth2GrantType::DeviceCode => "Device Code",
+                    _ => "OAuth2",
+                };
+                let scopes_info = if config.default_scopes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Default scopes: `{}`.", config.default_scopes.join("`, `"))
+                };
+                format!(
+                    "Uses OAuth2 authentication ({} flow).{}",
+                    flow, scopes_info
+                )
+            }
             // Handle future variants (non_exhaustive)
             _ => "Uses custom authentication.".to_string(),
         };
@@ -274,6 +291,7 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -390,6 +408,7 @@ mod tests {
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         });
         api.endpoints.push(Endpoint {
             id: "GetItem".to_string(),
@@ -400,6 +419,7 @@ mod tests {
             response: ApiResponse::json_type("Item"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         });
 
         let builder = ModuleDocBuilder::new(&api);
@@ -435,6 +455,7 @@ mod tests {
                 response: ApiResponse::json_type("CreateItemResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         );
 
@@ -458,6 +479,7 @@ mod tests {
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }];
 
         let builder = ModuleDocBuilder::new(&api);

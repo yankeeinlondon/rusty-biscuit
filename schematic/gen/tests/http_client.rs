@@ -38,6 +38,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
                 response: ApiResponse::json_type("ItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
             Endpoint {
                 id: "GetItem".to_string(),
@@ -48,6 +49,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
                 response: ApiResponse::json_type("Item"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             },
         ],
         module_path: None,
@@ -77,6 +79,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
             response: ApiResponse::json_type("ItemsResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         }],
         module_path: None,
         request_suffix: None,

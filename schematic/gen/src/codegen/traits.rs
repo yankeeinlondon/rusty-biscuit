@@ -128,6 +128,7 @@ mod tests {
             response: ApiResponse::json_type("ListReposResponse"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");
@@ -153,6 +154,7 @@ mod tests {
                     50,
                 )),
             ),
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");
@@ -175,6 +177,7 @@ mod tests {
                 EndpointParams::default()
                     .with_pagination(PaginationStyle::offset_limit("offset", "limit", 100, 1000)),
             ),
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");
@@ -194,6 +197,7 @@ mod tests {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");
@@ -216,6 +220,7 @@ mod tests {
                 true,
                 Some("Query"),
             )),
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Request");
@@ -233,6 +238,7 @@ mod tests {
             response: ApiResponse::json_type("ListUsersResponse"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
+            oauth_scopes: None,
         };
 
         let tokens = generate_paginated_impl(&endpoint, "Params");

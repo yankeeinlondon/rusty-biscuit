@@ -85,6 +85,7 @@
 //!             response: ApiResponse::json_type("ListModelsResponse"),
 //!             headers: vec![],
 //!             params: None,
+//!             oauth_scopes: None,
 //!         },
 //!     ],
 //!     module_path: None,
@@ -131,6 +132,7 @@
 pub mod auth;
 pub mod headers;
 pub mod models;
+pub mod oauth;
 pub mod params;
 pub mod prelude;
 pub mod request;
@@ -144,6 +146,7 @@ pub mod openapi;
 
 // Re-export main types at crate root
 pub use auth::{ApiKeyLocation, AuthStrategy, UpdateStrategy};
+pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,

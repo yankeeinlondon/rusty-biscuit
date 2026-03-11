@@ -61,9 +61,16 @@ struct PreparedEvent {
     prompt_text: Option<String>,
     tool_input_json: Option<String>,
     tool_response_json: Option<String>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cost_usd: Option<f64>,
     extra_json: String,
     env_json: String,
     anonymous_session_fallback: bool,
+    /// Whether this event came from an interactive (TTY) session.
+    interactive: Option<bool>,
 }
 
 /// Sync JSONL event logs into the SQLite reporting index.
@@ -351,6 +358,29 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
         .as_ref()
         .map(serde_json::to_string)
         .transpose()?;
+    // Extract normalized token_usage and cost_usd from meta.extra
+    let token_usage = meta.extra.get("token_usage");
+    let input_tokens = token_usage
+        .and_then(|v| v.get("input"))
+        .and_then(Value::as_u64)
+        .and_then(|v| i64::try_from(v).ok());
+    let output_tokens = token_usage
+        .and_then(|v| v.get("output"))
+        .and_then(Value::as_u64)
+        .and_then(|v| i64::try_from(v).ok());
+    let total_tokens = token_usage
+        .and_then(|v| v.get("total"))
+        .and_then(Value::as_u64)
+        .and_then(|v| i64::try_from(v).ok());
+    let cache_read_tokens = token_usage
+        .and_then(|v| v.get("cache_read"))
+        .and_then(Value::as_u64)
+        .and_then(|v| i64::try_from(v).ok());
+    let cost_usd = meta
+        .extra
+        .get("cost_usd")
+        .and_then(Value::as_f64);
+
     let extra_json = serde_json::to_string(&meta.extra)?;
     let env_json = serde_json::to_string(&meta.env)?;
 
@@ -386,15 +416,25 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
         prompt_text: meta.prompt.clone(),
         tool_input_json,
         tool_response_json,
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        cache_read_tokens,
+        cost_usd,
         extra_json,
         env_json,
         anonymous_session_fallback: anonymous_fallback,
+        interactive: meta
+            .extra
+            .get("interactive")
+            .and_then(Value::as_str)
+            .map(|v| v == "true"),
     };
 
     Ok(prepared)
 }
 
-fn session_key(meta: &EventMeta, source_file: &str, source_offset: i64) -> (String, bool) {
+fn session_key(meta: &EventMeta, source_file: &str, _source_offset: i64) -> (String, bool) {
     if let Some(session_id) = meta.session_id.as_deref()
         && !session_id.trim().is_empty()
     {
@@ -419,8 +459,20 @@ fn session_key(meta: &EventMeta, source_file: &str, source_offset: i64) -> (Stri
         return (format!("{}:{fallback}", meta.provider.as_slug()), false);
     }
 
+    // No session identifier at all — group by provider + source file + date.
+    // Using source_offset would make every single event its own "session",
+    // massively inflating session counts.
+    let date = paths::daily_log_date_from_path(std::path::Path::new(source_file))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| {
+            meta.timestamp
+                .with_timezone(&chrono::Local)
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string()
+        });
     (
-        format!("{}:{source_file}:{source_offset}", meta.provider.as_slug()),
+        format!("{}:{source_file}:{date}", meta.provider.as_slug()),
         true,
     )
 }
@@ -445,13 +497,15 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
             package_area, package, tool_name, agent_type, notification_type,
             notification_message, error, model, permission_mode, head_sha, is_dirty,
             memory_available_bytes, hostname, prompt_text, tool_input_json,
-            tool_response_json, extra_json, env_json
+            tool_response_json, input_tokens, output_tokens, total_tokens,
+            cache_read_tokens, cost_usd, extra_json, env_json, anonymous_session
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18, ?19,
             ?20, ?21, ?22, ?23, ?24, ?25,
-            ?26, ?27, ?28, ?29, ?30, ?31
+            ?26, ?27, ?28, ?29, ?30, ?31,
+            ?32, ?33, ?34, ?35, ?36, ?37
         )
         "#,
         params![
@@ -484,8 +538,14 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
             row.prompt_text,
             row.tool_input_json,
             row.tool_response_json,
+            row.input_tokens,
+            row.output_tokens,
+            row.total_tokens,
+            row.cache_read_tokens,
+            row.cost_usd,
             row.extra_json,
             row.env_json,
+            row.anonymous_session_fallback,
         ],
     )?;
 
@@ -505,11 +565,13 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
-            subagent_count
+            subagent_count, total_input_tokens, total_output_tokens, total_tokens,
+            total_cache_read_tokens, total_cost_usd, interactive
         ) VALUES (
             ?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1,
-            ?15, ?16, ?17, ?18, ?19
+            ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23, ?24, ?25
         )
         ON CONFLICT(session_key) DO UPDATE SET
             session_id = COALESCE(excluded.session_id, sessions.session_id),
@@ -526,12 +588,18 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             permission_mode = COALESCE(excluded.permission_mode, sessions.permission_mode),
             hostname = COALESCE(excluded.hostname, sessions.hostname),
             primary_language = COALESCE(excluded.primary_language, sessions.primary_language),
+            interactive = COALESCE(excluded.interactive, sessions.interactive),
             event_count = sessions.event_count + 1,
             turn_count = sessions.turn_count + excluded.turn_count,
             tool_call_count = sessions.tool_call_count + excluded.tool_call_count,
             tool_error_count = sessions.tool_error_count + excluded.tool_error_count,
             turn_error_count = sessions.turn_error_count + excluded.turn_error_count,
-            subagent_count = sessions.subagent_count + excluded.subagent_count
+            subagent_count = sessions.subagent_count + excluded.subagent_count,
+            total_input_tokens = sessions.total_input_tokens + excluded.total_input_tokens,
+            total_output_tokens = sessions.total_output_tokens + excluded.total_output_tokens,
+            total_tokens = sessions.total_tokens + excluded.total_tokens,
+            total_cache_read_tokens = sessions.total_cache_read_tokens + excluded.total_cache_read_tokens,
+            total_cost_usd = sessions.total_cost_usd + excluded.total_cost_usd
         "#,
         params![
             row.session_key,
@@ -553,6 +621,12 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             tool_error_count,
             turn_error_count,
             subagent_count,
+            row.input_tokens.unwrap_or(0),
+            row.output_tokens.unwrap_or(0),
+            row.total_tokens.unwrap_or(0),
+            row.cache_read_tokens.unwrap_or(0),
+            row.cost_usd.unwrap_or(0.0),
+            row.interactive,
         ],
     )?;
 
@@ -567,7 +641,8 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             session_key, session_id, provider, started_at, ended_at, cwd, repo_name, repo_org,
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
-            subagent_count
+            subagent_count, total_input_tokens, total_output_tokens, total_tokens,
+            total_cache_read_tokens, total_cost_usd, interactive
         )
         SELECT
             session_key,
@@ -590,7 +665,15 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END),
             SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END),
             SUM(CASE WHEN event = 'turn_error' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN event = 'subagent_start' THEN 1 ELSE 0 END)
+            SUM(CASE WHEN event = 'subagent_start' THEN 1 ELSE 0 END),
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(output_tokens), 0),
+            COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(cache_read_tokens), 0),
+            COALESCE(SUM(cost_usd), 0),
+            MAX(CASE WHEN json_extract(extra_json, '$.interactive') = 'true' THEN 1
+                     WHEN json_extract(extra_json, '$.interactive') = 'false' THEN 0
+                     ELSE NULL END)
         FROM events
         GROUP BY session_key;
         "#,

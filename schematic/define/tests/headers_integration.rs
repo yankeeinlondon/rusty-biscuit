@@ -34,6 +34,7 @@ fn env_mapping_comprehensive_configuration() {
             names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_API_KEY"]),
             header: "Authorization".to_string(),
         }),
+        ..Default::default()
     };
 
     assert!(mapping.bearer_token.is_some());

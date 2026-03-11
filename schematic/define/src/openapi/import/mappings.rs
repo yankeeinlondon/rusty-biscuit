@@ -111,6 +111,7 @@ pub fn map_operation(
             } else {
                 Some(params)
             },
+            oauth_scopes: None,
         },
         diagnostics,
     ))
@@ -143,9 +144,38 @@ pub fn map_security_scheme(scheme: &SecurityScheme) -> Result<AuthStrategy, Stri
                 location: ApiKeyLocation::Cookie,
             }),
         },
-        SecurityScheme::OAuth2 { .. } => {
-            // OAuth2 is complex; default to bearer token behavior
-            Err("OAuth2 not fully supported, consider using BearerToken with manual token management".to_string())
+        SecurityScheme::OAuth2 { flows, .. } => {
+            if let Some(auth_code) = &flows.authorization_code {
+                let scopes: Vec<String> = auth_code.scopes.keys().cloned().collect();
+                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {
+                    grant_type: crate::oauth::OAuth2GrantType::AuthorizationCodePkce,
+                    authorization_url: Some(auth_code.authorization_url.clone()),
+                    token_url: auth_code.token_url.clone(),
+                    revocation_url: None,
+                    device_authorization_url: None,
+                    default_scopes: scopes,
+                    pkce: crate::oauth::PkceRequirement::Required,
+                    client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
+                }))
+            } else if let Some(client_creds) = &flows.client_credentials {
+                let scopes: Vec<String> = client_creds.scopes.keys().cloned().collect();
+                Ok(AuthStrategy::OAuth2(crate::oauth::OAuth2Config {
+                    grant_type: crate::oauth::OAuth2GrantType::ClientCredentials,
+                    authorization_url: None,
+                    token_url: client_creds.token_url.clone(),
+                    revocation_url: None,
+                    device_authorization_url: None,
+                    default_scopes: scopes,
+                    pkce: crate::oauth::PkceRequirement::NotUsed,
+                    client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
+                }))
+            } else if flows.implicit.is_some() {
+                Err("Implicit OAuth2 flow is not supported (insecure). Use authorization_code with PKCE instead.".to_string())
+            } else if flows.password.is_some() {
+                Err("Resource Owner Password Credentials flow is not supported (insecure).".to_string())
+            } else {
+                Err("No supported OAuth2 flow found in security scheme.".to_string())
+            }
         }
         SecurityScheme::OpenIDConnect { .. } => Err("OpenID Connect not supported".to_string()),
     }

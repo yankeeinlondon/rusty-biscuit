@@ -7,11 +7,11 @@ use rusqlite::{Connection, params_from_iter};
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, Provider};
 
-use super::metrics::{RecoveryEvent, classify_tool, summarize_metrics};
+use super::metrics::{RecoveryEvent, classify_tool, normalize_tool_name, summarize_metrics};
 use super::types::{
     DailySummary, DailyToolStat, DateRange, ErrorRecord, ErrorsReport, LabeledCount, ProviderSplit,
     RepoActivity, ReportingFilters, ReposReport, SessionInfo, SessionsReport, ToolsReport,
-    TrendPoint, TrendsReport,
+    TrendPoint, TrendsReport, UsageTotals,
 };
 
 #[derive(Debug, Default)]
@@ -81,6 +81,7 @@ struct Totals {
     total_human_in_loop: u64,
     provider_count: u64,
     repo_count: u64,
+    usage: UsageTotals,
 }
 
 pub(crate) fn daily_summary(
@@ -113,6 +114,7 @@ pub(crate) fn daily_summary(
         top_tools,
         permission_modes: load_labeled_counts(conn, "permission_mode", range, filters)?,
         models: load_labeled_counts(conn, "model", range, filters)?,
+        usage: totals.usage,
         metrics: summarize_metrics(
             totals.total_turns,
             totals.total_tool_calls,
@@ -374,7 +376,10 @@ pub(crate) fn trends(
             COUNT(DISTINCT session_key) AS session_count,
             COALESCE(SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END), 0) AS turn_count,
             COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0) AS tool_call_count,
-            COALESCE(SUM(CASE WHEN event IN ('tool_error', 'turn_error') THEN 1 ELSE 0 END), 0) AS error_count
+            COALESCE(SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END), 0) AS tool_error_count,
+            COALESCE(SUM(CASE WHEN event = 'turn_error' THEN 1 ELSE 0 END), 0) AS turn_error_count,
+            COALESCE(SUM(total_tokens), 0) AS sum_total_tokens,
+            COALESCE(SUM(cost_usd), 0) AS sum_cost_usd
         FROM events
         "#,
     ) + " GROUP BY source_date ORDER BY source_date ASC";
@@ -388,13 +393,16 @@ pub(crate) fn trends(
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
             row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, f64>(8)?,
         ))
     })?;
 
     let provider_points = load_provider_points(conn, range, filters)?;
     let mut points = Vec::new();
     for row in rows {
-        let (date, events, sessions, turns, tools, errors) = row?;
+        let (date, events, sessions, turns, tools, tool_errors, turn_errors, total_tokens, cost_usd) = row?;
         let date = NaiveDate::parse_from_str(&date, "%Y-%m-%d")?;
         points.push(TrendPoint {
             date,
@@ -402,7 +410,10 @@ pub(crate) fn trends(
             sessions: sessions.max(0) as u64,
             turns: turns.max(0) as u64,
             tool_calls: tools.max(0) as u64,
-            errors: errors.max(0) as u64,
+            tool_errors: tool_errors.max(0) as u64,
+            turn_errors: turn_errors.max(0) as u64,
+            total_tokens: total_tokens.max(0) as u64,
+            cost_usd: cost_usd.max(0.0),
             providers: provider_points.get(&date).cloned().unwrap_or_default(),
         });
     }
@@ -444,7 +455,12 @@ fn load_totals(conn: &Connection, range: DateRange, filters: &ReportingFilters) 
             COALESCE(SUM(CASE WHEN event = 'permission_request' THEN 1 ELSE 0 END), 0) AS permission_request_count,
             COALESCE(SUM(CASE WHEN event = 'human_in_the_loop' THEN 1 ELSE 0 END), 0) AS human_in_loop_count,
             COUNT(DISTINCT provider) AS provider_count,
-            COUNT(DISTINCT CASE WHEN repo_org IS NOT NULL THEN repo_org || '/' || repo_name ELSE repo_name END) AS repo_count
+            COUNT(DISTINCT CASE WHEN repo_org IS NOT NULL THEN repo_org || '/' || repo_name ELSE repo_name END) AS repo_count,
+            COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+            COALESCE(SUM(total_tokens), 0) AS sum_total_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+            COALESCE(SUM(cost_usd), 0) AS total_cost_usd
         FROM events
         "#,
     );
@@ -463,6 +479,13 @@ fn load_totals(conn: &Connection, range: DateRange, filters: &ReportingFilters) 
             total_human_in_loop: row.get::<_, i64>(9)?.max(0) as u64,
             provider_count: row.get::<_, i64>(10)?.max(0) as u64,
             repo_count: row.get::<_, i64>(11)?.max(0) as u64,
+            usage: UsageTotals {
+                total_input_tokens: row.get::<_, i64>(12)?.max(0) as u64,
+                total_output_tokens: row.get::<_, i64>(13)?.max(0) as u64,
+                total_tokens: row.get::<_, i64>(14)?.max(0) as u64,
+                total_cache_read_tokens: row.get::<_, i64>(15)?.max(0) as u64,
+                total_cost_usd: row.get::<_, f64>(16)?.max(0.0),
+            },
         })
     })
     .map_err(Into::into)
@@ -476,20 +499,28 @@ fn load_provider_split(
     let builder = WhereBuilder::default()
         .with_range(range)
         .with_filters(filters);
-    let sql = builder.finish("SELECT provider, COUNT(*) FROM events")
-        + " GROUP BY provider ORDER BY COUNT(*) DESC, provider ASC";
+    let sql = builder.finish(
+        r#"SELECT provider, COUNT(*),
+           COALESCE(SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END), 0)
+           FROM events"#,
+    ) + " GROUP BY provider ORDER BY COUNT(*) DESC, provider ASC";
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(builder.params.iter()), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
     })?;
 
     let mut providers = Vec::new();
     for row in rows {
-        let (provider, count) = row?;
+        let (provider, count, turns) = row?;
         providers.push(ProviderSplit {
             provider: parse_provider(&provider)?,
             count: count.max(0) as u64,
+            turns: turns.max(0) as u64,
         });
     }
     Ok(providers)
@@ -557,7 +588,12 @@ fn load_sessions(
             COALESCE(SUM(CASE WHEN event = 'before_tool' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN event = 'tool_error' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN event = 'turn_error' THEN 1 ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN event = 'subagent_start' THEN 1 ELSE 0 END), 0)
+            COALESCE(SUM(CASE WHEN event = 'subagent_start' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(input_tokens), 0),
+            COALESCE(SUM(output_tokens), 0),
+            COALESCE(SUM(total_tokens), 0),
+            COALESCE(SUM(cache_read_tokens), 0),
+            COALESCE(SUM(cost_usd), 0)
         FROM events
         "#,
     ) + " GROUP BY session_key ORDER BY MIN(timestamp) DESC";
@@ -586,6 +622,11 @@ fn load_sessions(
             row.get::<_, i64>(18)?,
             row.get::<_, i64>(19)?,
             row.get::<_, i64>(20)?,
+            row.get::<_, i64>(21)?,
+            row.get::<_, i64>(22)?,
+            row.get::<_, i64>(23)?,
+            row.get::<_, i64>(24)?,
+            row.get::<_, f64>(25)?,
         ))
     })?;
 
@@ -613,6 +654,11 @@ fn load_sessions(
             tool_error_count,
             turn_error_count,
             subagent_count,
+            total_input_tokens,
+            total_output_tokens,
+            total_tokens,
+            total_cache_read_tokens,
+            total_cost_usd,
         ) = row?;
         let started_at = parse_timestamp(&started_at)?;
         let ended_at = parse_timestamp(&ended_at)?;
@@ -639,6 +685,11 @@ fn load_sessions(
             tool_error_count: tool_error_count.max(0) as u64,
             turn_error_count: turn_error_count.max(0) as u64,
             subagent_count: subagent_count.max(0) as u64,
+            total_input_tokens: total_input_tokens.max(0) as u64,
+            total_output_tokens: total_output_tokens.max(0) as u64,
+            total_tokens: total_tokens.max(0) as u64,
+            total_cache_read_tokens: total_cache_read_tokens.max(0) as u64,
+            total_cost_usd: total_cost_usd.max(0.0),
         });
     }
 
@@ -677,17 +728,17 @@ fn load_all_tool_stats(
         ))
     })?;
 
-    let mut tools = Vec::new();
+    let mut raw_tools = Vec::new();
     for row in rows {
         let (tool_name, call_count, error_count) = row?;
-        tools.push(DailyToolStat {
+        raw_tools.push(DailyToolStat {
             classification: classify_tool(&tool_name),
-            tool_name,
+            tool_name: normalize_tool_name(&tool_name).to_string(),
             call_count: call_count.max(0) as u64,
             error_count: error_count.max(0) as u64,
         });
     }
-    Ok(tools)
+    Ok(merge_tool_stats(raw_tools))
 }
 
 fn load_tool_stats(
@@ -725,17 +776,48 @@ fn load_tool_stats(
         ))
     })?;
 
-    let mut tools = Vec::new();
+    let mut raw_tools = Vec::new();
     for row in rows {
         let (tool_name, call_count, error_count) = row?;
-        tools.push(DailyToolStat {
+        raw_tools.push(DailyToolStat {
             classification: classify_tool(&tool_name),
-            tool_name,
+            tool_name: normalize_tool_name(&tool_name).to_string(),
             call_count: call_count.max(0) as u64,
             error_count: error_count.max(0) as u64,
         });
     }
-    Ok(tools)
+    // Merge after normalization, then apply top_n limit
+    let mut merged = merge_tool_stats(raw_tools);
+    merged.truncate(top_n);
+    Ok(merged)
+}
+
+/// Merge tool stats that share the same normalized name.
+///
+/// After normalization, multiple SQL rows may map to the same tool name
+/// (e.g. `grep_search` → `Grep`). This merges their counts and sorts by
+/// call count descending.
+fn merge_tool_stats(stats: Vec<DailyToolStat>) -> Vec<DailyToolStat> {
+    use std::collections::HashMap;
+    let mut merged: HashMap<String, DailyToolStat> = HashMap::new();
+    for stat in stats {
+        let entry = merged.entry(stat.tool_name.clone()).or_insert(DailyToolStat {
+            classification: stat.classification,
+            tool_name: stat.tool_name,
+            call_count: 0,
+            error_count: 0,
+        });
+        entry.call_count += stat.call_count;
+        entry.error_count += stat.error_count;
+    }
+    let mut result: Vec<DailyToolStat> = merged.into_values().collect();
+    result.sort_by(|a, b| {
+        b.call_count
+            .cmp(&a.call_count)
+            .then(b.error_count.cmp(&a.error_count))
+            .then(a.tool_name.cmp(&b.tool_name))
+    });
+    result
 }
 
 fn load_recovery_events(
@@ -774,8 +856,11 @@ fn load_provider_points(
     let builder = WhereBuilder::default()
         .with_range(range)
         .with_filters(filters);
-    let sql = builder.finish("SELECT source_date, provider, COUNT(*) FROM events")
-        + " GROUP BY source_date, provider ORDER BY source_date ASC, COUNT(*) DESC, provider ASC";
+    let sql = builder.finish(
+        r#"SELECT source_date, provider, COUNT(*),
+           COALESCE(SUM(CASE WHEN event = 'turn_complete' THEN 1 ELSE 0 END), 0)
+           FROM events"#,
+    ) + " GROUP BY source_date, provider ORDER BY source_date ASC, COUNT(*) DESC, provider ASC";
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(builder.params.iter()), |row| {
@@ -783,17 +868,19 @@ fn load_provider_points(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
         ))
     })?;
 
     let mut map: BTreeMap<NaiveDate, Vec<ProviderSplit>> = BTreeMap::new();
     for row in rows {
-        let (date, provider, count) = row?;
+        let (date, provider, count, turns) = row?;
         map.entry(NaiveDate::parse_from_str(&date, "%Y-%m-%d")?)
             .or_default()
             .push(ProviderSplit {
                 provider: parse_provider(&provider)?,
                 count: count.max(0) as u64,
+                turns: turns.max(0) as u64,
             });
     }
     Ok(map)

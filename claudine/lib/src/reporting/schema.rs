@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: &str = "2";
+const SCHEMA_VERSION: &str = "4";
 
 /// Initialize the reporting schema if it does not exist yet.
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -56,6 +56,11 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             prompt_text TEXT,
             tool_input_json TEXT,
             tool_response_json TEXT,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            total_tokens INTEGER,
+            cache_read_tokens INTEGER,
+            cost_usd REAL,
             extra_json TEXT NOT NULL,
             env_json TEXT NOT NULL,
             PRIMARY KEY (source_file, source_offset)
@@ -82,14 +87,26 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             tool_call_count INTEGER NOT NULL DEFAULT 0,
             tool_error_count INTEGER NOT NULL DEFAULT 0,
             turn_error_count INTEGER NOT NULL DEFAULT 0,
-            subagent_count INTEGER NOT NULL DEFAULT 0
+            subagent_count INTEGER NOT NULL DEFAULT 0,
+            total_input_tokens INTEGER NOT NULL DEFAULT 0,
+            total_output_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            total_cost_usd REAL NOT NULL DEFAULT 0
         );
         "#,
     )?;
 
     let previous_version = schema_version(conn)?;
-    if previous_version.as_deref().unwrap_or("0") < SCHEMA_VERSION {
+    let prev = previous_version.as_deref().unwrap_or("0");
+    if prev < "2" {
         migrate_to_v2(conn)?;
+    }
+    if prev < "3" {
+        migrate_to_v3(conn)?;
+    }
+    if prev < "4" {
+        migrate_to_v4(conn)?;
     }
 
     conn.execute(
@@ -186,6 +203,53 @@ fn migrate_to_v2(conn: &Connection) -> Result<()> {
 
     // The reporting database is a derived cache of JSONL logs, so clearing the
     // indexed tables is the safest way to backfill newly-added columns.
+    conn.execute("DELETE FROM ingestion_state", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
+    conn.execute("DELETE FROM events", [])?;
+
+    Ok(())
+}
+
+fn migrate_to_v3(conn: &Connection) -> Result<()> {
+    // Add token/cost columns to events
+    ensure_column(conn, "events", "input_tokens", "INTEGER")?;
+    ensure_column(conn, "events", "output_tokens", "INTEGER")?;
+    ensure_column(conn, "events", "total_tokens", "INTEGER")?;
+    ensure_column(conn, "events", "cache_read_tokens", "INTEGER")?;
+    ensure_column(conn, "events", "cost_usd", "REAL")?;
+
+    // Add token/cost accumulators to sessions
+    ensure_column(conn, "sessions", "total_input_tokens", "INTEGER DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "sessions",
+        "total_output_tokens",
+        "INTEGER DEFAULT 0",
+    )?;
+    ensure_column(conn, "sessions", "total_tokens", "INTEGER DEFAULT 0")?;
+    ensure_column(
+        conn,
+        "sessions",
+        "total_cache_read_tokens",
+        "INTEGER DEFAULT 0",
+    )?;
+    ensure_column(conn, "sessions", "total_cost_usd", "REAL DEFAULT 0")?;
+
+    // Re-ingest to backfill the new columns from extra_json
+    conn.execute("DELETE FROM ingestion_state", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
+    conn.execute("DELETE FROM events", [])?;
+
+    Ok(())
+}
+
+fn migrate_to_v4(conn: &Connection) -> Result<()> {
+    // Track whether a session was interactive (TTY) or headless (CI, piped).
+    ensure_column(conn, "sessions", "interactive", "INTEGER")?;
+    // Track whether a session used the anonymous fallback key (no provider session_id).
+    ensure_column(conn, "events", "anonymous_session", "INTEGER DEFAULT 0")?;
+
+    // Re-ingest to backfill
     conn.execute("DELETE FROM ingestion_state", [])?;
     conn.execute("DELETE FROM sessions", [])?;
     conn.execute("DELETE FROM events", [])?;
@@ -337,6 +401,9 @@ mod tests {
         let session_columns = table_columns(&conn, "sessions");
         assert!(session_columns.contains(&"package_area".to_string()));
         assert!(session_columns.contains(&"package".to_string()));
+        // v4 columns
+        assert!(event_columns.contains(&"anonymous_session".to_string()));
+        assert!(session_columns.contains(&"interactive".to_string()));
 
         let event_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))

@@ -258,6 +258,7 @@ pub struct ApiKeyEnv {
 ///     basic_user: None,
 ///     basic_pass: None,
 ///     api_key: None,
+///     ..Default::default()
 /// };
 /// ```
 ///
@@ -271,6 +272,7 @@ pub struct ApiKeyEnv {
 ///     basic_user: Some(EnvList::single("API_USERNAME")),
 ///     basic_pass: Some(EnvList::single("API_PASSWORD")),
 ///     api_key: None,
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -283,6 +285,15 @@ pub struct EnvMapping {
     pub basic_pass: Option<EnvList>,
     /// Environment variables for API key with custom header.
     pub api_key: Option<ApiKeyEnv>,
+    /// Environment variables for OAuth2 client ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<EnvList>,
+    /// Environment variables for OAuth2 client secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_secret: Option<EnvList>,
+    /// Environment variables for OAuth2 redirect URI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_redirect_uri: Option<EnvList>,
 }
 
 /// Errors that can occur when working with headers.
@@ -415,6 +426,7 @@ impl Headers {
     ///     basic_user: None,
     ///     basic_pass: None,
     ///     api_key: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let headers = Headers::default()
@@ -674,6 +686,7 @@ impl Headers {
     ///     basic_user: None,
     ///     basic_pass: None,
     ///     api_key: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let headers = Headers::default()
@@ -701,6 +714,7 @@ impl Headers {
     ///     basic_user: None,
     ///     basic_pass: None,
     ///     api_key: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let headers = Headers::default().from_env_with(custom_mapping);
@@ -736,6 +750,7 @@ impl Headers {
     ///     basic_user: None,
     ///     basic_pass: None,
     ///     api_key: None,
+    ///     ..Default::default()
     /// };
     ///
     /// let headers = Headers::default()
@@ -1121,6 +1136,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         assert!(mapping.bearer_token.is_some());
@@ -1134,6 +1150,7 @@ mod tests {
             basic_user: Some(EnvList::single("API_USER")),
             basic_pass: Some(EnvList::single("API_PASS")),
             api_key: None,
+        ..Default::default()
         };
 
         assert!(mapping.basic_user.is_some());
@@ -1151,6 +1168,7 @@ mod tests {
                 names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_API_KEY"]),
                 header: "Authorization".to_string(),
             }),
+        ..Default::default()
         };
 
         assert!(mapping.api_key.is_some());
@@ -1164,6 +1182,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let cloned = mapping.clone();
@@ -1534,6 +1553,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1568,6 +1588,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1600,6 +1621,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1633,6 +1655,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1666,6 +1689,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers::default().from_env_with(custom_mapping);
@@ -1694,6 +1718,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1726,6 +1751,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1761,6 +1787,7 @@ mod tests {
             basic_user: Some(EnvList::single("API_USERNAME")),
             basic_pass: Some(EnvList::single("API_PASSWORD")),
             api_key: None,
+        ..Default::default()
         };
 
         let headers = Headers {
@@ -1796,6 +1823,7 @@ mod tests {
                 names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_KEY"]),
                 header: "X-API-Key".to_string(),
             }),
+        ..Default::default()
         };
 
         let headers = Headers {

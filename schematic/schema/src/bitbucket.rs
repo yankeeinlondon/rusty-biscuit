@@ -48,9 +48,9 @@
 //!
 //! let client = Bitbucket::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{Paginated, RequestParts, SchematicError};
-pub use schematic_definitions::bitbucket::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::bitbucket::*;
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -169,8 +169,8 @@ impl ListDirectoryContentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/src/{}/{}",
-            self.workspace, self.repo_slug, self.commit, self.path
+            "/repositories/{}/{}/src/{}/{}", self.workspace, self.repo_slug, self.commit,
+            self.path
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -250,15 +250,10 @@ impl GetFileContentRawRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repositories/{}/{}/src/{}/{}",
-            self.workspace, self.repo_slug, self.commit, self.path
+            "/repositories/{}/{}/src/{}/{}", self.workspace, self.repo_slug, self.commit,
+            self.path
         );
-        Ok((
-            "GET",
-            path,
-            None,
-            vec![("Accept".to_string(), "text/plain".to_string())],
-        ))
+        Ok(("GET", path, None, vec![("Accept".to_string(), "text/plain".to_string())]))
     }
 }
 impl crate::shared::EndpointSpec for GetFileContentRawRequest {
@@ -333,8 +328,7 @@ impl ListPullRequestsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/pullrequests",
-            self.workspace, self.repo_slug
+            "/repositories/{}/{}/pullrequests", self.workspace, self.repo_slug
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -413,8 +407,8 @@ impl GetPullRequestRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repositories/{}/{}/pullrequests/{}",
-            self.workspace, self.repo_slug, self.id
+            "/repositories/{}/{}/pullrequests/{}", self.workspace, self.repo_slug, self
+            .id
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -489,8 +483,8 @@ impl ListPullRequestCommentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/pullrequests/{}/comments",
-            self.workspace, self.repo_slug, self.id
+            "/repositories/{}/{}/pullrequests/{}/comments", self.workspace, self
+            .repo_slug, self.id
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -576,7 +570,9 @@ impl ListIssuesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let mut path = format!("/repositories/{}/{}/issues", self.workspace, self.repo_slug);
+        let mut path = format!(
+            "/repositories/{}/{}/issues", self.workspace, self.repo_slug
+        );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query_pairs.push(("page", value.to_string()));
@@ -651,8 +647,7 @@ impl GetIssueRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repositories/{}/{}/issues/{}",
-            self.workspace, self.repo_slug, self.id
+            "/repositories/{}/{}/issues/{}", self.workspace, self.repo_slug, self.id
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -727,8 +722,8 @@ impl ListIssueCommentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/issues/{}/comments",
-            self.workspace, self.repo_slug, self.id
+            "/repositories/{}/{}/issues/{}/comments", self.workspace, self.repo_slug,
+            self.id
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -822,8 +817,8 @@ impl ListIssueChangesRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/issues/{}/changes",
-            self.workspace, self.repo_slug, self.id
+            "/repositories/{}/{}/issues/{}/changes", self.workspace, self.repo_slug, self
+            .id
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -910,8 +905,7 @@ impl ListTagsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/refs/tags",
-            self.workspace, self.repo_slug
+            "/repositories/{}/{}/refs/tags", self.workspace, self.repo_slug
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -987,8 +981,7 @@ impl GetTagRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repositories/{}/{}/refs/tags/{}",
-            self.workspace, self.repo_slug, self.name
+            "/repositories/{}/{}/refs/tags/{}", self.workspace, self.repo_slug, self.name
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1056,8 +1049,7 @@ impl ListDownloadsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repositories/{}/{}/downloads",
-            self.workspace, self.repo_slug
+            "/repositories/{}/{}/downloads", self.workspace, self.repo_slug
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -1133,8 +1125,8 @@ impl GetDownloadRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repositories/{}/{}/downloads/{}",
-            self.workspace, self.repo_slug, self.filename
+            "/repositories/{}/{}/downloads/{}", self.workspace, self.repo_slug, self
+            .filename
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1339,16 +1331,24 @@ impl BitbucketRequest {
             Self::ListPullRequestComments(_) => {
                 <ListPullRequestCommentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListIssues(_) => <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetIssue(_) => <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListIssues(_) => {
+                <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetIssue(_) => {
+                <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListIssueComments(_) => {
                 <ListIssueCommentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListIssueChanges(_) => {
                 <ListIssueChangesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListTags(_) => <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetTag(_) => <GetTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListTags(_) => {
+                <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetTag(_) => {
+                <GetTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListDownloads(_) => {
                 <ListDownloadsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1455,8 +1455,9 @@ impl Bitbucket {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://api.bitbucket.org/2.0";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> =
-        Some("https://developer.atlassian.com/cloud/bitbucket/rest/");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://developer.atlassian.com/cloud/bitbucket/rest/",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -1465,18 +1466,24 @@ impl Bitbucket {
             env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
             auth_strategy: schematic_define::AuthStrategy::Basic,
             env_username: Some("BITBUCKET_USERNAME".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_USERNAME".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_APP_PASSWORD".to_string(),
-                    ])),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_USERNAME".to_string()],
+                        ),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_APP_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
-                },
-            ),
+                    oauth_client_id: None,
+                    oauth_client_secret: None,
+                    oauth_redirect_uri: None,
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -1494,18 +1501,24 @@ impl Bitbucket {
             env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
             auth_strategy: schematic_define::AuthStrategy::Basic,
             env_username: Some("BITBUCKET_USERNAME".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_USERNAME".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_APP_PASSWORD".to_string(),
-                    ])),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_USERNAME".to_string()],
+                        ),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_APP_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
-                },
-            ),
+                    oauth_client_id: None,
+                    oauth_client_secret: None,
+                    oauth_redirect_uri: None,
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -1529,18 +1542,24 @@ impl Bitbucket {
             env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
             auth_strategy: schematic_define::AuthStrategy::Basic,
             env_username: Some("BITBUCKET_USERNAME".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_USERNAME".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_APP_PASSWORD".to_string(),
-                    ])),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_USERNAME".to_string()],
+                        ),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_APP_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
-                },
-            ),
+                    oauth_client_id: None,
+                    oauth_client_secret: None,
+                    oauth_redirect_uri: None,
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -1555,25 +1574,34 @@ impl Bitbucket {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
             auth_strategy: schematic_define::AuthStrategy::Basic,
             env_username: Some("BITBUCKET_USERNAME".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_USERNAME".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "BITBUCKET_APP_PASSWORD".to_string(),
-                    ])),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_USERNAME".to_string()],
+                        ),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["BITBUCKET_APP_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
-                },
-            ),
+                    oauth_client_id: None,
+                    oauth_client_secret: None,
+                    oauth_redirect_uri: None,
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -1799,9 +1827,7 @@ impl<'a> BitbucketVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -1829,15 +1855,13 @@ impl<'a> BitbucketVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -1899,7 +1923,8 @@ impl Bitbucket {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -1912,23 +1937,30 @@ impl Bitbucket {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        }
-                    })?;
-                    let password = std::env::var(password_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        }
-                    })?;
+                        })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
+                }
+                schematic_define::AuthStrategy::OAuth2(_) => {
+                    return Err(SchematicError::OAuthAuthenticationRequired {
+                        message: "This API uses OAuth2 authentication. Obtain a token using schematic-oauth and pass it via .variant_with_headers(Headers::default().use_bearer_token(token))"
+                            .to_string(),
+                    });
                 }
                 _ => {}
             }
@@ -2027,7 +2059,11 @@ impl Bitbucket {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

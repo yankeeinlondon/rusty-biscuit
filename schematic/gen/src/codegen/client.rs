@@ -516,6 +516,11 @@ fn generate_auth_setup(_api: &RestApi) -> TokenStream {
                         })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
+                schematic_define::AuthStrategy::OAuth2(_) => {
+                    return Err(SchematicError::OAuthAuthenticationRequired {
+                        message: "This API uses OAuth2 authentication. Obtain a token using schematic-oauth and pass it via .variant_with_headers(Headers::default().use_bearer_token(token))".to_string(),
+                    });
+                }
                 // Handle future variants (non_exhaustive)
                 _ => {}
             }
@@ -549,6 +554,7 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -593,6 +599,7 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -869,6 +876,7 @@ mod tests {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -914,6 +922,7 @@ mod tests {
                 response: ApiResponse::Text,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -953,6 +962,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
+                oauth_scopes: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -989,6 +999,7 @@ mod tests {
                     response: ApiResponse::json_type("ListItemsResponse"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "CreateSpeech".to_string(),
@@ -999,6 +1010,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
         );
@@ -1043,6 +1055,7 @@ mod tests {
                     response: ApiResponse::json_type("ListItemsResponse"),
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "CreateSpeech".to_string(),
@@ -1053,6 +1066,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "GetText".to_string(),
@@ -1063,6 +1077,7 @@ mod tests {
                     response: ApiResponse::Text,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "DeleteItem".to_string(),
@@ -1073,6 +1088,7 @@ mod tests {
                     response: ApiResponse::Empty,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
         );
@@ -1136,6 +1152,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
                 Endpoint {
                     id: "GetVoiceSampleAudio".to_string(),
@@ -1146,6 +1163,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
+                    oauth_scopes: None,
                 },
             ],
         );

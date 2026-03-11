@@ -104,6 +104,7 @@ pub enum RestMethod {
 ///             response: ApiResponse::json_type("HealthResponse"),
 ///             headers: vec![],
 ///             params: None,
+///             oauth_scopes: None,
 ///         },
 ///     ],
 ///     module_path: None,
@@ -192,6 +193,7 @@ pub struct RestApi {
     ///         basic_user: None,
     ///         basic_pass: None,
     ///         api_key: None,
+    ///         ..Default::default()
     ///     }),
     /// };
     /// ```
@@ -232,6 +234,7 @@ impl RestApi {
     ///         basic_user: None,
     ///         basic_pass: None,
     ///         api_key: None,
+    ///         ..Default::default()
     ///     }),
     /// };
     ///
@@ -298,6 +301,7 @@ impl RestApi {
             basic_user,
             basic_pass,
             api_key: None,
+        ..Default::default()
         }
     }
 }
@@ -328,6 +332,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
 ///     params: None,
+///     oauth_scopes: None,
 /// };
 ///
 /// assert!(endpoint.path.contains("{user_id}"));
@@ -347,6 +352,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
 ///     params: None,
+///     oauth_scopes: None,
 /// };
 ///
 /// assert!(endpoint.request.is_some());
@@ -369,6 +375,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("FileUploadResponse"),
 ///     headers: vec![],
 ///     params: None,
+///     oauth_scopes: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,6 +417,11 @@ pub struct Endpoint {
     /// If `None`, the endpoint has no imported parameters (backwards compatible
     /// with existing endpoint definitions).
     pub params: Option<EndpointParams>,
+    /// OAuth2 scopes required for this specific endpoint.
+    ///
+    /// If `None`, the API-level default scopes from `OAuth2Config::default_scopes`
+    /// are used. If `Some`, these scopes override the defaults for this endpoint.
+    pub oauth_scopes: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -484,6 +496,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let api = RestApi {
@@ -623,6 +636,7 @@ mod tests {
                 names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_TOKEN"]),
                 header: "Authorization".to_string(),
             }),
+            ..Default::default()
         };
 
         let api = RestApi {
@@ -657,6 +671,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
+        ..Default::default()
         };
 
         let api = RestApi {

@@ -47,6 +47,8 @@ enum SyncAction {
     NotDetected,
     /// Already up-to-date, no changes.
     UpToDate,
+    /// Registration was repaired (same events, but config/wrapper fixed).
+    Repaired,
     /// Would add hook (dry run).
     WouldAdd(String),
     /// Would remove stale hook (dry run).
@@ -101,6 +103,11 @@ fn prose_up_to_date() -> Prose {
     Prose::new("<dim>already up-to-date</dim>")
 }
 
+/// Format a prose for repaired registration.
+fn prose_repaired() -> Prose {
+    Prose::new("<i>repaired</i> hook registration")
+}
+
 /// Format a prose for dry-run would add.
 fn prose_would_add(hook: &str) -> Prose {
     Prose::new(format!(
@@ -151,6 +158,7 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
                 SyncAction::WrapperOnly(guidance) => prose_wrapper_only(&guidance),
                 SyncAction::NotDetected => prose_not_detected(),
                 SyncAction::UpToDate => prose_up_to_date(),
+                SyncAction::Repaired => prose_repaired(),
                 SyncAction::WouldAdd(hook) => prose_would_add(&hook),
                 SyncAction::WouldRemoveStale(hook) => prose_would_remove_stale(&hook),
                 SyncAction::WouldDeregister => prose_would_deregister(),
@@ -265,6 +273,8 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     }
                 } else {
                     // Get current state before sync
+                    let was_registered =
+                        configurator.is_registered(None).unwrap_or(false);
                     let before_events = configurator.registered_events(None).unwrap_or_default();
 
                     match configurator.register(cfg, None) {
@@ -287,9 +297,21 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                                 }
                             }
 
-                            // If no changes detected but event_count > 0, show up-to-date
+                            // If no event changes but register() ran (didn't skip),
+                            // it was a repair (e.g. wrapper script recreated).
                             if actions.is_empty() {
-                                actions.push(SyncAction::UpToDate);
+                                if was_registered {
+                                    actions.push(SyncAction::Repaired);
+                                } else {
+                                    // Fresh registration with same events shouldn't happen,
+                                    // but handle gracefully
+                                    for event in &after_events {
+                                        actions.push(SyncAction::Added(event.clone()));
+                                    }
+                                    if actions.is_empty() {
+                                        actions.push(SyncAction::UpToDate);
+                                    }
+                                }
                             }
                         }
                         Ok(RegistrationResult::Skipped(reason)) => match reason {

@@ -106,6 +106,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SamsungDeviceInfoResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetServerLogs".to_string(),
@@ -118,6 +119,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "LaunchApplicationById".to_string(),
@@ -131,6 +133,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "LaunchApplicationByName".to_string(),
@@ -143,6 +146,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "GetAppStatus".to_string(),
@@ -155,6 +159,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SamsungAppStatusResponse"),
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "CloseApp".to_string(),
@@ -167,6 +172,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
         Endpoint {
             id: "InstallApp".to_string(),
@@ -179,6 +185,7 @@ fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
+            oauth_scopes: None,
         },
     ]
 }

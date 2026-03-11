@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
+use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::OnceLock;
 
@@ -42,7 +43,10 @@ pub struct NetworkInfo {
     /// All detected network interfaces
     pub interfaces: Vec<NetworkInterface>,
 
-    /// Name of the primary interface (first non-loopback with IPv4 address)
+    /// Name of the primary interface.
+    ///
+    /// This prefers the interface used by the host's default route when it
+    /// can be determined, and otherwise falls back to a local heuristic.
     pub primary_interface: Option<String>,
 
     /// Aggregated IP addresses from all interfaces with interface attribution.
@@ -72,7 +76,7 @@ pub struct NetworkInfo {
 ///
 /// Returns a `Result<NetworkInfo>` containing:
 /// - All detected interfaces with their addresses and flags
-/// - The primary interface name (first non-loopback with IPv4)
+/// - The primary interface name (default-route interface when detectable)
 /// - Permission denied flag
 ///
 /// ## Errors
@@ -256,7 +260,9 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 
 /// Finds the primary network interface.
 ///
-/// The primary interface is selected using the following priority:
+/// This first prefers the interface backing the system's default route.
+/// If that cannot be detected, or does not map to an eligible interface,
+/// it falls back to a local heuristic:
 /// 1. Physical interfaces (en*, eth*, wlan*) over virtual ones (bridge*, utun*, docker*, veth*, etc.)
 /// 2. Interfaces with RUNNING flag (actively transmitting)
 /// 3. First interface alphabetically within the same priority tier
@@ -267,6 +273,25 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 ///
 /// Returns the name of the primary interface, or None if no suitable interface exists.
 fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
+    select_primary_interface(interfaces, detect_default_route_interface().as_deref())
+}
+
+fn select_primary_interface(
+    interfaces: &[NetworkInterface],
+    default_route_interface: Option<&str>,
+) -> Option<String> {
+    if let Some(route_interface) = default_route_interface
+        && let Some(iface) = interfaces
+            .iter()
+            .find(|iface| iface.name == route_interface && is_primary_candidate(iface))
+    {
+        return Some(iface.name.clone());
+    }
+
+    find_primary_interface_fallback(interfaces)
+}
+
+fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<String> {
     /// Checks if an interface name looks like a physical interface
     fn is_physical_interface(name: &str) -> bool {
         // Physical interface patterns:
@@ -305,11 +330,7 @@ fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
             || name.starts_with("llw")
     }
 
-    // Filter to candidates: non-loopback, up, has IPv4
-    let candidates: Vec<_> = interfaces
-        .iter()
-        .filter(|i| !i.flags.is_loopback && !i.ipv4_addresses.is_empty() && i.flags.is_up)
-        .collect();
+    let candidates: Vec<_> = interfaces.iter().filter(|i| is_primary_candidate(i)).collect();
 
     if candidates.is_empty() {
         return None;
@@ -341,6 +362,78 @@ fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
 
     // Fallback: First candidate (even if virtual)
     candidates.first().map(|i| i.name.clone())
+}
+
+fn is_primary_candidate(interface: &NetworkInterface) -> bool {
+    !interface.flags.is_loopback && !interface.ipv4_addresses.is_empty() && interface.flags.is_up
+}
+
+fn detect_default_route_interface() -> Option<String> {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        command_output(
+            "route",
+            &[
+                "-n", "get", "default",
+            ],
+        )
+        .and_then(|output| parse_bsd_default_route_interface(&output))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        command_output(
+            "ip",
+            &[
+                "route", "show", "default",
+            ],
+        )
+        .and_then(|output| parse_linux_default_route_interface(&output))
+    }
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
+        target_os = "linux"
+    )))]
+    {
+        None
+    }
+}
+
+fn command_output(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout).ok()
+}
+
+fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("interface:")
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn parse_linux_default_route_interface(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let tokens: Vec<_> = line.split_whitespace().collect();
+        tokens.windows(2).find(|window| window[0] == "dev").map(|window| window[1].to_string())
+    })
 }
 
 /// Detects network interfaces, excluding loopback and down interfaces.
@@ -731,7 +824,7 @@ mod tests {
             create_test_interface("utun0", true, true),     // VPN tunnel
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(
             primary,
             Some("en0".to_string()),
@@ -747,7 +840,7 @@ mod tests {
             create_test_interface("en1", true, true),  // Physical and running
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(primary, Some("en1".to_string()), "Should prefer running physical interface");
     }
 
@@ -759,7 +852,7 @@ mod tests {
             create_test_interface("en0", true, false),      // Physical but not running
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(
             primary,
             Some("en0".to_string()),
@@ -775,7 +868,7 @@ mod tests {
             create_test_interface("utun0", true, true),
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(
             primary,
             Some("bridge100".to_string()),
@@ -791,7 +884,7 @@ mod tests {
             create_test_interface("en1", false, true), // No IPv4
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(primary, None, "Should return None when no interfaces have IPv4 addresses");
     }
 
@@ -803,7 +896,7 @@ mod tests {
 
         let interfaces = vec![loopback];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(primary, None, "Should return None when only loopback interface exists");
     }
 
@@ -829,7 +922,7 @@ mod tests {
                 create_test_interface("en0", true, true),
             ];
 
-            let primary = find_primary_interface(&interfaces);
+            let primary = find_primary_interface_fallback(&interfaces);
             assert_eq!(
                 primary,
                 Some("en0".to_string()),
@@ -858,7 +951,7 @@ mod tests {
                 create_test_interface(physical_name, true, true),
             ];
 
-            let primary = find_primary_interface(&interfaces);
+            let primary = find_primary_interface_fallback(&interfaces);
             assert_eq!(
                 primary,
                 Some(physical_name.to_string()),
@@ -876,7 +969,7 @@ mod tests {
             create_test_interface("en0", true, true),             // Built-in
         ];
 
-        let primary = find_primary_interface(&interfaces);
+        let primary = find_primary_interface_fallback(&interfaces);
         assert_eq!(
             primary,
             Some("en0".to_string()),
@@ -915,5 +1008,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_select_primary_interface_prefers_default_route_interface() {
+        let interfaces = vec![
+            create_test_interface("en0", true, true),
+            create_test_interface("en7", true, true),
+        ];
+
+        let primary = select_primary_interface(&interfaces, Some("en7"));
+        assert_eq!(
+            primary,
+            Some("en7".to_string()),
+            "Should prefer the interface used by the default route"
+        );
+    }
+
+    #[test]
+    fn test_select_primary_interface_ignores_ineligible_default_route_interface() {
+        let mut down = create_test_interface("en7", true, true);
+        down.flags.is_up = false;
+
+        let interfaces = vec![
+            create_test_interface("en0", true, true),
+            down,
+        ];
+
+        let primary = select_primary_interface(&interfaces, Some("en7"));
+        assert_eq!(
+            primary,
+            Some("en0".to_string()),
+            "Should fall back when the routed interface is not an eligible primary candidate"
+        );
+    }
+
+    #[test]
+    fn test_parse_bsd_default_route_interface() {
+        let output = "\
+   route to: default
+destination: default
+    gateway: 192.168.100.1
+  interface: en7
+      flags: <UP,GATEWAY,DONE,STATIC>";
+
+        assert_eq!(parse_bsd_default_route_interface(output), Some("en7".to_string()));
+    }
+
+    #[test]
+    fn test_parse_linux_default_route_interface() {
+        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
+        assert_eq!(parse_linux_default_route_interface(output), Some("wlp3s0".to_string()));
     }
 }

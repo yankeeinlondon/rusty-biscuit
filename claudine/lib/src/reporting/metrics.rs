@@ -12,13 +12,36 @@ pub(crate) struct RecoveryEvent {
     pub event: AgenticEvent,
 }
 
+/// Normalize provider-specific tool names to canonical forms.
+///
+/// Different providers use different names for equivalent tools (e.g. OpenCode
+/// uses `grep_search` for what Claude calls `Grep`). This merges them into a
+/// single bucket for reporting.
+pub fn normalize_tool_name(tool_name: &str) -> &str {
+    match tool_name.trim().to_ascii_lowercase().as_str() {
+        "grep_search" => "Grep",
+        "list_dir" => "Glob",
+        "file_search" => "Glob",
+        "multi_edit" | "multiedit" => "Edit",
+        "todo_write" | "todowrite" => "TodoWrite",
+        "web_search" | "websearch" => "WebSearch",
+        "web_fetch" | "webfetch" => "WebFetch",
+        "taskcreate" => "TaskCreate",
+        "taskupdate" => "TaskUpdate",
+        _ => tool_name,
+    }
+}
+
 /// Classify a tool into a coarse activity bucket.
 pub fn classify_tool(tool_name: &str) -> ToolActionClass {
-    match tool_name.trim().to_ascii_lowercase().as_str() {
-        "read" | "grep" | "glob" | "websearch" | "web_search" | "webfetch" | "web_fetch" | "ls"
-        | "cat" | "find" | "skill" => ToolActionClass::Research,
-        "edit" | "multiedit" | "multi_edit" | "write" | "bash" | "shell" | "patch"
-        | "todowrite" | "todo_write" => ToolActionClass::Action,
+    match normalize_tool_name(tool_name)
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "read" | "grep" | "glob" | "websearch" | "webfetch" | "ls" | "cat" | "find" | "skill" => {
+            ToolActionClass::Research
+        }
+        "edit" | "write" | "bash" | "shell" | "patch" | "todowrite" => ToolActionClass::Action,
         "agent" | "task" | "taskcreate" | "taskupdate" | "subagent" => ToolActionClass::Delegation,
         _ => ToolActionClass::Other,
     }
@@ -168,6 +191,11 @@ mod tests {
             tool_error_count: 0,
             turn_error_count: 0,
             subagent_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cost_usd: 0.0,
         }];
 
         let metrics = summarize_metrics(3, 0, 0, 0, &sessions, &[], &[]);

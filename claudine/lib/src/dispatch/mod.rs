@@ -51,6 +51,23 @@ pub async fn dispatch(
 
     meta.env = env.clone();
 
+    // If the wrapper injected a session ID and the adapter didn't extract one
+    // from the payload, use the wrapper's session ID for consistent grouping.
+    if meta.session_id.is_none() {
+        if let Ok(wrapper_sid) = std::env::var("CLAUDINE_SESSION_ID") {
+            if !wrapper_sid.trim().is_empty() {
+                meta.session_id = Some(wrapper_sid);
+            }
+        }
+    }
+
+    // Propagate wrapper interactivity flag into extra for reporting.
+    if let Ok(interactive) = std::env::var("CLAUDINE_INTERACTIVE") {
+        meta.extra
+            .entry("interactive".to_string())
+            .or_insert_with(|| Value::String(interactive));
+    }
+
     info!(%provider, %event, "Dispatching event");
 
     let config = match loader::load_runtime_config(None, runtime_repo_root(env)) {

@@ -54,6 +54,10 @@ impl ProviderAdapter for QwenAdapter {
             }
         }
 
+        // Capture usage from assistant-message and result-style payloads.
+        // Qwen may nest usage at root or under a child object.
+        capture_qwen_usage(&mut meta.extra, raw);
+
         Ok((event, meta))
     }
 
@@ -155,6 +159,60 @@ fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
+/// Capture and normalize Qwen usage fields.
+///
+/// Qwen headless stream emits `usage` on both `assistant` and `result` events.
+/// The field may be at the root or nested under a child object. We preserve the
+/// raw `usage` object and normalize into the shared `token_usage` shape.
+///
+/// Only writes `cost_usd` when the provider includes an actual cost value.
+fn capture_qwen_usage(extra: &mut HashMap<String, Value>, raw: &Value) {
+    let usage = raw
+        .get("usage")
+        .or_else(|| raw.get("result").and_then(|r| r.get("usage")));
+
+    let Some(usage) = usage else { return };
+
+    // Preserve raw provider-native object
+    extra.insert("usage".to_string(), usage.clone());
+
+    // Normalize — Qwen field names may vary; try common shapes
+    let input = usage
+        .get("input_tokens")
+        .or_else(|| usage.get("prompt_tokens"))
+        .and_then(Value::as_u64);
+    let output = usage
+        .get("output_tokens")
+        .or_else(|| usage.get("completion_tokens"))
+        .and_then(Value::as_u64);
+    let total = usage
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| match (input, output) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        });
+    let cache_read = usage
+        .get("cached_tokens")
+        .or_else(|| usage.get("cache_read_tokens"))
+        .and_then(Value::as_u64);
+
+    let normalized = json!({
+        "total": total,
+        "input": input,
+        "output": output,
+        "cache_read": cache_read,
+    });
+    extra.insert("token_usage".to_string(), normalized);
+
+    // Only write cost_usd when provider gives us a real value
+    if let Some(cost) = usage.get("cost").or_else(|| raw.get("cost")) {
+        if cost.is_number() {
+            extra.insert("cost_usd".to_string(), cost.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -172,6 +230,84 @@ mod tests {
         let (event, meta) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::PermissionRequest);
         assert_eq!(meta.extra["can_use_tool_timeout_secs"], json!(60));
+    }
+
+    #[test]
+    fn parse_assistant_message_with_usage_normalizes_token_usage() {
+        let adapter = QwenAdapter;
+        let raw = json!({
+            "event_name": "StreamAssistantMessage",
+            "usage": {
+                "input_tokens": 2000,
+                "output_tokens": 500,
+                "total_tokens": 2500
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::AfterModel);
+
+        // Raw usage preserved
+        assert_eq!(meta.extra["usage"]["input_tokens"], json!(2000));
+
+        // Normalized token_usage
+        assert_eq!(meta.extra["token_usage"]["input"], json!(2000));
+        assert_eq!(meta.extra["token_usage"]["output"], json!(500));
+        assert_eq!(meta.extra["token_usage"]["total"], json!(2500));
+    }
+
+    #[test]
+    fn parse_result_with_nested_usage() {
+        let adapter = QwenAdapter;
+        let raw = json!({
+            "event_name": "StreamResult",
+            "result": {
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 300,
+                    "cached_tokens": 800
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::SessionEnd);
+
+        assert_eq!(meta.extra["token_usage"]["input"], json!(1000));
+        assert_eq!(meta.extra["token_usage"]["output"], json!(300));
+        assert_eq!(meta.extra["token_usage"]["cache_read"], json!(800));
+        assert_eq!(meta.extra["token_usage"]["total"], json!(1300));
+    }
+
+    #[test]
+    fn qwen_cost_usd_only_when_provider_gives_it() {
+        let adapter = QwenAdapter;
+
+        // Without cost
+        let raw_no_cost = json!({
+            "event_name": "StreamAssistantMessage",
+            "usage": { "input_tokens": 100, "output_tokens": 50 }
+        });
+        let (_, meta) = adapter.parse_event(&raw_no_cost).unwrap();
+        assert!(!meta.extra.contains_key("cost_usd"));
+
+        // With cost
+        let raw_with_cost = json!({
+            "event_name": "StreamAssistantMessage",
+            "usage": { "input_tokens": 100, "output_tokens": 50, "cost": 0.003 }
+        });
+        let (_, meta) = adapter.parse_event(&raw_with_cost).unwrap();
+        assert_eq!(meta.extra["cost_usd"], json!(0.003));
+    }
+
+    #[test]
+    fn qwen_no_usage_no_extra_keys() {
+        let adapter = QwenAdapter;
+        let raw = json!({ "event_name": "StreamSessionStart" });
+
+        let (_, meta) = adapter.parse_event(&raw).unwrap();
+        assert!(!meta.extra.contains_key("usage"));
+        assert!(!meta.extra.contains_key("token_usage"));
     }
 
     #[test]

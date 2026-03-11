@@ -4,6 +4,7 @@ pub mod dispatch;
 pub mod error;
 pub mod markdown;
 pub mod message;
+pub mod prelude;
 #[doc(hidden)]
 pub mod prepared;
 pub mod provider;
