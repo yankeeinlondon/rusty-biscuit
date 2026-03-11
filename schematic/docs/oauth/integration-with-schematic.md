@@ -12,6 +12,9 @@ last_updated: 2026-03-10
 ---
 # OAuth Integration with Schematic
 
+> Note
+> This document started as a forward-looking design analysis on 2026-03-10. The current runtime model now uses `AuthPolicy` for accepted explicit auth methods, `EnvMapping` for env fallback, and `SchematicError::AuthenticationRequired` for missing credentials. OAuth token acquisition itself lives in `schematic-oauth`; generated clients only accept an already-obtained token, typically through `.oauth_token(...)` or explicit `Headers`.
+
 This document analyzes the integration points, definition patterns, code generation challenges, and version considerations for adding OAuth authentication support to the schematic ecosystem.
 
 ---
@@ -645,4 +648,3 @@ The incremental effort to add OAuth 1.0a later is manageable if the OAuth 2.0 im
 3. **Evaluate `oauth2` crate integration** — determine whether generated clients should depend on the `oauth2` crate for token exchange or implement it directly with `reqwest`
 4. **Design the `TokenStore` trait** — decide whether it lives in a new `schematic-runtime` crate or is generated per-client
 5. **Implement Client Credentials flow first** — it's the simplest OAuth 2.0 flow (no browser interaction) and validates the core token lifecycle
-
