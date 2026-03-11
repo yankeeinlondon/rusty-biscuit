@@ -73,6 +73,10 @@ pub struct WrapperArgs {
     #[arg(long, conflicts_with = "quiet")]
     pub silent: bool,
 
+    /// Set the OPERATION env var for the wrapped session.
+    #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
+    pub operation: Option<String>,
+
     /// Enable provider-specific sandboxing.
     #[arg(long)]
     pub sandbox: bool,
@@ -197,6 +201,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
             deferred_warnings.push(warn);
         }
+    }
+
+    // Universal --operation flag
+    if let Some(ref op) = args.operation {
+        env_overrides.push(("OPERATION".to_string(), op.clone()));
     }
 
     // Universal --sandbox flag
