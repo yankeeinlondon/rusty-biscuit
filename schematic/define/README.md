@@ -18,6 +18,9 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS); supports `FromStr`, `TryFrom<String>` |
 | `AuthStrategy` | Authentication configuration (Bearer, API Key header/query/cookie, Basic, OAuth2, None) |
+| `AuthPolicy` | Explicit auth methods accepted by a client plus its env-fallback strategy |
+| `AuthMethod` | Explicit runtime auth methods (Bearer, API Key, Basic, OAuth2 token) |
+| `EnvAuthStrategy` | Environment-backed auth fallback shape for generated REST clients |
 | `ApiKeyLocation` | Location for API key auth (Query, Cookie) |
 | `OAuth2Config` | OAuth2 provider configuration (endpoints, grant type, PKCE) |
 | `OAuth2GrantType` | OAuth2 grant type (AuthorizationCodePkce, ClientCredentials, DeviceCode) |
@@ -106,10 +109,19 @@ The definition process is intentionally **data-driven**: you describe *what* the
 
 ## Authentication Strategies
 
-Authentication is configured in two parts:
+Authentication can be modeled in two ways:
 
-1. `AuthStrategy` on `RestApi::auth` - defines *how* auth is applied
-2. `env_auth`, `env_username` on `RestApi` - defines *where* credentials come from
+1. `RestApi::auth` with legacy `env_auth` / `env_username` fields for backward-compatible single-strategy auth
+2. `RestApi::auth_policy` plus `EnvMapping` for explicit multi-method auth and authoritative env fallback
+
+Generated clients always apply this precedence:
+
+1. Explicit auth already attached to `Headers`
+2. Explicit auth injected with generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, or `.oauth_token(...)`
+3. Environment-variable fallback from `EnvMapping`
+4. `SchematicError::AuthenticationRequired`
+
+Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before runtime auth resolution.
 
 ### Bearer Token (Most Common)
 
@@ -213,7 +225,56 @@ let api = RestApi {
 };
 ```
 
-OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients return `SchematicError::OAuthAuthenticationRequired` if no bearer token is provided, directing users to obtain a token via `schematic-oauth` and inject it with `variant_with_headers()`.
+OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients surface `SchematicError::AuthenticationRequired` when no acceptable credential is available and, for OAuth-enabled clients, point callers to `schematic-oauth` before injecting the token with `.oauth_token(...)` or an explicit `Headers` builder.
+
+### Multi-Method Auth Policy
+
+Use `auth_policy` when one client should accept more than one explicit auth method while keeping a single env fallback source:
+
+```rust
+use schematic_define::{
+    AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, OAuth2ClientAuthMethod,
+    OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi,
+};
+
+let api = RestApi {
+    auth: AuthStrategy::ApiKey {
+        header: "PRIVATE-TOKEN".to_string(),
+    },
+    auth_policy: Some(AuthPolicy {
+        explicit: vec![
+            AuthMethod::ApiKey {
+                header: "PRIVATE-TOKEN".to_string(),
+            },
+            AuthMethod::OAuth2(OAuth2Config {
+                grant_type: OAuth2GrantType::AuthorizationCodePkce,
+                authorization_url: Some("https://example.com/oauth/authorize".into()),
+                token_url: "https://example.com/oauth/token".into(),
+                revocation_url: None,
+                device_authorization_url: None,
+                default_scopes: vec!["read_api".into()],
+                pkce: PkceRequirement::Required,
+                client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+            }),
+        ],
+        env_fallback: Some(EnvAuthStrategy::ApiKey {
+            header: "PRIVATE-TOKEN".to_string(),
+        }),
+    }),
+    env_auth: vec!["GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()],
+    // ...
+    # name: "Example".to_string(),
+    # description: "Example".to_string(),
+    # base_url: "https://example.com/api".to_string(),
+    # docs_url: None,
+    # env_username: None,
+    # headers: vec![],
+    # endpoints: vec![],
+    # module_path: None,
+    # request_suffix: None,
+    # env_mapping: None,
+};
+```
 
 ### Endpoint-Level OAuth2 Scopes
 
@@ -239,12 +300,19 @@ If `oauth_scopes` is `None`, the API-level `default_scopes` from `OAuth2Config` 
 
 ### Missing Credentials
 
-If required credentials are not found in the environment, the generated code returns a `SchematicError::MissingCredential` error with the list of env vars that were checked:
+If neither explicit auth nor environment fallback can satisfy the API requirements, the generated code returns `SchematicError::AuthenticationRequired`:
 
 ```rust
-// Generated error when no credentials found
-Err(SchematicError::MissingCredential {
-    env_vars: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
+Err(SchematicError::AuthenticationRequired {
+    message: "Authentication required: an explicit API key in `PRIVATE-TOKEN`, an explicit OAuth access token or set one of the fallback env vars `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`.".to_string(),
+    explicit_methods: vec![
+        "an explicit API key in `PRIVATE-TOKEN`".to_string(),
+        "an explicit OAuth access token".to_string(),
+    ],
+    env_fallback_vars: vec![
+        "GITLAB_TOKEN".to_string(),
+        "GITLAB_PRIVATE_TOKEN".to_string(),
+    ],
 })
 ```
 
@@ -271,7 +339,7 @@ let client = SomeApi::new()
     .build();
 ```
 
-When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. The generated code checks `headers.has_authorization()` and bypasses the environment variable lookup if authorization is already set programmatically.
+When `Headers` has explicit auth set via `use_bearer_token()`, `use_basic_auth()`, or `use_api_key()`, env-based auth fallback is automatically skipped. The generated code checks `headers.has_explicit_auth()` so explicit API keys now win over env fallback the same way bearer/basic auth already did.
 
 This is useful for:
 
@@ -323,8 +391,8 @@ let headers = Headers::default()
     .build()
     .unwrap();
 
-// Check if authorization is set
-assert!(headers.has_authorization());
+// Check whether any explicit auth has been attached
+assert!(headers.has_explicit_auth());
 ```
 
 ### Headers Methods
@@ -344,7 +412,8 @@ assert!(headers.has_authorization());
 | `with_env_mapping(mapping)` | Configure env var mapping |
 | `from_env()` | Load credentials from environment (permissive) |
 | `try_from_env()` | Load credentials from environment (strict) |
-| `has_authorization()` | Check if auth is set |
+| `has_authorization()` | Check whether the `Authorization` header is set |
+| `has_explicit_auth()` | Check if any explicit auth is set |
 
 ### Environment Variable Loading
 

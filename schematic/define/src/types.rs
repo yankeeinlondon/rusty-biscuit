@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
-use crate::auth::AuthStrategy;
+use crate::auth::{AuthPolicy, AuthStrategy, EnvAuthStrategy};
 use crate::headers::{EnvList, EnvMapping};
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
@@ -91,6 +91,7 @@ pub enum RestMethod {
 ///     base_url: "https://api.example.com/v1".to_string(),
 ///     docs_url: None,
 ///     auth: AuthStrategy::None,
+///     auth_policy: None,
 ///     env_auth: vec![],
 ///     env_username: None,
 ///     headers: vec![],
@@ -109,6 +110,7 @@ pub enum RestMethod {
 ///     ],
 ///     module_path: None,
 ///     request_suffix: None,
+///     version: None,
 ///     env_mapping: None,
 /// };
 ///
@@ -132,6 +134,13 @@ pub struct RestApi {
     pub docs_url: Option<String>,
     /// Authentication strategy for this API.
     pub auth: AuthStrategy,
+    /// Structured authentication policy for this API.
+    ///
+    /// Use this when the client should accept multiple explicit auth methods,
+    /// such as "explicit OAuth token or explicit API key, with API-key env
+    /// fallback". If `None`, the generator derives a backward-compatible policy
+    /// from [`Self::auth`].
+    pub auth_policy: Option<AuthPolicy>,
     /// Environment variable names for authentication credentials.
     ///
     /// For `BearerToken` and `ApiKey` auth strategies, this is a fallback chain.
@@ -165,6 +174,11 @@ pub struct RestApi {
     /// This allows APIs to customize the naming of request structs. For example,
     /// using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
     pub request_suffix: Option<String>,
+    /// Semantic version of this API definition (e.g., `"1.0.0"`).
+    ///
+    /// Used as the `info.version` field in exported OpenAPI documents.
+    /// If `None`, the exporter falls back to `ExportOptions::version`, then `"1.0.0"`.
+    pub version: Option<String>,
     /// Environment variable mapping for authentication credentials.
     ///
     /// This provides a structured way to configure which environment variables to check
@@ -182,12 +196,14 @@ pub struct RestApi {
     ///     base_url: "https://api.example.com".to_string(),
     ///     docs_url: None,
     ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     auth_policy: None,
     ///     env_auth: vec![],
     ///     env_username: None,
     ///     headers: vec![],
     ///     endpoints: vec![],
     ///     module_path: None,
     ///     request_suffix: None,
+    ///     version: None,
     ///     env_mapping: Some(EnvMapping {
     ///         bearer_token: Some(EnvList::from_strs(&["API_KEY", "TOKEN"])),
     ///         basic_user: None,
@@ -223,12 +239,14 @@ impl RestApi {
     ///     base_url: "https://api.example.com".to_string(),
     ///     docs_url: None,
     ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     auth_policy: None,
     ///     env_auth: vec![],
     ///     env_username: None,
     ///     headers: vec![],
     ///     endpoints: vec![],
     ///     module_path: None,
     ///     request_suffix: None,
+    ///     version: None,
     ///     env_mapping: Some(EnvMapping {
     ///         bearer_token: Some(EnvList::from_strs(&["CUSTOM_TOKEN"])),
     ///         basic_user: None,
@@ -253,12 +271,14 @@ impl RestApi {
     ///     base_url: "https://api.example.com".to_string(),
     ///     docs_url: None,
     ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     auth_policy: None,
     ///     env_auth: vec!["OPENAI_API_KEY".to_string()],
     ///     env_username: None,
     ///     headers: vec![],
     ///     endpoints: vec![],
     ///     module_path: None,
     ///     request_suffix: None,
+    ///     version: None,
     ///     env_mapping: None,
     /// };
     ///
@@ -272,36 +292,49 @@ impl RestApi {
             return mapping.clone();
         }
 
-        // Otherwise, build from legacy fields for backward compatibility
-        // If env_username is set, this is basic auth (env_auth contains password)
-        // Otherwise, env_auth contains bearer token
-        let (bearer_token, basic_user, basic_pass) =
-            if let Some(ref username_env) = self.env_username {
-                // Basic auth mode
-                let user = Some(EnvList::single(username_env.clone()));
-                let pass = if !self.env_auth.is_empty() {
-                    // For basic auth, password comes from first element of env_auth
-                    Some(EnvList::single(self.env_auth[0].clone()))
-                } else {
-                    None
-                };
-                (None, user, pass)
-            } else {
-                // Bearer token mode (or no auth)
-                let bearer = if !self.env_auth.is_empty() {
-                    Some(EnvList::new(self.env_auth.clone()))
-                } else {
-                    None
-                };
-                (bearer, None, None)
-            };
+        Self::legacy_env_mapping_for(&self.auth, &self.env_auth, self.env_username.as_deref())
+    }
 
-        EnvMapping {
-            bearer_token,
-            basic_user,
-            basic_pass,
-            api_key: None,
-        ..Default::default()
+    /// Returns the effective authentication policy for this API.
+    ///
+    /// If [`Self::auth_policy`] is set, it is used directly. Otherwise a
+    /// backward-compatible policy is derived from [`Self::auth`].
+    #[must_use]
+    pub fn effective_auth_policy(&self) -> AuthPolicy {
+        self.auth_policy
+            .clone()
+            .unwrap_or_else(|| AuthPolicy::from_auth_strategy(&self.auth))
+    }
+
+    /// Builds an [`EnvMapping`] from the legacy auth fields.
+    ///
+    /// This is used by the generator to preserve the existing `env_auth` /
+    /// `env_username` authoring API while routing runtime behavior through
+    /// [`EnvMapping`].
+    #[must_use]
+    pub fn legacy_env_mapping_for(
+        auth: &AuthStrategy,
+        env_auth: &[String],
+        env_username: Option<&str>,
+    ) -> EnvMapping {
+        match AuthPolicy::from_auth_strategy(auth).env_fallback {
+            Some(EnvAuthStrategy::BearerToken { .. }) => EnvMapping {
+                bearer_token: (!env_auth.is_empty()).then(|| EnvList::new(env_auth.to_vec())),
+                ..Default::default()
+            },
+            Some(EnvAuthStrategy::ApiKey { header }) => EnvMapping {
+                api_key: (!env_auth.is_empty()).then(|| crate::headers::ApiKeyEnv {
+                    names: EnvList::new(env_auth.to_vec()),
+                    header,
+                }),
+                ..Default::default()
+            },
+            Some(EnvAuthStrategy::Basic) => EnvMapping {
+                basic_user: env_username.map(EnvList::single),
+                basic_pass: env_auth.first().cloned().map(EnvList::single),
+                ..Default::default()
+            },
+            None => EnvMapping::default(),
         }
     }
 }
@@ -505,12 +538,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["IGNORED_ENV".to_string()],
             env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: Some(explicit_mapping.clone()),
         };
 
@@ -530,12 +565,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
             env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 
@@ -558,12 +595,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::Basic,
+            auth_policy: None,
             env_auth: vec!["API_PASSWORD".to_string()],
             env_username: Some("API_USERNAME".to_string()),
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 
@@ -584,12 +623,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 
@@ -608,12 +649,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::Basic,
+            auth_policy: None,
             env_auth: vec![], // Empty env_auth
             env_username: Some("API_USERNAME".to_string()),
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 
@@ -647,12 +690,14 @@ mod tests {
             auth: AuthStrategy::ApiKey {
                 header: "Authorization".to_string(),
             },
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: Some(explicit_mapping.clone()),
         };
 
@@ -680,12 +725,14 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: Some(explicit_mapping),
         };
 

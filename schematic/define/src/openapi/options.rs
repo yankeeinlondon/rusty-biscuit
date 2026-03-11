@@ -60,10 +60,13 @@ impl ExportOptions {
         self
     }
 
-    /// Returns the version string, defaulting to "1.0.0".
+    /// Returns the explicit version from options, if set.
+    ///
+    /// The caller should prefer the API's own `version` field as the primary
+    /// source, falling back to this, then to `"1.0.0"`.
     #[must_use]
-    pub fn version_or_default(&self) -> &str {
-        self.version.as_deref().unwrap_or("1.0.0")
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
     }
 }
 
@@ -160,15 +163,15 @@ mod tests {
     }
 
     #[test]
-    fn export_options_version_or_default_with_none() {
+    fn export_options_version_none_by_default() {
         let opts = ExportOptions::new();
-        assert_eq!(opts.version_or_default(), "1.0.0");
+        assert_eq!(opts.version(), None);
     }
 
     #[test]
-    fn export_options_version_or_default_with_some() {
+    fn export_options_version_returns_set_value() {
         let opts = ExportOptions::new().with_version("2.5.0");
-        assert_eq!(opts.version_or_default(), "2.5.0");
+        assert_eq!(opts.version(), Some("2.5.0"));
     }
 
     #[test]

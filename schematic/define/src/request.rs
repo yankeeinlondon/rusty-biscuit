@@ -718,6 +718,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             docs_url: Some("https://docs.example.com".to_string()),
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["FILE_SERVICE_API_KEY".to_string()],
             env_username: None,
             headers: vec![],
@@ -779,6 +780,7 @@ mod tests {
             ],
             module_path: None,
             request_suffix: None,
+            version: None,
             env_mapping: None,
         };
 

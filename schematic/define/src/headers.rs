@@ -392,6 +392,8 @@ pub struct Headers {
     user_agent: Option<String>,
     /// Custom headers (name, value pairs).
     custom: Vec<(String, String)>,
+    /// Custom header names that were supplied as explicit authentication.
+    explicit_auth_headers: Vec<String>,
     /// Environment variable mapping for dynamic credential resolution.
     env_mapping: EnvMapping,
 }
@@ -437,6 +439,12 @@ impl Headers {
         self
     }
 
+    /// Returns the configured environment-variable mapping.
+    #[must_use]
+    pub fn env_mapping(&self) -> &EnvMapping {
+        &self.env_mapping
+    }
+
     /// Set Bearer token authentication.
     ///
     /// This sets the Authorization header to "Bearer {token}".
@@ -456,6 +464,28 @@ impl Headers {
     /// ```
     pub fn use_bearer_token(mut self, token: impl Into<String>) -> Self {
         self.authorization = Some(SensitiveString::new(format!("Bearer {}", token.into())));
+        self
+    }
+
+    /// Set bearer-token authentication using a custom header name.
+    ///
+    /// For the standard `Authorization` header this behaves the same as
+    /// [`use_bearer_token`](Self::use_bearer_token). For custom headers, the
+    /// value is written as `Bearer <token>` and marked as explicit auth.
+    pub fn use_bearer_token_with_header(
+        mut self,
+        token: impl Into<String>,
+        header_name: impl Into<String>,
+    ) -> Self {
+        let header_name = header_name.into();
+        if header_name.eq_ignore_ascii_case("Authorization") {
+            return self.use_bearer_token(token);
+        }
+
+        self.explicit_auth_headers
+            .retain(|existing| existing != &header_name);
+        self.explicit_auth_headers.push(header_name.clone());
+        self = self.header(header_name, format!("Bearer {}", token.into()));
         self
     }
 
@@ -506,7 +536,11 @@ impl Headers {
     /// assert_eq!(headers[0].0, "X-API-Key");
     /// assert_eq!(headers[0].1, "my-key");
     /// ```
-    pub fn use_api_key(self, key: impl Into<String>, header_name: impl Into<String>) -> Self {
+    pub fn use_api_key(mut self, key: impl Into<String>, header_name: impl Into<String>) -> Self {
+        let header_name = header_name.into();
+        self.explicit_auth_headers
+            .retain(|existing| existing != &header_name);
+        self.explicit_auth_headers.push(header_name.clone());
         self.header(header_name, key)
     }
 
@@ -655,6 +689,7 @@ impl Headers {
     pub fn remove(mut self, name: &str) -> Self {
         // Remove from custom headers
         self.custom.retain(|(k, _)| k != name);
+        self.explicit_auth_headers.retain(|header| header != name);
 
         // Remove from standard headers
         match name {
@@ -784,6 +819,11 @@ impl Headers {
         mapping: &EnvMapping,
         strict: bool,
     ) -> Result<Self, HeaderError> {
+        // Any explicit auth takes precedence over environment fallback.
+        if self.has_explicit_auth() {
+            return Ok(self);
+        }
+
         // Only load ENV values if authorization is not already set
         if self.authorization.is_none() {
             // Try bearer token
@@ -862,6 +902,39 @@ impl Headers {
     #[must_use]
     pub fn has_authorization(&self) -> bool {
         self.authorization.is_some()
+    }
+
+    /// Returns `true` if any explicit auth has been set programmatically.
+    ///
+    /// This includes:
+    /// - bearer tokens via [`use_bearer_token`](Self::use_bearer_token)
+    /// - basic auth via [`use_basic_auth`](Self::use_basic_auth)
+    /// - API keys via [`use_api_key`](Self::use_api_key)
+    #[must_use]
+    pub fn has_explicit_auth(&self) -> bool {
+        self.authorization.is_some()
+            || self
+                .explicit_auth_headers
+                .iter()
+                .any(|header| self.custom.iter().any(|(name, _)| name == header))
+    }
+
+    /// Returns `true` if a header with the given name is present.
+    #[must_use]
+    pub fn has_header(&self, name: &str) -> bool {
+        if name.eq_ignore_ascii_case("Authorization") {
+            return self.authorization.is_some();
+        }
+
+        self.custom
+            .iter()
+            .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+            || match name {
+                "Content-Type" => self.content_type.is_some(),
+                "Accept" => self.accept.is_some(),
+                "User-Agent" => self.user_agent.is_some(),
+                _ => false,
+            }
     }
 
     /// Build the final header list.
@@ -1510,6 +1583,20 @@ mod tests {
     }
 
     #[test]
+    fn headers_has_explicit_auth_true_after_api_key() {
+        let headers = Headers::default().use_api_key("key", "X-API-Key");
+        assert!(headers.has_explicit_auth());
+    }
+
+    #[test]
+    fn headers_has_explicit_auth_false_after_api_key_remove() {
+        let headers = Headers::default()
+            .use_api_key("key", "X-API-Key")
+            .remove("X-API-Key");
+        assert!(!headers.has_explicit_auth());
+    }
+
+    #[test]
     fn headers_has_authorization_false_after_remove() {
         let headers = Headers::default()
             .use_bearer_token("token")
@@ -1674,6 +1761,75 @@ mod tests {
 
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn from_env_does_not_apply_bearer_fallback_when_api_key_is_explicit() {
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "sk-from-env");
+        }
+
+        let mapping = EnvMapping {
+            bearer_token: Some(EnvList::single("OPENAI_API_KEY")),
+            basic_user: None,
+            basic_pass: None,
+            api_key: None,
+            ..Default::default()
+        };
+
+        let headers = Headers {
+            env_mapping: mapping,
+            ..Default::default()
+        }
+        .use_api_key("hf-explicit", "X-API-Key")
+        .from_env();
+
+        let result = headers.build().unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "X-API-Key");
+        assert_eq!(result[0].1, "hf-explicit");
+
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn from_env_does_not_overwrite_explicit_api_key() {
+        unsafe {
+            std::env::set_var("HF_TOKEN", "hf-from-env");
+        }
+
+        let mapping = EnvMapping {
+            bearer_token: None,
+            basic_user: None,
+            basic_pass: None,
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::single("HF_TOKEN"),
+                header: "X-API-Key".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let headers = Headers {
+            env_mapping: mapping,
+            ..Default::default()
+        }
+        .use_api_key("hf-explicit", "X-API-Key")
+        .from_env();
+
+        let result = headers.build().unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "X-API-Key");
+        assert_eq!(result[0].1, "hf-explicit");
+
+        unsafe {
+            std::env::remove_var("HF_TOKEN");
         }
     }
 

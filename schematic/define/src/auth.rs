@@ -172,6 +172,111 @@ pub enum AuthStrategy {
     OAuth2(OAuth2Config),
 }
 
+/// Explicit authentication methods accepted by a generated REST client.
+///
+/// Unlike [`AuthStrategy`], this type models what callers may provide
+/// programmatically at runtime. A client may accept several explicit methods
+/// while only falling back to one environment-based strategy.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthMethod {
+    /// Explicit bearer token, typically sent as `Authorization: Bearer <token>`.
+    BearerToken {
+        /// Optional header name override.
+        header: Option<String>,
+    },
+    /// Explicit API key sent in a custom header.
+    ApiKey {
+        /// Header name (e.g. `X-API-Key`).
+        header: String,
+    },
+    /// Explicit HTTP basic auth credentials.
+    Basic,
+    /// Explicit OAuth2 bearer token obtained out-of-band.
+    OAuth2(OAuth2Config),
+}
+
+/// Environment-backed authentication strategy used as a fallback.
+///
+/// This is intentionally separate from [`AuthMethod`] because OAuth2 metadata
+/// may be accepted explicitly without implying that OAuth credentials can be
+/// loaded from environment variables.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EnvAuthStrategy {
+    /// Bearer token fallback from [`crate::EnvMapping::bearer_token`].
+    BearerToken {
+        /// Optional header name override.
+        header: Option<String>,
+    },
+    /// API key fallback from [`crate::EnvMapping::api_key`].
+    ApiKey {
+        /// Header name (e.g. `X-API-Key`).
+        header: String,
+    },
+    /// Basic auth fallback from [`crate::EnvMapping::basic_user`] and
+    /// [`crate::EnvMapping::basic_pass`].
+    Basic,
+}
+
+/// Authentication policy for generated REST clients.
+///
+/// This decouples the explicit auth methods accepted by the client from the
+/// environment-based fallback used when the caller does not inject credentials.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthPolicy {
+    /// Explicit auth methods that callers may inject programmatically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub explicit: Vec<AuthMethod>,
+    /// Environment-based fallback strategy, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_fallback: Option<EnvAuthStrategy>,
+}
+
+impl AuthPolicy {
+    /// Builds a backward-compatible auth policy from a legacy [`AuthStrategy`].
+    #[must_use]
+    pub fn from_auth_strategy(auth: &AuthStrategy) -> Self {
+        match auth {
+            AuthStrategy::None => Self::default(),
+            AuthStrategy::BearerToken { header } => Self {
+                explicit: vec![AuthMethod::BearerToken {
+                    header: header.clone(),
+                }],
+                env_fallback: Some(EnvAuthStrategy::BearerToken {
+                    header: header.clone(),
+                }),
+            },
+            AuthStrategy::ApiKey { header } => Self {
+                explicit: vec![AuthMethod::ApiKey {
+                    header: header.clone(),
+                }],
+                env_fallback: Some(EnvAuthStrategy::ApiKey {
+                    header: header.clone(),
+                }),
+            },
+            AuthStrategy::Basic => Self {
+                explicit: vec![AuthMethod::Basic],
+                env_fallback: Some(EnvAuthStrategy::Basic),
+            },
+            AuthStrategy::OAuth2(config) => Self {
+                explicit: vec![AuthMethod::OAuth2(config.clone())],
+                env_fallback: None,
+            },
+            AuthStrategy::ApiKeyParam { .. } => Self::default(),
+        }
+    }
+
+    /// Returns the first configured OAuth2 provider metadata, if any.
+    #[must_use]
+    pub fn oauth2(&self) -> Option<&OAuth2Config> {
+        self.explicit.iter().find_map(|method| match method {
+            AuthMethod::OAuth2(config) => Some(config),
+            _ => None,
+        })
+    }
+}
+
 /// Location for API key authentication.
 ///
 /// Specifies where an API key is sent when using the `ApiKeyParam` auth strategy.
@@ -253,6 +358,57 @@ pub enum UpdateStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_policy_from_bearer_strategy_supports_explicit_and_env_fallback() {
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::BearerToken { header: None });
+        assert_eq!(
+            policy.explicit,
+            vec![AuthMethod::BearerToken { header: None }]
+        );
+        assert_eq!(
+            policy.env_fallback,
+            Some(EnvAuthStrategy::BearerToken { header: None })
+        );
+    }
+
+    #[test]
+    fn auth_policy_from_api_key_strategy_supports_explicit_and_env_fallback() {
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::ApiKey {
+            header: "X-API-Key".to_string(),
+        });
+        assert_eq!(
+            policy.explicit,
+            vec![AuthMethod::ApiKey {
+                header: "X-API-Key".to_string(),
+            }]
+        );
+        assert_eq!(
+            policy.env_fallback,
+            Some(EnvAuthStrategy::ApiKey {
+                header: "X-API-Key".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn auth_policy_from_oauth_strategy_is_explicit_only() {
+        let config = OAuth2Config {
+            grant_type: crate::oauth::OAuth2GrantType::AuthorizationCodePkce,
+            authorization_url: Some("https://example.com/authorize".to_string()),
+            token_url: "https://example.com/token".to_string(),
+            revocation_url: None,
+            device_authorization_url: None,
+            default_scopes: vec!["read".to_string()],
+            pkce: crate::oauth::PkceRequirement::Required,
+            client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretPost,
+        };
+
+        let policy = AuthPolicy::from_auth_strategy(&AuthStrategy::OAuth2(config.clone()));
+        assert_eq!(policy.explicit, vec![AuthMethod::OAuth2(config.clone())]);
+        assert!(policy.env_fallback.is_none());
+        assert_eq!(policy.oauth2(), Some(&config));
+    }
 
     // ========== ApiKeyLocation Tests ==========
 

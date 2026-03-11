@@ -395,12 +395,14 @@ impl OpenApiImport {
             base_url,
             docs_url: doc.external_docs.as_ref().map(|ext| ext.url.clone()),
             auth,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             headers: vec![],
             endpoints,
             module_path: self.options.module_path.clone(),
             request_suffix: None,
+            version: None,
             env_mapping: None,
         })
     }

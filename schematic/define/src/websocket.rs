@@ -29,6 +29,7 @@
 //!     docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
 //!     auth: AuthStrategy::ApiKey { header: "xi-api-key".to_string() },
 //!     env_auth: vec!["ELEVEN_LABS_API_KEY".to_string()],
+//!     version: None,
 //!     endpoints: vec![
 //!         WebSocketEndpoint {
 //!             id: "TextToSpeech".to_string(),
@@ -605,6 +606,7 @@ pub struct WebSocketEndpoint {
 ///     docs_url: Some("https://docs.example.com/websocket".to_string()),
 ///     auth: AuthStrategy::BearerToken { header: None },
 ///     env_auth: vec!["STREAM_API_KEY".to_string()],
+///     version: None,
 ///     endpoints: vec![],
 ///     runtime: None,
 /// };
@@ -636,6 +638,12 @@ pub struct WebSocketApi {
     /// Works the same as [`crate::RestApi::env_auth`]: a fallback chain
     /// where the first set env var is used.
     pub env_auth: Vec<String>,
+    /// Semantic version of this API definition (e.g., `"1.0.0"`).
+    ///
+    /// Used as the `info.version` field in exported API documents.
+    /// If `None`, falls back to a default of `"1.0.0"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<WebSocketEndpoint>,
     /// Optional runtime hints for code generation.
@@ -882,6 +890,7 @@ mod tests {
             docs_url: Some("https://docs.example.com".to_string()),
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["TEST_API_KEY".to_string()],
+            version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Echo".to_string(),
                 path: "/echo".to_string(),
@@ -927,6 +936,7 @@ mod tests {
                 docs_url: None,
                 auth: auth.clone(),
                 env_auth: vec![],
+                version: None,
                 endpoints: vec![],
                 runtime: None,
             };
@@ -1139,6 +1149,7 @@ mod tests {
             docs_url: None,
             auth: AuthStrategy::None,
             env_auth: vec![],
+            version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Echo".to_string(),
                 path: "/echo".to_string(),
@@ -1180,6 +1191,7 @@ mod tests {
                 "ELEVEN_LABS_API_KEY".to_string(),
                 "ELEVENLABS_API_KEY".to_string(),
             ],
+            version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "TextToSpeech".to_string(),
                 path: "/text-to-speech/{voice_id}/stream-input".to_string(),

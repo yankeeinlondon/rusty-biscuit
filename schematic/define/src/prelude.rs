@@ -15,12 +15,14 @@
 //!     base_url: "https://api.example.com".to_string(),
 //!     docs_url: None,
 //!     auth: AuthStrategy::BearerToken { header: None },
+//!     auth_policy: None,
 //!     env_auth: vec!["API_KEY".to_string()],
 //!     env_username: None,
 //!     headers: vec![],
 //!     endpoints: vec![],
 //!     module_path: None,
 //!     request_suffix: None,
+//!     version: None,
 //!     env_mapping: None,
 //! };
 //! ```
@@ -37,12 +39,13 @@
 //!     docs_url: None,
 //!     auth: AuthStrategy::BearerToken { header: None },
 //!     env_auth: vec!["STREAM_KEY".to_string()],
+//!     version: None,
 //!     endpoints: vec![],
 //!     runtime: None,
 //! };
 //! ```
 
-pub use crate::auth::{AuthStrategy, UpdateStrategy};
+pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
 pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use crate::params::{EndpointParams, PaginationResponse, PaginationStyle};
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};

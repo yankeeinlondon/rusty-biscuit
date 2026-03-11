@@ -11,7 +11,8 @@
 //! - [`RestApi`] - A complete REST API definition with base URL, auth, and endpoints
 //! - [`Endpoint`] - A single API endpoint with method, path, and schemas
 //! - [`RestMethod`] - HTTP methods (GET, POST, PUT, etc.)
-//! - [`AuthStrategy`] - Authentication strategies (Bearer, API Key, Basic, None)
+//! - [`AuthStrategy`] - Legacy single-strategy authentication model
+//! - [`AuthPolicy`] - Explicit auth methods plus environment fallback policy
 //! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
@@ -72,6 +73,7 @@
 //!     base_url: "https://api.openai.com/v1".to_string(),
 //!     docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
 //!     auth: AuthStrategy::BearerToken { header: None },
+//!     auth_policy: None,
 //!     env_auth: vec!["OPENAI_API_KEY".to_string()],
 //!     env_username: None,
 //!     headers: vec![],
@@ -90,6 +92,7 @@
 //!     ],
 //!     module_path: None,
 //!     request_suffix: None,
+//!     version: None,
 //!     env_mapping: None,
 //! };
 //!
@@ -145,7 +148,7 @@ pub mod websocket;
 pub mod openapi;
 
 // Re-export main types at crate root
-pub use auth::{ApiKeyLocation, AuthStrategy, UpdateStrategy};
+pub use auth::{ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
 pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
