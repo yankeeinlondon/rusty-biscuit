@@ -14,7 +14,10 @@ pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
 pub use crate::components::renderable::{Renderable, RenderableContent};
 pub use crate::components::section::{HeadingLevel, Section};
-pub use crate::components::table::table::{Table, TableCellContent, TableColumn};
+pub use crate::components::table::table::{
+    MeasuredColumn, Table, TableCellContent, TableColumn, TableWidthError, TableWidthMeasurements,
+    TableWidthPlan,
+};
 pub use crate::components::table::types::{ColumnType, Currency, VerticalAlign};
 pub use crate::components::terminal_image::TerminalImage;
 pub use crate::components::terminal_image::{

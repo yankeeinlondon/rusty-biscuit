@@ -7,6 +7,7 @@ use crate::{
         layout::{Alignment, Layout, RowFill, WordWrap},
     },
 };
+use thiserror::Error;
 
 use super::types::{ColumnType, Currency, VerticalAlign};
 use crate::discovery::detection::{ColorDepth, ColorMode};
@@ -256,6 +257,14 @@ impl Conditional {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum DropBehavior {
+    #[default]
+    Keep,
+    DropSilently,
+    DropWithMessage(String),
+}
+
 /// Column definition for a table.
 ///
 /// A `TableColumn` defines the header, data type, width constraints, alignment,
@@ -346,6 +355,8 @@ pub struct TableColumn {
     /// Defaults to `Conditional::Always`. Use [`TableColumn::with_when`] to
     /// make a column appear only when the terminal is wide enough.
     pub when: Conditional,
+    /// Controls whether this column may be dropped when the table cannot fit.
+    drop_behavior: DropBehavior,
 }
 
 impl TableColumn {
@@ -363,6 +374,7 @@ impl TableColumn {
             vertical_align: VerticalAlign::default(),
             uniform_alignment: false,
             when: Conditional::default(),
+            drop_behavior: DropBehavior::Keep,
         }
     }
 
@@ -382,6 +394,7 @@ impl TableColumn {
             vertical_align: VerticalAlign::default(),
             uniform_alignment: false,
             when: Conditional::default(),
+            drop_behavior: DropBehavior::Keep,
         }
     }
 
@@ -507,6 +520,19 @@ impl TableColumn {
         self
     }
 
+    /// Allow this column to be dropped when the table cannot fit.
+    ///
+    /// Passing `Some(message)` records a note that is appended after the
+    /// rendered table if this column is dropped. Passing `None` drops the
+    /// column silently.
+    pub fn drop_when_space_is_limited<T: Into<String>>(mut self, msg: Option<T>) -> Self {
+        self.drop_behavior = match msg {
+            Some(message) => DropBehavior::DropWithMessage(message.into()),
+            None => DropBehavior::DropSilently,
+        };
+        self
+    }
+
     /// Returns the effective alignment: explicit override or column type default.
     pub fn effective_alignment(&self) -> Alignment {
         self.alignment
@@ -524,6 +550,17 @@ impl TableColumn {
         self.word_wrap
             .clone()
             .unwrap_or_else(|| self.column_type.default_word_wrap())
+    }
+
+    fn drop_note(&self) -> Option<String> {
+        match &self.drop_behavior {
+            DropBehavior::DropWithMessage(message) => Some(message.clone()),
+            DropBehavior::Keep | DropBehavior::DropSilently => None,
+        }
+    }
+
+    fn is_droppable(&self) -> bool {
+        !matches!(self.drop_behavior, DropBehavior::Keep)
     }
 }
 
@@ -629,6 +666,119 @@ pub struct Table {
     alternate_text_color: bool,
 }
 
+/// Measured width facts for a single visible table column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeasuredColumn {
+    pub original_index: usize,
+    pub header_width: usize,
+    pub header_line_width: usize,
+    pub cell_max_width: usize,
+    pub cell_line_max_width: usize,
+    pub columnar_width_requirement: usize,
+    pub fixed_width: Option<usize>,
+    pub min_width: Option<usize>,
+    pub max_width: Option<usize>,
+    pub effective_word_wrap: WordWrap,
+    pub natural_break_width: usize,
+    pub resolved_width: usize,
+    pub is_non_wrapping: bool,
+    pub is_shrinkable: bool,
+    pub drop_note: Option<String>,
+    pub header_lines: Vec<String>,
+}
+
+/// Table-level measurements captured before a final width fit is resolved.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableWidthMeasurements {
+    pub available_render_width: usize,
+    pub border_overhead: usize,
+    pub content_budget: usize,
+    pub fixed_width_consumption: usize,
+    pub non_wrapping_consumption: usize,
+    pub working_width: usize,
+    pub word_wrap_needed: bool,
+    pub columns: Vec<MeasuredColumn>,
+}
+
+/// Final table width plan shared by all rendering paths.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableWidthPlan {
+    pub available_render_width: usize,
+    pub visible_column_indices: Vec<usize>,
+    pub dropped_column_indices: Vec<usize>,
+    pub columns: Vec<MeasuredColumn>,
+    pub table_width: usize,
+    pub dropped_notes: Vec<String>,
+}
+
+/// Structured width planning errors for tables.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum TableWidthError {
+    #[error("Table could not be rendered because no columns are visible.")]
+    NoVisibleColumns,
+    #[error(
+        "Table could not be rendered in {available_render_width} columns. Fixed-width columns require {required_width} content columns before borders."
+    )]
+    InsufficientWidthForFixedColumns {
+        available_render_width: usize,
+        border_overhead: usize,
+        content_budget: usize,
+        fixed_width_consumption: usize,
+        non_wrapping_consumption: usize,
+        required_width: usize,
+        blocking_column_indices: Vec<usize>,
+        droppable_columns_available: bool,
+    },
+    #[error(
+        "Table could not be rendered in {available_render_width} columns. Fixed and non-wrapping columns require {required_width} content columns before borders."
+    )]
+    InsufficientWidthForNonWrappingColumns {
+        available_render_width: usize,
+        border_overhead: usize,
+        content_budget: usize,
+        fixed_width_consumption: usize,
+        non_wrapping_consumption: usize,
+        required_width: usize,
+        blocking_column_indices: Vec<usize>,
+        droppable_columns_available: bool,
+    },
+    #[error(
+        "Table could not be rendered in {available_render_width} columns. Wrapping columns need at least {required_width} content columns after fixed and non-wrapping columns are reserved."
+    )]
+    InsufficientWidthForWrappingColumns {
+        available_render_width: usize,
+        border_overhead: usize,
+        content_budget: usize,
+        fixed_width_consumption: usize,
+        non_wrapping_consumption: usize,
+        required_width: usize,
+        blocking_column_indices: Vec<usize>,
+        droppable_columns_available: bool,
+    },
+    #[error(
+        "Table could not be rendered in {available_render_width} columns even after dropping eligible columns."
+    )]
+    InsufficientWidthAfterDropping {
+        available_render_width: usize,
+        border_overhead: usize,
+        content_budget: usize,
+        fixed_width_consumption: usize,
+        non_wrapping_consumption: usize,
+        required_width: usize,
+        blocking_column_indices: Vec<usize>,
+        dropped_column_indices: Vec<usize>,
+    },
+}
+
+impl TableWidthPlan {
+    fn content_widths(&self) -> Vec<usize> {
+        self.columns
+            .iter()
+            .map(|column| column.resolved_width)
+            .collect()
+    }
+}
+
 impl Table {
     /// Create a new empty table.
     pub fn new() -> Self {
@@ -704,6 +854,8 @@ impl Table {
     ///
     /// Returns `None` when all columns are already visible (no filtering
     /// needed), avoiding an unnecessary clone.
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn with_visible_columns(&self, available_width: u32) -> Option<Table> {
         let visible: Vec<usize> = self
             .columns
@@ -740,160 +892,580 @@ impl Table {
         })
     }
 
-    /// Calculate column widths based on content and available space.
-    ///
-    /// If `available_width` is provided, the total table width (including borders)
-    /// will be constrained to fit within that space. Width reduction is distributed
-    /// proportionally among text columns that allow word wrap, while fixed-width
-    /// and numeric columns are not reduced.
-    fn calculate_column_widths(&self, available_width: Option<u32>) -> Vec<usize> {
-        let num_cols = self
-            .columns
-            .len()
-            .max(self.data.iter().map(|row| row.len()).max().unwrap_or(0));
+    /// Return the width budget available to the table after margins resolve.
+    pub fn available_render_width(&self, terminal_width: u32) -> u32 {
+        self.layout.available_width(terminal_width)
+    }
 
-        if num_cols == 0 {
+    /// Measure the currently visible columns without dropping any columns.
+    pub fn measure_widths(
+        &self,
+        terminal_width: u32,
+    ) -> Result<TableWidthMeasurements, TableWidthError> {
+        let available_render_width = self.available_render_width(terminal_width) as usize;
+        let visible_indices =
+            self.visible_column_indices(self.available_render_width(terminal_width));
+        self.measure_widths_for_indices(available_render_width, &visible_indices)
+    }
+
+    /// Produce the full width plan used by table rendering.
+    pub fn plan_widths(&self, terminal_width: u32) -> Result<TableWidthPlan, TableWidthError> {
+        let available_render_width = self.available_render_width(terminal_width) as usize;
+        self.plan_widths_for_render_width(available_render_width)
+    }
+
+    /// Return whether this table would need wrapping or truncation at the given width.
+    pub fn would_wrap(&self, terminal_width: u32) -> Result<bool, TableWidthError> {
+        Ok(self.measure_widths(terminal_width)?.word_wrap_needed)
+    }
+
+    /// Compatibility helper retained for existing tests.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn calculate_column_widths(&self, available_width: Option<u32>) -> Vec<usize> {
+        let available_render_width = available_width.unwrap_or(u32::MAX) as usize;
+        if self.total_column_count() == 0 {
             return Vec::new();
         }
 
-        let mut widths = vec![0; num_cols];
-        let mut fixed = vec![false; num_cols];
+        match self.plan_widths_for_render_width(available_render_width) {
+            Ok(plan) => plan.content_widths(),
+            Err(_) => {
+                let visible_indices = self
+                    .visible_column_indices(available_render_width.min(u32::MAX as usize) as u32);
+                self.measure_widths_for_indices(available_render_width, &visible_indices)
+                    .map(|measurements| {
+                        let mut widths: Vec<usize> = measurements
+                            .columns
+                            .iter()
+                            .map(|column| column.columnar_width_requirement)
+                            .collect();
+                        if let Some(available) = available_width {
+                            compatibility_constrain_widths(
+                                &mut widths,
+                                &measurements.columns,
+                                available as usize,
+                            );
+                        }
+                        widths
+                    })
+                    .unwrap_or_default()
+            }
+        }
+    }
 
-        // Consider header widths
-        for (i, col) in self.columns.iter().enumerate() {
-            if let Some(fixed_width) = col.fixed_width {
-                widths[i] = fixed_width;
-                fixed[i] = true;
-                continue;
+    fn plan_widths_for_render_width(
+        &self,
+        available_render_width: usize,
+    ) -> Result<TableWidthPlan, TableWidthError> {
+        let mut visible_indices = self.visible_column_indices(available_render_width as u32);
+        if visible_indices.is_empty() {
+            return Err(TableWidthError::NoVisibleColumns);
+        }
+
+        let mut dropped_column_indices = Vec::new();
+        let mut dropped_notes = Vec::new();
+
+        loop {
+            let measurements =
+                self.measure_widths_for_indices(available_render_width, &visible_indices)?;
+
+            match self.resolve_width_plan(
+                available_render_width,
+                visible_indices.clone(),
+                measurements,
+                dropped_column_indices.clone(),
+                dropped_notes.clone(),
+            ) {
+                Ok(plan) => return Ok(plan),
+                Err(error) => {
+                    let droppable = visible_indices.iter().enumerate().rev().find_map(
+                        |(position, original_index)| {
+                            self.column_definition(*original_index)
+                                .filter(|column| column.is_droppable())
+                                .map(|_| (position, *original_index))
+                        },
+                    );
+
+                    let Some((drop_position, dropped_index)) = droppable else {
+                        return if dropped_column_indices.is_empty() {
+                            Err(error)
+                        } else {
+                            Err(self.into_after_drop_error(error, dropped_column_indices.clone()))
+                        };
+                    };
+
+                    visible_indices.remove(drop_position);
+                    dropped_column_indices.push(dropped_index);
+                    if let Some(note) = self
+                        .column_definition(dropped_index)
+                        .and_then(TableColumn::drop_note)
+                    {
+                        dropped_notes.push(note);
+                    }
+
+                    if visible_indices.is_empty() {
+                        return Err(TableWidthError::InsufficientWidthAfterDropping {
+                            available_render_width,
+                            border_overhead: 0,
+                            content_budget: 0,
+                            fixed_width_consumption: 0,
+                            non_wrapping_consumption: 0,
+                            required_width: 0,
+                            blocking_column_indices: Vec::new(),
+                            dropped_column_indices,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn measure_widths_for_indices(
+        &self,
+        available_render_width: usize,
+        visible_indices: &[usize],
+    ) -> Result<TableWidthMeasurements, TableWidthError> {
+        if visible_indices.is_empty() {
+            return Err(TableWidthError::NoVisibleColumns);
+        }
+
+        let border_overhead = table_border_overhead(visible_indices.len());
+        let content_budget = available_render_width.saturating_sub(border_overhead);
+
+        let columns: Vec<MeasuredColumn> = visible_indices
+            .iter()
+            .map(|&original_index| self.measure_column(original_index))
+            .collect();
+
+        let fixed_width_consumption = columns
+            .iter()
+            .filter(|column| column.fixed_width.is_some())
+            .map(|column| column.resolved_width)
+            .sum();
+
+        let non_wrapping_consumption = columns
+            .iter()
+            .filter(|column| column.fixed_width.is_none() && column.is_non_wrapping)
+            .map(|column| column.columnar_width_requirement)
+            .sum();
+
+        let full_unwrapped_content_width: usize = columns
+            .iter()
+            .map(|column| column.columnar_width_requirement)
+            .sum();
+
+        let reserved_width = fixed_width_consumption + non_wrapping_consumption;
+        let working_width = content_budget.saturating_sub(reserved_width);
+        let word_wrap_needed = full_unwrapped_content_width > content_budget;
+
+        Ok(TableWidthMeasurements {
+            available_render_width,
+            border_overhead,
+            content_budget,
+            fixed_width_consumption,
+            non_wrapping_consumption,
+            working_width,
+            word_wrap_needed,
+            columns,
+        })
+    }
+
+    fn resolve_width_plan(
+        &self,
+        available_render_width: usize,
+        visible_column_indices: Vec<usize>,
+        mut measurements: TableWidthMeasurements,
+        dropped_column_indices: Vec<usize>,
+        dropped_notes: Vec<String>,
+    ) -> Result<TableWidthPlan, TableWidthError> {
+        let content_budget = measurements.content_budget;
+        let reserved_width =
+            measurements.fixed_width_consumption + measurements.non_wrapping_consumption;
+
+        if measurements.fixed_width_consumption > content_budget {
+            return Err(self.build_width_error(
+                &measurements,
+                WidthFailureKind::Fixed,
+                measurements.fixed_width_consumption,
+            ));
+        }
+
+        if reserved_width > content_budget {
+            return Err(self.build_width_error(
+                &measurements,
+                WidthFailureKind::NonWrapping,
+                reserved_width,
+            ));
+        }
+
+        if !measurements.word_wrap_needed {
+            for column in &mut measurements.columns {
+                if column.fixed_width.is_none() {
+                    column.resolved_width = column.columnar_width_requirement;
+                }
             }
 
-            // Use prose header for width calculation if present, otherwise use plain header
-            let header_width = if let Some(ref prose) = col.header_prose {
-                visible_width(prose.content())
-            } else {
-                visible_width(&col.header)
-            };
-            widths[i] = header_width as usize;
-            if let Some(min) = col.min_width {
-                widths[i] = widths[i].max(min);
+            let table_width = table_total_width(
+                measurements
+                    .columns
+                    .iter()
+                    .map(|column| column.resolved_width)
+                    .collect(),
+            );
+
+            return Ok(TableWidthPlan {
+                available_render_width,
+                visible_column_indices,
+                dropped_column_indices,
+                columns: measurements.columns,
+                table_width,
+                dropped_notes,
+            });
+        }
+
+        let natural_break_total: usize = measurements
+            .columns
+            .iter()
+            .filter(|column| column.is_shrinkable)
+            .map(|column| column.natural_break_width)
+            .sum();
+
+        if natural_break_total > measurements.working_width {
+            let required_width = reserved_width + natural_break_total;
+            return Err(self.build_width_error(
+                &measurements,
+                WidthFailureKind::Wrapping,
+                required_width,
+            ));
+        }
+
+        for column in &mut measurements.columns {
+            if column.is_shrinkable {
+                column.resolved_width = column.natural_break_width;
             }
         }
 
-        // Consider data widths
-        for row in &self.data {
-            for (i, cell) in row.iter().enumerate() {
-                if i < widths.len() {
-                    if fixed.get(i).copied().unwrap_or(false) {
-                        continue;
-                    }
-                    let cell_width = visible_width(&cell.to_string()) as usize;
-                    widths[i] = widths[i].max(cell_width);
+        let mut surplus = measurements
+            .working_width
+            .saturating_sub(natural_break_total);
+        if surplus > 0 {
+            for column in &mut measurements.columns {
+                if !column.is_shrinkable {
+                    continue;
+                }
+
+                let desired = column
+                    .columnar_width_requirement
+                    .saturating_sub(column.resolved_width);
+                let grant = desired.min(surplus);
+                column.resolved_width += grant;
+                surplus = surplus.saturating_sub(grant);
+
+                if surplus == 0 {
+                    break;
                 }
             }
         }
 
-        // Apply max width constraints (ensuring max_width doesn't go below min_width)
-        for (i, col) in self.columns.iter().enumerate() {
-            if fixed.get(i).copied().unwrap_or(false) {
-                continue;
-            }
-            if let Some(max) = col.max_width
-                && i < widths.len()
-            {
-                let min = col.min_width.unwrap_or(0);
-                widths[i] = widths[i].min(max).max(min);
-            }
-        }
+        let table_width = table_total_width(
+            measurements
+                .columns
+                .iter()
+                .map(|column| column.resolved_width)
+                .collect(),
+        );
 
-        // If available_width is specified, constrain total table width
-        if let Some(available) = available_width {
-            self.constrain_widths_to_available(&mut widths, &fixed, available as usize);
-        }
-
-        widths
+        Ok(TableWidthPlan {
+            available_render_width,
+            visible_column_indices,
+            dropped_column_indices,
+            columns: measurements.columns,
+            table_width,
+            dropped_notes,
+        })
     }
 
-    /// Constrain column widths to fit within available space.
-    ///
-    /// Border overhead: `│ ` (2) at start + ` │` (2) at end + ` │ ` (3) between each column.
-    /// Total: 2 + sum(widths) + 2 + (n-1)*3 = 4 + sum(widths) + 3*(n-1) for n > 0
-    fn constrain_widths_to_available(
+    fn visible_column_indices(&self, available_width: u32) -> Vec<usize> {
+        (0..self.total_column_count())
+            .filter(|index| {
+                self.column_definition(*index)
+                    .map(|column| column.when.is_satisfied(available_width))
+                    .unwrap_or(true)
+            })
+            .collect()
+    }
+
+    fn total_column_count(&self) -> usize {
+        self.columns
+            .len()
+            .max(self.data.iter().map(|row| row.len()).max().unwrap_or(0))
+    }
+
+    fn column_definition(&self, column_index: usize) -> Option<&TableColumn> {
+        self.columns.get(column_index)
+    }
+
+    fn measure_column(&self, column_index: usize) -> MeasuredColumn {
+        let default_column = TableColumn::new("");
+        let column = self
+            .column_definition(column_index)
+            .unwrap_or(&default_column);
+        let header_content = column
+            .header_prose
+            .as_ref()
+            .map(|prose| prose.content())
+            .unwrap_or(&column.header);
+        let header_lines = split_lines(header_content);
+        let header_width = visible_width(header_content) as usize;
+        let header_line_width = measure_max_explicit_line_width(header_content);
+
+        let formatted_cells = self.formatted_column_cells(column_index);
+        let cell_max_width = formatted_cells
+            .iter()
+            .map(|cell| visible_width(cell) as usize)
+            .max()
+            .unwrap_or(0);
+        let cell_line_max_width = formatted_cells
+            .iter()
+            .map(|cell| measure_max_explicit_line_width(cell))
+            .max()
+            .unwrap_or(0);
+
+        let normalized_min_width = column.min_width;
+        let normalized_max_width = normalize_max_width(column.min_width, column.max_width);
+        let effective_word_wrap = column.effective_word_wrap();
+        let unclamped_requirement = header_line_width.max(cell_line_max_width);
+        let is_non_wrapping = matches!(effective_word_wrap, WordWrap::None);
+        let is_shrinkable = !is_non_wrapping && column.fixed_width.is_none();
+
+        let resolved_requirement = if let Some(fixed_width) = column.fixed_width {
+            fixed_width
+        } else {
+            apply_width_constraints(
+                unclamped_requirement,
+                normalized_min_width,
+                normalized_max_width,
+            )
+        };
+
+        let natural_break_width = if let Some(fixed_width) = column.fixed_width {
+            fixed_width
+        } else {
+            natural_break_width(
+                header_content,
+                &formatted_cells,
+                &effective_word_wrap,
+                normalized_min_width,
+                normalized_max_width,
+                resolved_requirement,
+            )
+        };
+
+        MeasuredColumn {
+            original_index: column_index,
+            header_width,
+            header_line_width,
+            cell_max_width,
+            cell_line_max_width,
+            columnar_width_requirement: resolved_requirement,
+            fixed_width: column.fixed_width,
+            min_width: normalized_min_width,
+            max_width: normalized_max_width,
+            effective_word_wrap,
+            natural_break_width,
+            resolved_width: resolved_requirement,
+            is_non_wrapping,
+            is_shrinkable,
+            drop_note: column.drop_note(),
+            header_lines,
+        }
+    }
+
+    fn formatted_column_cells(&self, column_index: usize) -> Vec<String> {
+        self.data
+            .iter()
+            .filter_map(|row| row.get(column_index))
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn build_width_error(
         &self,
-        widths: &mut [usize],
-        fixed: &[bool],
-        available: usize,
-    ) {
-        if widths.is_empty() {
-            return;
-        }
-
-        // Calculate border overhead: start(2) + end(2) + separators(3*(n-1))
-        let border_overhead = 4 + (widths.len().saturating_sub(1)) * 3;
-        let max_content_width = available.saturating_sub(border_overhead);
-
-        let current_content_width: usize = widths.iter().sum();
-        if current_content_width <= max_content_width {
-            return; // Already fits
-        }
-
-        // Calculate how much we need to reduce
-        let excess = current_content_width.saturating_sub(max_content_width);
-
-        // Identify reducible columns (text columns that allow word wrap, aren't fixed,
-        // and don't have min_width - columns with min_width are treated as non-reducible)
-        let mut reducible: Vec<(usize, usize)> = Vec::new(); // (index, current_width)
-        for (i, &width) in widths.iter().enumerate() {
-            if fixed.get(i).copied().unwrap_or(false) {
-                continue;
-            }
-            // Columns with min_width should not be reduced - treat them as fixed
-            let has_min_width = self.columns.get(i).and_then(|col| col.min_width).is_some();
-            if has_min_width {
-                continue;
-            }
-            let allows_reduction = self
+        measurements: &TableWidthMeasurements,
+        kind: WidthFailureKind,
+        required_width: usize,
+    ) -> TableWidthError {
+        let blocking_column_indices = match kind {
+            WidthFailureKind::Fixed => measurements
                 .columns
-                .get(i)
-                .map(|col| col.column_type.allows_word_wrap_override())
-                .unwrap_or(true); // Default to allowing reduction for columns without definitions
-            if allows_reduction && width > 0 {
-                reducible.push((i, width));
-            }
-        }
-
-        if reducible.is_empty() {
-            return; // No columns can be reduced
-        }
-
-        // Distribute reduction proportionally among reducible columns
-        let total_reducible: usize = reducible.iter().map(|(_, w)| w).sum();
-        if total_reducible == 0 {
-            return;
-        }
-
-        let mut remaining_excess = excess;
-        for (idx, current_width) in reducible {
-            // Proportional share of the reduction
-            let share =
-                (current_width as f64 / total_reducible as f64 * excess as f64).ceil() as usize;
-            let reduction = share.min(remaining_excess);
-
-            // Get minimum width constraint
-            let min_width = self
+                .iter()
+                .filter(|column| column.fixed_width.is_some())
+                .map(|column| column.original_index)
+                .collect(),
+            WidthFailureKind::NonWrapping => measurements
                 .columns
-                .get(idx)
-                .and_then(|col| col.min_width)
-                .unwrap_or(1); // Minimum 1 character
+                .iter()
+                .filter(|column| column.fixed_width.is_some() || column.is_non_wrapping)
+                .map(|column| column.original_index)
+                .collect(),
+            WidthFailureKind::Wrapping => measurements
+                .columns
+                .iter()
+                .filter(|column| column.is_shrinkable)
+                .map(|column| column.original_index)
+                .collect(),
+        };
+        let droppable_columns_available = measurements.columns.iter().any(|column| {
+            self.column_definition(column.original_index)
+                .map(|definition| definition.is_droppable())
+                .unwrap_or(false)
+        });
 
-            let new_width = current_width.saturating_sub(reduction).max(min_width);
-            let actual_reduction = current_width.saturating_sub(new_width);
-            widths[idx] = new_width;
-            remaining_excess = remaining_excess.saturating_sub(actual_reduction);
-
-            if remaining_excess == 0 {
-                break;
+        match kind {
+            WidthFailureKind::Fixed => TableWidthError::InsufficientWidthForFixedColumns {
+                available_render_width: measurements.available_render_width,
+                border_overhead: measurements.border_overhead,
+                content_budget: measurements.content_budget,
+                fixed_width_consumption: measurements.fixed_width_consumption,
+                non_wrapping_consumption: measurements.non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                droppable_columns_available,
+            },
+            WidthFailureKind::NonWrapping => {
+                TableWidthError::InsufficientWidthForNonWrappingColumns {
+                    available_render_width: measurements.available_render_width,
+                    border_overhead: measurements.border_overhead,
+                    content_budget: measurements.content_budget,
+                    fixed_width_consumption: measurements.fixed_width_consumption,
+                    non_wrapping_consumption: measurements.non_wrapping_consumption,
+                    required_width,
+                    blocking_column_indices,
+                    droppable_columns_available,
+                }
             }
+            WidthFailureKind::Wrapping => TableWidthError::InsufficientWidthForWrappingColumns {
+                available_render_width: measurements.available_render_width,
+                border_overhead: measurements.border_overhead,
+                content_budget: measurements.content_budget,
+                fixed_width_consumption: measurements.fixed_width_consumption,
+                non_wrapping_consumption: measurements.non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                droppable_columns_available,
+            },
         }
+    }
+
+    fn into_after_drop_error(
+        &self,
+        error: TableWidthError,
+        dropped_column_indices: Vec<usize>,
+    ) -> TableWidthError {
+        match error {
+            TableWidthError::InsufficientWidthForFixedColumns {
+                available_render_width,
+                border_overhead,
+                content_budget,
+                fixed_width_consumption,
+                non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                ..
+            }
+            | TableWidthError::InsufficientWidthForNonWrappingColumns {
+                available_render_width,
+                border_overhead,
+                content_budget,
+                fixed_width_consumption,
+                non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                ..
+            }
+            | TableWidthError::InsufficientWidthForWrappingColumns {
+                available_render_width,
+                border_overhead,
+                content_budget,
+                fixed_width_consumption,
+                non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                ..
+            } => TableWidthError::InsufficientWidthAfterDropping {
+                available_render_width,
+                border_overhead,
+                content_budget,
+                fixed_width_consumption,
+                non_wrapping_consumption,
+                required_width,
+                blocking_column_indices,
+                dropped_column_indices,
+            },
+            other => other,
+        }
+    }
+
+    fn max_content_widths_for_plan(&self, plan: &TableWidthPlan) -> Vec<usize> {
+        plan.columns
+            .iter()
+            .map(|column| {
+                self.data
+                    .iter()
+                    .filter_map(|row| row.get(column.original_index))
+                    .map(|cell| visible_width(&cell.to_string()) as usize)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect()
+    }
+
+    fn max_content_widths_for_cursor_plan(&self, plan: &TableWidthPlan) -> Vec<Option<u32>> {
+        plan.columns
+            .iter()
+            .map(|column| {
+                let is_uniform = self
+                    .column_definition(column.original_index)
+                    .map(|definition| definition.uniform_alignment)
+                    .unwrap_or(false);
+
+                if is_uniform {
+                    Some(
+                        self.data
+                            .iter()
+                            .filter_map(|row| row.get(column.original_index))
+                            .map(|cell| visible_width(&cell.to_string()))
+                            .max()
+                            .unwrap_or(0),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn calculate_row_heights_for_plan(&self, plan: &TableWidthPlan) -> Vec<usize> {
+        self.data
+            .iter()
+            .map(|row| {
+                let mut max_height = 1;
+                for column in &plan.columns {
+                    let strategy = self
+                        .column_definition(column.original_index)
+                        .map(|definition| definition.effective_word_wrap())
+                        .unwrap_or(WordWrap::None);
+                    let content = row
+                        .get(column.original_index)
+                        .map(ToString::to_string)
+                        .unwrap_or_default();
+                    let wrapped = wrap_cell_content(&content, &strategy, column.resolved_width);
+                    max_height = max_height.max(wrapped.len());
+                }
+                max_height
+            })
+            .collect()
     }
 
     /// Render the table content with multi-line cell support.
@@ -909,30 +1481,19 @@ impl Table {
         stripe_color_mode: Option<&ColorMode>,
         text_color_mode: Option<&ColorMode>,
     ) -> String {
-        // If any columns are conditionally hidden at this width, build a
-        // filtered table and delegate to it.
-        if let Some(aw) = available_width
-            && let Some(filtered) = self.with_visible_columns(aw)
-        {
-            return filtered.render_content(available_width, stripe_color_mode, text_color_mode);
+        if self.total_column_count() == 0 {
+            return self.title.clone().unwrap_or_default();
         }
 
         let mut result = String::new();
-        let widths = self.calculate_column_widths(available_width);
+        let plan =
+            match self.plan_widths_for_render_width(available_width.unwrap_or(u32::MAX) as usize) {
+                Ok(plan) => plan,
+                Err(error) => return error.to_string(),
+            };
+        let widths = plan.content_widths();
 
-        // Calculate max content width per column for consistent alignment.
-        // Only consider data rows, not headers (headers are separated by border
-        // and don't need to align with data content).
-        let max_content_widths: Vec<usize> = (0..widths.len())
-            .map(|col_idx| {
-                self.data
-                    .iter()
-                    .filter_map(|row| row.get(col_idx))
-                    .map(|cell| visible_width(&cell.to_string()) as usize)
-                    .max()
-                    .unwrap_or(0)
-            })
-            .collect();
+        let max_content_widths = self.max_content_widths_for_plan(&plan);
 
         if let Some(ref title) = self.title {
             result.push_str(title);
@@ -946,22 +1507,16 @@ impl Table {
         }
 
         // Render header row with multi-line support (explicit newlines only, no word wrap)
-        if !self.columns.is_empty() {
-            // Calculate header height based on explicit newlines
-            let header_lines: Vec<Vec<String>> = self
+        if !plan.columns.is_empty() {
+            let header_lines: Vec<Vec<String>> = plan
                 .columns
                 .iter()
-                .enumerate()
-                .map(|(i, col)| {
-                    let width = widths.get(i).copied().unwrap_or(col.header.len());
-                    // Use prose content for header if present, otherwise use plain header
-                    let header_content = col
-                        .header_prose
-                        .as_ref()
-                        .map(|p| p.content())
-                        .unwrap_or(&col.header);
-                    // Headers use None strategy (no word wrap), only split on explicit newlines
-                    wrap_cell_content(header_content, &WordWrap::None, width)
+                .map(|column_plan| {
+                    let column = self.column_definition(column_plan.original_index);
+                    let header_content = column
+                        .and_then(|col| col.header_prose.as_ref().map(|p| p.content()))
+                        .unwrap_or_else(|| column.map(|col| col.header.as_str()).unwrap_or(""));
+                    wrap_cell_content(header_content, &WordWrap::None, column_plan.resolved_width)
                 })
                 .collect();
 
@@ -978,8 +1533,7 @@ impl Table {
                 .map(|(i, lines)| {
                     let width = widths.get(i).copied().unwrap_or(0);
                     let vertical_align = self
-                        .columns
-                        .get(i)
+                        .column_definition(plan.columns[i].original_index)
                         .map(|col| col.vertical_align)
                         .unwrap_or(VerticalAlign::Top);
                     apply_vertical_padding(lines, header_height, vertical_align, width)
@@ -991,16 +1545,19 @@ impl Table {
             // don't need to align with data rows.
             for line_idx in 0..header_height {
                 let mut header_row = String::from("│ ");
-                for (i, col) in self.columns.iter().enumerate() {
-                    let width = widths.get(i).copied().unwrap_or(col.header.len());
-                    let alignment = col.effective_alignment();
+                for (i, column_plan) in plan.columns.iter().enumerate() {
+                    let width = widths.get(i).copied().unwrap_or(column_plan.resolved_width);
+                    let alignment = self
+                        .column_definition(column_plan.original_index)
+                        .map(TableColumn::effective_alignment)
+                        .unwrap_or(Alignment::Left);
                     let line_content = padded_headers
                         .get(i)
                         .and_then(|lines| lines.get(line_idx))
                         .map(|s| s.as_str())
                         .unwrap_or("");
                     header_row.push_str(&pad_cell(line_content, width, alignment, None));
-                    if i < self.columns.len() - 1 {
+                    if i < plan.columns.len() - 1 {
                         header_row.push_str(" │ ");
                     }
                 }
@@ -1016,7 +1573,7 @@ impl Table {
         }
 
         // Calculate row heights for multi-line support
-        let row_heights = calculate_row_heights(&self.data, &self.columns, &widths);
+        let row_heights = self.calculate_row_heights_for_plan(&plan);
 
         // Resolve stripe escape once (if enabled)
         let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
@@ -1038,21 +1595,22 @@ impl Table {
             };
 
             // Prepare wrapped and vertically-aligned content for each cell
-            let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(row.len());
-            for (i, cell) in row.iter().enumerate() {
+            let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(plan.columns.len());
+            for (i, column_plan) in plan.columns.iter().enumerate() {
                 let width = widths.get(i).copied().unwrap_or(0);
                 let strategy = self
-                    .columns
-                    .get(i)
+                    .column_definition(column_plan.original_index)
                     .map(|col| col.effective_word_wrap())
                     .unwrap_or(WordWrap::None);
                 let vertical_align = self
-                    .columns
-                    .get(i)
+                    .column_definition(column_plan.original_index)
                     .map(|col| col.vertical_align)
                     .unwrap_or(VerticalAlign::Top);
 
-                let content = cell.to_string();
+                let content = row
+                    .get(column_plan.original_index)
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 let wrapped = wrap_cell_content(&content, &strategy, width);
                 let padded = apply_vertical_padding(wrapped, row_height, vertical_align, width);
                 cell_lines.push(padded);
@@ -1070,11 +1628,11 @@ impl Table {
                     row_str.push_str(fg);
                 }
                 row_str.push(' ');
-                for (i, _cell) in row.iter().enumerate() {
+                for (i, column_plan) in plan.columns.iter().enumerate() {
                     let width = widths.get(i).copied().unwrap_or(0);
-                    let col = self.columns.get(i);
+                    let col = self.column_definition(column_plan.original_index);
                     let alignment = col
-                        .map(|c| c.effective_alignment())
+                        .map(TableColumn::effective_alignment)
                         .unwrap_or(Alignment::Left);
                     // Only use max_content_width for columns with uniform_alignment enabled
                     let max_width = if col.map(|c| c.uniform_alignment).unwrap_or(false) {
@@ -1105,7 +1663,7 @@ impl Table {
                     } else {
                         row_str.push_str(&pad_cell(line_content, width, alignment, max_width));
                     }
-                    if i < row.len() - 1 {
+                    if i < plan.columns.len() - 1 {
                         row_str.push_str(" │ ");
                     }
                 }
@@ -1131,6 +1689,8 @@ impl Table {
             result.push('\n');
         }
 
+        append_dropped_notes_block(&mut result, &plan.dropped_notes, None, None);
+
         // Remove trailing newline
         if result.ends_with('\n') {
             result.pop();
@@ -1149,6 +1709,10 @@ impl Table {
         stripe_color_mode: Option<&ColorMode>,
         text_color_mode: Option<&ColorMode>,
     ) -> String {
+        if self.total_column_count() == 0 {
+            return self.title.clone().unwrap_or_default();
+        }
+
         let mut result = String::new();
 
         // Calculate margins first to determine available width for column calculation
@@ -1158,33 +1722,17 @@ impl Table {
             .saturating_sub(left_margin)
             .saturating_sub(right_margin);
 
-        // If any columns are conditionally hidden at this width, build a
-        // filtered table and delegate to it.
-        if let Some(filtered) = self.with_visible_columns(available_width) {
-            return filtered.render_with_cursor_positioning(
-                term_width,
-                stripe_color_mode,
-                text_color_mode,
-            );
-        }
-
-        let widths = self.calculate_column_widths(Some(available_width));
+        let plan = match self.plan_widths_for_render_width(available_width as usize) {
+            Ok(plan) => plan,
+            Err(error) => return error.to_string(),
+        };
+        let widths = plan.content_widths();
 
         if widths.is_empty() {
             return result;
         }
 
-        // Calculate table width: │ + space + col1 + space │ space + col2 + space │ ...
-        // Border chars: "│ " (2) at start + " │" (2) at end + " │ " (3) between columns
-        // Total: 2 + sum(widths) + 2 + 3*(n-1) = 4 + sum(widths) + 3*(n-1)
-        let table_content_width: usize = widths.iter().sum();
-        let table_border_width = if widths.is_empty() {
-            0
-        } else {
-            // start(2) + content + end(2) + separators(3*(n-1))
-            4 + table_content_width + (widths.len().saturating_sub(1)) * 3
-        };
-        let table_width = table_border_width as u32;
+        let table_width = plan.table_width as u32;
 
         // Calculate table start position based on block alignment
         let table_start = match self.layout.alignment {
@@ -1216,11 +1764,12 @@ impl Table {
         };
 
         // Collect column alignments
-        let alignments: Vec<Alignment> = (0..widths.len())
-            .map(|i| {
-                self.columns
-                    .get(i)
-                    .map(|col| col.effective_alignment())
+        let alignments: Vec<Alignment> = plan
+            .columns
+            .iter()
+            .map(|column| {
+                self.column_definition(column.original_index)
+                    .map(TableColumn::effective_alignment)
                     .unwrap_or(Alignment::Left)
             })
             .collect();
@@ -1229,27 +1778,7 @@ impl Table {
         // Only populated for columns with `uniform_alignment` enabled;
         // other columns use per-cell visible width so that right/center
         // alignment positions each cell individually.
-        let max_content_widths: Vec<Option<u32>> = (0..widths.len())
-            .map(|col_idx| {
-                let is_uniform = self
-                    .columns
-                    .get(col_idx)
-                    .map(|c| c.uniform_alignment)
-                    .unwrap_or(false);
-                if is_uniform {
-                    Some(
-                        self.data
-                            .iter()
-                            .filter_map(|row| row.get(col_idx))
-                            .map(|cell| visible_width(&cell.to_string()))
-                            .max()
-                            .unwrap_or(0),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let max_content_widths = self.max_content_widths_for_cursor_plan(&plan);
 
         // Render title (if present)
         if let Some(ref title) = self.title {
@@ -1276,21 +1805,16 @@ impl Table {
         result.push('\n');
 
         // Header row with multi-line support
-        if !self.columns.is_empty() {
-            // Calculate header height based on explicit newlines
-            let header_lines: Vec<Vec<String>> = self
+        if !plan.columns.is_empty() {
+            let header_lines: Vec<Vec<String>> = plan
                 .columns
                 .iter()
-                .enumerate()
-                .map(|(i, col)| {
-                    let width = widths.get(i).copied().unwrap_or(col.header.len());
-                    // Use prose content for header if present, otherwise use plain header
-                    let header_content = col
-                        .header_prose
-                        .as_ref()
-                        .map(|p| p.content())
-                        .unwrap_or(&col.header);
-                    wrap_cell_content(header_content, &WordWrap::None, width)
+                .map(|column_plan| {
+                    let column = self.column_definition(column_plan.original_index);
+                    let header_content = column
+                        .and_then(|col| col.header_prose.as_ref().map(|p| p.content()))
+                        .unwrap_or_else(|| column.map(|col| col.header.as_str()).unwrap_or(""));
+                    wrap_cell_content(header_content, &WordWrap::None, column_plan.resolved_width)
                 })
                 .collect();
 
@@ -1307,8 +1831,7 @@ impl Table {
                 .map(|(i, lines)| {
                     let width = widths.get(i).copied().unwrap_or(0);
                     let vertical_align = self
-                        .columns
-                        .get(i)
+                        .column_definition(plan.columns[i].original_index)
                         .map(|col| col.vertical_align)
                         .unwrap_or(VerticalAlign::Top);
                     apply_vertical_padding(lines, header_height, vertical_align, width)
@@ -1319,7 +1842,7 @@ impl Table {
             // Headers use traditional alignment (no max_content_width) since they
             // don't need to align with data rows.
             for line_idx in 0..header_height {
-                let line_cells: Vec<String> = (0..self.columns.len())
+                let line_cells: Vec<String> = (0..plan.columns.len())
                     .map(|i| {
                         padded_headers
                             .get(i)
@@ -1355,7 +1878,7 @@ impl Table {
         }
 
         // Calculate row heights for multi-line support
-        let row_heights = calculate_row_heights(&self.data, &self.columns, &widths);
+        let row_heights = self.calculate_row_heights_for_plan(&plan);
 
         // Resolve stripe escapes once (if enabled)
         let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
@@ -1366,21 +1889,22 @@ impl Table {
             let row_height = row_heights.get(row_idx).copied().unwrap_or(1);
 
             // Prepare wrapped and vertically-aligned content for each cell
-            let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(row.len());
-            for (i, cell) in row.iter().enumerate() {
+            let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(plan.columns.len());
+            for (i, column_plan) in plan.columns.iter().enumerate() {
                 let width = widths.get(i).copied().unwrap_or(0);
                 let strategy = self
-                    .columns
-                    .get(i)
+                    .column_definition(column_plan.original_index)
                     .map(|col| col.effective_word_wrap())
                     .unwrap_or(WordWrap::None);
                 let vertical_align = self
-                    .columns
-                    .get(i)
+                    .column_definition(column_plan.original_index)
                     .map(|col| col.vertical_align)
                     .unwrap_or(VerticalAlign::Top);
 
-                let content = cell.to_string();
+                let content = row
+                    .get(column_plan.original_index)
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 let wrapped = wrap_cell_content(&content, &strategy, width);
                 let padded = apply_vertical_padding(wrapped, row_height, vertical_align, width);
                 cell_lines.push(padded);
@@ -1388,7 +1912,7 @@ impl Table {
 
             // Render each line of the row
             for line_idx in 0..row_height {
-                let line_cells: Vec<String> = (0..row.len())
+                let line_cells: Vec<String> = (0..plan.columns.len())
                     .map(|i| {
                         cell_lines
                             .get(i)
@@ -1422,6 +1946,17 @@ impl Table {
             if end > border_end {
                 result.push_str(&" ".repeat((end - border_end) as usize));
             }
+        }
+        result.push('\n');
+        append_dropped_notes_block(
+            &mut result,
+            &plan.dropped_notes,
+            Some(table_start),
+            fill_end_col,
+        );
+
+        if result.ends_with('\n') {
+            result.pop();
         }
 
         result
@@ -1488,6 +2023,297 @@ impl Renderable for Table {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WidthFailureKind {
+    Fixed,
+    NonWrapping,
+    Wrapping,
+}
+
+fn table_border_overhead(column_count: usize) -> usize {
+    if column_count == 0 {
+        0
+    } else {
+        4 + 3 * (column_count.saturating_sub(1))
+    }
+}
+
+fn table_total_width(widths: Vec<usize>) -> usize {
+    if widths.is_empty() {
+        0
+    } else {
+        table_border_overhead(widths.len()) + widths.iter().sum::<usize>()
+    }
+}
+
+fn normalize_max_width(min_width: Option<usize>, max_width: Option<usize>) -> Option<usize> {
+    match (min_width, max_width) {
+        (Some(min), Some(max)) => Some(min.max(max)),
+        (_, max) => max,
+    }
+}
+
+fn apply_width_constraints(
+    width: usize,
+    min_width: Option<usize>,
+    max_width: Option<usize>,
+) -> usize {
+    let mut resolved = width;
+    if let Some(max) = max_width {
+        resolved = resolved.min(max);
+    }
+    if let Some(min) = min_width {
+        resolved = resolved.max(min);
+    }
+    resolved
+}
+
+fn measure_explicit_line_widths(content: &str) -> Vec<usize> {
+    let lines = split_lines(content);
+    if lines.is_empty() {
+        vec![0]
+    } else {
+        lines
+            .into_iter()
+            .map(|line| visible_width(&line) as usize)
+            .collect()
+    }
+}
+
+fn measure_max_explicit_line_width(content: &str) -> usize {
+    measure_explicit_line_widths(content)
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+}
+
+fn measure_break_segments(content: &str, wrap: &WordWrap) -> Vec<usize> {
+    split_lines(content)
+        .into_iter()
+        .flat_map(|line| measure_break_segments_for_line(&line, wrap))
+        .collect()
+}
+
+fn measure_break_segments_for_line(line: &str, wrap: &WordWrap) -> Vec<usize> {
+    match wrap {
+        WordWrap::None => vec![visible_width(line) as usize],
+        WordWrap::Truncate(_) => vec![1],
+        WordWrap::WrapProse(_, _) => measure_segment_widths(line, &['-']),
+        WordWrap::BespokeProse(_, chars, _) => measure_segment_widths(line, chars),
+    }
+}
+
+fn measure_segment_widths(line: &str, extra_break_chars: &[char]) -> Vec<usize> {
+    let mut widths = Vec::new();
+    let mut current_width = 0usize;
+    let bytes = line.as_bytes();
+    let mut idx = 0usize;
+
+    while idx < line.len() {
+        if bytes[idx] == 0x1b {
+            idx = measurement_escape_sequence_end(line, idx);
+            continue;
+        }
+
+        let Some(ch) = line[idx..].chars().next() else {
+            break;
+        };
+        let ch_len = ch.len_utf8();
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+
+        if ch_width == 0 {
+            idx += ch_len;
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            widths.push(current_width);
+            current_width = 0;
+        } else if extra_break_chars.contains(&ch) {
+            current_width += ch_width;
+            widths.push(current_width);
+            current_width = 0;
+        } else {
+            current_width += ch_width;
+        }
+
+        idx += ch_len;
+    }
+
+    widths.push(current_width);
+
+    let widths: Vec<usize> = widths.into_iter().filter(|width| *width > 0).collect();
+    if widths.is_empty() { vec![0] } else { widths }
+}
+
+fn measurement_escape_sequence_end(content: &str, start: usize) -> usize {
+    let bytes = content.as_bytes();
+    if start >= bytes.len() {
+        return bytes.len();
+    }
+    if bytes[start] != 0x1b {
+        return (start + 1).min(bytes.len());
+    }
+    if start + 1 >= bytes.len() {
+        return bytes.len();
+    }
+
+    match bytes[start + 1] {
+        b'[' => {
+            let mut idx = start + 2;
+            while idx < bytes.len() {
+                let byte = bytes[idx];
+                idx += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+            idx
+        }
+        b']' => {
+            let mut idx = start + 2;
+            while idx < bytes.len() {
+                let byte = bytes[idx];
+                if byte == 0x07 {
+                    idx += 1;
+                    break;
+                }
+                if byte == 0x1b && idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' {
+                    idx += 2;
+                    break;
+                }
+                idx += 1;
+            }
+            idx
+        }
+        b'_' => {
+            let mut idx = start + 2;
+            while idx < bytes.len() {
+                if bytes[idx] == 0x1b && idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' {
+                    idx += 2;
+                    break;
+                }
+                idx += 1;
+            }
+            idx
+        }
+        _ => {
+            if let Some(ch) = content[start + 1..].chars().next() {
+                start + 1 + ch.len_utf8()
+            } else {
+                bytes.len()
+            }
+        }
+    }
+}
+
+fn natural_break_width(
+    header_content: &str,
+    formatted_cells: &[String],
+    wrap: &WordWrap,
+    min_width: Option<usize>,
+    max_width: Option<usize>,
+    columnar_width_requirement: usize,
+) -> usize {
+    if columnar_width_requirement <= 5 {
+        return columnar_width_requirement;
+    }
+
+    let base = match wrap {
+        WordWrap::None => columnar_width_requirement,
+        WordWrap::Truncate(_) => min_width.unwrap_or(1).max(1),
+        WordWrap::WrapProse(_, _) | WordWrap::BespokeProse(_, _, _) => {
+            let mut widest = measure_break_segments(header_content, wrap)
+                .into_iter()
+                .max()
+                .unwrap_or(0);
+            for cell in formatted_cells {
+                widest = widest.max(
+                    measure_break_segments(cell, wrap)
+                        .into_iter()
+                        .max()
+                        .unwrap_or(0),
+                );
+            }
+            widest
+        }
+    };
+
+    apply_width_constraints(base.max(min_width.unwrap_or(1)), min_width, max_width)
+}
+
+fn append_dropped_notes_block(
+    result: &mut String,
+    dropped_notes: &[String],
+    start_col: Option<u32>,
+    fill_end_col: Option<u32>,
+) {
+    for note in dropped_notes {
+        if let Some(col) = start_col {
+            result.push_str(&format!("\x1b[{}G- {}", col, note));
+            if let Some(end) = fill_end_col {
+                let line_width = visible_width(&format!("- {}", note));
+                let line_end = col + line_width;
+                if end > line_end {
+                    result.push_str(&" ".repeat((end - line_end) as usize));
+                }
+            }
+        } else {
+            result.push_str("- ");
+            result.push_str(note);
+        }
+        result.push('\n');
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn compatibility_constrain_widths(
+    widths: &mut [usize],
+    columns: &[MeasuredColumn],
+    available_width: usize,
+) {
+    if widths.is_empty() {
+        return;
+    }
+
+    let max_content_width = available_width.saturating_sub(table_border_overhead(widths.len()));
+    let mut current_content_width: usize = widths.iter().sum();
+    if current_content_width <= max_content_width {
+        return;
+    }
+
+    loop {
+        let mut progress = false;
+        for (index, width) in widths.iter_mut().enumerate() {
+            let Some(column) = columns.get(index) else {
+                continue;
+            };
+
+            if column.fixed_width.is_some() || column.is_non_wrapping {
+                continue;
+            }
+
+            let min_width = column.min_width.unwrap_or(1);
+            if *width <= min_width {
+                continue;
+            }
+
+            *width -= 1;
+            current_content_width = current_content_width.saturating_sub(1);
+            progress = true;
+
+            if current_content_width <= max_content_width {
+                return;
+            }
+        }
+
+        if !progress {
+            return;
+        }
     }
 }
 
@@ -1655,6 +2481,8 @@ fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<St
 /// Calculate the height (number of lines) needed for each row based on wrapped content.
 ///
 /// Returns a vector where each element is the number of lines needed for that row.
+#[cfg(test)]
+#[allow(dead_code)]
 fn calculate_row_heights(
     data: &[Vec<TableCellContent>],
     columns: &[TableColumn],
@@ -2682,6 +3510,79 @@ mod tests {
             "Total width {} should fit in available 30",
             total_with_borders
         );
+    }
+
+    #[test]
+    fn test_measure_widths_uses_widest_explicit_header_line() {
+        let table = Table::new().with_columns(vec![TableColumn::new("Tool\nCalls")]);
+
+        let measurements = table.measure_widths(80).unwrap();
+        let column = &measurements.columns[0];
+
+        assert_eq!(column.header_line_width, 5);
+        assert_eq!(column.columnar_width_requirement, 5);
+    }
+
+    #[test]
+    fn test_measure_widths_marks_word_wrap_none_columns_as_non_wrapping() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Path").with_word_wrap(WordWrap::None),
+            ])
+            .with_data(vec![vec![
+                "app".into(),
+                "/very/long/path/that/should/not/shrink".into(),
+            ]]);
+
+        let measurements = table.measure_widths(30).unwrap();
+        let path = measurements
+            .columns
+            .iter()
+            .find(|column| column.original_index == 1)
+            .unwrap();
+
+        assert!(path.is_non_wrapping);
+        assert!(!path.is_shrinkable);
+    }
+
+    #[test]
+    fn test_plan_widths_drops_rightmost_eligible_column_and_renders_note() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name").with_fixed_width(8),
+                TableColumn::new("ID").with_fixed_width(4),
+                TableColumn::new("Notes")
+                    .with_word_wrap(WordWrap::None)
+                    .drop_when_space_is_limited(Some("Notes hidden on narrow terminals")),
+            ])
+            .with_data(vec![vec![
+                "Widget".into(),
+                "42".into(),
+                "This column is intentionally too wide".into(),
+            ]]);
+
+        let plan = table.plan_widths(28).unwrap();
+        assert_eq!(plan.visible_column_indices, vec![0, 1]);
+        assert_eq!(plan.dropped_column_indices, vec![2]);
+        assert_eq!(plan.dropped_notes, vec!["Notes hidden on narrow terminals"]);
+
+        let rendered = table.render_content(Some(28), None, None);
+        assert!(rendered.contains("- Notes hidden on narrow terminals"));
+    }
+
+    #[test]
+    fn test_plan_widths_truncate_columns_have_small_natural_break_width() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Notes")
+                    .with_min_width(3)
+                    .with_word_wrap(WordWrap::Truncate(Some("...".into()))),
+            ])
+            .with_data(vec![vec!["This is a much longer note".into()]]);
+
+        let plan = table.plan_widths(20).unwrap();
+        assert_eq!(plan.columns[0].natural_break_width, 3);
     }
 
     // ── Multi-line cell helper function tests ────────────────────────

@@ -80,6 +80,7 @@ TableColumn::new("Status")
 | `vertical_align` | `VerticalAlign` | Vertical alignment for multi-line cells (default: `Top`) |
 | `uniform_alignment` | `bool` | Align all cells at the same position regardless of content width |
 | `when` | `Conditional` | Controls column visibility based on terminal width (default: `Always`) |
+| `drop_when_space_is_limited(..)` | builder | Marks a column as auto-droppable and optionally records a note |
 
 ### `TableCellContent`
 
@@ -114,16 +115,32 @@ The width checked is the **renderable width** (terminal width minus layout margi
 
 Enum with `USD`, `GBP`, and `EUR` variants. Defined in `types.rs` with a `symbol()` method returning `$`, `£`, or `€`.
 
-## Column Width Calculation
+## Width Planning
 
-`calculate_column_widths()` runs a four-pass algorithm:
+Table rendering now goes through an explicit planning phase before any rows are rendered:
 
-1. **Header pass** -- Initialize each column's width to its header text length, flooring at `min_width` if set. Columns with `fixed_width` use that value directly.
-2. **Data pass** -- Walk every cell in every row; widen the column if the cell content exceeds the current width (skipped for fixed-width columns).
-3. **Constraint pass** -- Clamp each column to `max_width` if set.
-4. **Fit pass** -- `constrain_widths_to_available()` proportionally reduces non-fixed column widths when total width (including border overhead) exceeds available terminal width.
+1. Resolve renderable width from `Layout`.
+2. Filter columns by `Conditional`.
+3. Measure headers and cells line-by-line, not as one raw string.
+4. Classify columns as fixed, non-wrapping, or shrinkable.
+5. Compute a natural break width for shrinkable columns.
+6. Reuse the same `TableWidthPlan` in both normal and cursor-positioned renderers.
+7. Optionally drop rightmost droppable columns and append their notes after the table.
 
-The number of columns is derived from whichever is larger: the column definitions count or the widest data row. This means data rows can exceed the defined column count without panicking. Extra cells still participate in width calculation and render as additional columns (with default alignment/wrap behavior when no `TableColumn` is defined for that index).
+Public planning APIs are available on `Table`:
+
+```rust
+use biscuit_terminal::components::table::table::{Table, TableColumn};
+
+let table = Table::new().with_columns(vec![TableColumn::new("Name")]);
+let measurements = table.measure_widths(80)?;
+let plan = table.plan_widths(80)?;
+assert_eq!(measurements.available_render_width, 80);
+assert_eq!(plan.visible_column_indices, vec![0]);
+# Ok::<(), biscuit_terminal::components::table::table::TableWidthError>(())
+```
+
+The number of columns is still derived from whichever is larger: the column definitions count or the widest data row. Extra cells participate in measurement and rendering with default table-column semantics when no explicit `TableColumn` exists for that index.
 
 ## Rendering Pipeline
 
