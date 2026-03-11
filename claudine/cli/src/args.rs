@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "claudine", version, about)]
 pub(crate) struct Cli {
-    /// Increase verbosity (-v for info, -vv for debug).
+    /// Increase verbosity (-v for verbose, -vv for debug).
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
 

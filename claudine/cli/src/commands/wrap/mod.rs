@@ -108,8 +108,12 @@ pub struct WrapperArgs {
 }
 
 /// Run a wrapped provider command.
-pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs) -> Result<()> {
-    let code = match run_provider_wrapper_inner(provider, args) {
+pub fn run_provider_wrapper(
+    provider: Provider,
+    args: WrapperArgs,
+    verbose: u8,
+) -> Result<()> {
+    let code = match run_provider_wrapper_inner(provider, args, verbose) {
         Ok(code) => code,
         Err(error) => {
             log::error(&error.to_string());
@@ -120,7 +124,7 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs) -> Result<()>
     std::process::exit(code);
 }
 
-fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i32> {
+fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<i32> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -203,8 +207,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
         }
     }
 
-    // Universal --operation flag
-    if let Some(ref op) = args.operation {
+    // Universal --operation flag (clap-parsed or extracted from passthrough)
+    let effective_operation = args.operation.clone().or(extracted.operation);
+    if let Some(ref op) = effective_operation {
         env_overrides.push(("OPERATION".to_string(), op.clone()));
     }
 
@@ -420,7 +425,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
                 &env_plan,
                 mcp_runtime.as_ref(),
                 &term,
-                args.verbose_level(),
+                verbose,
             );
 
             if let Some(info_message) =
@@ -471,24 +476,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs) -> Result<i
     }
 
     exit_code
-}
-
-impl WrapperArgs {
-    /// Determine the effective verbosity level from the global -v/-vv flag.
-    ///
-    /// This reads the tracing subscriber level to determine verbosity:
-    /// - 0 = default (header + badges)
-    /// - 1 = verbose (+ env changes + warnings)
-    /// - 2 = debug (+ full command + all debug info)
-    fn verbose_level(&self) -> u8 {
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            2
-        } else if tracing::enabled!(tracing::Level::INFO) {
-            1
-        } else {
-            0
-        }
-    }
 }
 
 fn resolve_binary_path(
@@ -677,40 +664,72 @@ fn takes_value(arg: &str) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ExtractedWrapperFlags {
     yolo: bool,
     non_interactive: bool,
     repo: bool,
     quiet: bool,
     silent: bool,
+    operation: Option<String>,
 }
 
 fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWrapperFlags {
     let mut extracted = ExtractedWrapperFlags::default();
-    args.retain(|arg| match arg.as_str() {
-        "-y" | "--yolo" => {
-            extracted.yolo = true;
-            false
+    let mut skip_next = false;
+    let mut remove_indices = Vec::new();
+
+    for (i, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
         }
-        "-n" | "--non-interactive" | "--ni" => {
-            extracted.non_interactive = true;
-            false
+        match arg.as_str() {
+            "-y" | "--yolo" => {
+                extracted.yolo = true;
+                remove_indices.push(i);
+            }
+            "-n" | "--non-interactive" | "--ni" => {
+                extracted.non_interactive = true;
+                remove_indices.push(i);
+            }
+            "--repo" => {
+                extracted.repo = true;
+                remove_indices.push(i);
+            }
+            "-q" | "--quiet" => {
+                extracted.quiet = true;
+                remove_indices.push(i);
+            }
+            "--silent" => {
+                extracted.silent = true;
+                remove_indices.push(i);
+            }
+            "--operation" | "--op" => {
+                if let Some(value) = args.get(i + 1) {
+                    extracted.operation = Some(value.clone());
+                    remove_indices.push(i);
+                    remove_indices.push(i + 1);
+                    skip_next = true;
+                }
+            }
+            _ => {
+                if let Some(value) = arg.strip_prefix("--operation=") {
+                    extracted.operation = Some(value.to_string());
+                    remove_indices.push(i);
+                } else if let Some(value) = arg.strip_prefix("--op=") {
+                    extracted.operation = Some(value.to_string());
+                    remove_indices.push(i);
+                }
+            }
         }
-        "--repo" => {
-            extracted.repo = true;
-            false
-        }
-        "-q" | "--quiet" => {
-            extracted.quiet = true;
-            false
-        }
-        "--silent" => {
-            extracted.silent = true;
-            false
-        }
-        _ => true,
-    });
+    }
+
+    // Remove in reverse order to preserve indices
+    for i in remove_indices.into_iter().rev() {
+        args.remove(i);
+    }
+
     extracted
 }
 
@@ -802,6 +821,46 @@ mod tests {
         assert!(extracted.yolo);
         assert!(extracted.non_interactive);
         assert_eq!(args, vec!["--json", "task"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_operation_from_passthrough() {
+        let mut args = vec![
+            "do something".to_string(),
+            "--op".to_string(),
+            "commit".to_string(),
+        ];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+
+        assert_eq!(extracted.operation.as_deref(), Some("commit"));
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_operation_equals_form() {
+        let mut args = vec![
+            "do something".to_string(),
+            "--operation=deploy".to_string(),
+        ];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+
+        assert_eq!(extracted.operation.as_deref(), Some("deploy"));
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_op_equals_form() {
+        let mut args = vec![
+            "do something".to_string(),
+            "--op=review".to_string(),
+        ];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+
+        assert_eq!(extracted.operation.as_deref(), Some("review"));
+        assert_eq!(args, vec!["do something"]);
     }
 
     #[test]

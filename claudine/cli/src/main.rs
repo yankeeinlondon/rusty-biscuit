@@ -45,22 +45,26 @@ async fn main() -> Result<()> {
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         Some(Commands::Mcp(args)) => commands::mcp::run(args),
         Some(Commands::Claude(args)) => {
-            commands::wrap::run_provider_wrapper(Provider::Claude, args)
+            commands::wrap::run_provider_wrapper(Provider::Claude, args, cli.verbose)
         }
-        Some(Commands::Codex(args)) => commands::wrap::run_provider_wrapper(Provider::Codex, args),
+        Some(Commands::Codex(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::Codex, args, cli.verbose)
+        }
         Some(Commands::Gemini(args)) => {
-            commands::wrap::run_provider_wrapper(Provider::Gemini, args)
+            commands::wrap::run_provider_wrapper(Provider::Gemini, args, cli.verbose)
         }
         Some(Commands::Kimi(args)) => {
-            commands::wrap::run_provider_wrapper(Provider::KimiCode, args)
+            commands::wrap::run_provider_wrapper(Provider::KimiCode, args, cli.verbose)
         }
         Some(Commands::Qwen(args)) => {
-            commands::wrap::run_provider_wrapper(Provider::QwenCode, args)
+            commands::wrap::run_provider_wrapper(Provider::QwenCode, args, cli.verbose)
         }
         Some(Commands::Opencode(args)) => {
-            commands::wrap::run_provider_wrapper(Provider::OpenCode, args)
+            commands::wrap::run_provider_wrapper(Provider::OpenCode, args, cli.verbose)
         }
-        Some(Commands::Goose(args)) => commands::wrap::run_provider_wrapper(Provider::Goose, args),
+        Some(Commands::Goose(args)) => {
+            commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
+        }
         None => {
             // No subcommand given - show help
             Cli::command().print_help()?;
@@ -96,8 +100,7 @@ fn build_env_filter(verbose: u8) -> tracing_subscriber::EnvFilter {
 
 fn verbosity_level(verbose: u8) -> LevelFilter {
     match verbose {
-        0 => LevelFilter::WARN,
-        1 => LevelFilter::INFO,
+        0 | 1 => LevelFilter::WARN,
         _ => LevelFilter::DEBUG,
     }
 }
