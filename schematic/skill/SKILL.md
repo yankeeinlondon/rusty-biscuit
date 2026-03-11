@@ -28,6 +28,12 @@ The four packages involved in this process are:
 - `schematic-gen` - once an API has been defined (in `schematic-definitions`) we will use the `schematic-gen` library to generate an API client and deploy it to `schematic-schema`
 - `schematic-schema` is the package that callers will look for API client definitions in
 
+## More Details on Packages
+
+To understand the various package found in the **schematic** ecosystem in greater depth you should choose from the following documents:
+
+- [schematic-definitions](./sections/definitions.md) has a full overview of the API definitions **schematic** has. It also gives code examples of how you might define different parts of an API.
+
 ## Tooling
 
 We use the `just` runner to provide the most common operations you'll need when working with these packages:
@@ -42,8 +48,6 @@ All packages in **Schematic** are written in Rust and use the 2024 edition.
 ## How to Design an API
 
 ### Key Design Primitives
-
-TODO
 
 ### Best Practices
 
