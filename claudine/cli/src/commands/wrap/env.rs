@@ -87,16 +87,6 @@ pub(crate) fn build_child_env(
         "CLAUDINE_SESSION_ID",
         uuid::Uuid::new_v4().to_string(),
     );
-    set_added_env(
-        &mut env,
-        &mut added,
-        "CLAUDINE_INTERACTIVE",
-        if interactive {
-            "true".to_string()
-        } else {
-            "false".to_string()
-        },
-    );
 
     for (key, value) in env_overrides {
         set_added_env(&mut env, &mut added, key, value.clone());
@@ -440,6 +430,7 @@ fn canonical_or_self(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::wrap::profile::profile_for_provider;
     use sniff::filesystem::repo::Package;
 
     #[test]
@@ -680,6 +671,30 @@ mod tests {
             package_candidates_for_area("claudine", &packages),
             vec!["claudine".to_string(), "claudine-cli".to_string()]
         );
+    }
+
+    #[test]
+    fn build_child_env_uses_interactive_without_claudine_duplicate() {
+        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::events::Provider::Claude,
+            &[],
+            false,
+            true,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+
+        let added: std::collections::HashMap<_, _> = plan.added.into_iter().collect();
+        assert_eq!(added.get("INTERACTIVE").map(String::as_str), Some("true"));
+        assert!(!added.contains_key("CLAUDINE_INTERACTIVE"));
     }
 
     fn sanitize_env_for_test(
