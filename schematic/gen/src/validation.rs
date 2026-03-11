@@ -22,6 +22,7 @@
 //!     base_url: "https://api.test.com".to_string(),
 //!     docs_url: None,
 //!     auth: AuthStrategy::None,
+//!     auth_policy: None,
 //!     env_auth: vec![],
 //!     env_username: None,
 //!     env_mapping: None,
@@ -29,6 +30,7 @@
 //!     endpoints: vec![],
 //!     module_path: None,
 //!     request_suffix: None,
+//!     version: None,
 //! };
 //!
 //! assert!(validate_api(&api).is_ok());
@@ -66,6 +68,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///     base_url: "https://api.test.com".to_string(),
 ///     docs_url: None,
 ///     auth: AuthStrategy::None,
+///     auth_policy: None,
 ///     env_auth: vec![],
 ///     env_username: None,
 ///     env_mapping: None,
@@ -85,6 +88,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///     ],
 ///     module_path: None,
 ///     request_suffix: None,
+///     version: None,
 /// };
 ///
 /// assert!(validate_api(&api).is_ok());
@@ -157,6 +161,7 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -164,6 +169,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 

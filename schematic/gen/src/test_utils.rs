@@ -21,6 +21,7 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         base_url: base_url.to_string(),
         docs_url: None,
         auth,
+        auth_policy: None,
         env_auth,
         env_username: None,
         env_mapping: None,
@@ -28,6 +29,7 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         endpoints: vec![],
         module_path: None,
         request_suffix: None,
+        version: None,
     }
 }
 
@@ -44,6 +46,7 @@ pub fn make_api_with_endpoint(
         base_url: "https://api.example.com".to_string(),
         docs_url: None,
         auth,
+        auth_policy: None,
         env_auth,
         env_username: None,
         env_mapping: None,
@@ -51,6 +54,7 @@ pub fn make_api_with_endpoint(
         endpoints: vec![endpoint],
         module_path: None,
         request_suffix: None,
+        version: None,
     }
 }
 
@@ -89,6 +93,7 @@ pub fn make_simple_api() -> RestApi {
         base_url: "https://api.test.com/v1".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -106,6 +111,7 @@ pub fn make_simple_api() -> RestApi {
         }],
         module_path: None,
         request_suffix: None,
+        version: None,
     }
 }
 
@@ -122,6 +128,7 @@ pub fn make_complex_api() -> RestApi {
         base_url: "https://api.openai.com/v1".to_string(),
         docs_url: Some("https://platform.openai.com/docs".to_string()),
         auth: AuthStrategy::BearerToken { header: None },
+        auth_policy: None,
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
         env_mapping: None,
@@ -163,6 +170,7 @@ pub fn make_complex_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
     }
 }
 

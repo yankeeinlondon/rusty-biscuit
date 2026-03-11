@@ -166,6 +166,7 @@ pub fn run_import_asyncapi(
         docs_url: None,
         auth,
         env_auth,
+        version: None,
         endpoints,
         runtime: None,
     };

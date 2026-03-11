@@ -32,8 +32,8 @@ pub fn generate_request_parts_type() -> TokenStream {
 
 /// Generates the SchematicError enum for runtime errors.
 ///
-/// This error type is used by generated API client code and provides variants
-/// for all error conditions that can occur during API requests:
+        /// This error type is used by generated API client code and provides variants
+        /// for all error conditions that can occur during API requests:
 ///
 /// - `Http`: HTTP request failures (network errors, timeouts)
 /// - `Json`: JSON deserialization failures
@@ -72,8 +72,9 @@ pub fn generate_error_type() -> TokenStream {
         /// ```text
         /// match client.request::<Response>(req).await {
         ///     Ok(response) => { /* success */ }
-        ///     Err(SchematicError::MissingCredential { env_vars }) => {
-        ///         eprintln!("Set one of: {:?}", env_vars);
+        ///     Err(SchematicError::AuthenticationRequired { explicit_methods, env_fallback_vars, .. }) => {
+        ///         eprintln!("Accepted explicit auth: {:?}", explicit_methods);
+        ///         eprintln!("Env fallback vars: {:?}", env_fallback_vars);
         ///     }
         ///     Err(SchematicError::ApiError { status: 429, body }) => {
         ///         // Rate limited - implement backoff
@@ -122,6 +123,18 @@ pub fn generate_error_type() -> TokenStream {
             MissingCredential {
                 /// The environment variable names that were checked.
                 env_vars: Vec<String>,
+            },
+
+            /// Authentication is required but neither explicit credentials nor
+            /// configured environment fallbacks were available.
+            #[error("{message}")]
+            AuthenticationRequired {
+                /// Human-readable next-step guidance.
+                message: String,
+                /// Explicit credential types accepted by the client.
+                explicit_methods: Vec<String>,
+                /// Environment variables accepted as fallback sources.
+                env_fallback_vars: Vec<String>,
             },
 
             /// Header validation or construction failed.
@@ -315,10 +328,10 @@ mod tests {
             "Should have Error Handling Examples section"
         );
 
-        // Check for MissingCredential example
+        // Check for AuthenticationRequired example
         assert!(
-            code.contains("SchematicError::MissingCredential { env_vars }"),
-            "Should show MissingCredential handling example"
+            code.contains("SchematicError::AuthenticationRequired"),
+            "Should show AuthenticationRequired handling example"
         );
 
         // Check for rate limiting (429) example

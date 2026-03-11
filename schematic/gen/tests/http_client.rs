@@ -7,7 +7,10 @@
 //! - Implements proper error handling
 
 use proc_macro2::TokenStream;
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy, OAuth2Config,
+    OAuth2ClientAuthMethod, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
+};
 use schematic_gen::output::assemble_api_code;
 
 /// Formats generated tokens into readable code for assertions.
@@ -24,6 +27,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         base_url: "https://api.example.com/v1".to_string(),
         docs_url: None,
         auth,
+        auth_policy: None,
         env_auth,
         env_username: None,
         env_mapping: None,
@@ -54,6 +58,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
     }
 }
 
@@ -66,6 +71,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         base_url: "https://api.example.com/v1".to_string(),
         docs_url: None,
         auth: AuthStrategy::Basic,
+        auth_policy: None,
         env_auth: vec![password_env.to_string()], // Password from env_auth[0]
         env_username: Some(username_env.to_string()),
         env_mapping: None,
@@ -83,6 +89,59 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         }],
         module_path: None,
         request_suffix: None,
+        version: None,
+    }
+}
+
+fn make_dual_auth_api() -> RestApi {
+    let oauth = OAuth2Config {
+        grant_type: OAuth2GrantType::AuthorizationCodePkce,
+        authorization_url: Some("https://example.com/oauth/authorize".to_string()),
+        token_url: "https://example.com/oauth/token".to_string(),
+        revocation_url: None,
+        device_authorization_url: None,
+        default_scopes: vec!["read".to_string()],
+        pkce: PkceRequirement::Required,
+        client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+    };
+
+    RestApi {
+        name: "DualAuthApi".to_string(),
+        description: "Dual auth API".to_string(),
+        base_url: "https://api.example.com/v1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::ApiKey {
+            header: "X-API-Key".to_string(),
+        },
+        auth_policy: Some(AuthPolicy {
+            explicit: vec![
+                AuthMethod::ApiKey {
+                    header: "X-API-Key".to_string(),
+                },
+                AuthMethod::OAuth2(oauth),
+            ],
+            env_fallback: Some(EnvAuthStrategy::ApiKey {
+                header: "X-API-Key".to_string(),
+            }),
+        }),
+        env_auth: vec!["DUAL_AUTH_API_KEY".to_string()],
+        env_username: None,
+        env_mapping: None,
+        headers: vec![],
+        endpoints: vec![Endpoint {
+            id: "GetItems".to_string(),
+            method: RestMethod::Get,
+            path: "/items".to_string(),
+            description: "Get items".to_string(),
+            request: None,
+            response: ApiResponse::json_type("ItemsResponse"),
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        }],
+        module_path: None,
+        request_suffix: None,
+        version: None,
     }
 }
 
@@ -232,22 +291,20 @@ fn bearer_token_uses_runtime_auth_matching() {
 
     // Should use runtime match for auth
     assert!(
-        code.contains("match &self.auth_strategy"),
-        "Should use runtime auth matching\nGenerated code:\n{}",
+        code.contains("match &self.auth_policy.env_fallback"),
+        "Should use auth policy fallback matching\nGenerated code:\n{}",
         code
     );
 
-    // Should handle BearerToken variant
     assert!(
-        code.contains("schematic_define::AuthStrategy::BearerToken"),
-        "Should handle BearerToken variant\nGenerated code:\n{}",
+        code.contains("schematic_define::EnvAuthStrategy::BearerToken"),
+        "Should handle BearerToken env fallback\nGenerated code:\n{}",
         code
     );
 
-    // Should format Bearer token at runtime
     assert!(
-        code.contains(r#"format!("Bearer {}", token)"#),
-        "Should format Bearer prefix\nGenerated code:\n{}",
+        code.contains("headers.use_bearer_token(token)"),
+        "Should apply bearer token via Headers helper\nGenerated code:\n{}",
         code
     );
 }
@@ -271,10 +328,9 @@ fn bearer_token_with_custom_header() {
         code
     );
 
-    // Runtime handling extracts header via header.as_deref()
     assert!(
-        code.contains("header.as_deref()"),
-        "Should use header.as_deref() for runtime extraction\nGenerated code:\n{}",
+        code.contains("headers.use_bearer_token_with_header(token, header)"),
+        "Should use the custom-header bearer helper\nGenerated code:\n{}",
         code
     );
 }
@@ -305,17 +361,15 @@ fn api_key_uses_runtime_auth_matching() {
         code
     );
 
-    // Should handle ApiKey variant at runtime
     assert!(
-        code.contains("schematic_define::AuthStrategy::ApiKey"),
-        "Should handle ApiKey variant\nGenerated code:\n{}",
+        code.contains("schematic_define::EnvAuthStrategy::ApiKey"),
+        "Should handle ApiKey env fallback\nGenerated code:\n{}",
         code
     );
 
-    // Runtime uses header.as_str() for header name
     assert!(
-        code.contains("header.as_str()"),
-        "Should use header.as_str() at runtime\nGenerated code:\n{}",
+        code.contains("headers.header(header.clone(), key)"),
+        "Should write the API key header through Headers\nGenerated code:\n{}",
         code
     );
 }
@@ -338,10 +392,50 @@ fn basic_auth_uses_reqwest_basic_auth() {
         code
     );
 
-    // Should use reqwest's basic_auth method
     assert!(
-        code.contains("basic_auth(username, Some(password))"),
-        "Should use reqwest basic_auth\nGenerated code:\n{}",
+        code.contains("headers.use_basic_auth(username, password)"),
+        "Should use the Headers basic auth helper\nGenerated code:\n{}",
+        code
+    );
+}
+
+#[test]
+fn dual_auth_generates_explicit_api_key_and_oauth_helpers() {
+    let api = make_dual_auth_api();
+    let tokens = assemble_api_code(&api);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("pub fn api_key(&self, key: impl Into<String>) -> Self"),
+        "Should generate explicit API key helper\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("pub fn oauth_token(&self, token: impl Into<String>) -> Self"),
+        "Should generate explicit OAuth token helper\nGenerated code:\n{}",
+        code
+    );
+}
+
+#[test]
+fn dual_auth_generates_descriptive_authentication_required_error() {
+    let api = make_dual_auth_api();
+    let tokens = assemble_api_code(&api);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("SchematicError::AuthenticationRequired"),
+        "Should use AuthenticationRequired for dual-auth clients\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("Obtain the OAuth token with schematic-oauth"),
+        "Should point OAuth users to schematic-oauth\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("if !headers.has_explicit_auth()"),
+        "Should only apply env fallback when explicit auth is absent\nGenerated code:\n{}",
         code
     );
 }

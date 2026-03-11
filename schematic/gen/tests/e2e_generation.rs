@@ -203,6 +203,7 @@ fn generate_code_for_various_api_configurations() {
             base_url: "https://api.simple.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -220,6 +221,7 @@ fn generate_code_for_various_api_configurations() {
             }],
             module_path: None,
             request_suffix: None,
+            version: None,
         },
         // API with all HTTP methods
         RestApi {
@@ -228,6 +230,7 @@ fn generate_code_for_various_api_configurations() {
             base_url: "https://api.methods.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -291,6 +294,7 @@ fn generate_code_for_various_api_configurations() {
             ],
             module_path: None,
             request_suffix: None,
+            version: None,
         },
         // API with multiple path parameters
         RestApi {
@@ -299,6 +303,7 @@ fn generate_code_for_various_api_configurations() {
             base_url: "https://api.nested.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["NESTED_API_KEY".to_string()],
             env_username: None,
             env_mapping: None,
@@ -316,6 +321,7 @@ fn generate_code_for_various_api_configurations() {
             }],
             module_path: None,
             request_suffix: None,
+            version: None,
         },
     ];
 
@@ -384,6 +390,7 @@ fn binary_response_generates_request_bytes_method() {
         base_url: "https://api.binary.com".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -401,6 +408,7 @@ fn binary_response_generates_request_bytes_method() {
         }],
         module_path: None,
         request_suffix: None,
+        version: None,
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -449,6 +457,7 @@ fn text_response_generates_request_text_method() {
         base_url: "https://api.text.com".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -466,6 +475,7 @@ fn text_response_generates_request_text_method() {
         }],
         module_path: None,
         request_suffix: None,
+        version: None,
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -501,6 +511,7 @@ fn empty_response_generates_request_empty_method() {
         base_url: "https://api.empty.com".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -518,6 +529,7 @@ fn empty_response_generates_request_empty_method() {
         }],
         module_path: None,
         request_suffix: None,
+        version: None,
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -549,6 +561,7 @@ fn mixed_response_types_generate_all_methods() {
         base_url: "https://api.mixed.com".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -601,6 +614,7 @@ fn mixed_response_types_generate_all_methods() {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -787,6 +801,7 @@ fn paginated_endpoints_generate_paginated_trait() {
         base_url: "https://api.pagination.com".to_string(),
         docs_url: None,
         auth: AuthStrategy::None,
+        auth_policy: None,
         env_auth: vec![],
         env_username: None,
         env_mapping: None,
@@ -819,6 +834,7 @@ fn paginated_endpoints_generate_paginated_trait() {
         ],
         module_path: None,
         request_suffix: None,
+        version: None,
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");

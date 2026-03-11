@@ -190,6 +190,7 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -197,6 +198,7 @@ mod tests {
             endpoints,
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 

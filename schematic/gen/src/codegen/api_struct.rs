@@ -5,7 +5,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{AuthStrategy, RestApi};
+use schematic_define::{AuthPolicy, AuthStrategy, RestApi};
 
 /// Generates the API struct for the given API definition.
 ///
@@ -62,6 +62,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
 
     // Generate auth strategy initialization
     let auth_strategy_init = generate_auth_strategy_init(&api.auth);
+    let auth_policy_init = generate_auth_policy_init(&api.effective_auth_policy());
 
     // Generate env_username initialization
     let env_username_init = match &api.env_username {
@@ -80,6 +81,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
 
     // Generate builder struct name
     let builder_name = format_ident!("{}VariantBuilder", api.name);
+    let explicit_auth_helpers = generate_explicit_auth_helpers(api);
 
     quote! {
         #[doc = #description]
@@ -90,6 +92,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             env_auth: Vec<String>,
             /// Authentication strategy for this API client.
             auth_strategy: schematic_define::AuthStrategy,
+            /// Effective authentication policy for this API client.
+            auth_policy: schematic_define::AuthPolicy,
             /// Environment variable for Basic auth username.
             env_username: Option<String>,
             /// Headers builder with environment variable support for credentials.
@@ -112,6 +116,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     base_url: Self::BASE_URL.to_string(),
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
+                    auth_policy: #auth_policy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
                     variant_hooks: crate::shared::VariantHooks::default(),
@@ -131,6 +136,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     base_url: base_url.into(),
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
+                    auth_policy: #auth_policy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
                     variant_hooks: crate::shared::VariantHooks::default(),
@@ -156,6 +162,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     base_url: Self::BASE_URL.to_string(),
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
+                    auth_policy: #auth_policy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
                     variant_hooks: crate::shared::VariantHooks::default(),
@@ -179,6 +186,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     base_url: base_url.into(),
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
+                    auth_policy: #auth_policy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
                     variant_hooks: crate::shared::VariantHooks::default(),
@@ -288,23 +296,54 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                 &self.base_url
             }
 
+            /// Returns the effective authentication policy for this client.
+            pub fn auth_policy(&self) -> &schematic_define::AuthPolicy {
+                &self.auth_policy
+            }
+
+            /// Returns OAuth2 provider metadata, if this client accepts OAuth tokens.
+            pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {
+                self.auth_policy.oauth2()
+            }
+
             /// Returns the API key header name and value for authentication.
             ///
             /// Returns `None` if the authentication strategy is not `ApiKey`
             /// or if the API key environment variable is not set.
             pub fn api_key_header(&self) -> Option<(String, String)> {
-                match &self.auth_strategy {
-                    schematic_define::AuthStrategy::ApiKey { header } => {
-                        for env_name in &self.env_auth {
-                            if let Ok(value) = std::env::var(env_name) {
-                                return Some((header.clone(), value));
-                            }
-                        }
-                        None
-                    }
-                    _ => None,
-                }
+                let header = self
+                    .auth_policy
+                    .explicit
+                    .iter()
+                    .find_map(|method| match method {
+                        schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        self.headers
+                            .env_mapping()
+                            .api_key
+                            .as_ref()
+                            .map(|api_key| api_key.header.clone())
+                    });
+
+                header.and_then(|header| {
+                    self.headers
+                        .env_mapping()
+                        .api_key
+                        .as_ref()
+                        .and_then(|api_key| {
+                            api_key
+                                .names
+                                .names()
+                                .iter()
+                                .find_map(|env_name| std::env::var(env_name).ok())
+                        })
+                        .map(|value| (header, value))
+                })
             }
+
+            #explicit_auth_helpers
         }
 
         impl Default for #struct_name {
@@ -464,20 +503,46 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             /// Options not explicitly set will inherit from the base client.
             #[must_use]
             pub fn build(self) -> #struct_name {
-                let auth_strategy = match self.auth_update {
+                let auth_update = self.auth_update.clone();
+                let auth_policy = match auth_update.clone() {
+                    schematic_define::UpdateStrategy::NoChange => self.base.auth_policy.clone(),
+                    schematic_define::UpdateStrategy::ChangeTo(ref auth) => {
+                        schematic_define::AuthPolicy::from_auth_strategy(auth)
+                    }
+                    _ => self.base.auth_policy.clone(),
+                };
+                let auth_strategy = match auth_update.clone() {
                     schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
                     schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
                     // Handle future variants (non_exhaustive)
                     _ => self.base.auth_strategy.clone(),
                 };
+                let has_env_auth_override = self.env_auth.is_some();
+                let env_auth = self.env_auth.unwrap_or_else(|| self.base.env_auth.clone());
+                let headers = match self.headers {
+                    Some(headers) => headers,
+                    None if has_env_auth_override
+                        || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+                    {
+                        self.base.headers.clone().with_env_mapping(
+                            schematic_define::RestApi::legacy_env_mapping_for(
+                                &auth_strategy,
+                                &env_auth,
+                                self.base.env_username.as_deref(),
+                            ),
+                        )
+                    }
+                    None => self.base.headers.clone(),
+                };
 
                 #struct_name {
                     client: self.base.client.clone(),
                     base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
-                    env_auth: self.env_auth.unwrap_or_else(|| self.base.env_auth.clone()),
+                    env_auth,
                     auth_strategy,
+                    auth_policy,
                     env_username: self.base.env_username.clone(),
-                    headers: self.headers.unwrap_or_else(|| self.base.headers.clone()),
+                    headers,
                     variant_hooks: crate::shared::VariantHooks {
                         pre_response_json: self.pre_response_json,
                         response_mutators: self.response_mutators,
@@ -568,6 +633,160 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
         }
         // Handle future variants (non_exhaustive)
         _ => quote! { schematic_define::AuthStrategy::None },
+    }
+}
+
+/// Generates the initialization code for an [`AuthPolicy`].
+fn generate_auth_policy_init(policy: &AuthPolicy) -> TokenStream {
+    let explicit = policy.explicit.iter().map(generate_auth_method_init);
+    let env_fallback = match &policy.env_fallback {
+        Some(strategy) => {
+            let strategy = generate_env_auth_strategy_init(strategy);
+            quote! { Some(#strategy) }
+        }
+        None => quote! { None },
+    };
+
+    quote! {
+        schematic_define::AuthPolicy {
+            explicit: vec![#(#explicit),*],
+            env_fallback: #env_fallback,
+        }
+    }
+}
+
+fn generate_auth_method_init(method: &schematic_define::AuthMethod) -> TokenStream {
+    match method {
+        schematic_define::AuthMethod::BearerToken { header } => match header {
+            Some(header) => {
+                quote! { schematic_define::AuthMethod::BearerToken { header: Some(#header.to_string()) } }
+            }
+            None => quote! { schematic_define::AuthMethod::BearerToken { header: None } },
+        },
+        schematic_define::AuthMethod::ApiKey { header } => {
+            quote! { schematic_define::AuthMethod::ApiKey { header: #header.to_string() } }
+        }
+        schematic_define::AuthMethod::Basic => quote! { schematic_define::AuthMethod::Basic },
+        schematic_define::AuthMethod::OAuth2(config) => {
+            let config_tokens = generate_auth_strategy_init(&AuthStrategy::OAuth2(config.clone()));
+            quote! {
+                match #config_tokens {
+                    schematic_define::AuthStrategy::OAuth2(config) => schematic_define::AuthMethod::OAuth2(config),
+                    _ => unreachable!(),
+                }
+            }
+        }
+        _ => quote! { schematic_define::AuthMethod::Basic },
+    }
+}
+
+fn generate_env_auth_strategy_init(strategy: &schematic_define::EnvAuthStrategy) -> TokenStream {
+    match strategy {
+        schematic_define::EnvAuthStrategy::BearerToken { header } => match header {
+            Some(header) => {
+                quote! { schematic_define::EnvAuthStrategy::BearerToken { header: Some(#header.to_string()) } }
+            }
+            None => quote! { schematic_define::EnvAuthStrategy::BearerToken { header: None } },
+        },
+        schematic_define::EnvAuthStrategy::ApiKey { header } => {
+            quote! { schematic_define::EnvAuthStrategy::ApiKey { header: #header.to_string() } }
+        }
+        schematic_define::EnvAuthStrategy::Basic => {
+            quote! { schematic_define::EnvAuthStrategy::Basic }
+        }
+        _ => quote! { schematic_define::EnvAuthStrategy::Basic },
+    }
+}
+
+fn generate_explicit_auth_helpers(api: &RestApi) -> TokenStream {
+    let policy = api.effective_auth_policy();
+
+    let bearer_header = policy.explicit.iter().find_map(|method| match method {
+        schematic_define::AuthMethod::BearerToken { header } => Some(header.clone()),
+        _ => None,
+    });
+    let api_key_header = policy.explicit.iter().find_map(|method| match method {
+        schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+        _ => None,
+    });
+    let has_basic = policy
+        .explicit
+        .iter()
+        .any(|method| matches!(method, schematic_define::AuthMethod::Basic));
+    let has_oauth = policy.oauth2().is_some();
+
+    let bearer_helper = bearer_header.map(|header| match header {
+        Some(header_name) => quote! {
+            /// Returns a clone of this client configured with an explicit bearer token.
+            #[must_use]
+            pub fn bearer_token(&self, token: impl Into<String>) -> Self {
+                self.variant()
+                    .headers_builder(self.headers.clone().use_bearer_token_with_header(token, #header_name))
+                    .build()
+            }
+        },
+        None => quote! {
+            /// Returns a clone of this client configured with an explicit bearer token.
+            #[must_use]
+            pub fn bearer_token(&self, token: impl Into<String>) -> Self {
+                self.variant()
+                    .headers_builder(self.headers.clone().use_bearer_token(token))
+                    .build()
+            }
+        },
+    }).unwrap_or_default();
+
+    let api_key_helper = api_key_header
+        .map(|header_name| {
+            quote! {
+                /// Returns a clone of this client configured with an explicit API key.
+                #[must_use]
+                pub fn api_key(&self, key: impl Into<String>) -> Self {
+                    self.variant()
+                        .headers_builder(self.headers.clone().use_api_key(key, #header_name))
+                        .build()
+                }
+            }
+        })
+        .unwrap_or_default();
+
+    let basic_helper = if has_basic {
+        quote! {
+            /// Returns a clone of this client configured with explicit basic auth.
+            #[must_use]
+            pub fn basic_auth(
+                &self,
+                username: impl Into<String>,
+                password: impl Into<String>,
+            ) -> Self {
+                self.variant()
+                    .headers_builder(self.headers.clone().use_basic_auth(username, password))
+                    .build()
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let oauth_helper = if has_oauth {
+        quote! {
+            /// Returns a clone of this client configured with an explicit OAuth access token.
+            #[must_use]
+            pub fn oauth_token(&self, token: impl Into<String>) -> Self {
+                self.variant()
+                    .headers_builder(self.headers.clone().use_bearer_token(token))
+                    .build()
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        #api_key_helper
+        #bearer_helper
+        #basic_helper
+        #oauth_helper
     }
 }
 
@@ -694,6 +913,7 @@ mod tests {
             base_url: base_url.to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -701,6 +921,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 
@@ -823,6 +1044,7 @@ mod tests {
             base_url: "https://api.bearer.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["BEARER_TOKEN".to_string()],
             env_username: None,
             env_mapping: None,
@@ -830,6 +1052,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -848,6 +1071,7 @@ mod tests {
             auth: AuthStrategy::ApiKey {
                 header: "X-API-Key".to_string(),
             },
+            auth_policy: None,
             env_auth: vec!["API_KEY".to_string()],
             env_username: None,
             env_mapping: None,
@@ -855,6 +1079,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -872,6 +1097,7 @@ mod tests {
             base_url: "https://api.basic.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::Basic,
+            auth_policy: None,
             env_auth: vec!["BASIC_PASS".to_string()],
             env_username: Some("BASIC_USER".to_string()),
             env_mapping: None,
@@ -879,6 +1105,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -1012,6 +1239,7 @@ mod tests {
             base_url: "https://api.headers.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1022,6 +1250,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -1066,6 +1295,17 @@ mod tests {
     }
 
     #[test]
+    fn variant_builder_checks_env_override_before_consuming_option() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(code.contains("let has_env_auth_override = self.env_auth.is_some();"));
+        assert!(code.contains("let env_auth = self.env_auth.unwrap_or_else"));
+        assert!(code.contains("None if has_env_auth_override"));
+    }
+
+    #[test]
     fn variant_builder_has_mutate_response_method() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
@@ -1094,6 +1334,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_string(),
             docs_url: Some("https://docs.example.com/api".to_string()),
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1101,6 +1342,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");

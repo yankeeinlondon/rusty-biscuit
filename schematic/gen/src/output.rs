@@ -1402,6 +1402,7 @@ mod tests {
             base_url: "https://api.test.com/v1".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1419,6 +1420,7 @@ mod tests {
             }],
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 
@@ -1429,6 +1431,7 @@ mod tests {
             base_url: "https://api.openai.com/v1".to_string(),
             docs_url: Some("https://platform.openai.com/docs".to_string()),
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["OPENAI_API_KEY".to_string()],
             env_username: None,
             env_mapping: None,
@@ -1470,6 +1473,7 @@ mod tests {
             ],
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 
@@ -1798,6 +1802,7 @@ mod tests {
                 base_url: "https://test.com".to_string(),
                 docs_url: None,
                 auth: auth.clone(),
+                auth_policy: None,
                 env_auth,
                 env_username,
                 env_mapping: None,
@@ -1815,6 +1820,7 @@ mod tests {
                 }],
                 module_path: None,
                 request_suffix: None,
+                version: None,
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1857,6 +1863,7 @@ mod tests {
             base_url: "https://test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1864,6 +1871,7 @@ mod tests {
             endpoints,
             module_path: None,
             request_suffix: None,
+            version: None,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1889,6 +1897,7 @@ mod tests {
             base_url: "https://empty.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1896,6 +1905,7 @@ mod tests {
             endpoints: vec![],
             module_path: None,
             request_suffix: None,
+            version: None,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1930,6 +1940,7 @@ mod tests {
             base_url: "http://localhost:8080".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1947,6 +1958,7 @@ mod tests {
             }],
             module_path: Some("foo".to_string()),
             request_suffix: Some("NativeRequest".to_string()),
+            version: None,
         };
 
         let api_b = RestApi {
@@ -1955,6 +1967,7 @@ mod tests {
             base_url: "http://localhost:8080".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            auth_policy: None,
             env_auth: vec![],
             env_username: None,
             env_mapping: None,
@@ -1972,6 +1985,7 @@ mod tests {
             }],
             module_path: Some("foo".to_string()),
             request_suffix: Some("CompatRequest".to_string()),
+            version: None,
         };
 
         (api_a, api_b)

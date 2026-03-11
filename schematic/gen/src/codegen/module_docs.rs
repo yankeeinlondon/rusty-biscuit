@@ -278,6 +278,7 @@ mod tests {
             base_url: "https://api.test.com".to_string(),
             docs_url: Some("https://docs.test.com".to_string()),
             auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
             env_auth: vec!["TEST_API_KEY".to_string()],
             env_username: None,
             env_mapping: None,
@@ -295,6 +296,7 @@ mod tests {
             }],
             module_path: None,
             request_suffix: None,
+            version: None,
         }
     }
 

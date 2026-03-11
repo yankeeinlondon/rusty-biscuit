@@ -376,8 +376,12 @@ pub enum SchematicError {
     #[error("Failed to serialize request body: {0}")]
     SerializationError(String),
 
-    #[error("Missing credentials: none of the following environment variables are set: {env_vars:?}")]
-    MissingCredential { env_vars: Vec<String> },
+    #[error("{message}")]
+    AuthenticationRequired {
+        message: String,
+        explicit_methods: Vec<String>,
+        env_fallback_vars: Vec<String>,
+    },
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -544,12 +548,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Authentication Strategies
 
-The generator supports multiple authentication strategies defined in `schematic-define`. Authentication is configured in two parts:
+The generator supports both the legacy single-strategy auth model and the new multi-method auth policy.
 
-1. **`RestApi::auth`** - Defines *how* authentication is applied (Bearer, API Key, Basic)
-2. **`RestApi::env_auth`** / **`env_username`** / **`env_mapping`** - Defines *where* credentials come from
+Runtime precedence is always:
 
-All strategies return `SchematicError::MissingCredential` if required credentials are not found.
+1. Explicit auth already set on `Headers`
+2. Explicit auth configured through generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, or `.oauth_token(...)`
+3. Environment fallback resolved through `EnvMapping`
+4. `SchematicError::AuthenticationRequired`
+
+`RestApi::env_auth` and `env_username` remain authoring conveniences, but generated REST clients normalize them into `EnvMapping` and no longer resolve auth directly from those raw fields at runtime.
 
 ### Bearer Token
 
@@ -564,13 +572,16 @@ RestApi {
 Generated code:
 
 ```rust
-let token = ["OPENAI_API_KEY"]
-    .iter()
-    .find_map(|var| std::env::var(var).ok())
-    .ok_or_else(|| SchematicError::MissingCredential {
-        env_vars: vec!["OPENAI_API_KEY".to_string()],
-    })?;
-req_builder = req_builder.header("Authorization", format!("Bearer {}", token));
+if !headers.has_explicit_auth() {
+    headers = self.apply_env_fallback(headers);
+}
+
+if self.auth_is_required()
+    && !headers.has_explicit_auth()
+    && !self.headers_satisfy_fallback(&headers)
+{
+    return Err(self.authentication_required_error());
+}
 ```
 
 ### API Key
@@ -586,13 +597,7 @@ RestApi {
 Generated code:
 
 ```rust
-let key = ["X_API_KEY"]
-    .iter()
-    .find_map(|var| std::env::var(var).ok())
-    .ok_or_else(|| SchematicError::MissingCredential {
-        env_vars: vec!["X_API_KEY".to_string()],
-    })?;
-req_builder = req_builder.header("X-API-Key", key);
+headers = headers.header("X-API-Key", key);
 ```
 
 ### Basic Auth
@@ -609,15 +614,7 @@ RestApi {
 Generated code:
 
 ```rust
-let username = std::env::var("API_USER")
-    .map_err(|_| SchematicError::MissingCredential {
-        env_vars: vec!["API_USER".to_string()],
-    })?;
-let password = std::env::var("API_PASS")
-    .map_err(|_| SchematicError::MissingCredential {
-        env_vars: vec!["API_PASS".to_string()],
-    })?;
-req_builder = req_builder.basic_auth(username, Some(password));
+headers = headers.use_basic_auth(username, password);
 ```
 
 ### No Authentication
@@ -647,12 +644,38 @@ RestApi {
 }
 ```
 
-Generated code returns `SchematicError::OAuthAuthenticationRequired` if no bearer token has been set via `Headers`. Users obtain tokens via `schematic-oauth` and inject them programmatically:
+Generated code points OAuth-enabled callers to `schematic-oauth` when no acceptable credential is available. Users obtain tokens there and inject them programmatically:
 
 ```rust
-let client = Api::new()
-    .variant_with_headers(Headers::default().use_bearer_token(token));
+let client = Api::new().oauth_token(token);
 ```
+
+### Multi-Method Auth
+
+When `RestApi::auth_policy` is set, generated clients can accept more than one explicit auth method. For example, a client can accept either an explicit API key or an explicit OAuth token while only falling back to env-based API keys:
+
+```rust
+RestApi {
+    auth: AuthStrategy::ApiKey {
+        header: "PRIVATE-TOKEN".to_string(),
+    },
+    auth_policy: Some(AuthPolicy {
+        explicit: vec![
+            AuthMethod::ApiKey {
+                header: "PRIVATE-TOKEN".to_string(),
+            },
+            AuthMethod::OAuth2(oauth_config),
+        ],
+        env_fallback: Some(EnvAuthStrategy::ApiKey {
+            header: "PRIVATE-TOKEN".to_string(),
+        }),
+    }),
+    env_auth: vec!["GITLAB_TOKEN".to_string()],
+    // ...
+}
+```
+
+That generates first-class helpers such as `.api_key(...)` and `.oauth_token(...)` on the same client.
 
 ## HTTP Methods
 
@@ -863,9 +886,8 @@ Generated runtime error types (`SchematicError`):
 | `ApiError` | Non-2xx status code from API |
 | `UnsupportedMethod` | Unknown HTTP method (should never occur) |
 | `SerializationError` | Request body serialization failed |
-| `MissingCredential` | Required auth env vars not found |
+| `AuthenticationRequired` | No explicit auth or env fallback satisfied the client policy |
 | `InternalError` | Internal runtime error (type mismatch in variant hooks) |
-| `OAuthAuthenticationRequired` | OAuth2 auth required but no token provided |
 
 ## Ergonomic Conversions
 

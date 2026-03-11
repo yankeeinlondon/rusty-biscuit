@@ -502,6 +502,7 @@ mod tests {
             docs_url: None,
             auth: AuthStrategy::None,
             env_auth: vec![],
+            version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Echo".to_string(),
                 path: "/echo".to_string(),
@@ -530,6 +531,7 @@ mod tests {
                 header: "API-KEY".to_string(),
             },
             env_auth: vec!["TEST_KEY".to_string()],
+            version: None,
             endpoints: vec![WebSocketEndpoint {
                 id: "Main".to_string(),
                 path: "/ws".to_string(),
