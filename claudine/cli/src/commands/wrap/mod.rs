@@ -1,6 +1,7 @@
 pub(crate) mod env;
 mod exec;
 pub(crate) mod profile;
+pub(crate) mod prompt_file;
 pub(crate) mod repo_home;
 
 use biscuit_terminal::terminal::Terminal;
@@ -84,6 +85,10 @@ pub struct WrapperArgs {
     /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
     #[arg(long)]
     pub repo: bool,
+
+    /// Source the initial prompt from a Markdown file (composed with Darkmatter).
+    #[arg(short = 'p', long = "prompt-file", value_name = "FILE")]
+    pub prompt_file: Option<String>,
 
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
@@ -235,6 +240,66 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         repo_requested,
         needs_mcp_shadow_home,
     )?;
+
+    // -- Prompt-file pipeline -------------------------------------------------
+    let mut stdin_seed: Option<String> = None;
+    let mut prompt_file_dry_run: Option<prompt_file::PromptFileDryRunInfo> = None;
+
+    if let Some(ref prompt_file_input) = args.prompt_file {
+        let pf_ctx = prompt_file::PromptResolutionContext {
+            cwd: cwd.clone(),
+            repo_root: env_plan.repo_root.clone(),
+            package_root: env_plan
+                .package_context
+                .as_ref()
+                .and_then(|pc| {
+                    // Derive package root from repo_root + package_area
+                    env_plan
+                        .repo_root
+                        .as_ref()
+                        .map(|rr| rr.join(&pc.package_area))
+                }),
+            interactive: std::io::stdin().is_terminal()
+                && std::io::stdout().is_terminal()
+                && !non_interactive_requested,
+        };
+
+        let resolved = prompt_file::resolve_prompt_file(prompt_file_input, &pf_ctx)?;
+        let composed = prompt_file::compose_prompt_file(&resolved)?;
+
+        // Detect conflict with existing prompt source
+        prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
+
+        // Deliver composed body to provider
+        let delivery_method = if matches!(provider, Provider::Claude | Provider::KimiCode) {
+            "stdin"
+        } else {
+            "args"
+        };
+        profile.apply_prompt_body(
+            &mut child_args,
+            &mut stdin_seed,
+            &composed.body,
+            non_interactive_requested,
+        )?;
+
+        // Add prompt-file env vars to child environment
+        for (key, value) in &composed.env_overrides {
+            env_plan
+                .env
+                .insert(key.clone().into(), value.clone().into());
+            env_plan
+                .added
+                .push((key.clone(), value.clone()));
+        }
+
+        prompt_file_dry_run = Some(prompt_file::PromptFileDryRunInfo {
+            original: resolved.original.clone(),
+            resolved_path: composed.resolved_path.clone(),
+            delivery_method: delivery_method.to_string(),
+            env_names: composed.env_names.clone(),
+        });
+    }
 
     let mut mcp_runtime = None;
     let mut mcp_cleanup: Option<(Box<dyn claudine::mcp::inject::McpInjector>, claudine::mcp::inject::InjectionResult)> = None;
@@ -400,6 +465,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             repo_requested,
             &env_plan,
             mcp_runtime.as_ref(),
+            prompt_file_dry_run.as_ref(),
             child_cwd,
             &term,
         );
@@ -466,6 +532,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         args.timeout,
         stdout_noise,
         stderr_noise,
+        stdin_seed.as_deref(),
     );
 
     // MCP injector cleanup: remove temp files written during injection

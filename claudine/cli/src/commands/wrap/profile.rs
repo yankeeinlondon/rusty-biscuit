@@ -162,6 +162,21 @@ pub(crate) trait WrapperProfile: Send + Sync {
         &[]
     }
 
+    // -- Prompt-file delivery -------------------------------------------------
+
+    /// Deliver a composed prompt body to the provider.
+    ///
+    /// For arg-based providers, the prompt is injected into `args`.
+    /// For stdin-based providers (Claude, Kimi), the prompt is placed in
+    /// `stdin_seed` and requires `non_interactive` mode.
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        stdin_seed: &mut Option<String>,
+        prompt: &str,
+        non_interactive: bool,
+    ) -> Result<()>;
+
     // -- Provider-required env vars ------------------------------------------
 
     /// Env var names that this provider requires and should bypass the
@@ -281,6 +296,22 @@ impl WrapperProfile for ClaudeWrapper {
         None
     }
 
+    fn apply_prompt_body(
+        &self,
+        _args: &mut Vec<String>,
+        stdin_seed: &mut Option<String>,
+        prompt: &str,
+        non_interactive: bool,
+    ) -> Result<()> {
+        if !non_interactive {
+            bail!(
+                "prompt-file delivery for Claude requires --non-interactive \
+                 because the prompt is seeded via stdin"
+            );
+        }
+        *stdin_seed = Some(prompt.to_string());
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +396,23 @@ impl WrapperProfile for CodexWrapper {
             args.push("--sandbox".to_string());
         }
         None
+    }
+
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        _stdin_seed: &mut Option<String>,
+        prompt: &str,
+        _non_interactive: bool,
+    ) -> Result<()> {
+        // Codex: insert prompt as positional after "exec" (index 1 in args)
+        let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
+            1
+        } else {
+            0
+        };
+        args.insert(insert_at, prompt.to_string());
+        Ok(())
     }
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
@@ -485,6 +533,18 @@ impl WrapperProfile for GeminiWrapper {
             ),
         }
     }
+
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        _stdin_seed: &mut Option<String>,
+        prompt: &str,
+        _non_interactive: bool,
+    ) -> Result<()> {
+        args.push("--prompt".to_string());
+        args.push(prompt.to_string());
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +593,23 @@ impl WrapperProfile for KimiWrapper {
         if !has_flag(args, "--print") {
             args.push("--print".to_string());
         }
+        Ok(())
+    }
+
+    fn apply_prompt_body(
+        &self,
+        _args: &mut Vec<String>,
+        stdin_seed: &mut Option<String>,
+        prompt: &str,
+        non_interactive: bool,
+    ) -> Result<()> {
+        if !non_interactive {
+            bail!(
+                "prompt-file delivery for Kimi requires --non-interactive \
+                 because the prompt is seeded via stdin"
+            );
+        }
+        *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
 }
@@ -616,6 +693,18 @@ impl WrapperProfile for QwenWrapper {
             args.push("--sandbox".to_string());
         }
         None
+    }
+
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        _stdin_seed: &mut Option<String>,
+        prompt: &str,
+        _non_interactive: bool,
+    ) -> Result<()> {
+        args.push("--prompt".to_string());
+        args.push(prompt.to_string());
+        Ok(())
     }
 }
 
@@ -704,6 +793,23 @@ impl WrapperProfile for OpencodeWrapper {
             )),
         }
     }
+
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        _stdin_seed: &mut Option<String>,
+        prompt: &str,
+        _non_interactive: bool,
+    ) -> Result<()> {
+        // OpenCode: insert prompt as positional after "run" (index 1 in args)
+        let insert_at = if args.first().is_some_and(|f| f == "run") {
+            1
+        } else {
+            0
+        };
+        args.insert(insert_at, prompt.to_string());
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -765,6 +871,25 @@ impl WrapperProfile for GooseWrapper {
     ) -> Option<String> {
         env_overrides.push(("GOOSE_MODEL".to_string(), model.to_string()));
         None
+    }
+
+    fn apply_prompt_body(
+        &self,
+        args: &mut Vec<String>,
+        _stdin_seed: &mut Option<String>,
+        prompt: &str,
+        _non_interactive: bool,
+    ) -> Result<()> {
+        // Goose: insert -t <prompt> after "run" subcommand
+        if let Some(pos) = args.iter().position(|a| a == "run") {
+            args.insert(pos + 1, prompt.to_string());
+            args.insert(pos + 1, "-t".to_string());
+        } else {
+            args.push("run".to_string());
+            args.push("-t".to_string());
+            args.push(prompt.to_string());
+        }
+        Ok(())
     }
 }
 

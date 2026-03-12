@@ -41,6 +41,7 @@ pub(crate) fn run_child(
     timeout: Option<u64>,
     stdout_noise_prefixes: &[&str],
     stderr_noise_prefixes: &[&str],
+    stdin_seed: Option<&str>,
 ) -> Result<i32> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
@@ -55,13 +56,19 @@ pub(crate) fn run_child(
     let filter_stdout = !stdout_noise_prefixes.is_empty();
     let filter_stderr = !stderr_noise_prefixes.is_empty();
 
+    let needs_stdin_pipe = stdin_seed.is_some();
+
     let mut command = Command::new(binary);
     command
         .args(args)
         .env_clear()
         .envs(env)
         .current_dir(cwd)
-        .stdin(Stdio::inherit())
+        .stdin(if needs_stdin_pipe {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
         .stdout(if filter_stdout {
             Stdio::piped()
         } else {
@@ -74,6 +81,14 @@ pub(crate) fn run_child(
         });
 
     let mut child = command.spawn()?;
+
+    // Write stdin seed and close the pipe so the child sees EOF.
+    if let Some(seed) = stdin_seed {
+        if let Some(mut stdin_pipe) = child.stdin.take() {
+            stdin_pipe.write_all(seed.as_bytes())?;
+            // Drop closes the pipe
+        }
+    }
 
     // Spawn filter threads that read child output line-by-line and
     // suppress lines matching any noise prefix.

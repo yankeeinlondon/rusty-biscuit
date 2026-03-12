@@ -9,6 +9,7 @@ use std::path::Path;
 use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
+use crate::commands::wrap::prompt_file::PromptFileDryRunInfo;
 use crate::log;
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] args`
@@ -108,6 +109,7 @@ pub(crate) fn log_wrapper_env_details(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn log_dry_run(
     profile: &dyn WrapperProfile,
     binary_path: &Path,
@@ -115,6 +117,7 @@ pub(crate) fn log_dry_run(
     repo_requested: bool,
     env_plan: &EnvPlan,
     mcp_runtime: Option<&McpRuntimeInfo>,
+    prompt_file_info: Option<&PromptFileDryRunInfo>,
     child_cwd: &Path,
     term: &Terminal,
 ) {
@@ -177,6 +180,34 @@ pub(crate) fn log_dry_run(
     if let Some(mcp_runtime) = mcp_runtime {
         log_mcp_runtime(term, mcp_runtime);
     }
+
+    if let Some(pf) = prompt_file_info {
+        log_prompt_file_dry_run(term, pf);
+    }
+}
+
+fn log_prompt_file_dry_run(term: &Terminal, info: &PromptFileDryRunInfo) {
+    log::message(&Prose::new("<bold>Prompt File:</bold>").render(term));
+
+    let mut items: Vec<RenderableContent> = Vec::new();
+    items.push(RenderableContent::from(Prose::new(format!(
+        "<green>path</green><dim>={} (from {})</dim>",
+        info.resolved_path.display(),
+        info.original
+    ))));
+    items.push(RenderableContent::from(Prose::new(format!(
+        "<green>delivery</green><dim>={}</dim>",
+        info.delivery_method
+    ))));
+    if !info.env_names.is_empty() {
+        items.push(RenderableContent::from(Prose::new(format!(
+            "<green>env_vars</green><dim>={}</dim>",
+            info.env_names.join(", ")
+        ))));
+    }
+
+    let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
+    log::message(&rendered);
 }
 
 pub(crate) fn summarize_value(key: &str, value: &str) -> String {
