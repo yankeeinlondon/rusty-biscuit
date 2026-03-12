@@ -643,7 +643,7 @@ fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
     //     log::data(&format!("Top tools: {top_tools}"));
     // }
 
-    let tool_calls = if term.width() > 120 {
+    let _tool_calls = if term.width() > 120 {
         Some(TableColumn::new("Tool\nCalls")
             .with_type(ColumnType::Integer)
         )
