@@ -1647,9 +1647,10 @@ impl Table {
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
-                    // Cell content may contain \x1b[0m (full SGR reset) which
-                    // kills the stripe bg/fg.  Append restores so that the
-                    // padding spaces added by pad_cell keep the stripe.
+                    // Cell content may contain \x1b[0m (full SGR reset) or
+                    // \x1b[49m (background reset) which kills the stripe bg/fg.
+                    // Replace every such reset *within* the content so the stripe
+                    // survives between styled spans, not just after the last one.
                     if is_striped {
                         let mut restore = String::new();
                         if let Some(bg) = active_bg {
@@ -1658,8 +1659,24 @@ impl Table {
                         if let Some(fg) = active_fg {
                             restore.push_str(fg);
                         }
-                        let restored = format!("{}{}", line_content, restore);
-                        row_str.push_str(&pad_cell(&restored, width, alignment, max_width));
+                        let mut patched = line_content.to_string();
+                        if !restore.is_empty() && patched.contains("\x1b[") {
+                            // Full SGR reset – restore both bg and fg
+                            patched = patched.replace(
+                                "\x1b[0m",
+                                &format!("\x1b[0m{restore}"),
+                            );
+                            // Background-only reset – restore just bg
+                            if let Some(bg) = active_bg {
+                                patched = patched.replace(
+                                    "\x1b[49m",
+                                    &format!("\x1b[49m{bg}"),
+                                );
+                            }
+                        }
+                        // Ensure stripe is active for trailing padding too
+                        patched.push_str(&restore);
+                        row_str.push_str(&pad_cell(&patched, width, alignment, max_width));
                     } else {
                         row_str.push_str(&pad_cell(line_content, width, alignment, max_width));
                     }
@@ -2402,7 +2419,30 @@ fn render_row_with_cursor_positioning(
         // causing a visual line wrap ("blank line").
         let is_padding_only = content.bytes().all(|b| b == b' ');
         if !is_padding_only {
-            row.push_str(&format!("\x1b[{}G{}\x1b[0m", content_col, content));
+            // Patch mid-content resets so the stripe survives between
+            // styled Prose spans (e.g. <bg-red>A</bg-red> gap <bg-red>B</bg-red>).
+            let patched: std::borrow::Cow<'_, str> = if has_stripe && content.contains("\x1b[") {
+                let mut s = content.to_string();
+                // Build full restore (bg + fg)
+                let mut restore = String::new();
+                if let Some(bg) = stripe_bg {
+                    restore.push_str(bg);
+                }
+                if let Some(fg) = stripe_fg {
+                    restore.push_str(fg);
+                }
+                if !restore.is_empty() {
+                    s = s.replace("\x1b[0m", &format!("\x1b[0m{restore}"));
+                }
+                // Background-only reset
+                if let Some(bg) = stripe_bg {
+                    s = s.replace("\x1b[49m", &format!("\x1b[49m{bg}"));
+                }
+                std::borrow::Cow::Owned(s)
+            } else {
+                std::borrow::Cow::Borrowed(content)
+            };
+            row.push_str(&format!("\x1b[{}G{}\x1b[0m", content_col, patched));
         }
 
         // The \x1b[0m above resets any active SGR from cell content (colors,
@@ -4553,6 +4593,97 @@ mod tests {
             .find(bg)
             .expect("Stripe bg should be re-applied after SGR reset in cell");
         assert!(bg_restore > 0, "Stripe bg must follow the SGR reset");
+    }
+
+    #[test]
+    fn test_stripe_survives_bg_reset_mid_content_space_padded() {
+        // When Prose content like <bg-red>A</bg-red> emits \x1b[49m (bg-only
+        // reset), the stripe bg must be re-applied so that text between styled
+        // spans keeps the stripe.
+        let content = "\x1b[41mERR\x1b[49m, \x1b[41mWARN\x1b[49m";
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_min_width(20),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "plain".into()],
+                vec!["row1".into(), TableCellContent::Text(content.to_string())],
+            ]);
+
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains("row1"))
+            .expect("Should have row1 line");
+
+        // Count how many times the stripe bg appears after a \x1b[49m.
+        // There are two \x1b[49m resets in the content; the stripe bg must
+        // follow each one.
+        let bg_after_49m: Vec<_> = striped_line
+            .match_indices("\x1b[49m")
+            .filter_map(|(pos, _)| {
+                let after = pos + "\x1b[49m".len();
+                striped_line.get(after..).and_then(|s| {
+                    if s.starts_with(bg) {
+                        Some(pos)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        assert!(
+            bg_after_49m.len() >= 2,
+            "Stripe bg must be restored after each \\x1b[49m; found {} restorations in: {:?}",
+            bg_after_49m.len(),
+            striped_line
+        );
+    }
+
+    #[test]
+    fn test_stripe_survives_bg_reset_mid_content_cursor_positioned() {
+        let content = "\x1b[41mERR\x1b[49m, \x1b[41mWARN\x1b[49m";
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_min_width(20),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "plain".into()],
+                vec!["row1".into(), TableCellContent::Text(content.to_string())],
+            ])
+            .prefer_cursor_alignment();
+
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains("row1"))
+            .expect("Should have row1 line");
+
+        let bg_after_49m: Vec<_> = striped_line
+            .match_indices("\x1b[49m")
+            .filter_map(|(pos, _)| {
+                let after = pos + "\x1b[49m".len();
+                striped_line.get(after..).and_then(|s| {
+                    if s.starts_with(bg) {
+                        Some(pos)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        assert!(
+            bg_after_49m.len() >= 2,
+            "Stripe bg must be restored after each \\x1b[49m; found {} restorations in: {:?}",
+            bg_after_49m.len(),
+            striped_line
+        );
     }
 
     // ── Alternate text color tests ──────────────────────────────────
