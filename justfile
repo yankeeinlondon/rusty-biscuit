@@ -201,7 +201,7 @@ doctest *args="":
         all_pkgs=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
         pkg_args=""
         for area in "${areas[@]}"; do
-            if echo "$all_pkgs" | grep -qx "$area"; then
+            if grep -qx "$area" <<< "$all_pkgs"; then
                 pkg_args="$pkg_args -p $area"
             else
                 # Area name doesn't match a package; expand to all packages with that prefix
