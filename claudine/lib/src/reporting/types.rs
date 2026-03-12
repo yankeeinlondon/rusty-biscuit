@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::events::{AgenticEvent, Provider};
 
@@ -199,15 +200,17 @@ pub struct ErrorRecord {
     pub provider: Provider,
     pub event: AgenticEvent,
     pub session_key: String,
+    pub session_id: Option<String>,
     pub repo_name: Option<String>,
     pub tool_name: Option<String>,
+    pub model: Option<String>,
     pub error: String,
     pub prompt: Option<String>,
-    pub tool_input_json: Option<String>,
+    pub tool_input: Option<JsonValue>,
     pub notification_message: Option<String>,
     /// Raw extra JSON from the event, used as fallback context.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra_json: Option<String>,
+    pub extra: Option<JsonValue>,
 }
 
 /// Error list wrapper for JSON output.
@@ -270,4 +273,65 @@ pub struct TrendsReport {
     pub points: Vec<TrendPoint>,
     pub provider_split: Vec<ProviderSplit>,
     pub top_tools: Vec<DailyToolStat>,
+}
+
+/// One event row within a session detail report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub timestamp: DateTime<Utc>,
+    pub event: AgenticEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_org: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_dirty: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_input: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_response: Option<JsonValue>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cost_usd: f64,
+    /// Raw extra JSON payload from the event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<JsonValue>,
+    /// Environment context snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<JsonValue>,
+}
+
+/// Full detail for a single session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionDetailReport {
+    pub session: SessionInfo,
+    pub events: Vec<SessionEvent>,
+    pub tools: Vec<DailyToolStat>,
+    pub errors: Vec<ErrorRecord>,
 }

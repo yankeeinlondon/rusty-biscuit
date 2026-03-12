@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use serde_json::{Value, json};
+use tracing::debug;
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
@@ -64,9 +65,7 @@ impl ProviderAdapter for OpenCodeAdapter {
                 .or_else(|| raw.get("output").cloned())
                 .or_else(|| event_context.get("tool_response").cloned())
                 .or_else(|| event_context.get("output").cloned()),
-            error: str_field(raw, "error")
-                .or_else(|| value_path_string(event_context, &["error", "message"]))
-                .or_else(|| str_field(event_context, "error")),
+            error: extract_error(raw, event_context, event),
             prompt: str_field(raw, "prompt"),
             agent_type: str_field(raw, "agent_type"),
             notification_type: if event == AgenticEvent::Notification {
@@ -189,6 +188,69 @@ fn map_event(event_type: &str) -> Result<AgenticEvent, AdapterError> {
         "experimental.text.complete" => Ok(AgenticEvent::AfterModel),
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
+}
+
+/// Extract error details from an OpenCode event payload.
+///
+/// OpenCode `session.error` events carry a structured error object:
+/// ```json
+/// { "properties": { "error": { "name": "UnknownError", "data": { "message": "..." } } } }
+/// ```
+///
+/// This function tries multiple paths to find error text, logging the raw
+/// payload at DEBUG level for turn errors to aid future debugging.
+fn extract_error(raw: &Value, event_context: &Value, event: AgenticEvent) -> Option<String> {
+    if event == AgenticEvent::TurnError {
+        debug!(
+            raw_payload = %raw,
+            event_context = %event_context,
+            "OpenCode turn error payload"
+        );
+    }
+
+    // 1. Simple top-level string: raw["error"]
+    if let Some(error) = str_field(raw, "error") {
+        return Some(error);
+    }
+
+    // 2. Structured error object: properties.error.data.message (OpenCode SDK format)
+    let error_obj = event_context.get("error");
+    if let Some(error_obj) = error_obj {
+        let error_name = error_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Error");
+        let error_message = error_obj
+            .get("data")
+            .and_then(|data| data.get("message"))
+            .and_then(Value::as_str);
+
+        if let Some(message) = error_message {
+            return Some(format!("{error_name}: {message}"));
+        }
+
+        // Fallback: error name only (e.g. MessageOutputLengthError has no message)
+        if error_name != "Error" {
+            return Some(error_name.to_string());
+        }
+
+        // Last resort: stringify the error object if it's non-null
+        if !error_obj.is_null() {
+            return Some(error_obj.to_string());
+        }
+    }
+
+    // 3. Legacy path: properties.error.message (flat structure)
+    if let Some(msg) = value_path_string(event_context, &["error", "message"]) {
+        return Some(msg);
+    }
+
+    // 4. Simple string in event_context: properties.error (string)
+    if let Some(error) = str_field(event_context, "error") {
+        return Some(error);
+    }
+
+    None
 }
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
@@ -357,5 +419,101 @@ mod tests {
         assert_eq!(meta.extra["token_usage"]["total"], json!(49712));
         assert_eq!(meta.extra["token_usage"]["cache_read"], json!(48479));
         assert_eq!(meta.extra["token_usage"]["cache_write"], json!(356));
+    }
+
+    #[test]
+    fn parse_session_error_extracts_structured_error() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "session.error",
+            "properties": {
+                "sessionID": "ses_err_789",
+                "error": {
+                    "name": "UnknownError",
+                    "data": {
+                        "message": "something went wrong"
+                    }
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnError);
+        assert_eq!(meta.session_id.as_deref(), Some("ses_err_789"));
+        assert_eq!(meta.error.as_deref(), Some("UnknownError: something went wrong"));
+    }
+
+    #[test]
+    fn parse_session_error_api_error_with_status() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "session.error",
+            "properties": {
+                "error": {
+                    "name": "APIError",
+                    "data": {
+                        "message": "rate limit exceeded",
+                        "statusCode": 429,
+                        "isRetryable": true
+                    }
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnError);
+        assert_eq!(meta.error.as_deref(), Some("APIError: rate limit exceeded"));
+    }
+
+    #[test]
+    fn parse_session_error_name_only_no_message() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "session.error",
+            "properties": {
+                "error": {
+                    "name": "MessageOutputLengthError",
+                    "data": {}
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnError);
+        assert_eq!(meta.error.as_deref(), Some("MessageOutputLengthError"));
+    }
+
+    #[test]
+    fn parse_session_error_with_provider_auth_error() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "session.error",
+            "properties": {
+                "error": {
+                    "name": "ProviderAuthError",
+                    "data": {
+                        "providerID": "anthropic",
+                        "message": "invalid API key"
+                    }
+                }
+            }
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnError);
+        assert_eq!(meta.error.as_deref(), Some("ProviderAuthError: invalid API key"));
+    }
+
+    #[test]
+    fn parse_session_error_with_no_error_field() {
+        let adapter = OpenCodeAdapter;
+        let raw = json!({
+            "type": "session.error",
+            "properties": {}
+        });
+
+        let (event, meta) = adapter.parse_event(&raw).unwrap();
+        assert_eq!(event, AgenticEvent::TurnError);
+        assert_eq!(meta.error, None);
     }
 }

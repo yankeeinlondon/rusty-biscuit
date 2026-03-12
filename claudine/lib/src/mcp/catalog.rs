@@ -294,7 +294,9 @@ impl McpCatalogStore {
     }
 }
 
-fn resolve_match_list<'a>(matches: Vec<&'a McpServer>) -> std::result::Result<Option<&'a McpServer>, Vec<&'a McpServer>> {
+fn resolve_match_list(
+    matches: Vec<&McpServer>,
+) -> std::result::Result<Option<&McpServer>, Vec<&McpServer>> {
     if matches.len() == 1 {
         return Ok(matches.into_iter().next());
     }

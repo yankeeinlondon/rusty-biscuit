@@ -275,7 +275,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             .and_then(|l| l.primary.as_ref())
             .map(|l| l.to_string());
 
-        let mut context = EnvironmentContext {
+        EnvironmentContext {
             os,
             hardware,
             git,
@@ -283,10 +283,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             primary_language,
             package_area: None,
             package: None,
-        };
-
-        apply_wrapper_package_context(&mut context, &lookup_env_var);
-        context
+        }
     }
 }
 
@@ -309,7 +306,9 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
         filesystem: None,
     });
 
-    EnvironmentContext::from(result)
+    let mut context = EnvironmentContext::from(result);
+    apply_wrapper_package_context(&mut context, &lookup_env_var);
+    context
 }
 
 fn apply_wrapper_package_context(

@@ -13,9 +13,9 @@ use crate::error::Result;
 
 pub use types::{
     DailySummary, DailyToolStat, DateRange, DerivedMetrics, ErrorRecord, ErrorsReport,
-    LabeledCount, ProviderSplit, RepoActivity, ReportingFilters, ReposReport, SessionInfo,
-    SessionsReport, SyncFailure, SyncRequest, SyncSummary, ToolActionClass, ToolsReport,
-    TrendPoint, TrendsReport, UsageTotals,
+    LabeledCount, ProviderSplit, RepoActivity, ReportingFilters, ReposReport, SessionDetailReport,
+    SessionEvent, SessionInfo, SessionsReport, SyncFailure, SyncRequest, SyncSummary,
+    ToolActionClass, ToolsReport, TrendPoint, TrendsReport, UsageTotals,
 };
 
 /// SQLite-backed reporting index built from Claudine JSONL event logs.
@@ -102,6 +102,11 @@ impl ReportingStore {
     /// Query repository activity for an inclusive date range.
     pub fn repos(&self, range: DateRange, filters: &ReportingFilters) -> Result<ReposReport> {
         queries::repos(&self.connection, range, filters)
+    }
+
+    /// Query full detail for a single session by key or ID.
+    pub fn session_detail(&self, id: &str) -> Result<SessionDetailReport> {
+        queries::session_detail(&self.connection, id)
     }
 
     /// Query daily trends for an inclusive date range.

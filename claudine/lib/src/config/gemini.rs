@@ -300,10 +300,10 @@ fn is_claudine_hook(entry: &Value) -> bool {
     };
 
     // Nested format: {hooks: [{name: "claudine-..."}]}
-    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array()) {
-        if hooks.iter().any(has_claudine_name) {
-            return true;
-        }
+    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array())
+        && hooks.iter().any(has_claudine_name)
+    {
+        return true;
     }
 
     // Legacy flat format: {name: "claudine-..."}
@@ -323,10 +323,10 @@ fn extract_claudine_event(entry: &Value) -> Option<String> {
     };
 
     // Try nested format first
-    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array()) {
-        if let Some(event) = hooks.iter().find_map(extract_from) {
-            return Some(event);
-        }
+    if let Some(hooks) = entry.get("hooks").and_then(|h| h.as_array())
+        && let Some(event) = hooks.iter().find_map(extract_from)
+    {
+        return Some(event);
     }
 
     // Fall back to legacy flat format

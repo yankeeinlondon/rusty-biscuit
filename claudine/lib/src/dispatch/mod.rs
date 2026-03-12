@@ -53,12 +53,11 @@ pub async fn dispatch(
 
     // If the wrapper injected a session ID and the adapter didn't extract one
     // from the payload, use the wrapper's session ID for consistent grouping.
-    if meta.session_id.is_none() {
-        if let Ok(wrapper_sid) = std::env::var("CLAUDINE_SESSION_ID") {
-            if !wrapper_sid.trim().is_empty() {
-                meta.session_id = Some(wrapper_sid);
-            }
-        }
+    if meta.session_id.is_none()
+        && let Ok(wrapper_sid) = std::env::var("CLAUDINE_SESSION_ID")
+        && !wrapper_sid.trim().is_empty()
+    {
+        meta.session_id = Some(wrapper_sid);
     }
 
     // Propagate wrapper interactivity flag into extra for reporting.
@@ -231,8 +230,7 @@ where
 {
     keys.iter()
         .copied()
-        .into_iter()
-        .filter_map(|key| lookup(key))
+        .filter_map(lookup)
         .map(|value| value.trim().to_string())
         .find(|value| !value.is_empty())
 }

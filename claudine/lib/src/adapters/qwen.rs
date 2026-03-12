@@ -206,10 +206,10 @@ fn capture_qwen_usage(extra: &mut HashMap<String, Value>, raw: &Value) {
     extra.insert("token_usage".to_string(), normalized);
 
     // Only write cost_usd when provider gives us a real value
-    if let Some(cost) = usage.get("cost").or_else(|| raw.get("cost")) {
-        if cost.is_number() {
-            extra.insert("cost_usd".to_string(), cost.clone());
-        }
+    if let Some(cost) = usage.get("cost").or_else(|| raw.get("cost"))
+        && cost.is_number()
+    {
+        extra.insert("cost_usd".to_string(), cost.clone());
     }
 }
 
