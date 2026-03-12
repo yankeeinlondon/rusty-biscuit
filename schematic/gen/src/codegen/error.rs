@@ -150,16 +150,6 @@ pub fn generate_error_type() -> TokenStream {
             /// Should never occur in normal operation.
             #[error("Internal error: {0}")]
             InternalError(String),
-
-            /// OAuth2 authentication is required but no token was provided.
-            ///
-            /// Use the `schematic-oauth` runtime to obtain a token, then
-            /// pass it via `.variant_with_headers(Headers::default().use_bearer_token(token))`.
-            #[error("OAuth2 authentication required: {message}")]
-            OAuthAuthenticationRequired {
-                /// Description of the OAuth2 requirement.
-                message: String,
-            },
         }
     }
 }

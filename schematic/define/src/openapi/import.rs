@@ -463,13 +463,11 @@ impl OpenApiImport {
                 }
             };
 
-            match mappings::map_security_scheme(scheme) {
+            let location = format!("#/components/securitySchemes/{}", name);
+            match mappings::map_security_scheme(scheme, diagnostics, &location) {
                 Ok(auth) => return auth,
                 Err(msg) => {
-                    diagnostics.push(OpenApiDiagnostic::warn(
-                        format!("#/components/securitySchemes/{}", name),
-                        msg,
-                    ));
+                    diagnostics.push(OpenApiDiagnostic::warn(location, msg));
                 }
             }
         }

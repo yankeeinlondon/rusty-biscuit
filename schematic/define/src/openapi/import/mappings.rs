@@ -118,7 +118,15 @@ pub fn map_operation(
 }
 
 /// Maps an OpenAPI security scheme to an AuthStrategy.
-pub fn map_security_scheme(scheme: &SecurityScheme) -> Result<AuthStrategy, String> {
+///
+/// Unsupported but recognized flows (implicit, password) degrade gracefully
+/// to `AuthStrategy::None` with a warning diagnostic instead of aborting the
+/// import.
+pub fn map_security_scheme(
+    scheme: &SecurityScheme,
+    diagnostics: &mut Vec<OpenApiDiagnostic>,
+    location: &str,
+) -> Result<AuthStrategy, String> {
     match scheme {
         SecurityScheme::HTTP {
             scheme: auth_scheme,
@@ -170,9 +178,17 @@ pub fn map_security_scheme(scheme: &SecurityScheme) -> Result<AuthStrategy, Stri
                     client_auth: crate::oauth::OAuth2ClientAuthMethod::ClientSecretBasic,
                 }))
             } else if flows.implicit.is_some() {
-                Err("Implicit OAuth2 flow is not supported (insecure). Use authorization_code with PKCE instead.".to_string())
+                diagnostics.push(OpenApiDiagnostic::warn(
+                    location.to_string(),
+                    "Implicit OAuth2 flow is not supported (insecure). Use authorization_code with PKCE instead. Falling back to manual auth.".to_string(),
+                ));
+                Ok(AuthStrategy::None)
             } else if flows.password.is_some() {
-                Err("Resource Owner Password Credentials flow is not supported (insecure).".to_string())
+                diagnostics.push(OpenApiDiagnostic::warn(
+                    location.to_string(),
+                    "Resource Owner Password Credentials flow is not supported (insecure). Falling back to manual auth.".to_string(),
+                ));
+                Ok(AuthStrategy::None)
             } else {
                 Err("No supported OAuth2 flow found in security scheme.".to_string())
             }
@@ -1155,7 +1171,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme).unwrap();
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         assert!(matches!(result, AuthStrategy::BearerToken { .. }));
     }
 
@@ -1168,7 +1184,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme).unwrap();
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         assert!(matches!(result, AuthStrategy::Basic));
     }
 
@@ -1181,7 +1197,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme).unwrap();
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         match result {
             AuthStrategy::ApiKey { header } => {
                 assert_eq!(header, "X-API-Key");
@@ -1199,7 +1215,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme).unwrap();
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         match result {
             AuthStrategy::ApiKeyParam { name, location } => {
                 assert_eq!(name, "api_key");
@@ -1218,7 +1234,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme).unwrap();
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test").unwrap();
         match result {
             AuthStrategy::ApiKeyParam { name, location } => {
                 assert_eq!(name, "session");
@@ -1237,7 +1253,7 @@ mod tests {
             extensions: Default::default(),
         };
 
-        let result = map_security_scheme(&scheme);
+        let result = map_security_scheme(&scheme, &mut Vec::new(), "#/test");
         assert!(result.is_err());
     }
 
