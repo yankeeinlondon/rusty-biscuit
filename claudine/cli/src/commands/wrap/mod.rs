@@ -530,16 +530,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         &env_plan.env,
         child_cwd,
         args.timeout,
-        stdout_noise,
-        stderr_noise,
-        stdin_seed.as_deref(),
+        exec::ChildIoOptions {
+            stdout_noise_prefixes: stdout_noise,
+            stderr_noise_prefixes: stderr_noise,
+            stdin_seed: stdin_seed.as_deref(),
+        },
     );
 
     // MCP injector cleanup: remove temp files written during injection
-    if let Some((injector, injection_result)) = mcp_cleanup {
-        if let Err(e) = injector.cleanup(&injection_result) {
-            tracing::warn!("MCP injector cleanup failed: {e}");
-        }
+    if let Some((injector, injection_result)) = mcp_cleanup
+        && let Err(e) = injector.cleanup(&injection_result)
+    {
+        tracing::warn!("MCP injector cleanup failed: {e}");
     }
 
     exit_code

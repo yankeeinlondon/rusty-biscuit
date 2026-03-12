@@ -245,16 +245,16 @@ fn walk_dir_recursive(dir: &Path, filename: &str, matches: &mut Vec<PathBuf>) ->
         let path = entry.path();
         if path.is_dir() {
             // Skip .git and other hidden directories
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.') || name == "node_modules" || name == "target" {
-                    continue;
-                }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && (name.starts_with('.') || name == "node_modules" || name == "target")
+            {
+                continue;
             }
             walk_dir_recursive(&path, filename, matches)?;
-        } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name == filename {
-                matches.push(path);
-            }
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name == filename
+        {
+            matches.push(path);
         }
     }
     Ok(())

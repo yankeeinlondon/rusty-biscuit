@@ -279,7 +279,7 @@ fn run_init(json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    if user_defaults_exists && repo_root.is_some() && !repo_defaults_exists {
+    if user_defaults_exists && !repo_defaults_exists && let Some(repo_root) = repo_root {
         let catalog = McpCatalogStore::load()?;
         let user_defaults = load_user_defaults()?;
 
@@ -295,7 +295,6 @@ fn run_init(json_output: bool) -> Result<()> {
             "Select repo-default MCP servers:",
             &user_defaults.defaults,
         )?;
-        let repo_root = repo_root.expect("repo root should exist");
         save_repo_defaults(
             &repo_root,
             &McpDefaults {
@@ -462,7 +461,7 @@ fn run_alias(args: AliasArgs, json_output: bool) -> Result<()> {
             return render_json_or_text(
                 json_output,
                 json!({ "action": "add", "id": add.name, "alias": add.alias }),
-                format!("Alias added."),
+                "Alias added.".to_string(),
             );
         }
         Some(AliasCompatibilityCommand::Remove(remove)) => {

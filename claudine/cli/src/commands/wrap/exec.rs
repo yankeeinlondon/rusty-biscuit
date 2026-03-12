@@ -7,6 +7,12 @@ use std::thread;
 
 use color_eyre::eyre::Result;
 
+pub(crate) struct ChildIoOptions<'a> {
+    pub(crate) stdout_noise_prefixes: &'a [&'a str],
+    pub(crate) stderr_noise_prefixes: &'a [&'a str],
+    pub(crate) stdin_seed: Option<&'a str>,
+}
+
 /// Spawn the provider child process and return its exit code.
 ///
 /// ## Environment
@@ -39,9 +45,7 @@ pub(crate) fn run_child(
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
-    stdout_noise_prefixes: &[&str],
-    stderr_noise_prefixes: &[&str],
-    stdin_seed: Option<&str>,
+    io: ChildIoOptions<'_>,
 ) -> Result<i32> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
@@ -53,10 +57,10 @@ pub(crate) fn run_child(
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
 
-    let filter_stdout = !stdout_noise_prefixes.is_empty();
-    let filter_stderr = !stderr_noise_prefixes.is_empty();
+    let filter_stdout = !io.stdout_noise_prefixes.is_empty();
+    let filter_stderr = !io.stderr_noise_prefixes.is_empty();
 
-    let needs_stdin_pipe = stdin_seed.is_some();
+    let needs_stdin_pipe = io.stdin_seed.is_some();
 
     let mut command = Command::new(binary);
     command
@@ -83,18 +87,19 @@ pub(crate) fn run_child(
     let mut child = command.spawn()?;
 
     // Write stdin seed and close the pipe so the child sees EOF.
-    if let Some(seed) = stdin_seed {
-        if let Some(mut stdin_pipe) = child.stdin.take() {
-            stdin_pipe.write_all(seed.as_bytes())?;
-            // Drop closes the pipe
-        }
+    if let Some(seed) = io.stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+        // Drop closes the pipe
     }
 
     // Spawn filter threads that read child output line-by-line and
     // suppress lines matching any noise prefix.
     let stdout_handle = if filter_stdout {
         let pipe = child.stdout.take().expect("stdout was set to piped");
-        let prefixes: Vec<String> = stdout_noise_prefixes
+        let prefixes: Vec<String> = io
+            .stdout_noise_prefixes
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -115,7 +120,8 @@ pub(crate) fn run_child(
 
     let stderr_handle = if filter_stderr {
         let pipe = child.stderr.take().expect("stderr was set to piped");
-        let prefixes: Vec<String> = stderr_noise_prefixes
+        let prefixes: Vec<String> = io
+            .stderr_noise_prefixes
             .iter()
             .map(|s| s.to_string())
             .collect();
