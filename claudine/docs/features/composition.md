@@ -13,7 +13,6 @@ The _chained_ style of composition will use Darkmatter's composition transform o
 
 Another dimension to how Claudine provides composition features is whether you want the _caller_ or the _reference file_ to be the main determinant of which Agent to use.
 
-
 ## Using the `--frontmatter-prompt` for Inline Composition
 
 Using the `--frontmatter-prompt` is an example of an _inline_ composition where the agent being used is explicitly specified by the caller.
@@ -48,9 +47,10 @@ claudine opencode --compose some-file.md
 
 In this example:
 
-- we resolve the location of the `some-file.md` file using [file reference resolution](./file-reference-solution.md)
+- we resolve the location of the `some-file.md` file using `biscuit-file`'s `FileReference` struct
     - if the file can not be resolved we return an error
-- 
+- we transform the Markdown using Darkmatter's compose pipeline
+- we then pass the chosen Agent (in this example it's `opencode`)
 
 
 ## Using the `compose` command to Abstract Agent Choice
@@ -63,19 +63,13 @@ The compose command has two major variants:
 1. Inline composition of the `prompt` frontmatter
 2. Chained composition
 
-### Inline Composition
+### Inline Composition with `compose`
 
 The first variant is VERY similar to the `--frontmatter-prompt` based approach already discussed:
 
 - takes a file reference like `claudine compose inline <file>`
 - looks for help on choosing the appropriate agentic CLI based on the referenced `agent` (see Agent Selection process)
 - once the agent has been determined, this command performs exactly the same transformation of the file reference as the prior approach did.
-
-### Chained Composition
-
-The second variant of the `compose` function does not mutate any files in the filesystem nor does it expect the referenced file to have a `prompt` frontmatter property.
-
-
 
 #### Agent Selection
 
@@ -97,3 +91,33 @@ The second variant of the `compose` function does not mutate any files in the fi
     - the favorite agent defined in config (repo config, user config if not in repo) will be tried but if it fails it will automatically retry with the second favorite agent
     - if the second favorite agent fails too then we will return an error
 
+### Chained Composition with `compose`
+
+The second variant of the `compose` function does not mutate any files in the filesystem nor does it expect the referenced file to have a `prompt` frontmatter property. Instead, the default `compose` subcommand will:
+
+- resolve the file reference (to the Markdown file)
+- run darkmatter's compose function on the reference file
+- send the composed Markdown content to an Agent as a prompt
+
+```sh
+claudine compose <file-ref>
+```
+
+
+## Summary Process
+
+1. Leverage the `FileReference` struct from **biscuit-file** to resolve the filepath to the CLI's file reference parameter
+2. Transform content using Darkmatter's compose pipeline; where content is:
+   - the `prompt` property for _inline_ operations
+   - the full document's content for _chained_ operations
+3. Wrap the execution -- using **claudine** of a non-interactive agent session to process the prompt:
+   - the prompt is the frontmatter property `prompt` (after Darkmatter compose) for inline operations
+   - the prompt is the entire document (after Darkmatter compose) for chained operations
+
+The utility of these processes are:
+
+- Inline operations are used to update the _body_ of a document using a composed prompt and an non-interactive agent session
+    - this is a common way to compose research or build up content that will be made into a "skill"
+    - there are of course many other use cases too
+- Chained operations are used to compose a reference file and then use it to prompt a non-interactive agent session
+    - this provides a way to take a static "template" and inject dynamic content into the content before using it as a prompt to an Agent
