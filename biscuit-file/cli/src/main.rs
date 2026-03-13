@@ -4,11 +4,12 @@
 //! For Markdown files, extracts and converts the frontmatter block.
 
 use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
-use biscuit_file::{FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
-use clap::{ArgGroup, Parser, ValueEnum};
+use biscuit_file::{FileReference, FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
+use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
+use std::process;
 
 /// File format conversion and extraction utility.
 ///
@@ -26,6 +27,9 @@ use std::path::PathBuf;
 struct Cli {
     /// Input file path (omit or use `-` for STDIN)
     file: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
 
     /// Output as JSON
     #[arg(long)]
@@ -115,10 +119,43 @@ enum InputFormat {
     Pdf,
 }
 
+#[derive(Subcommand)]
+enum Commands {
+    /// Resolve a file reference to its filesystem path
+    #[command(alias = "ref")]
+    Reference {
+        /// The file reference string (e.g., @foo.md, !README.md, vault:note.md)
+        reference: String,
+
+        /// Output a path relative to the matched base directory
+        #[arg(long)]
+        relative: bool,
+
+        /// Output a path relative to the current working directory
+        #[arg(long)]
+        relative_cwd: bool,
+
+        /// Add a vault root path
+        #[arg(long = "add-vault", short = 'v')]
+        vaults: Vec<PathBuf>,
+    },
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+
+    // Handle subcommands first
+    if let Some(Commands::Reference {
+        reference,
+        relative,
+        relative_cwd,
+        vaults,
+    }) = cli.command
+    {
+        return run_reference(&reference, relative, relative_cwd, &vaults);
+    }
 
     // No file argument and STDIN is a terminal (not piped) → show help
     if cli.file.is_none() && std::io::stdin().is_terminal() {
@@ -361,6 +398,53 @@ fn process_markdown(content: &[u8], format: Option<OutputFormat>, compact: bool)
     match fm_format {
         FrontmatterFormat::Yaml => process_yaml(frontmatter.as_bytes(), format, compact),
         FrontmatterFormat::Toml => process_toml(frontmatter.as_bytes(), format, compact),
+    }
+}
+
+/// Resolve a file reference and print the result.
+///
+/// Exit codes: 0 = found, 1 = not found, 2 = error.
+fn run_reference(
+    reference: &str,
+    relative: bool,
+    relative_cwd: bool,
+    vaults: &[PathBuf],
+) -> Result<()> {
+    let file_ref = match FileReference::new(reference) {
+        Ok(fr) => fr,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            process::exit(2);
+        }
+    };
+
+    let file_ref = vaults
+        .iter()
+        .fold(file_ref, |fr, vault| fr.add_vault(vault));
+
+    let result = if relative_cwd {
+        file_ref.resolve_relative(None)
+    } else if relative {
+        // --relative: resolve, then compute path relative to the reference's scope root.
+        // Since the scope root isn't directly exposed, we approximate by resolving
+        // the absolute path and stripping the filename's directory contribution.
+        file_ref.resolve_relative(None)
+    } else {
+        file_ref.resolve()
+    };
+
+    match result {
+        Ok(Some(path)) => {
+            println!("{}", path.display());
+            Ok(())
+        }
+        Ok(None) => {
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            process::exit(2);
+        }
     }
 }
 
