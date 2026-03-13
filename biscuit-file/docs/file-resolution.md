@@ -37,12 +37,12 @@ That means that:
 The resolution process described above is the default but we can add to it with builder functions:
 
 ```rust
-let ref: FileReference = FileReference::new("@foobar.md")
+let file_ref = FileReference::new("@foobar.md")?
     .add_magic_path(PathPosition::End, "/User/bob/.claude/dir")
     .add_magic_path(PathPosition::Start, "/Library/Applications/foobar");
 ```
 
-With the example above, the `ref` file reference when asked to resolve the file path will look for `foobar.md` in:
+With the example above, the `file_ref` reference when asked to resolve the file path will look for `foobar.md` in:
 
 - `/Location/Applications/foobar/foobar.md`
 - if CWD is in a git repo, `{RepoRoot}/foobar.md`
@@ -75,7 +75,7 @@ When a file reference is prefixed with `vault:` this make the file reference an 
 Example:
 
 ```rust
-let ref = FileReference::new("vault::foobar.md")
+let file_ref = FileReference::new("vault::foobar.md")?
     .add_vault("/Users/bob/my-vault");
 ```
 

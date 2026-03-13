@@ -419,6 +419,81 @@ fn input_format_override() {
         .stdout(predicate::str::contains(r#""name": "example""#));
 }
 
+// ── File reference resolution ────────────────────────────────────────
+
+#[test]
+fn reference_resolves_relative_path_to_absolute() {
+    bf().arg("reference")
+        .arg("./Cargo.toml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
+        .stdout(predicate::str::starts_with("/"));
+}
+
+#[test]
+fn reference_alias_ref_works() {
+    bf().arg("ref")
+        .arg("./Cargo.toml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"));
+}
+
+#[test]
+fn reference_nonexistent_exits_1() {
+    bf().arg("reference")
+        .arg("./nonexistent-file-that-does-not-exist.md")
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn reference_relative_cwd() {
+    bf().arg("reference")
+        .arg("--relative-cwd")
+        .arg("./Cargo.toml")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match("^Cargo\\.toml\n$").unwrap());
+}
+
+#[test]
+fn reference_vault_no_roots_exits_2() {
+    bf().arg("reference")
+        .arg("vault:note.md")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("vault"));
+}
+
+#[test]
+fn reference_add_vault_searches_vault() {
+    let dir = std::env::temp_dir().join("bf-test-vault");
+    let _ = std::fs::create_dir_all(&dir);
+    let note_path = dir.join("note.md");
+    std::fs::write(&note_path, "# Test").unwrap();
+
+    bf().arg("reference")
+        .arg("--add-vault")
+        .arg(dir.to_str().unwrap())
+        .arg("vault:note.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("note.md"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reference_invalid_syntax_exits_2() {
+    bf().arg("reference")
+        .arg("{{invalid-name}}/foo.md")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid variable name"));
+}
+
 // ── Unknown file type ───────────────────────────────────────────────
 
 #[test]

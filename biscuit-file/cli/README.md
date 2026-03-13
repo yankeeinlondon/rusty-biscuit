@@ -135,6 +135,47 @@ bf post.md --yaml    # frontmatter as YAML
 bf post.md           # defaults to JSON
 ```
 
+## File Reference Resolution
+
+The `reference` subcommand (alias `ref`) resolves file reference strings to filesystem paths.
+
+```sh
+bf reference @docs/spec.md           # magic: searches repo root, then HOME
+bf reference !README.md              # package: resolves from Cargo workspace area
+bf reference %foo.md                 # recursive: walks directories for a match
+bf ref ./Cargo.toml                  # alias for 'reference'
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--relative` | Output path relative to CWD |
+| `--relative-cwd` | Output path relative to CWD |
+| `--add-vault` / `-v` | Add a vault root for `vault:` references |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | File found and path printed |
+| `1` | Well-formed reference but no matching file |
+| `2` | Error (invalid syntax, missing env var, etc.) |
+
+### Examples
+
+```sh
+# Resolve a magic reference
+bf reference @CLAUDE.md
+
+# Resolve with relative output
+bf reference --relative-cwd @docs/spec.md
+
+# Resolve a vault reference with custom root
+bf reference --add-vault ~/my-vault vault:notes/today.md
+bf reference -v ~/vault1 -v ~/vault2 vault:note.md
+```
+
 ## Examples
 
 ```sh

@@ -11,6 +11,7 @@ Core library for file format parsing, conversion, and detection as well as file 
 | `json5` | yes | JSON5 parsing and conversion via `json-five` |
 | `extract` | yes | PDF text extraction via `pdf-extract` |
 | `lopdf` | yes | PDF table-of-contents extraction via `lopdf` |
+| `file-reference` | yes | File reference parsing and resolution via `git2`, `cargo_metadata`, `walkdir` |
 | `pdfium` | no | High-fidelity PDF extraction via `pdfium-render` |
 | `schema` | no | JSON Schema validation for TOML/YAML |
 | `full` | no | All features enabled |
@@ -19,22 +20,34 @@ Core library for file format parsing, conversion, and detection as well as file 
 
 ### `FileReference` struct
 
-The `FilePath` struct is design to be an ergonomic way to "refer" to a file lazily at some point of time and then later _resolve_ the file reference based on smart business rules on how to resolve a file.
+Parse compact file descriptors and resolve them lazily against runtime context (CWD, git repo root, Cargo workspace, env vars, configured paths).
+
+Supported reference types:
+- **Relative** (`./foo.md`) and **Absolute** (`/path/to/file`)
+- **Magic** (`@docs/spec.md`) -- searches repo root, HOME, and custom paths
+- **Package** (`!README.md`) -- resolves from package area in a Cargo workspace
+- **Vault** (`vault:notes/today.md`) -- searches Obsidian vault roots
+- **Recursive** (`%foo.md`) -- walks directories to find a matching filename
+- **Interpolation** (`{{DIR}}/foo.md`) -- expands environment variables at resolution time
 
 #### Example
 
 ```rust
-// at the point of definition we're just referring to a file
-// who's name is `foobar.md` but in what directory is not
-// important yet.
-let file_ref: FileReference = FileReference::new("foobar.md");
-// ... some time later
-// we run the `resolve()` method to resolve a fully qualified
-// file path to the file ... if it can be resolved
-let filepath: Option<Path> = FileReference::resolve();
-// if instead we want the file's path to resolve to a relative
-// directory to the current working directory
-let relative: Option<Path> = FileReference::resolve_relative(None);
+use biscuit_file::{FileReference, PathPosition};
+
+// Parse a magic reference (purely syntactic -- no filesystem access)
+let file_ref = FileReference::new("@docs/spec.md")?;
+
+// Resolve lazily against current runtime state
+let filepath: Option<PathBuf> = file_ref.resolve()?;
+
+// Or resolve to a path relative to CWD
+let relative: Option<PathBuf> = file_ref.resolve_relative(None)?;
+
+// Builder methods for custom search paths and vault roots
+let file_ref = FileReference::new("vault:notes/today.md")?
+    .add_vault("/path/to/vault")
+    .add_magic_path("/extra/search/path", PathPosition::Start);
 ```
 
 For more details refer to [FileResolution Design](../docs/file-resolution.md).
