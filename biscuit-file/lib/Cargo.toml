@@ -6,7 +6,7 @@ description = "File format utilities for PDF, TOML, and YAML"
 license = "MIT"
 
 [features]
-default = ["toml", "yaml", "json5", "extract", "lopdf"]
+default = ["toml", "yaml", "json5", "extract", "lopdf", "file-reference"]
 
 # Format support
 toml = ["dep:toml"]
@@ -18,9 +18,12 @@ extract = ["dep:pdf-extract"]
 lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
+# File reference resolution
+file-reference = ["dep:git2", "dep:cargo_metadata", "dep:walkdir"]
+
 # Optional features
 schema = ["dep:jsonschema"]
-full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema"]
+full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema", "file-reference"]
 
 [dependencies]
 # Core serialization
@@ -44,6 +47,11 @@ json-five = { version = "0.3", optional = true }
 pdf-extract = { version = "0.10", optional = true }
 lopdf = { version = "0.39", optional = true }
 pdfium-render = { version = "0.8", optional = true }
+
+# File reference resolution
+git2 = { version = "0.20", optional = true }
+cargo_metadata = { version = "0.19", optional = true }
+walkdir = { version = "2", optional = true }
 
 # Schema validation
 jsonschema = { version = "0.42", optional = true }
