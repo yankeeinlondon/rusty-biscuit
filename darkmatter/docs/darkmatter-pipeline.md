@@ -32,14 +32,14 @@ The final stage of the Markdown processing will take the _composed_ output and r
 | Text Replacement          | Block Transclusion        |  Table Rendering           |
 | FM Interpolation          | Frontmatter Transclusion  |  YouTube Embedding         |
 | TOC Linking               | Code Block Transclusion   |  Popover                   |
-| Cleaning                  |                           |  List Expansion            |
-| Normalization             | ▎AI: Prompt Expansion     |  Smart Image               |
+| Shell Expansion           |                           |  List Expansion            |
+|                           | ▎AI: Prompt Expansion     |  Smart Image               |
 |                           | ▎AI: Summarization        |  Image Rendering           |
 |                           | ▎AI: Consolidation        |  Disclosure Blocks         |
 |                           | ▎AI: Normalization        |  Block Columns             |
 |                           |                           |  Audio Content             |
-|                           |                           |  Charting                  |
-|                           |                           |  Mermaid Rendering         |
+| Cleaning                  |                           |  Charting                  |
+| Normalization             |                           |  Mermaid Rendering         |
 |                           |                           |  TOC Generation            |
 
 ## Variance by Output Target
@@ -75,6 +75,7 @@ Rendering to HTML (aka, the Browser) is deploying to the most feature-rich platf
 |[Cleaning](./cleaning.md)                   | ✅     |   -  | ✅ |   -  |
 |[Interpolation](./interpolation.md)         | -      |  ✅  | ✅ |   ✅ |
 |[Text Replacement](./text-replacement.md)   | -      |  ✅  | ✅ |   ✅ |
+|[Shell Expansion](./shell-expansion.md)     | -      |  ✅  | ✅ |   ✅ |
 |[Transclusion](./transclusion.md)           | -      |  ✅  | ✅ |   ✅ |
 |[Summarization](./summarization.md)         | -      |  ✅  | ✅ |   ✅ |
 |[Consolidation](./consolidation.md)         | -      |  ✅  | ✅ |   ✅ |
