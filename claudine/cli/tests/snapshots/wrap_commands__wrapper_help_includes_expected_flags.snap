@@ -25,6 +25,8 @@ Options:
       --sandbox                      Enable provider-specific sandboxing
       --repo                         Use only repo-scoped skills, commands, and agents via a shadow HOME
   -p, --prompt-file <FILE>           Source the initial prompt from a Markdown file (composed with Darkmatter)
+      --frontmatter-prompt <FILE>    Inline composition: use frontmatter `prompt` as input, replace body with output [aliases: --fp]
+      --compose <FILE>               Chained composition: compose full document and use as prompt (no file mutation)
       --mcp                          Enable Claudine-managed MCP session composition
       --use <ID>                     Activate specific MCP servers by ID or alias (comma-separated)
       --strict                       Treat unresolved or ambiguous MCP tags as hard errors
