@@ -1,11 +1,14 @@
 //! File format utilities for the dockhand ecosystem.
 //!
-//! This crate provides parsing, conversion, and validation for common file formats:
+//! This crate provides parsing, conversion, and validation for common file formats,
+//! plus a file reference system for lazily resolving file paths:
 //!
 //! - **TOML**: Parse, convert to JSON/YAML, validate against schema
 //! - **YAML**: Parse, convert to JSON/TOML, validate against schema
 //! - **JSON5**: Parse, convert to JSON/YAML/TOML
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
+//! - **FileReference**: Parse compact file descriptors (`@`, `!`, `vault:`, `%`,
+//!   `{{ENV}}`) and resolve them lazily against runtime context
 //!
 //! ## Feature Flags
 //!
@@ -17,6 +20,7 @@
 //! | `extract` | Yes | PDF text extraction via pdf-extract |
 //! | `lopdf` | Yes | PDF TOC extraction via lopdf |
 //! | `pdfium` | No | High-fidelity PDF extraction via pdfium-render |
+//! | `file-reference` | Yes | File reference parsing and resolution |
 //! | `schema` | No | JSON Schema validation for TOML/YAML |
 //! | `full` | No | All features enabled |
 //!
@@ -66,6 +70,24 @@
 //! let toc = pdf.toc()?;
 //! # Ok::<(), biscuit_file::PdfError>(())
 //! ```
+//!
+//! ### File Reference Resolution
+//!
+//! ```rust,no_run
+//! use biscuit_file::{FileReference, PathPosition};
+//!
+//! // Magic reference -- searches repo root, then HOME
+//! let file_ref = FileReference::new("@docs/spec.md")?;
+//! if let Some(path) = file_ref.resolve()? {
+//!     println!("Found: {}", path.display());
+//! }
+//!
+//! // With custom search paths and vault roots
+//! let file_ref = FileReference::new("vault:notes/today.md")?
+//!     .add_vault("/path/to/vault")
+//!     .add_magic_path("/extra/search/path", PathPosition::Start);
+//! # Ok::<(), biscuit_file::FileReferenceError>(())
+//! ```
 
 mod detect;
 mod error;
@@ -81,6 +103,9 @@ pub mod json5;
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub mod pdf;
+
+#[cfg(feature = "file-reference")]
+pub mod file_reference;
 
 // Re-export core error type
 pub use error::BiscuitFileError;
@@ -100,6 +125,9 @@ pub use self::json5::{Json5, Json5Error, Json5Source};
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
+
+#[cfg(feature = "file-reference")]
+pub use self::file_reference::{FileReference, FileReferenceError, PathPosition};
 
 // Re-export underlying crate types for convenience
 // This allows consumers to use `use biscuit_file::serde_yaml::Value`

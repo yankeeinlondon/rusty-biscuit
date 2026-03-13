@@ -1,0 +1,129 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use crate::file_reference::error::FileReferenceError;
+
+/// Runtime state captured for file reference resolution.
+pub(crate) struct ResolutionContext {
+    pub cwd: PathBuf,
+    pub home_dir: Option<PathBuf>,
+    pub env: HashMap<String, String>,
+}
+
+impl ResolutionContext {
+    /// Build from live process state.
+    pub fn from_ambient() -> Result<Self, FileReferenceError> {
+        let cwd =
+            std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
+        let home_dir = home_dir();
+        let env = std::env::vars().collect();
+
+        Ok(Self {
+            cwd,
+            home_dir,
+            env,
+        })
+    }
+}
+
+/// Find the git repository root starting from `from`.
+///
+/// Returns `Ok(None)` if no git repository is found.
+pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+    match git2::Repository::discover(from) {
+        Ok(repo) => {
+            let workdir = repo.workdir().ok_or_else(|| {
+                FileReferenceError::Git("bare repository has no working directory".to_string())
+            })?;
+            Ok(Some(workdir.to_path_buf()))
+        }
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(FileReferenceError::Git(e.to_string())),
+    }
+}
+
+/// Find the package area (first path component of a workspace member) for
+/// the current working directory within a Cargo workspace.
+///
+/// Given a workspace root and a CWD within it, this identifies which workspace
+/// member contains the CWD and returns its "area" directory (the first path
+/// component under the workspace root).
+///
+/// For a single-crate repo (no workspace members), returns `None`.
+pub(crate) fn find_package_area(
+    repo_root: &Path,
+    cwd: &Path,
+) -> Result<Option<PathBuf>, FileReferenceError> {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(repo_root.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .map_err(|e| FileReferenceError::Workspace(e.to_string()))?;
+
+    let workspace_root = metadata.workspace_root.as_std_path();
+
+    // If there are no workspace members beyond the root, this is a single-crate repo
+    let members: Vec<_> = metadata
+        .workspace_packages()
+        .into_iter()
+        .filter_map(|pkg| {
+            let manifest = pkg.manifest_path.as_std_path();
+            let pkg_dir = manifest.parent()?;
+            pkg_dir.strip_prefix(workspace_root).ok().map(|rel| {
+                let first_component = rel
+                    .components()
+                    .next()
+                    .map(|c| PathBuf::from(c.as_os_str()))
+                    .unwrap_or_default();
+                (pkg_dir.to_path_buf(), first_component)
+            })
+        })
+        .collect();
+
+    // Find the member whose directory is an ancestor of CWD
+    let cwd_normalized = cwd
+        .canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf());
+
+    for (pkg_dir, area) in &members {
+        let pkg_normalized = pkg_dir
+            .canonicalize()
+            .unwrap_or_else(|_| pkg_dir.to_path_buf());
+
+        if cwd_normalized.starts_with(&pkg_normalized) && !area.as_os_str().is_empty() {
+            return Ok(Some(workspace_root.join(area)));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Get the user's home directory.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_ambient_succeeds() {
+        let ctx = ResolutionContext::from_ambient().unwrap();
+        assert!(ctx.cwd.is_absolute());
+    }
+
+    #[test]
+    fn find_git_root_inside_repo() {
+        // We're inside the rusty-biscuit repo
+        let root = find_git_root(&std::env::current_dir().unwrap()).unwrap();
+        assert!(root.is_some());
+    }
+
+    #[test]
+    fn find_git_root_outside_repo() {
+        // /tmp is unlikely to be in a git repo
+        let root = find_git_root(Path::new("/tmp")).unwrap();
+        assert!(root.is_none());
+    }
+}
