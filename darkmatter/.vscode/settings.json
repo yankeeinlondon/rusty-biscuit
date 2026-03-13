@@ -1,8 +1,22 @@
 {
     "cSpell.words": [
+        "chgrp",
+        "cryptsetup",
         "Darkmatter",
+        "doas",
         "highspeed",
+        "killall",
+        "lvremove",
+        "mongosh",
+        "mparted",
         "osascript",
-        "syntect"
+        "pkill",
+        "poweroff",
+        "psql",
+        "reflog",
+        "sgdisk",
+        "syntect",
+        "vgremove",
+        "wipefs"
     ]
 }
