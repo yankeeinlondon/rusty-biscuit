@@ -1,6 +1,6 @@
 # biscuit-file
 
-Core library for file format parsing, conversion, and detection.
+Core library for file format parsing, conversion, and detection as well as file resolution.
 
 ## Feature Flags
 
@@ -16,6 +16,28 @@ Core library for file format parsing, conversion, and detection.
 | `full` | no | All features enabled |
 
 ## Key Types
+
+### `FileReference` struct
+
+The `FilePath` struct is design to be an ergonomic way to "refer" to a file lazily at some point of time and then later _resolve_ the file reference based on smart business rules on how to resolve a file.
+
+#### Example
+
+```rust
+// at the point of definition we're just referring to a file
+// who's name is `foobar.md` but in what directory is not
+// important yet.
+let file_ref: FileReference = FileReference::new("foobar.md");
+// ... some time later
+// we run the `resolve()` method to resolve a fully qualified
+// file path to the file ... if it can be resolved
+let filepath: Option<Path> = FileReference::resolve();
+// if instead we want the file's path to resolve to a relative
+// directory to the current working directory
+let relative: Option<Path> = FileReference::resolve_relative(None);
+```
+
+For more details refer to [FileResolution Design](../docs/file-resolution.md).
 
 ### `FileType` / `detect_file_type`
 

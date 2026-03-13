@@ -1,20 +1,21 @@
 # Biscuit File
 
-A Rust toolkit for converting between common file formats and extracting content from documents.
+A Rust library and CLI for working with files and file formats.
 
-## What It Does
+## Functional Overview
 
 - **Convert data formats** -- Move data freely between JSON, JSON5, YAML, and TOML
 - **Extract PDF content** -- Pull text or Markdown from PDF documents
 - **Read Markdown frontmatter** -- Extract and convert the YAML or TOML metadata block from Markdown files
 - **Detect file types** -- Automatically identify files using extensions and magic bytes
+- [**File Resolution**](./docs/file-resolution.md) -- resolves the file path of a passed in file using a set of smart and consistent path based logic
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `biscuit-file` (lib) | Core library with parsers, converters, and file detection |
-| `biscuit-file-cli` (`bf`) | Command-line interface for all conversions |
+| Package                   | Description                                               |
+|---------------------------|-----------------------------------------------------------|
+| `biscuit-file` (lib)      | Core library with parsers, converters, and file detection |
+| `biscuit-file-cli` (`bf`) | Command-line interface for all conversions                |
 
 ## Quick Start
 
@@ -49,11 +50,11 @@ cat data.json | bf --input-format json --yaml
 
 ## Supported Formats
 
-| Format | Read | Write |
-|--------|:----:|:-----:|
-| JSON | yes | yes |
-| JSON5 | yes | yes |
-| YAML | yes | yes |
-| TOML | yes | yes |
-| Markdown (frontmatter) | yes | -- |
-| PDF | yes | -- |
+| Format                 | Read | Write |
+|------------------------|:----:|:-----:|
+| JSON                   | yes  | yes   |
+| JSON5                  | yes  | yes   |
+| YAML                   | yes  | yes   |
+| TOML                   | yes  | yes   |
+| Markdown (frontmatter) | yes  | --    |
+| PDF                    | yes  | --    |
