@@ -2,6 +2,7 @@ pub mod about;
 pub mod actions;
 pub mod agents;
 pub mod completions;
+pub mod compose;
 pub mod dry_run;
 pub mod handle;
 pub mod hooks;

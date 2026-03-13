@@ -63,4 +63,6 @@ pub(crate) enum Commands {
     Opencode(commands::wrap::WrapperArgs),
     /// Wrap Goose with Claudine preflight/env handling.
     Goose(commands::wrap::WrapperArgs),
+    /// Compose a Markdown document through an agentic CLI.
+    Compose(commands::compose::ComposeArgs),
 }

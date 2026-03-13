@@ -39,7 +39,7 @@ impl EventSupportLevel {
 }
 
 /// Supported agentic CLI providers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Provider {
@@ -353,6 +353,58 @@ impl Provider {
         }
 
         None
+    }
+
+    /// Fuzzy match returning all matching providers (exact/prefix/contains).
+    ///
+    /// Unlike `fuzzy_match_cli_name` which returns the first match, this
+    /// collects all providers that match the input at the best matching tier.
+    /// Exact matches are returned alone; otherwise all prefix matches; otherwise
+    /// all contains matches.
+    pub fn fuzzy_match_all(input: &str) -> Vec<Self> {
+        let normalized = normalize_provider_input(input);
+        if normalized.is_empty() {
+            return Vec::new();
+        }
+
+        // Exact match
+        if let Some(provider) = Self::parse_cli_name(&normalized) {
+            return vec![provider];
+        }
+
+        // Prefix matches
+        let mut prefix_matches = Vec::new();
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let display = normalize_provider_input(&provider.to_string());
+            if display.starts_with(&normalized)
+                || provider.as_slug().starts_with(&normalized)
+                || provider
+                    .cli_aliases()
+                    .iter()
+                    .any(|alias| alias.starts_with(&normalized))
+            {
+                prefix_matches.push(provider);
+            }
+        }
+        if !prefix_matches.is_empty() {
+            return prefix_matches;
+        }
+
+        // Contains matches
+        let mut contains_matches = Vec::new();
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let display = normalize_provider_input(&provider.to_string());
+            if display.contains(&normalized)
+                || provider.as_slug().contains(&normalized)
+                || provider
+                    .cli_aliases()
+                    .iter()
+                    .any(|alias| alias.contains(&normalized))
+            {
+                contains_matches.push(provider);
+            }
+        }
+        contains_matches
     }
 
     /// Returns the corresponding sniff `AiCli` variant for install detection.

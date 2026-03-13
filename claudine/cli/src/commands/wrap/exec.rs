@@ -264,6 +264,128 @@ fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
     }
 }
 
+/// Captured output from a child process.
+pub(crate) struct CapturedChildOutput {
+    pub(crate) exit_code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+/// Spawn a provider child process and capture its output.
+///
+/// Behaves like `run_child()` but pipes stdout and stderr into strings
+/// instead of forwarding to the terminal. Noise filtering still applies
+/// to the captured output. No output is printed live.
+pub(crate) fn run_child_capture(
+    binary: &Path,
+    args: &[String],
+    env: &HashMap<OsString, OsString>,
+    cwd: &Path,
+    timeout: Option<u64>,
+    io: ChildIoOptions<'_>,
+) -> Result<CapturedChildOutput> {
+    debug_assert!(
+        env.contains_key(&OsString::from("PATH")),
+        "child env is missing PATH"
+    );
+    debug_assert!(
+        env.contains_key(&OsString::from("HOME")),
+        "child env is missing HOME"
+    );
+
+    let needs_stdin_pipe = io.stdin_seed.is_some();
+
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env)
+        .current_dir(cwd)
+        .stdin(if needs_stdin_pipe {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    // Write stdin seed and close the pipe so the child sees EOF.
+    if let Some(seed) = io.stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
+
+    // Capture stdout into a string, applying noise filtering
+    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_noise: Vec<String> = io
+        .stdout_noise_prefixes
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let stdout_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout_pipe);
+        let mut captured = String::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if stdout_noise
+                .iter()
+                .any(|p| line.starts_with(p.as_str()))
+            {
+                continue;
+            }
+            if !captured.is_empty() {
+                captured.push('\n');
+            }
+            captured.push_str(&line);
+        }
+        captured
+    });
+
+    // Capture stderr into a string, applying noise filtering
+    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_noise: Vec<String> = io
+        .stderr_noise_prefixes
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let stderr_handle = thread::spawn(move || {
+        let reader = BufReader::new(stderr_pipe);
+        let mut captured = String::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if stderr_noise
+                .iter()
+                .any(|p| line.starts_with(p.as_str()))
+            {
+                continue;
+            }
+            if !captured.is_empty() {
+                captured.push('\n');
+            }
+            captured.push_str(&line);
+        }
+        captured
+    });
+
+    let exit_code = if let Some(seconds) = timeout {
+        wait_with_timeout(&mut child, seconds)?
+    } else {
+        wait_with_signal_handling(&mut child)?
+    };
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+
+    Ok(CapturedChildOutput {
+        exit_code,
+        stdout,
+        stderr,
+    })
+}
+
 fn exit_code_from_status(status: ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;

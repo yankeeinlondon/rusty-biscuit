@@ -1,5 +1,5 @@
 pub(crate) mod env;
-mod exec;
+pub(crate) mod exec;
 pub(crate) mod profile;
 pub(crate) mod prompt_file;
 pub(crate) mod repo_home;
@@ -89,6 +89,14 @@ pub struct WrapperArgs {
     /// Source the initial prompt from a Markdown file (composed with Darkmatter).
     #[arg(short = 'p', long = "prompt-file", value_name = "FILE")]
     pub prompt_file: Option<String>,
+
+    /// Inline composition: use frontmatter `prompt` as input, replace body with output.
+    #[arg(long = "frontmatter-prompt", visible_alias = "fp", value_name = "FILE", conflicts_with_all = ["prompt_file", "compose"])]
+    pub frontmatter_prompt: Option<String>,
+
+    /// Chained composition: compose full document and use as prompt (no file mutation).
+    #[arg(long = "compose", value_name = "FILE", conflicts_with_all = ["prompt_file", "frontmatter_prompt"])]
+    pub compose: Option<String>,
 
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
@@ -299,6 +307,67 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             delivery_method: delivery_method.to_string(),
             env_names: composed.env_names.clone(),
         });
+    }
+
+    // -- Frontmatter-prompt (inline composition) pipeline --------------------
+    let mut inline_composition_source: Option<(
+        claudine::composition::ResolvedCompositionSource,
+        claudine::composition::PreparedPrompt,
+    )> = None;
+
+    if let Some(ref fp_input) = args.frontmatter_prompt {
+        let source = claudine::composition::resolve_composition_source(fp_input)
+            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+        let prepared = claudine::composition::prepare_inline_prompt(&source)
+            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+
+        // Detect conflict with existing prompt source
+        prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
+
+        // Force non-interactive for inline composition
+        if !non_interactive_requested {
+            profile.apply_non_interactive(&mut child_args)?;
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
+
+        // Deliver the composed prompt to the provider
+        profile.apply_prompt_body(
+            &mut child_args,
+            &mut stdin_seed,
+            &prepared.prompt,
+            true, // always non-interactive for inline composition
+        )?;
+
+        inline_composition_source = Some((source, prepared));
+    }
+
+    // -- Chained composition (--compose) pipeline ------------------------------
+    let mut chained_composition = false;
+
+    if let Some(ref compose_input) = args.compose {
+        let source = claudine::composition::resolve_composition_source(compose_input)
+            .map_err(|e| eyre!("compose: {e}"))?;
+        let prepared = claudine::composition::prepare_chained_prompt(&source)
+            .map_err(|e| eyre!("compose: {e}"))?;
+
+        // Detect conflict with existing prompt source
+        prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
+
+        // Force non-interactive for chained composition
+        if !non_interactive_requested {
+            profile.apply_non_interactive(&mut child_args)?;
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
+
+        // Deliver the composed document to the provider
+        profile.apply_prompt_body(
+            &mut child_args,
+            &mut stdin_seed,
+            &prepared.prompt,
+            true, // always non-interactive for chained composition
+        )?;
+
+        chained_composition = true;
     }
 
     let mut mcp_runtime = None;
@@ -517,25 +586,69 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         }
     }
 
-    let stdout_noise = if non_interactive_requested {
+    let stdout_noise = if non_interactive_requested || inline_composition_source.is_some() || chained_composition {
         profile.stdout_noise_prefixes()
     } else {
         &[]
     };
     let stderr_noise = profile.stderr_noise_prefixes();
 
-    let exit_code = exec::run_child(
-        binary_path.as_path(),
-        &child_args,
-        &env_plan.env,
-        child_cwd,
-        args.timeout,
-        exec::ChildIoOptions {
-            stdout_noise_prefixes: stdout_noise,
-            stderr_noise_prefixes: stderr_noise,
-            stdin_seed: stdin_seed.as_deref(),
-        },
-    );
+    let exit_code = if let Some((source, _prepared)) = inline_composition_source {
+        // Inline composition: capture output and update file
+        let captured = exec::run_child_capture(
+            binary_path.as_path(),
+            &child_args,
+            &env_plan.env,
+            child_cwd,
+            args.timeout,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed: stdin_seed.as_deref(),
+            },
+        )?;
+
+        if captured.exit_code == 0 {
+            // Build updated document: original frontmatter + last_updated + captured body
+            let mut updated_md = source.markdown.clone();
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            updated_md.fm_insert("last_updated", &today)
+                .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+            *updated_md.content_mut() = captured.stdout;
+
+            let doc_string = updated_md.as_string();
+            claudine::config::atomic::atomic_write(
+                &source.resolved_path,
+                doc_string.as_bytes(),
+            )
+            .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
+
+            if !silent_requested && !quiet_requested {
+                log::message(&format!(
+                    "  \x1b[32m✓\x1b[0m Updated {}",
+                    source.resolved_path.display()
+                ));
+            }
+        } else if !captured.stderr.is_empty() {
+            eprintln!("{}", captured.stderr);
+        }
+
+        Ok(captured.exit_code)
+    } else {
+        // Normal execution: forward I/O to terminal
+        exec::run_child(
+            binary_path.as_path(),
+            &child_args,
+            &env_plan.env,
+            child_cwd,
+            args.timeout,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed: stdin_seed.as_deref(),
+            },
+        )
+    };
 
     // MCP injector cleanup: remove temp files written during injection
     if let Some((injector, injection_result)) = mcp_cleanup
