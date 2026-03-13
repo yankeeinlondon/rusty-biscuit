@@ -7,7 +7,7 @@ use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
 use biscuit_file::{FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
 use clap::{ArgGroup, Parser, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 
 /// File format conversion and extraction utility.
@@ -119,6 +119,12 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+
+    // No file argument and STDIN is a terminal (not piped) → show help
+    if cli.file.is_none() && std::io::stdin().is_terminal() {
+        Cli::parse_from(["bf", "--help"]);
+    }
+
     let from_stdin = cli.is_stdin();
 
     // Detect input format
