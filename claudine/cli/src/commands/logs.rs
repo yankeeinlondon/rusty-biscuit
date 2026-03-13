@@ -482,7 +482,12 @@ fn render_sessions_report(report: &SessionsReport) {
     ]);
 
     for session in &report.sessions {
-        let repo = repo_label(session.repo_org.as_deref(), session.repo_name.as_deref());
+        let repo= if term.width() > 140 {
+            repo_label(session.repo_org.as_deref(), session.repo_name.as_deref())
+        } else {
+            repo_label(None, session.repo_name.as_deref())
+        };
+
         let errors = session.tool_error_count + session.turn_error_count;
         let session_id = session
             .session_id
