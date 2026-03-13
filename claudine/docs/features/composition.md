@@ -52,7 +52,6 @@ In this example:
 - we transform the Markdown using Darkmatter's compose pipeline
 - we then pass the chosen Agent (in this example it's `opencode`)
 
-
 ## Using the `compose` command to Abstract Agent Choice
 
 In our first example we were explicit about _which_ agentic CLI we intended to use by using an agent subcommand (codex, claude, etc.) and modifying it with the `--frontmatter-prompt <file>` switch. Sometimes, however, it can be useful to defer the choice of which agent to use 
@@ -116,8 +115,8 @@ claudine compose <file-ref>
 
 The utility of these processes are:
 
-- Inline operations are used to update the _body_ of a document using a composed prompt and an non-interactive agent session
+- Inline operations are used to update the _body_ of a document using a composed prompt and a non-interactive agent session
     - this is a common way to compose research or build up content that will be made into a "skill"
-    - there are of course many other use cases too
+    - there are, of course, many other use cases too
 - Chained operations are used to compose a reference file and then use it to prompt a non-interactive agent session
     - this provides a way to take a static "template" and inject dynamic content into the content before using it as a prompt to an Agent
