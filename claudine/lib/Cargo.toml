@@ -12,6 +12,7 @@ name = "claudine"
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"] }
+darkmatter = { path = "../../darkmatter/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }

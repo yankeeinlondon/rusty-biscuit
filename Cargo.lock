@@ -1170,6 +1170,7 @@ dependencies = [
  "biscuit-speaks",
  "biscuit-terminal",
  "chrono",
+ "darkmatter",
  "dirs",
  "fs2",
  "playa",
