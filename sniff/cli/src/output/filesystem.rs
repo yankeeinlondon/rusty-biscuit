@@ -244,7 +244,7 @@ fn format_ref_decorations(refs: &[sniff::filesystem::git::RefDecoration]) -> Str
 /// Returns (owner/repo, browsable_url) tuple.
 fn parse_git_url(
     url: &str,
-    provider: &sniff::filesystem::git::HostingProvider,
+    provider: &sniff::filesystem::git::GitHostingProvider,
 ) -> (Option<String>, Option<String>) {
     // Try to extract owner/repo from URL
     let owner_repo = if url.contains('@') && url.contains(':') {
@@ -275,6 +275,24 @@ fn parse_git_url(
     (owner_repo, browse_url)
 }
 
+/// Build the commit URL base from the preferred remote (usually "origin").
+///
+/// Returns `(browse_url, provider)` if a browsable remote is found, or `None`
+/// if no remote has a resolvable browse URL.
+fn build_commit_url_base(
+    git: &sniff::filesystem::git::GitInfo,
+) -> Option<(String, sniff::filesystem::git::GitHostingProvider)> {
+    // Prefer "origin", fall back to the first remote with a URL
+    let remote = git
+        .remotes
+        .iter()
+        .find(|r| r.name == "origin")
+        .or_else(|| git.remotes.first())?;
+    let url = remote.url.as_ref()?;
+    let (_, browse_url) = parse_git_url(url, &remote.provider);
+    browse_url.map(|base| (base, remote.provider))
+}
+
 /// Split a path into directory and filename components.
 fn split_path(path: &str) -> (String, String) {
     if let Some(pos) = path.rfind('/') {
@@ -290,10 +308,20 @@ fn split_path(path: &str) -> (String, String) {
 ///
 /// Parses conventional commit format and includes SHA, timestamp, ref decorations,
 /// and optionally the author (when `verbose > 0`).
-fn format_commit_line(commit: &sniff::filesystem::git::CommitInfo, verbose: u8) -> String {
+///
+/// When `commit_url` is `Some`, the SHA is rendered as an OSC8 hyperlink.
+fn format_commit_line(
+    commit: &sniff::filesystem::git::CommitInfo,
+    verbose: u8,
+    commit_url: Option<&str>,
+) -> String {
     let cc = ConventionalCommit::parse(&commit.message);
     let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
-    let sha = commit.sha[0..7].to_string();
+    let short_sha = &commit.sha[0..7];
+    let sha_display = match commit_url {
+        Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
+        None => format!("<b>{short_sha}</b>"),
+    };
     let date_prefix = if use_on { "<i>on</i> " } else { "" };
     let refs_part = format_ref_decorations(&commit.refs);
     let user_part = if verbose > 0 {
@@ -312,8 +340,8 @@ fn format_commit_line(commit: &sniff::filesystem::git::CommitInfo, verbose: u8) 
             .map(|s| format!("(<dim>{}</dim>)", s))
             .unwrap_or_default();
         format!(
-            "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
-            sha,
+            "[{}] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}: <dim>{}</dim>",
+            sha_display,
             op,
             scope_part,
             time_str,
@@ -332,19 +360,20 @@ fn format_commit_line(commit: &sniff::filesystem::git::CommitInfo, verbose: u8) 
             first_line.to_string()
         };
         format!(
-            "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-            sha, truncated, date_prefix, date_str, refs_part, user_part,
+            "[{}] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, truncated, date_prefix, date_str, refs_part, user_part,
         )
     }
 }
 
-/// Print detailed information for a single commit looked up by `--hash`.
+/// Print detailed information for a single commit looked up by `hash` subcommand.
 ///
 /// Shows the commit as a one-liner followed by a list of files changed.
 pub fn print_hash_section(
     commit: &sniff::filesystem::git::CommitInfo,
     files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
     verbose: u8,
+    commit_url: Option<&str>,
 ) {
     use sniff::filesystem::git::DeltaKind;
 
@@ -354,7 +383,7 @@ pub fn print_hash_section(
     let status_title = Prose::new("<b><u>Commit</u></b>");
     println!("\n{}\n", status_title.render(&terminal));
 
-    let commit_line = format_commit_line(commit, verbose);
+    let commit_line = format_commit_line(commit, verbose, commit_url);
     let rendered = Prose::new(commit_line.as_str()).render(&terminal);
     let list = UnorderedList::new(vec![rendered]);
     println!("{}", list.render(&terminal));
@@ -407,6 +436,18 @@ pub fn print_hash_section(
 pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize, verbose: u8) {
     let terminal = Terminal::default();
 
+    // Build commit URL base from the preferred remote (usually "origin").
+    let commit_url_base = build_commit_url_base(git);
+
+    // Determine how many of the most recent commits are unpushed.
+    // Use the "origin" tracking ahead count; if unavailable, assume all are pushed.
+    let unpushed_count = git
+        .tracking
+        .iter()
+        .find(|t| t.remote == "origin")
+        .map(|t| t.ahead)
+        .unwrap_or(0);
+
     // === Status Section ===
     let status_title = Prose::new("<b><u>Status</u></b>");
     println!("\n{}\n", status_title.render(&terminal));
@@ -415,8 +456,20 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
-    for commit in commits.iter().rev() {
-        status_items.push(format_commit_line(commit, verbose));
+    for (display_index, commit) in commits.iter().rev().enumerate() {
+        // display_index 0 = oldest displayed commit, last = most recent.
+        // The most recent `unpushed_count` commits (at the end) are unpushed.
+        let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
+        let commit_url = if is_pushed {
+            commit_url_base
+                .as_ref()
+                .map(|(base, provider)| {
+                    format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
+                })
+        } else {
+            None
+        };
+        status_items.push(format_commit_line(commit, verbose, commit_url.as_deref()));
     }
 
     // File changes grouped by status
@@ -448,14 +501,14 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         status_items.push(line);
     }
 
-    // Add modified files
+    // Add unstaged modified files
     for file in &modified {
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let line = if dir.is_empty() {
-            format!("<yellow>modified: <b>{}</b></yellow>", name)
+            format!("<yellow>unstaged(modified): <b>{}</b></yellow>", name)
         } else {
-            format!("<yellow>modified: {}<b>{}</b></yellow>", dir, name)
+            format!("<yellow>unstaged(modified): {}<b>{}</b></yellow>", dir, name)
         };
         status_items.push(line);
     }

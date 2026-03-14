@@ -214,17 +214,17 @@ pub struct LocalBranchInfo {
 /// ## Examples
 ///
 /// ```
-/// use sniff::filesystem::git::HostingProvider;
+/// use sniff::filesystem::git::GitHostingProvider;
 ///
-/// let provider = HostingProvider::from_url("https://github.com/user/repo");
-/// assert_eq!(provider, HostingProvider::GitHub);
+/// let provider = GitHostingProvider::from_url("https://github.com/user/repo");
+/// assert_eq!(provider, GitHostingProvider::GitHub);
 ///
-/// let provider = HostingProvider::from_url("git@gitlab.com:user/repo.git");
-/// assert_eq!(provider, HostingProvider::GitLab);
+/// let provider = GitHostingProvider::from_url("git@gitlab.com:user/repo.git");
+/// assert_eq!(provider, GitHostingProvider::GitLab);
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum HostingProvider {
+pub enum GitHostingProvider {
     /// GitHub (github.com)
     GitHub,
     /// GitLab (gitlab.com)
@@ -249,7 +249,7 @@ pub enum HostingProvider {
 
 /// Static metadata for a Git hosting provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostingProviderMetadata {
+pub struct GitHostingProviderMetadata {
     /// Human-readable provider name.
     pub display_name: &'static str,
     /// Short ASCII symbol used in compact CLI output.
@@ -262,74 +262,74 @@ pub struct HostingProviderMetadata {
     pub browser_base_url: Option<&'static str>,
 }
 
-impl HostingProvider {
+impl GitHostingProvider {
     /// Returns static metadata for the hosting provider.
-    pub const fn metadata(&self) -> HostingProviderMetadata {
+    pub const fn metadata(&self) -> GitHostingProviderMetadata {
         match self {
-            Self::GitHub => HostingProviderMetadata {
+            Self::GitHub => GitHostingProviderMetadata {
                 display_name: "GitHub",
                 symbol: "[gh]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
                 browser_base_url: Some("https://github.com"),
             },
-            Self::GitLab => HostingProviderMetadata {
+            Self::GitLab => GitHostingProviderMetadata {
                 display_name: "GitLab",
                 symbol: "[gl]",
                 self_hosted: false,
                 host_based_detection_reliable: false,
                 browser_base_url: Some("https://gitlab.com"),
             },
-            Self::Bitbucket => HostingProviderMetadata {
+            Self::Bitbucket => GitHostingProviderMetadata {
                 display_name: "Bitbucket",
                 symbol: "[bb]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
                 browser_base_url: Some("https://bitbucket.org"),
             },
-            Self::AzureDevOps => HostingProviderMetadata {
+            Self::AzureDevOps => GitHostingProviderMetadata {
                 display_name: "Azure DevOps",
                 symbol: "[az]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
                 browser_base_url: Some("https://dev.azure.com"),
             },
-            Self::AwsCodeCommit => HostingProviderMetadata {
+            Self::AwsCodeCommit => GitHostingProviderMetadata {
                 display_name: "AWS CodeCommit",
                 symbol: "[aws]",
                 self_hosted: false,
                 host_based_detection_reliable: false,
                 browser_base_url: None,
             },
-            Self::Gitea => HostingProviderMetadata {
+            Self::Gitea => GitHostingProviderMetadata {
                 display_name: "Gitea",
                 symbol: "[ga]",
                 self_hosted: true,
                 host_based_detection_reliable: false,
                 browser_base_url: None,
             },
-            Self::Forgejo => HostingProviderMetadata {
+            Self::Forgejo => GitHostingProviderMetadata {
                 display_name: "Forgejo",
                 symbol: "[fj]",
                 self_hosted: true,
                 host_based_detection_reliable: false,
                 browser_base_url: None,
             },
-            Self::SourceHut => HostingProviderMetadata {
+            Self::SourceHut => GitHostingProviderMetadata {
                 display_name: "SourceHut",
                 symbol: "[sh]",
                 self_hosted: false,
                 host_based_detection_reliable: true,
                 browser_base_url: Some("https://sr.ht"),
             },
-            Self::SelfHosted => HostingProviderMetadata {
+            Self::SelfHosted => GitHostingProviderMetadata {
                 display_name: "Self-Hosted",
                 symbol: "[git]",
                 self_hosted: true,
                 host_based_detection_reliable: false,
                 browser_base_url: None,
             },
-            Self::Unknown => HostingProviderMetadata {
+            Self::Unknown => GitHostingProviderMetadata {
                 display_name: "Unknown",
                 symbol: "[?]",
                 self_hosted: false,
@@ -354,6 +354,20 @@ impl HostingProvider {
         self.metadata().browser_base_url
     }
 
+    /// Returns the URL path segment used to view a single commit.
+    ///
+    /// Combined with the browse URL and a SHA to form a full commit link:
+    /// `{browse_url}/{commit_path_segment}/{sha}`
+    pub const fn commit_path_segment(&self) -> &'static str {
+        match self {
+            Self::GitLab => "-/commit",
+            Self::Bitbucket => "commits",
+            Self::SourceHut => "commit",
+            // GitHub, Gitea, Forgejo, AzureDevOps, and most others use "commit"
+            _ => "commit",
+        }
+    }
+
     /// Detects the hosting provider from a Git remote URL.
     ///
     /// Supports HTTPS, SSH, and git protocol URLs.
@@ -361,19 +375,19 @@ impl HostingProvider {
     /// ## Examples
     ///
     /// ```
-    /// use sniff::filesystem::git::HostingProvider;
+    /// use sniff::filesystem::git::GitHostingProvider;
     ///
     /// assert_eq!(
-    ///     HostingProvider::from_url("https://github.com/user/repo"),
-    ///     HostingProvider::GitHub
+    ///     GitHostingProvider::from_url("https://github.com/user/repo"),
+    ///     GitHostingProvider::GitHub
     /// );
     /// assert_eq!(
-    ///     HostingProvider::from_url("git@bitbucket.org:user/repo.git"),
-    ///     HostingProvider::Bitbucket
+    ///     GitHostingProvider::from_url("git@bitbucket.org:user/repo.git"),
+    ///     GitHostingProvider::Bitbucket
     /// );
     /// assert_eq!(
-    ///     HostingProvider::from_url("https://git.company.com/repo"),
-    ///     HostingProvider::SelfHosted
+    ///     GitHostingProvider::from_url("https://git.company.com/repo"),
+    ///     GitHostingProvider::SelfHosted
     /// );
     /// ```
     pub fn from_url(url: &str) -> Self {
@@ -626,7 +640,7 @@ pub struct RemoteInfo {
     /// Remote URL (if configured).
     pub url: Option<String>,
     /// Detected hosting provider.
-    pub provider: HostingProvider,
+    pub provider: GitHostingProvider,
     /// Branches available on this remote (only populated with --deep flag).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branches: Option<Vec<String>>,
@@ -1416,8 +1430,8 @@ fn get_remotes(repo: &Repository, include_remote_details: bool) -> Vec<RemoteInf
                         let url = remote.url().map(String::from);
                         let provider = url
                             .as_ref()
-                            .map(|u| HostingProvider::from_url(u))
-                            .unwrap_or(HostingProvider::Unknown);
+                            .map(|u| GitHostingProvider::from_url(u))
+                            .unwrap_or(GitHostingProvider::Unknown);
 
                         let (branches, default_branch) = if include_remote_details {
                             (get_remote_branches(repo, name), get_remote_default_branch(repo, name))
@@ -1966,89 +1980,89 @@ mod tests {
     #[test]
     fn test_hosting_provider_github() {
         assert_eq!(
-            HostingProvider::from_url("https://github.com/user/repo"),
-            HostingProvider::GitHub
+            GitHostingProvider::from_url("https://github.com/user/repo"),
+            GitHostingProvider::GitHub
         );
         assert_eq!(
-            HostingProvider::from_url("git@github.com:user/repo.git"),
-            HostingProvider::GitHub
+            GitHostingProvider::from_url("git@github.com:user/repo.git"),
+            GitHostingProvider::GitHub
         );
     }
 
     #[test]
     fn test_hosting_provider_gitlab() {
         assert_eq!(
-            HostingProvider::from_url("https://gitlab.com/user/repo"),
-            HostingProvider::GitLab
+            GitHostingProvider::from_url("https://gitlab.com/user/repo"),
+            GitHostingProvider::GitLab
         );
     }
 
     #[test]
     fn test_hosting_provider_bitbucket() {
         assert_eq!(
-            HostingProvider::from_url("https://bitbucket.org/user/repo"),
-            HostingProvider::Bitbucket
+            GitHostingProvider::from_url("https://bitbucket.org/user/repo"),
+            GitHostingProvider::Bitbucket
         );
     }
 
     #[test]
     fn test_hosting_provider_azure_devops() {
         assert_eq!(
-            HostingProvider::from_url("https://dev.azure.com/org/project"),
-            HostingProvider::AzureDevOps
+            GitHostingProvider::from_url("https://dev.azure.com/org/project"),
+            GitHostingProvider::AzureDevOps
         );
         assert_eq!(
-            HostingProvider::from_url("https://org.visualstudio.com/project"),
-            HostingProvider::AzureDevOps
+            GitHostingProvider::from_url("https://org.visualstudio.com/project"),
+            GitHostingProvider::AzureDevOps
         );
     }
 
     #[test]
     fn test_hosting_provider_aws_codecommit() {
         assert_eq!(
-            HostingProvider::from_url(
+            GitHostingProvider::from_url(
                 "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/repo"
             ),
-            HostingProvider::AwsCodeCommit
+            GitHostingProvider::AwsCodeCommit
         );
     }
 
     #[test]
     fn test_hosting_provider_sourcehut() {
         assert_eq!(
-            HostingProvider::from_url("https://git.sr.ht/~user/repo"),
-            HostingProvider::SourceHut
+            GitHostingProvider::from_url("https://git.sr.ht/~user/repo"),
+            GitHostingProvider::SourceHut
         );
     }
 
     #[test]
     fn test_hosting_provider_gitea_and_forgejo() {
         assert_eq!(
-            HostingProvider::from_url("https://gitea.example.com/user/repo"),
-            HostingProvider::Gitea
+            GitHostingProvider::from_url("https://gitea.example.com/user/repo"),
+            GitHostingProvider::Gitea
         );
         assert_eq!(
-            HostingProvider::from_url("https://forgejo.example.com/user/repo"),
-            HostingProvider::Forgejo
+            GitHostingProvider::from_url("https://forgejo.example.com/user/repo"),
+            GitHostingProvider::Forgejo
         );
         assert_eq!(
-            HostingProvider::from_url("https://codeberg.org/forgejo/forgejo"),
-            HostingProvider::Forgejo
+            GitHostingProvider::from_url("https://codeberg.org/forgejo/forgejo"),
+            GitHostingProvider::Forgejo
         );
     }
 
     #[test]
     fn test_hosting_provider_metadata_helpers() {
-        let github = HostingProvider::GitHub.metadata();
+        let github = GitHostingProvider::GitHub.metadata();
         assert_eq!(github.display_name, "GitHub");
         assert_eq!(github.symbol, "[gh]");
         assert!(github.host_based_detection_reliable);
         assert_eq!(github.browser_base_url, Some("https://github.com"));
 
-        let self_hosted = HostingProvider::SelfHosted.metadata();
+        let self_hosted = GitHostingProvider::SelfHosted.metadata();
         assert!(self_hosted.self_hosted);
         assert!(!self_hosted.host_based_detection_reliable);
-        assert_eq!(HostingProvider::SelfHosted.symbol(), "[git]");
+        assert_eq!(GitHostingProvider::SelfHosted.symbol(), "[git]");
     }
 
     #[test]
@@ -2068,14 +2082,14 @@ mod tests {
     #[test]
     fn test_hosting_provider_self_hosted() {
         assert_eq!(
-            HostingProvider::from_url("https://git.company.com/repo"),
-            HostingProvider::SelfHosted
+            GitHostingProvider::from_url("https://git.company.com/repo"),
+            GitHostingProvider::SelfHosted
         );
     }
 
     #[test]
     fn test_hosting_provider_unknown() {
-        assert_eq!(HostingProvider::from_url("unknown"), HostingProvider::Unknown);
+        assert_eq!(GitHostingProvider::from_url("unknown"), GitHostingProvider::Unknown);
     }
 
     #[test]
@@ -2687,7 +2701,7 @@ mod tests {
         let remote_with_branches = RemoteInfo {
             name: "origin".to_string(),
             url: Some("https://github.com/user/repo".to_string()),
-            provider: HostingProvider::GitHub,
+            provider: GitHostingProvider::GitHub,
             branches: Some(vec![
                 "main".to_string(),
                 "develop".to_string(),
@@ -2712,7 +2726,7 @@ mod tests {
         let remote_without_branches = RemoteInfo {
             name: "upstream".to_string(),
             url: Some("https://github.com/other/repo".to_string()),
-            provider: HostingProvider::GitHub,
+            provider: GitHostingProvider::GitHub,
             branches: None,
             default_branch: None,
         };
@@ -2955,7 +2969,7 @@ mod tests {
         assert!(info.worktrees.is_empty());
         assert_eq!(info.remotes.len(), 1);
         assert_eq!(info.remotes[0].name, "origin");
-        assert_eq!(info.remotes[0].provider, HostingProvider::GitHub);
+        assert_eq!(info.remotes[0].provider, GitHostingProvider::GitHub);
     }
 
     #[test]
@@ -3237,7 +3251,7 @@ mod tests {
         RemoteInfo {
             name: name.to_string(),
             url: Some(format!("https://github.com/{name}/repo.git")),
-            provider: HostingProvider::GitHub,
+            provider: GitHostingProvider::GitHub,
             branches: None,
             default_branch: None,
         }

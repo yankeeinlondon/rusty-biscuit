@@ -17,7 +17,7 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, CommitInfo, DeltaKind, GitInfo, HostingProvider, LocalBranchInfo, RemoteInfo,
+    BehindStatus, CommitInfo, DeltaKind, GitInfo, GitHostingProvider, LocalBranchInfo, RemoteInfo,
     RepoStatus, detect_git, get_commit_by_sha, get_commit_files, get_commits_for_path,
 };
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
