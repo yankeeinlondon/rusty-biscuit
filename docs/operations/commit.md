@@ -23,11 +23,11 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 
 This monorepo has the following packages:
 
-::shell sniff git packages
+::shell sniff repo packages
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
-::shell sniff git staged -v
+::shell sniff repo staged-packages
 
 ## Orchestration
 
@@ -51,8 +51,9 @@ Your task is to:
 
 **IMPORTANT:** you must follow these steps exactly
 **IMPORTANT:** remember that you are running in a non-interactive mode so you can not ask the user questions and expect a reply!
-**IMPORTANT:** do NOT push commits to any remote!
-**IMPORTANT:** you should run tests, build any packages, or run a formatter. Your job is to commit what you were given and you should assume that all validations before the commit were already done.
+**IMPORTANT:** DO NOT push commits to any remote!
+**IMPORTANT:** you should not run tests, build any packages, or run a formatter. Your job is to commit what you were given and you should assume that all validations before the commit were already done.
+**IMPORTANT:** when acting as an orchestrator you should take every opportunity to communicate progress back to the user as they will not be able to see the subagent's work.
 
 0. If no files are staged for commit then communicate this to the user and exit.
 1. read the lessons you've learned while making commits by reading:
