@@ -7,7 +7,7 @@
 
 ## Pre-Requisite
 
-
+It's important to understand that the `biscuit-file` package just added powerful functionality for converting a file reference into a valid file path. We will not only want to use this in our implementation of the "shell expansion" feature but ensure that all areas of Darkmatter which currently are performing some form of file reference resolution use the functionality coming from `biscuit-file`.
 
 ## Purpose
 
