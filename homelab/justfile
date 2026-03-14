@@ -215,7 +215,7 @@ install-server:
 install-frontend:
     @cd server/frontend && pnpm install
 
-INTEGRATIONS := `sniff repo --packages integration | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '`
+INTEGRATIONS := `sniff repo packages integration | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '`
 
 build-local-integrations *args="":
     #!/usr/bin/env bash
@@ -346,7 +346,7 @@ commit:
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
-    @claudine opencode -n "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo --packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, perf, test, ci) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message (DO NOT COMMIT ALL STAGED FILES as a SINGLE COMMIT unless they are all part of the same conventional commit group). Note: there are two cases where it's ok to have no 'scope' (aka, package) associated to a commit message:\n1. If the change appears to have no relationship to any particular package in the monorepo.\n2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code then it's possible to group them all into one commit which has no scope specified. Note: the action 'refactor' should be reserved for commits which have at least some source code files.\nIf no files are staged for commit then communicate this to the user and exit. Note: make sure NOT to commit everything as one commit. You are committing files in groups. IMPORTANT: remember that you are running in a non-interactive mode so you can not ask the user questions and expect a reply! DO NOT PUSH COMMITS TO THE ORIGIN." --op "commit"
+    @claudine opencode -n "evaluate all the staged commits in the repo and then group them by scope (e.g., $(sniff repo packages)) and operation (e.g., fix, docs, chore, feat, refactor, style, perf, test, ci) and then commit each group separately using the conventional commit naming conventions with a well thought out commit message (DO NOT COMMIT ALL STAGED FILES as a SINGLE COMMIT unless they are all part of the same conventional commit group). Note: there are two cases where it's ok to have no 'scope' (aka, package) associated to a commit message:\n1. If the change appears to have no relationship to any particular package in the monorepo.\n2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code then it's possible to group them all into one commit which has no scope specified. Note: the action 'refactor' should be reserved for commits which have at least some source code files.\nIf no files are staged for commit then communicate this to the user and exit. Note: make sure NOT to commit everything as one commit. You are committing files in groups. IMPORTANT: remember that you are running in a non-interactive mode so you can not ask the user questions and expect a reply! DO NOT PUSH COMMITS TO THE ORIGIN." --op "commit"
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff git 2>/dev/null || exit 0
 
