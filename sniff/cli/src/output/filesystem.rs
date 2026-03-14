@@ -304,6 +304,17 @@ fn split_path(path: &str) -> (String, String) {
     }
 }
 
+/// Formats diff stats as ` - <green-500>N added</green-500>, <red-500>N removed</red-500>`.
+/// Returns an empty string if both counts are zero.
+fn format_diff_stats(added: usize, removed: usize) -> String {
+    if added == 0 && removed == 0 {
+        return String::new();
+    }
+    format!(
+        " - <green-500>{added} <i>added</i></green-500>, <red-500>{removed} <i>removed</i></red-500>"
+    )
+}
+
 /// Format a single commit as a styled one-liner.
 ///
 /// Parses conventional commit format and includes SHA, timestamp, ref decorations,
@@ -494,10 +505,14 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let action = file.action.label();
+        let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
         let line = if dir.is_empty() {
-            format!("<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>", name)
+            format!("<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}", name)
         } else {
-            format!("<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>", dir, name)
+            format!(
+                "<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>{diff_stats}",
+                dir, name
+            )
         };
         status_items.push(line);
     }
@@ -507,10 +522,17 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let action = file.action.label();
+        let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
         let line = if dir.is_empty() {
-            format!("<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>", name)
+            format!(
+                "<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>{diff_stats}",
+                name
+            )
         } else {
-            format!("<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>", dir, name)
+            format!(
+                "<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>{diff_stats}",
+                dir, name
+            )
         };
         status_items.push(line);
     }

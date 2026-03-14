@@ -201,6 +201,10 @@ pub struct FileChange {
     pub status: FileStatus,
     /// The kind of change (created, modified, deleted).
     pub action: FileAction,
+    /// Number of lines added in this change.
+    pub lines_added: usize,
+    /// Number of lines removed in this change.
+    pub lines_removed: usize,
 }
 
 /// Tracking status for a remote.
@@ -1126,6 +1130,8 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
                     path: p.clone(),
                     status: FileStatus::Untracked,
                     action: FileAction::Created,
+                    lines_added: 0,
+                    lines_removed: 0,
                 });
             }
         }
@@ -1136,24 +1142,33 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
         {
             if is_staged && is_unstaged {
                 // File is both staged and has additional modifications
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Both,
                     action: staged_action.unwrap_or(FileAction::Modified),
+                    lines_added,
+                    lines_removed,
                 });
                 dirty_set.insert(p.clone());
             } else if is_staged {
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Staged,
                     action: staged_action.unwrap_or(FileAction::Modified),
+                    lines_added,
+                    lines_removed,
                 });
                 dirty_set.insert(p.clone());
             } else if is_unstaged {
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Modified,
                     action: unstaged_action.unwrap_or(FileAction::Modified),
+                    lines_added,
+                    lines_removed,
                 });
                 dirty_set.insert(p.clone());
             }
@@ -1251,6 +1266,36 @@ fn build_dirty_files(
 }
 
 /// Gets the unified diff for a single file (combined staged + unstaged changes).
+/// Returns `(lines_added, lines_removed)` for a single file by combining staged and unstaged diffs.
+fn get_file_diff_stats(repo: &Repository, filepath: &Path) -> (usize, usize) {
+    let mut added: usize = 0;
+    let mut removed: usize = 0;
+
+    // Staged changes (HEAD to index)
+    if let Ok(head_tree) = repo.head().and_then(|h| h.peel_to_tree()) {
+        let mut opts = git2::DiffOptions::new();
+        opts.pathspec(filepath);
+        if let Ok(diff) = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts)) {
+            if let Ok(stats) = diff.stats() {
+                added += stats.insertions();
+                removed += stats.deletions();
+            }
+        }
+    }
+
+    // Unstaged changes (index to workdir)
+    let mut opts = git2::DiffOptions::new();
+    opts.pathspec(filepath);
+    if let Ok(diff) = repo.diff_index_to_workdir(None, Some(&mut opts)) {
+        if let Ok(stats) = diff.stats() {
+            added += stats.insertions();
+            removed += stats.deletions();
+        }
+    }
+
+    (added, removed)
+}
+
 fn get_file_diff(repo: &Repository, filepath: &Path) -> Result<String> {
     let mut diff_output = String::new();
 
