@@ -140,6 +140,55 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Handle `sniff git staged|unstaged|untracked` — list files by status (early return)
+    if let Some(ref cmd) = cli.command
+        && let Some(sub) = cmd.git_subcommand()
+    {
+        use crate::args::GitSubcommand;
+        let status_filter = match sub {
+            GitSubcommand::Staged => Some(sniff::filesystem::git::FileStatus::Staged),
+            GitSubcommand::Unstaged => Some(sniff::filesystem::git::FileStatus::Modified),
+            GitSubcommand::Untracked => Some(sniff::filesystem::git::FileStatus::Untracked),
+            _ => None,
+        };
+        if let Some(filter) = status_filter {
+            // Quick detect — only need filesystem/git data
+            let mut config = SniffConfig::new()
+                .skip_os()
+                .skip_hardware()
+                .skip_network();
+            if let Some(ref base) = base_dir {
+                config = config.base_dir(base.clone());
+            }
+            let result = sniff::detect_with_config(config)?;
+            if let Some(ref fs) = result.filesystem
+                && let Some(ref git) = fs.git
+            {
+                if cli.json {
+                    let files: Vec<_> = git
+                        .file_changes
+                        .iter()
+                        .filter(|f| match filter {
+                            sniff::filesystem::git::FileStatus::Staged => {
+                                f.status == sniff::filesystem::git::FileStatus::Staged
+                                    || f.status == sniff::filesystem::git::FileStatus::Both
+                            }
+                            sniff::filesystem::git::FileStatus::Modified => {
+                                f.status == sniff::filesystem::git::FileStatus::Modified
+                                    || f.status == sniff::filesystem::git::FileStatus::Both
+                            }
+                            _ => f.status == filter,
+                        })
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&files)?);
+                } else {
+                    output::print_git_file_list(git, &filter, cli.verbose);
+                }
+            }
+            return Ok(());
+        }
+    }
+
     let mut config = SniffConfig::new();
 
     if let Some(ref base) = base_dir {
@@ -288,16 +337,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map_or(FilesFilter::default(), |c| c.files_filter());
 
-    let deps = cli.command.as_ref().is_some_and(|c| c.deps());
-    let packages = cli.command.as_ref().is_some_and(|c| c.packages());
-    let package = cli.command.as_ref().is_some_and(|c| c.package());
-    let package_area = cli.command.as_ref().is_some_and(|c| c.package_area());
-    let dirty_packages = cli.command.as_ref().is_some_and(|c| c.dirty_packages());
-    let dirty_package_areas = cli
-        .command
-        .as_ref()
-        .is_some_and(|c| c.dirty_package_areas());
-    let ui = cli.command.as_ref().is_some_and(|c| c.ui());
+    let repo_subcommand = cli.command.as_ref().and_then(|c| c.repo_subcommand());
     let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
 
     // Output logic:
@@ -315,13 +355,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             history_count,
             &docs_filter,
             &files_filter,
-            deps,
-            packages,
-            package,
-            package_area,
-            dirty_packages,
-            dirty_package_areas,
-            ui,
+            repo_subcommand,
             repo_filter,
             base_dir.as_deref(),
             latest_versions_enabled,

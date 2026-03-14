@@ -207,42 +207,14 @@ pub enum Commands {
 
     /// Show only repository/monorepo structure
     Repo {
-        /// Render an internal dependency diagram
-        #[arg(long)]
-        deps: bool,
-        /// Output only package names as a comma-separated list
-        #[arg(long)]
-        packages: bool,
-        /// Output the package name for the current directory
-        #[arg(long)]
-        package: bool,
-        /// Output the package area for the current directory
-        #[arg(long)]
-        package_area: bool,
-        /// Output only package names that have uncommitted changes
-        #[arg(long)]
-        dirty_packages: bool,
-        /// Output only package area names that have uncommitted changes
-        #[arg(long)]
-        dirty_package_areas: bool,
         /// Query package registries for latest dependency versions and report available updates
-        #[arg(
-            long,
-            conflicts_with_all = [
-                "deps",
-                "packages",
-                "package",
-                "package_area",
-                "dirty_packages",
-                "dirty_package_areas",
-            ]
-        )]
-        latest_versions: bool,
-        /// Use visual (Mermaid) rendering for --deps instead of text
         #[arg(long)]
-        ui: bool,
+        latest_versions: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Option<String>,
+
+        #[command(subcommand)]
+        repo_subcommand: Option<RepoSubcommand>,
     },
 
     /// Show only language detection results
@@ -348,6 +320,50 @@ pub enum GitSubcommand {
         #[arg(value_name = "SHA")]
         sha: String,
     },
+    /// List files staged for commit
+    Staged,
+    /// List modified but unstaged files
+    Unstaged,
+    /// List untracked files
+    Untracked,
+}
+
+/// Repo-specific subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum RepoSubcommand {
+    /// Render an internal dependency diagram
+    Deps {
+        /// Use visual (Mermaid) rendering instead of text
+        #[arg(long)]
+        ui: bool,
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output only package names as a comma-separated list
+    Packages {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output the package name for the current directory
+    Package,
+    /// Output the package area for the current directory
+    PackageArea,
+    /// Output only package names that have uncommitted changes
+    DirtyPackages {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output only package area names that have uncommitted changes
+    DirtyPackageAreas {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output the root directory of the current package
+    PackageRoot,
+    /// Output the root directory of the current package area
+    PackageAreaRoot,
+    /// Output the root directory of the repository
+    RepoRoot,
 }
 
 impl Commands {
@@ -474,52 +490,14 @@ impl Commands {
         }
     }
 
-    /// Check if this is a repo command with `--deps` flag.
-    pub fn deps(&self) -> bool {
-        matches!(self, Commands::Repo { deps: true, .. })
-    }
-
-    /// Check if this is a repo command with `--packages` flag.
-    pub fn packages(&self) -> bool {
-        matches!(self, Commands::Repo { packages: true, .. })
-    }
-
-    /// Check if this is a repo command with `--package` flag.
-    pub fn package(&self) -> bool {
-        matches!(self, Commands::Repo { package: true, .. })
-    }
-
-    /// Check if this is a repo command with `--package-area` flag.
-    pub fn package_area(&self) -> bool {
-        matches!(
-            self,
+    /// Get the repo subcommand if this is a repo command.
+    pub fn repo_subcommand(&self) -> Option<&RepoSubcommand> {
+        match self {
             Commands::Repo {
-                package_area: true,
-                ..
-            }
-        )
-    }
-
-    /// Check if this is a repo command with `--dirty-packages` flag.
-    pub fn dirty_packages(&self) -> bool {
-        matches!(
-            self,
-            Commands::Repo {
-                dirty_packages: true,
-                ..
-            }
-        )
-    }
-
-    /// Check if this is a repo command with `--dirty-package-areas` flag.
-    pub fn dirty_package_areas(&self) -> bool {
-        matches!(
-            self,
-            Commands::Repo {
-                dirty_package_areas: true,
-                ..
-            }
-        )
+                repo_subcommand, ..
+            } => repo_subcommand.as_ref(),
+            _ => None,
+        }
     }
 
     /// Check if this command requests remote refresh data.
@@ -550,15 +528,26 @@ impl Commands {
         )
     }
 
-    /// Check if this is a repo command with `--ui` flag.
-    pub fn ui(&self) -> bool {
-        matches!(self, Commands::Repo { ui: true, .. })
-    }
-
     /// Get the repo filter string if this is a repo command with a filter arg.
+    ///
+    /// Checks both the top-level filter and subcommand-level filters.
     pub fn repo_filter(&self) -> Option<&str> {
         match self {
-            Commands::Repo { filter, .. } => filter.as_deref(),
+            Commands::Repo {
+                filter,
+                repo_subcommand,
+                ..
+            } => {
+                // Subcommand filter takes precedence if present
+                let sub_filter = match repo_subcommand {
+                    Some(RepoSubcommand::Deps { filter, .. }) => filter.as_deref(),
+                    Some(RepoSubcommand::Packages { filter }) => filter.as_deref(),
+                    Some(RepoSubcommand::DirtyPackages { filter }) => filter.as_deref(),
+                    Some(RepoSubcommand::DirtyPackageAreas { filter }) => filter.as_deref(),
+                    _ => None,
+                };
+                sub_filter.or(filter.as_deref())
+            }
             _ => None,
         }
     }
@@ -567,6 +556,16 @@ impl Commands {
     pub fn git_remote(&self) -> Option<&str> {
         match self {
             Commands::Git { remote, .. } => remote.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Get the git subcommand if this is a git command.
+    pub fn git_subcommand(&self) -> Option<&GitSubcommand> {
+        match self {
+            Commands::Git {
+                git_subcommand, ..
+            } => git_subcommand.as_ref(),
             _ => None,
         }
     }
@@ -720,6 +719,10 @@ Commands:
     sniff git --refresh-remotes      Refresh remotes before reporting sync status
     sniff git hash HEAD              Show details for the latest commit
     sniff git hash abc1234           Show details for a specific commit
+    sniff git staged                 List files staged for commit
+    sniff git staged -v              Staged files with action labels
+    sniff git unstaged               List modified but unstaged files
+    sniff git untracked              List untracked files
     sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand
@@ -729,10 +732,17 @@ Commands:
     sniff repo biscuit               Filter to packages matching \"biscuit\"
     sniff repo !biscuit              Exclude packages matching \"biscuit\"
     sniff repo @sniff                Filter to packages in the \"sniff\" area
-    sniff repo --deps                Show internal dependency list (text)
-    sniff repo --deps --ui           Show internal dependency diagram (Mermaid)
-    sniff repo --deps biscuit        Filtered text dependency list
-    sniff repo --packages biscuit    Filtered CSV package names
+    sniff repo deps                  Show internal dependency list (text)
+    sniff repo deps --ui             Show internal dependency diagram (Mermaid)
+    sniff repo deps biscuit          Filtered text dependency list
+    sniff repo packages biscuit      Filtered CSV package names
+    sniff repo package               Package name for current directory
+    sniff repo package-area          Package area for current directory
+    sniff repo dirty-packages        Packages with uncommitted changes
+    sniff repo dirty-package-areas   Package areas with uncommitted changes
+    sniff repo package-root          Root directory of the current package
+    sniff repo package-area-root     Root directory of the current package area
+    sniff repo repo-root             Root directory of the repository
     sniff language                   Show only language detection results
     sniff files                      Show broad file associations
     sniff files --association image  Show only image file statistics
@@ -938,6 +948,72 @@ mod tests {
         }
 
         #[test]
+        fn repo_subcommands_parse() {
+            let cli = parse_args(&["repo", "deps"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Deps { ui: false, .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "deps", "--ui"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Deps { ui: true, .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "packages"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Packages { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "package"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Package),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "package-area"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::PackageArea),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "dirty-packages"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::DirtyPackages { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "dirty-package-areas"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::DirtyPackageAreas { .. }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
         fn editors_install_no_name_parses() {
             let cli = parse_args(&["editors", "install"]).unwrap();
             if let Some(Commands::Editors {
@@ -1011,15 +1087,9 @@ mod tests {
             );
             assert_eq!(
                 Commands::Repo {
-                    deps: false,
-                    packages: false,
-                    package: false,
-                    package_area: false,
-                    dirty_packages: false,
-                    dirty_package_areas: false,
                     latest_versions: false,
-                    ui: false,
                     filter: None,
+                    repo_subcommand: None,
                 }
                 .to_output_filter(),
                 OutputFilter::Repo
@@ -1095,26 +1165,35 @@ mod tests {
         #[test]
         fn repo_accessors_work() {
             let cmd = Commands::Repo {
-                deps: true,
-                packages: true,
-                package: true,
-                package_area: true,
-                dirty_packages: true,
-                dirty_package_areas: true,
                 latest_versions: true,
-                ui: true,
                 filter: Some("biscuit".to_string()),
+                repo_subcommand: None,
             };
 
-            assert!(cmd.deps());
-            assert!(cmd.packages());
-            assert!(cmd.package());
-            assert!(cmd.package_area());
-            assert!(cmd.dirty_packages());
-            assert!(cmd.dirty_package_areas());
             assert!(cmd.latest_versions());
-            assert!(cmd.ui());
             assert_eq!(cmd.repo_filter(), Some("biscuit"));
+
+            // Subcommand filter takes precedence
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: Some("top-level".to_string()),
+                repo_subcommand: Some(RepoSubcommand::Deps {
+                    ui: true,
+                    filter: Some("sub-level".to_string()),
+                }),
+            };
+            assert_eq!(cmd.repo_filter(), Some("sub-level"));
+
+            // Falls back to top-level filter when subcommand has none
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: Some("top-level".to_string()),
+                repo_subcommand: Some(RepoSubcommand::Deps {
+                    ui: false,
+                    filter: None,
+                }),
+            };
+            assert_eq!(cmd.repo_filter(), Some("top-level"));
         }
 
         #[test]
@@ -1206,7 +1285,6 @@ mod tests {
 
         #[test]
         fn unsupported_combinations_fail() {
-            assert!(parse_args(&["repo", "--deps", "--latest-versions"]).is_err());
             assert!(parse_args(&["git", "origin", "--refresh-remotes"]).is_err());
         }
     }

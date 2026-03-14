@@ -311,7 +311,7 @@ fn format_diff_stats(added: usize, removed: usize) -> String {
         return String::new();
     }
     format!(
-        " - <green-500>{added} <i>added</i></green-500>, <red-500>{removed} <i>removed</i></red-500>"
+        " - <dim><green-500>{added} <i>added</i></green-500>, <red-500>{removed} <i>removed</i></red-500></dim>"
     )
 }
 
@@ -440,6 +440,49 @@ pub fn print_hash_section(
 /// - **Status**: Recent commits (with conventional commit parsing), staged/modified/untracked files
 /// - **Meta**: Remote tracking status, branches, git config
 ///
+/// Format a file path with the directory dimmed and filename bold, plus optional action.
+fn format_file_line(path: &std::path::Path, verbose: u8, action: &sniff::filesystem::git::FileAction) -> String {
+    let path_str = path.display().to_string();
+    let (dir, name) = split_path(&path_str);
+    let action_suffix = if verbose > 0 {
+        format!(" <dim>(<i>{}</i>)</dim>", action.label())
+    } else {
+        String::new()
+    };
+    if dir.is_empty() {
+        format!("<b>{name}</b>{action_suffix}")
+    } else {
+        format!("<dim>{dir}</dim><b>{name}</b>{action_suffix}")
+    }
+}
+
+/// Print files matching a specific status filter (staged, unstaged, or untracked).
+pub fn print_git_file_list(
+    git: &sniff::filesystem::git::GitInfo,
+    status_filter: &sniff::filesystem::git::FileStatus,
+    verbose: u8,
+) {
+    use sniff::filesystem::git::FileStatus;
+
+    let terminal = Terminal::default();
+    let files: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| match status_filter {
+            FileStatus::Staged => f.status == FileStatus::Staged || f.status == FileStatus::Both,
+            FileStatus::Modified => {
+                f.status == FileStatus::Modified || f.status == FileStatus::Both
+            }
+            _ => f.status == *status_filter,
+        })
+        .collect();
+
+    for file in &files {
+        let line = format_file_line(&file.path, verbose, &file.action);
+        print!("{}", Prose::new(&line).display(&terminal));
+    }
+}
+
 /// ## Arguments
 ///
 /// * `git` - Git repository information
@@ -1356,6 +1399,46 @@ pub fn print_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Pa
     }
 }
 
+/// Print the root directory of the package containing the given directory, or exit 1.
+pub fn print_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    if let Some(pkg) = repo.and_then(|r| r.package_for_dir(&dir)) {
+        println!("{}", pkg.path.display());
+    } else {
+        std::process::exit(1);
+    }
+}
+
+/// Print the root directory of the package area containing the given directory, or exit 1.
+pub fn print_repo_package_area_root(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
+        if area == "root" {
+            // Root-level packages have the repo root as their area root
+            println!("{}", repo.unwrap().root.display());
+        } else {
+            println!("{}", repo.unwrap().root.join(area).display());
+        }
+    } else {
+        std::process::exit(1);
+    }
+}
+
+/// Print the root directory of the repository, or exit 1.
+pub fn print_repo_root(result: &sniff::SniffResult) {
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    if let Some(repo) = repo {
+        println!("{}", repo.root.display());
+    } else {
+        std::process::exit(1);
+    }
+}
+
 /// Resolve the effective directory from `--base` or fall back to CWD.
 fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
     base_dir
@@ -2116,7 +2199,7 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
 /// terminal cannot display images or mmdc is not available.
 pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
     if !repo.is_monorepo {
-        eprintln!("--deps requires a monorepo (no workspace packages found)");
+        eprintln!("deps requires a monorepo (no workspace packages found)");
         return;
     }
 
@@ -2157,7 +2240,7 @@ pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_fil
 /// are omitted unless an explicit filter is set.
 pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
     if !repo.is_monorepo {
-        eprintln!("--deps requires a monorepo (no workspace packages found)");
+        eprintln!("deps requires a monorepo (no workspace packages found)");
         return;
     }
 
@@ -2229,7 +2312,7 @@ pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filte
     eprintln!(
         "\n{}",
         Prose::new(
-            "<dim><i>use the <blue>--ui</blue> CLI switch to show this in a visual format</i></dim>"
+            "<dim><i>use the <blue>--ui</blue> flag to show this in a visual format</i></dim>"
         )
         .render(&term)
     );

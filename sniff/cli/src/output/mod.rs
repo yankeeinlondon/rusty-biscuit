@@ -19,7 +19,7 @@ use sniff::SniffResult;
 
 use crate::args::{DocsFilter, FilesFilter};
 
-pub use filesystem::{print_git_section, print_hash_section};
+pub use filesystem::{print_git_file_list, print_git_section, print_hash_section};
 pub use programs::{print_programs_json, print_programs_markdown};
 pub use remote::{print_remote_json, print_remote_text};
 pub use services::{print_services_json, print_services_text};
@@ -29,7 +29,8 @@ pub use topics::print_topics_table;
 pub(crate) use filesystem::{
     print_dirty_package_areas, print_dirty_packages, print_docs_section, print_files_section,
     print_filesystem_section, print_language_section, print_repo_deps_text, print_repo_deps_visual,
-    print_repo_package, print_repo_package_area, print_repo_packages, print_repo_section,
+    print_repo_package, print_repo_package_area, print_repo_package_area_root,
+    print_repo_package_root, print_repo_packages, print_repo_root, print_repo_section,
 };
 pub(crate) use hardware::{
     print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
@@ -247,13 +248,7 @@ pub fn print_text(
     history_count: usize,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-    deps: bool,
-    packages: bool,
-    package: bool,
-    package_area: bool,
-    dirty_packages: bool,
-    dirty_package_areas: bool,
-    ui: bool,
+    repo_subcommand: Option<&crate::args::RepoSubcommand>,
     repo_filter: Option<&str>,
     base_dir: Option<&std::path::Path>,
     latest_versions_requested: bool,
@@ -335,31 +330,55 @@ pub fn print_text(
             }
         }
         OutputFilter::Repo => {
-            if package {
-                print_repo_package(result, base_dir, verbose);
-            } else if package_area {
-                print_repo_package_area(result, base_dir);
-            } else if packages {
-                print_repo_packages(result, repo_filter);
-            } else if dirty_packages {
-                print_dirty_packages(result, repo_filter);
-            } else if dirty_package_areas {
-                print_dirty_package_areas(result, repo_filter);
-            } else if let Some(ref filesystem) = result.filesystem
-                && let Some(ref repo) = filesystem.repo
-            {
-                if deps && ui {
-                    print_repo_deps_visual(repo, repo_filter);
-                } else if deps {
-                    print_repo_deps_text(repo, repo_filter);
-                } else {
-                    print_repo_section(
-                        repo,
-                        verbose,
-                        repo_root,
-                        repo_filter,
-                        latest_versions_requested,
-                    );
+            use crate::args::RepoSubcommand;
+            match repo_subcommand {
+                Some(RepoSubcommand::Package) => {
+                    print_repo_package(result, base_dir, verbose);
+                }
+                Some(RepoSubcommand::PackageArea) => {
+                    print_repo_package_area(result, base_dir);
+                }
+                Some(RepoSubcommand::Packages { .. }) => {
+                    print_repo_packages(result, repo_filter);
+                }
+                Some(RepoSubcommand::DirtyPackages { .. }) => {
+                    print_dirty_packages(result, repo_filter);
+                }
+                Some(RepoSubcommand::DirtyPackageAreas { .. }) => {
+                    print_dirty_package_areas(result, repo_filter);
+                }
+                Some(RepoSubcommand::Deps { ui, .. }) => {
+                    if let Some(ref filesystem) = result.filesystem
+                        && let Some(ref repo) = filesystem.repo
+                    {
+                        if *ui {
+                            print_repo_deps_visual(repo, repo_filter);
+                        } else {
+                            print_repo_deps_text(repo, repo_filter);
+                        }
+                    }
+                }
+                Some(RepoSubcommand::PackageRoot) => {
+                    print_repo_package_root(result, base_dir);
+                }
+                Some(RepoSubcommand::PackageAreaRoot) => {
+                    print_repo_package_area_root(result, base_dir);
+                }
+                Some(RepoSubcommand::RepoRoot) => {
+                    print_repo_root(result);
+                }
+                None => {
+                    if let Some(ref filesystem) = result.filesystem
+                        && let Some(ref repo) = filesystem.repo
+                    {
+                        print_repo_section(
+                            repo,
+                            verbose,
+                            repo_root,
+                            repo_filter,
+                            latest_versions_requested,
+                        );
+                    }
                 }
             }
         }
