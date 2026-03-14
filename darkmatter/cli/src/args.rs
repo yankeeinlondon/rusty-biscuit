@@ -127,6 +127,21 @@ pub enum Command {
         toml: bool,
     },
 
+    /// Set a frontmatter property on a markdown document.
+    Set {
+        /// Input file path (use "-" for stdin; outputs to stdout)
+        #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+        input: PathBuf,
+
+        /// Frontmatter property name to set
+        #[arg(value_name = "PROP")]
+        prop: String,
+
+        /// Value to set (parsed as JSON if valid, otherwise treated as a string)
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+
     /// Hash a markdown document's frontmatter and body.
     Hash {
         /// Input file path (use "-" for stdin)

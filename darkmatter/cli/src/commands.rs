@@ -98,6 +98,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_get(&input, &props, json5, yaml, toml)?;
         }
+        CliCommand::Set {
+            input,
+            prop,
+            value,
+        } => {
+            run_set(&input, &prop, &value)?;
+        }
         CliCommand::Hash {
             input,
             body,
@@ -301,6 +308,33 @@ pub fn run_get(
 
     let output = format_value(&value, json5, yaml, toml)?;
     println!("{output}");
+
+    Ok(())
+}
+
+/// Set a frontmatter property on a markdown document.
+///
+/// When input is `-` (stdin), the modified document is written to stdout.
+/// When input is a file path, the file is updated in place.
+pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str) -> Result<()> {
+    let is_stdin = input.to_str() == Some("-");
+    let mut md = load_markdown(Some(input))?;
+
+    let value: serde_json::Value =
+        serde_json::from_str(raw_value).unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
+
+    md.fm_insert(prop, value)
+        .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
+
+    let output = md.as_string();
+
+    if is_stdin {
+        print!("{output}");
+    } else {
+        std::fs::write(input, &output)
+            .wrap_err_with(|| format!("Failed to write to {:?}", input))?;
+        print!("{output}");
+    }
 
     Ok(())
 }

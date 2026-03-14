@@ -24,6 +24,7 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("toc"))
         .stdout(predicate::str::contains("delta"))
         .stdout(predicate::str::contains("get"))
+        .stdout(predicate::str::contains("set"))
         .stdout(predicate::str::contains("hash"));
 }
 
@@ -869,6 +870,105 @@ fn test_get_tab_indented_frontmatter_property_is_populated() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"2026-02-27\""));
+}
+
+// =============================================================================
+//                          SET SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_set_string_value_via_stdin() {
+    md_cmd()
+        .args(["set", "-", "title", "New Title"])
+        .write_stdin("---\ntitle: Old Title\n---\n# Content\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title: New Title"))
+        .stdout(predicate::str::contains("# Content"));
+}
+
+#[test]
+fn test_set_adds_new_property_via_stdin() {
+    md_cmd()
+        .args(["set", "-", "author", "Alice"])
+        .write_stdin("---\ntitle: Hello\n---\n# Content\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("author: Alice"))
+        .stdout(predicate::str::contains("title: Hello"));
+}
+
+#[test]
+fn test_set_numeric_value() {
+    md_cmd()
+        .args(["set", "-", "count", "42"])
+        .write_stdin("---\ntitle: Test\n---\n# Content\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("count: 42"));
+}
+
+#[test]
+fn test_set_boolean_value() {
+    md_cmd()
+        .args(["set", "-", "draft", "true"])
+        .write_stdin("---\ntitle: Test\n---\n# Content\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("draft: true"));
+}
+
+#[test]
+fn test_set_json_array_value() {
+    md_cmd()
+        .args(["set", "-", "tags", r#"["rust","cli"]"#])
+        .write_stdin("---\ntitle: Test\n---\n# Content\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust"))
+        .stdout(predicate::str::contains("cli"));
+}
+
+#[test]
+fn test_set_creates_frontmatter_when_none_exists() {
+    md_cmd()
+        .args(["set", "-", "title", "Brand New"])
+        .write_stdin("# No Frontmatter\n\nJust content.\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title: Brand New"))
+        .stdout(predicate::str::contains("# No Frontmatter"));
+}
+
+#[test]
+fn test_set_updates_file_in_place() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "---\ntitle: Original\n---\n# Content\n").unwrap();
+
+    md_cmd()
+        .arg("set")
+        .arg(tmp.path())
+        .args(["title", "Updated"])
+        .assert()
+        .success();
+
+    let updated = std::fs::read_to_string(tmp.path()).unwrap();
+    assert!(updated.contains("title: Updated"));
+    assert!(updated.contains("# Content"));
+    assert!(!updated.contains("Original"));
+}
+
+#[test]
+fn test_set_preserves_body_content() {
+    let input = "---\ntitle: Test\n---\n# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
+    md_cmd()
+        .args(["set", "-", "version", "2"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Heading"))
+        .stdout(predicate::str::contains("**bold**"))
+        .stdout(predicate::str::contains("- list item"));
 }
 
 #[test]
