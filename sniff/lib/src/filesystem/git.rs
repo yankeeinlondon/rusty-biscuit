@@ -170,6 +170,28 @@ pub enum FileStatus {
     Untracked,
 }
 
+/// The kind of change applied to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FileAction {
+    /// Newly created file.
+    Created,
+    /// Existing file was modified.
+    Modified,
+    /// File was deleted.
+    Deleted,
+}
+
+impl FileAction {
+    /// Human-readable label for display.
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Modified => "modified",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
 /// A file change with its status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileChange {
@@ -177,6 +199,8 @@ pub struct FileChange {
     pub path: PathBuf,
     /// Status of the file.
     pub status: FileStatus,
+    /// The kind of change (created, modified, deleted).
+    pub action: FileAction,
 }
 
 /// Tracking status for a remote.
@@ -1069,6 +1093,25 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
         let is_unstaged = status.is_wt_modified() || status.is_wt_deleted();
         let is_untracked = status.is_wt_new();
 
+        // Determine the specific action for staged and unstaged changes
+        let staged_action = if status.is_index_new() {
+            Some(FileAction::Created)
+        } else if status.is_index_deleted() {
+            Some(FileAction::Deleted)
+        } else if status.is_index_modified() {
+            Some(FileAction::Modified)
+        } else {
+            None
+        };
+
+        let unstaged_action = if status.is_wt_deleted() {
+            Some(FileAction::Deleted)
+        } else if status.is_wt_modified() {
+            Some(FileAction::Modified)
+        } else {
+            None
+        };
+
         if is_staged {
             staged += 1;
         }
@@ -1082,6 +1125,7 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Untracked,
+                    action: FileAction::Created,
                 });
             }
         }
@@ -1095,18 +1139,21 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Both,
+                    action: staged_action.unwrap_or(FileAction::Modified),
                 });
                 dirty_set.insert(p.clone());
             } else if is_staged {
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Staged,
+                    action: staged_action.unwrap_or(FileAction::Modified),
                 });
                 dirty_set.insert(p.clone());
             } else if is_unstaged {
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Modified,
+                    action: unstaged_action.unwrap_or(FileAction::Modified),
                 });
                 dirty_set.insert(p.clone());
             }

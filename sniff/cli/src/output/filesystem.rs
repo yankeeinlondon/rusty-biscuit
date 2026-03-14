@@ -493,22 +493,24 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     for file in &staged {
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
+        let action = file.action.label();
         let line = if dir.is_empty() {
-            format!("<lime>staged: <b>{}</b></lime>", name)
+            format!("<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>", name)
         } else {
-            format!("<lime>staged: {}<b>{}</b></lime>", dir, name)
+            format!("<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>", dir, name)
         };
         status_items.push(line);
     }
 
-    // Add unstaged modified files
+    // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
+        let action = file.action.label();
         let line = if dir.is_empty() {
-            format!("<yellow>unstaged(modified): <b>{}</b></yellow>", name)
+            format!("<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>", name)
         } else {
-            format!("<yellow>unstaged(modified): {}<b>{}</b></yellow>", dir, name)
+            format!("<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>", dir, name)
         };
         status_items.push(line);
     }
