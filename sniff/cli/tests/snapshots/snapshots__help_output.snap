@@ -32,8 +32,8 @@ Commands:
   Filesystem details:
     sniff git                        Show only git repository information
     sniff git --refresh-remotes      Refresh remotes before reporting sync status
-    sniff git --hash HEAD            Show details for the latest commit
-    sniff git --hash abc1234         Show details for a specific commit
+    sniff git hash HEAD              Show details for the latest commit
+    sniff git hash abc1234           Show details for a specific commit
     sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand

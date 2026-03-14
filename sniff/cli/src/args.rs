@@ -186,15 +186,11 @@ pub enum Commands {
         history: usize,
 
         /// Refresh remote-tracking data before reporting branch and sync status
-        #[arg(long, conflicts_with_all = ["remote", "hash"])]
+        #[arg(long, conflicts_with = "remote")]
         refresh_remotes: bool,
 
-        /// Show details for a specific commit by SHA
-        #[arg(long, value_name = "SHA", conflicts_with = "package")]
-        hash: Option<String>,
-
         /// Filter to commits and changes within a package
-        #[arg(short, long, value_name = "PKG", conflicts_with = "hash")]
+        #[arg(short, long, value_name = "PKG")]
         package: Option<String>,
 
         /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
@@ -204,6 +200,9 @@ pub enum Commands {
         /// Print help
         #[arg(long, action = clap::ArgAction::Help)]
         help: Option<bool>,
+
+        #[command(subcommand)]
+        git_subcommand: Option<GitSubcommand>,
     },
 
     /// Show only repository/monorepo structure
@@ -337,6 +336,17 @@ pub enum Commands {
         /// Filter services by state
         #[arg(long, value_enum, default_value = "running")]
         state: ServiceStateArg,
+    },
+}
+
+/// Git-specific subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum GitSubcommand {
+    /// Show details for a specific commit by SHA
+    Hash {
+        /// Commit SHA (full or abbreviated)
+        #[arg(value_name = "SHA")]
+        sha: String,
     },
 }
 
@@ -561,10 +571,13 @@ impl Commands {
         }
     }
 
-    /// Get commit SHA if this is a git command with `--hash`.
+    /// Get commit SHA if this is a `git hash <SHA>` subcommand.
     pub fn git_hash(&self) -> Option<&str> {
         match self {
-            Commands::Git { hash, .. } => hash.as_deref(),
+            Commands::Git {
+                git_subcommand: Some(GitSubcommand::Hash { sha }),
+                ..
+            } => Some(sha.as_str()),
             _ => None,
         }
     }
@@ -705,8 +718,8 @@ Commands:
   Filesystem details:
     sniff git                        Show only git repository information
     sniff git --refresh-remotes      Refresh remotes before reporting sync status
-    sniff git --hash HEAD            Show details for the latest commit
-    sniff git --hash abc1234         Show details for a specific commit
+    sniff git hash HEAD              Show details for the latest commit
+    sniff git hash abc1234           Show details for a specific commit
     sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand
@@ -1109,10 +1122,10 @@ mod tests {
             let git = Commands::Git {
                 history: 3,
                 refresh_remotes: true,
-                hash: None,
                 package: None,
                 remote: Some("owner/repo".to_string()),
                 help: None,
+                git_subcommand: None,
             };
             assert_eq!(git.history(), 3);
             assert_eq!(git.git_remote(), Some("owner/repo"));

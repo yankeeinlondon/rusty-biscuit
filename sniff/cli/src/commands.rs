@@ -111,7 +111,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Handle `sniff git --hash <sha>` — drill into a single commit (early return)
+    // Handle `sniff git hash <sha>` — drill into a single commit (early return)
     if let Some(ref cmd) = cli.command
         && let Some(sha) = cmd.git_hash()
     {
@@ -134,7 +134,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
             println!("{}", serde_json::to_string_pretty(&json)?);
         } else {
-            output::print_hash_section(&commit, &files, cli.verbose);
+            let commit_url = commit_url_from_repo(&repo, &commit.sha);
+            output::print_hash_section(&commit, &files, cli.verbose, commit_url.as_deref());
         }
         return Ok(());
     }
@@ -447,6 +448,28 @@ fn resolve_remote_name(name: &str, base_dir: Option<&std::path::Path>) -> Option
     let repo = git2::Repository::discover(dir).ok()?;
     let remote = repo.find_remote(name).ok()?;
     remote.url().map(String::from)
+}
+
+/// Build a commit URL from a `git2::Repository` by reading the origin remote.
+fn commit_url_from_repo(repo: &git2::Repository, sha: &str) -> Option<String> {
+    let remote = repo.find_remote("origin").ok()?;
+    let url = remote.url()?;
+    let provider = sniff::filesystem::git::GitHostingProvider::from_url(url);
+    let base = provider.browser_base_url()?;
+
+    // Extract owner/repo from URL
+    let owner_repo = if url.contains('@') && url.contains(':') {
+        url.split(':')
+            .next_back()
+            .map(|s| s.trim_end_matches(".git").to_string())
+    } else if url.contains("://") {
+        let path = url.split('/').skip(3).collect::<Vec<_>>().join("/");
+        Some(path.trim_end_matches(".git").to_string())
+    } else {
+        None
+    }?;
+
+    Some(format!("{base}/{owner_repo}/{}/{sha}", provider.commit_path_segment()))
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.
