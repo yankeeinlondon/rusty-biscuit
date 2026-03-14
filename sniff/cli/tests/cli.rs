@@ -266,6 +266,11 @@ fn test_repo_scoped_flags_parse_in_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--latest-versions"))
+        .stdout(predicate::str::contains("deps"))
+        .stdout(predicate::str::contains("packages"))
+        .stdout(predicate::str::contains("package-area"))
+        .stdout(predicate::str::contains("dirty-packages"))
+        .stdout(predicate::str::contains("dirty-package-areas"))
         .stdout(predicate::str::contains("--refresh-remotes").not());
 }
 
@@ -1024,12 +1029,12 @@ fn test_git_json_contains_new_fields() {
 }
 
 #[test]
-fn test_invalid_latest_versions_repo_combo_fails() {
+fn test_repo_deps_help_mentions_ui() {
     cargo_bin_cmd!("sniff")
-        .args(["repo", "--deps", "--latest-versions"])
+        .args(["repo", "deps", "--help"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("--latest-versions"));
+        .success()
+        .stdout(predicate::str::contains("--ui"));
 }
 
 #[test]

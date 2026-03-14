@@ -1,5 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
+assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -34,6 +35,10 @@ Commands:
     sniff git --refresh-remotes      Refresh remotes before reporting sync status
     sniff git hash HEAD              Show details for the latest commit
     sniff git hash abc1234           Show details for a specific commit
+    sniff git staged                 List files staged for commit
+    sniff git staged -v              Staged files with action labels
+    sniff git unstaged               List modified but unstaged files
+    sniff git untracked              List untracked files
     sniff git --package homelab      Scope to commits within a package
     sniff git origin                 Inspect the 'origin' remote
     sniff git owner/repo             Inspect by owner/repo shorthand
@@ -43,10 +48,17 @@ Commands:
     sniff repo biscuit               Filter to packages matching "biscuit"
     sniff repo !biscuit              Exclude packages matching "biscuit"
     sniff repo @sniff                Filter to packages in the "sniff" area
-    sniff repo --deps                Show internal dependency list (text)
-    sniff repo --deps --ui           Show internal dependency diagram (Mermaid)
-    sniff repo --deps biscuit        Filtered text dependency list
-    sniff repo --packages biscuit    Filtered CSV package names
+    sniff repo deps                  Show internal dependency list (text)
+    sniff repo deps --ui             Show internal dependency diagram (Mermaid)
+    sniff repo deps biscuit          Filtered text dependency list
+    sniff repo packages biscuit      Filtered CSV package names
+    sniff repo package               Package name for current directory
+    sniff repo package-area          Package area for current directory
+    sniff repo dirty-packages        Packages with uncommitted changes
+    sniff repo dirty-package-areas   Package areas with uncommitted changes
+    sniff repo package-root          Root directory of the current package
+    sniff repo package-area-root     Root directory of the current package area
+    sniff repo repo-root             Root directory of the repository
     sniff language                   Show only language detection results
     sniff files                      Show broad file associations
     sniff files --association image  Show only image file statistics
