@@ -7,7 +7,36 @@
 
 ## Pre-Requisite
 
-It's important to understand that the `biscuit-file` package just added powerful functionality for converting a file reference into a valid file path. We will not only want to use this in our implementation of the "shell expansion" feature but ensure that all areas of Darkmatter which currently are performing some form of file reference resolution use the functionality coming from `biscuit-file`.
+It's important to understand that the `biscuit-file` package just added powerful functionality for converting a file reference into a valid file path. We will not only want to use this in our implementation of the "shell expansion" feature but ensure that all areas of Darkmatter which currently are performing some form of file reference resolution using the functionality coming from `biscuit-file`.
+
+> The biscuit-file crate provides a FileReference type for lazily resolving file paths from a compact string syntax. Construction
+> via FileReference::new(raw) parses the reference without touching the filesystem — it just validates syntax and extracts the
+> reference kind, path template, and any {{ENV}} interpolation tokens. Resolution happens later when you call .resolve(), which
+> captures the ambient context (cwd, HOME, git root, cargo workspace) and searches for the file. References are distinguished by
+> prefix: @ searches from the git root (then HOME), ! searches from the current package area in a cargo workspace, vault: searches
+> configured vault roots, and bare paths resolve relative to cwd. Any reference can be prefixed with % to enable recursive
+> directory-tree searching, and {{VAR}} tokens anywhere in the path are expanded from environment variables at resolution time.
+> Builder methods .add_magic_path() and .add_vault() let you prepend or append custom search roots.
+>
+> ```rust
+> use biscuit_file::{FileReference, PathPosition};
+> // Magic reference — searches git root, then HOME
+> let fr = FileReference::new("@docs/spec.md")?;
+> if let Some(path) = fr.resolve()? {
+>     println!("Found: {}", path.display());
+> }
+> // Vault reference with custom root
+> let fr = FileReference::new("vault:notes/today.md")?
+>     .add_vault("/path/to/obsidian-vault");
+> let resolved = fr.resolve()?;
+> // Recursive search for a filename across the repo
+> let fr = FileReference::new("%@README.md")?;
+> let found = fr.resolve()?; // walks the entire git root tree
+> // Environment variable interpolation
+> let fr = FileReference::new("{{CONFIG_DIR}}/app.toml")?;
+> let path = fr.resolve()?;
+> ```
+
 
 ## Purpose
 

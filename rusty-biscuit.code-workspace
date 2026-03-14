@@ -9,6 +9,10 @@
             "path": "docs"
         },
         {
+            "name": "Monorepo Prompts",
+            "path": "prompts"
+        },
+        {
             "name": "agent-sandbox",
             "path": "agent-sandbox"
         },

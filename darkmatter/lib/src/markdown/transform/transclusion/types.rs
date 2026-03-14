@@ -223,6 +223,9 @@ pub enum TransclusionError {
     #[error("URL parse error: {0}")]
     UrlParse(#[from] url::ParseError),
 
+    #[error("File reference error: {0}")]
+    FileReference(#[from] biscuit_file::FileReferenceError),
+
     #[error("JSON parse error in transclusion option: {0}")]
     Json(#[from] serde_json::Error),
 }

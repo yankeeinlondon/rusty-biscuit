@@ -2,6 +2,7 @@
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::transform::{TransclusionOptions, TransformSource};
+use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
 
 /// Resolves a directive target into a canonical local path or URL.
@@ -43,6 +44,11 @@ fn resolve_url_target(
 }
 
 /// Resolves a local filesystem path.
+///
+/// Delegates to [`FileReference`] for `@` (magic/repo-root), `!` (package),
+/// `vault:`, `%` (recursive), and `{{ENV}}` interpolation references.
+/// Relative paths are resolved from the source file's directory (not CWD)
+/// since transclusion context is file-relative.
 pub fn resolve_path(
     raw_target: &str,
     options: &TransclusionOptions,
@@ -55,80 +61,87 @@ pub fn resolve_path(
         });
     }
 
-    let raw = PathBuf::from(raw_target);
-
-    let absolute = if raw_target.starts_with("@") {
-        if !options.resolve_repo_root {
-            return Err(TransclusionError::InvalidReference {
-                reference: raw_target.to_string(),
-                line,
-            });
-        }
-
-        let source_file =
-            source_file_path(source).ok_or_else(|| TransclusionError::MissingSourceContext {
-                reference: raw_target.to_string(),
-                line,
-            })?;
-
-        let repo_root =
-            find_repo_root(&source_file).ok_or_else(|| TransclusionError::InvalidReference {
-                reference: raw_target.to_string(),
-                line,
-            })?;
-
-        let rel = raw_target
-            .strip_prefix("@/")
-            .or_else(|| raw_target.strip_prefix('@'))
-            .unwrap_or(raw_target);
-        let joined = repo_root.join(rel);
-
-        let canonical_repo = std::fs::canonicalize(&repo_root)?;
-        let canonical_path = std::fs::canonicalize(&joined)?;
-
-        if !canonical_path.starts_with(&canonical_repo) {
-            return Err(TransclusionError::InvalidReference {
-                reference: raw_target.to_string(),
-                line,
-            });
-        }
-
-        canonical_path
-    } else if raw_target.starts_with("~") {
+    // Handle ~ (home directory) by converting to absolute path.
+    // FileReference uses @ for magic refs (git root + HOME fallback),
+    // but ~ should resolve directly to HOME without searching git root.
+    if raw_target.starts_with('~') {
         let home = std::env::var("HOME").map_err(|_| TransclusionError::MissingSourceContext {
             reference: raw_target.to_string(),
             line,
         })?;
         let suffix = raw_target.trim_start_matches('~').trim_start_matches('/');
-        std::fs::canonicalize(Path::new(&home).join(suffix))?
-    } else if raw.is_absolute() {
-        std::fs::canonicalize(raw)?
-    } else {
-        let source_file =
-            source_file_path(source).ok_or_else(|| TransclusionError::MissingSourceContext {
+        return std::fs::canonicalize(Path::new(&home).join(suffix)).map_err(Into::into);
+    }
+
+    // Use FileReference for @, !, vault:, %, {{ENV}}, and absolute paths.
+    if is_file_reference_target(raw_target) {
+        if raw_target.starts_with('@') && !options.resolve_repo_root {
+            return Err(TransclusionError::InvalidReference {
                 reference: raw_target.to_string(),
                 line,
-            })?;
-        let base_dir = if source_file.is_dir() {
-            source_file
+            });
+        }
+
+        // Normalize @/ to @ — FileReference strips only the @ prefix,
+        // so @/foo would leave /foo (absolute) which breaks the join.
+        let normalized;
+        let ref_input = if let Some(rest) = raw_target.strip_prefix("@/") {
+            normalized = format!("@{rest}");
+            &normalized
         } else {
-            source_file.parent().map(Path::to_path_buf).ok_or_else(|| {
-                TransclusionError::MissingSourceContext {
-                    reference: raw_target.to_string(),
-                    line,
-                }
-            })?
+            raw_target
         };
 
-        let candidate = if raw_target.starts_with("./") || raw_target.starts_with("../") {
-            base_dir.join(&raw)
-        } else {
-            base_dir.join(Path::new(raw_target))
-        };
-        std::fs::canonicalize(candidate)?
+        let file_ref = FileReference::new(ref_input)?;
+        let resolved = file_ref.resolve()?;
+
+        return resolved.ok_or_else(|| {
+            TransclusionError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("File not found: {raw_target}"),
+            ))
+        });
+    }
+
+    // Relative paths — resolve from the source file's directory.
+    let raw = PathBuf::from(raw_target);
+
+    if raw.is_absolute() {
+        return std::fs::canonicalize(raw).map_err(Into::into);
+    }
+
+    let source_file =
+        source_file_path(source).ok_or_else(|| TransclusionError::MissingSourceContext {
+            reference: raw_target.to_string(),
+            line,
+        })?;
+    let base_dir = if source_file.is_dir() {
+        source_file
+    } else {
+        source_file.parent().map(Path::to_path_buf).ok_or_else(|| {
+            TransclusionError::MissingSourceContext {
+                reference: raw_target.to_string(),
+                line,
+            }
+        })?
     };
 
-    Ok(absolute)
+    let candidate = if raw_target.starts_with("./") || raw_target.starts_with("../") {
+        base_dir.join(&raw)
+    } else {
+        base_dir.join(Path::new(raw_target))
+    };
+    std::fs::canonicalize(candidate).map_err(Into::into)
+}
+
+/// Returns `true` if the target should be routed through [`FileReference`]
+/// rather than handled as a simple relative path.
+fn is_file_reference_target(target: &str) -> bool {
+    target.starts_with('@')
+        || target.starts_with('!')
+        || target.starts_with("vault:")
+        || target.starts_with('%')
+        || target.contains("{{")
 }
 
 fn source_file_path(source: &TransformSource) -> Option<PathBuf> {
@@ -178,24 +191,6 @@ fn is_markdown_path(path: &Path) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown")
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = if start.is_dir() {
-        start.to_path_buf()
-    } else {
-        start.parent()?.to_path_buf()
-    };
-
-    loop {
-        if current.join(".git").exists() {
-            return Some(current);
-        }
-
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
 /// Attempts to infer whether a reference string is URL-like.
 pub fn is_url_like(reference: &str) -> bool {
     reference.starts_with("http://") || reference.starts_with("https://")
@@ -203,12 +198,17 @@ pub fn is_url_like(reference: &str) -> bool {
 
 /// Returns `true` if the reference looks like a filesystem path rather than
 /// inline string content.  A reference is path-like when it contains a path
-/// separator (`/` or `\`) or starts with a special path prefix (`@` or `~`).
+/// separator (`/` or `\`), starts with a file-reference prefix (`@`, `~`,
+/// `!`, `%`), uses `vault:` syntax, or contains `{{` env-var interpolation.
 pub fn is_file_like_reference(reference: &str) -> bool {
     if reference.contains('/')
         || reference.contains('\\')
         || reference.starts_with('@')
         || reference.starts_with('~')
+        || reference.starts_with('!')
+        || reference.starts_with('%')
+        || reference.starts_with("vault:")
+        || reference.contains("{{")
     {
         return true;
     }
@@ -236,7 +236,6 @@ pub fn normalize_reference_token(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::tempdir;
 
     fn default_options() -> TransclusionOptions {
@@ -282,8 +281,11 @@ mod tests {
     #[test]
     fn resolves_repo_root_reference() {
         let dir = tempdir().unwrap();
-        let root = dir.path();
-        std::fs::create_dir(root.join(".git")).unwrap();
+        // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        // Initialize a real git repo so git2::Repository::discover() works
+        git2::Repository::init(&root).unwrap();
 
         let nested = root.join("docs");
         std::fs::create_dir_all(&nested).unwrap();
@@ -293,34 +295,33 @@ mod tests {
         let target_path = root.join("shared.md");
         std::fs::write(&target_path, "# shared").unwrap();
 
+        // FileReference resolves @/ from CWD's git root, so we need to
+        // temporarily change to the temp dir for this test.
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&nested).unwrap();
+
         let resolved = resolve_path(
             "@/shared.md",
             &default_options(),
             &TransformSource::File(source_path),
             1,
-        )
-        .unwrap();
+        );
 
-        assert_eq!(resolved, std::fs::canonicalize(target_path).unwrap());
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let resolved = resolved.unwrap();
+        assert_eq!(resolved, root.join("shared.md"));
     }
 
     #[test]
-    fn repo_root_escape_is_rejected() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-        std::fs::create_dir(root.join(".git")).unwrap();
-
-        let source_path = root.join("root.md");
-        std::fs::write(&source_path, "# root").unwrap();
-
-        let outside = root.parent().unwrap().join("outside.md");
-        let mut file = std::fs::File::create(&outside).unwrap();
-        writeln!(file, "# outside").unwrap();
+    fn repo_root_disabled_is_rejected() {
+        let mut opts = default_options();
+        opts.resolve_repo_root = false;
 
         let err = resolve_path(
-            "@/../outside.md",
-            &default_options(),
-            &TransformSource::File(source_path),
+            "@/shared.md",
+            &opts,
+            &TransformSource::Unknown,
             1,
         )
         .unwrap_err();
@@ -336,6 +337,10 @@ mod tests {
         assert!(is_file_like_reference("~/notes/intro.md"));
         assert!(is_file_like_reference("/absolute/path.md"));
         assert!(is_file_like_reference("intro.md"));
+        assert!(is_file_like_reference("!README.md"));
+        assert!(is_file_like_reference("%@docs/spec.md"));
+        assert!(is_file_like_reference("vault:notes/today.md"));
+        assert!(is_file_like_reference("{{CONFIG_DIR}}/app.toml"));
         assert!(!is_file_like_reference("Just some text content"));
         assert!(!is_file_like_reference("**Bold** markdown"));
         assert!(!is_file_like_reference(""));

@@ -20,7 +20,7 @@ tracing = "0.1"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "file-reference"] }
 
 # Error handling
 thiserror = "2.0"
@@ -69,3 +69,4 @@ tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
+git2 = "0.20"

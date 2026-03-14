@@ -4,7 +4,8 @@ spec: ""
 design: ""
 suggestions: ""
 docs_updated: []
-areas_effected: []
+package_areas_affected: []
+files_modified: []
 stage: "tech-design"
 ---
 
@@ -37,3 +38,12 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
     - this property will match one of the steps described above
 
 ## Your Task
+
+::file @prompts/feature/feature-prompts/tech-design.md when="stage==tech-design"
+::file @prompts/feature/feature-prompts/plan.md when="stage==plan"
+::file @prompts/feature/feature-prompts/implement.md when="stage==implement"
+::file @prompts/feature/feature-prompts/commit-implementation.md when="stage==commit-implement"
+::file @prompts/feature/feature-prompts/review.md when="stage==review"
+::file @prompts/feature/feature-prompts/suggestions.md when="stage==suggestions"
+::file @prompts/feature/feature-prompts/update-readmes.md when="stage==update-readmes"
+::file @prompts/feature/feature-prompts/update-skill.md when="stage==update-skill"

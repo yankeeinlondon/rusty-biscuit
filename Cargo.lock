@@ -1679,6 +1679,7 @@ dependencies = [
  "biscuit-hash",
  "biscuit-terminal",
  "chrono",
+ "git2",
  "globset",
  "html-escape",
  "insta",
