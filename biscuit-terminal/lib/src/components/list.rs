@@ -315,7 +315,7 @@ impl Default for UnorderedList {
     fn default() -> Self {
         UnorderedList {
             items: vec![],
-            bullet: "• ".to_string(),
+            bullet: "- ".to_string(),
             hanging_indent: true,
             layout: Layout::default(),
             indent_children: None,
