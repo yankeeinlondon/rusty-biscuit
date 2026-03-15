@@ -12,6 +12,7 @@
         "osascript",
         "pkill",
         "poweroff",
+        "prepatory",
         "psql",
         "reflog",
         "sgdisk",

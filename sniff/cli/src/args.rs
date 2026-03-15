@@ -364,6 +364,8 @@ pub enum RepoSubcommand {
     PackageAreaRoot,
     /// Output the root directory of the repository
     RepoRoot,
+    /// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise
+    IsCurrentPackageAreaDirty,
 }
 
 impl Commands {
@@ -743,6 +745,7 @@ Commands:
     sniff repo package-root          Root directory of the current package
     sniff repo package-area-root     Root directory of the current package area
     sniff repo repo-root             Root directory of the repository
+    sniff repo is-current-package-area-dirty  Exit 0 if CWD's area is dirty, 1 otherwise
     sniff language                   Show only language detection results
     sniff files                      Show broad file associations
     sniff files --association image  Show only image file statistics
@@ -1008,6 +1011,15 @@ mod tests {
                 cli.command,
                 Some(Commands::Repo {
                     repo_subcommand: Some(RepoSubcommand::DirtyPackageAreas { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "is-current-package-area-dirty"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::IsCurrentPackageAreaDirty),
                     ..
                 })
             ));

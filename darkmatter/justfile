@@ -244,6 +244,14 @@ _feature_stage feat base_dir stage:
 _feature_gen feat base_dir:
     #!/usr/bin/env bash
     echo
+    if $(sniff repo is-current-package-areas-dirty); then
+        cd "$(sniff repo package-area-root)" && git add .
+        echo -e "- staged all files in the {{BOLD}}$(sniff repo package-area){{RESET}} package area for commit"
+        # claudine opencode --compose "@/prompts/commit.md" --op "commit"
+    else
+        echo -e "- the {{BOLD}}$(sniff repo package-area){{RESET}} package area is clean; not need for preparatory commits"
+    fi
+    echo
     echo -e "🏃 starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
     if claudine codex -n --yolo "{{base_dir}}/prompt.md" --op "tech-design"; then
         just _speak "The tech design document for the {{feat}} feature has been created"
@@ -251,11 +259,11 @@ _feature_gen feat base_dir:
         echo -e "🎉 The design document for the {{feat}} feature has been created"
         echo -e "🏃 starting the planning for the {{feat}} feature"
         just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
-        if claudine claude -n --yolo "{{base_dir}}/prompt.md" --op "plan"; then
+        if claudine claude --compose --yolo "{{base_dir}}/prompt.md" --op "plan"; then
             echo -e "🎉 The plan for the {{feat}} feature has been created"
             echo -e "🏃 starting the implementation for the {{feat}} feature"
             just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
-            if claudine claude -n --yolo "{{base_dir}}/prompt.md" --op "implement"; then
+            if claudine claude --compose --yolo "{{base_dir}}/prompt.md" --op "implement"; then
                 just _speak "The implementation for the {{feat}} feature is complete"
                 echo
                 echo -e "🎉 The implementation for the {{feat}} feature is complete"
@@ -294,7 +302,7 @@ _feature feat base_dir:
             else
                 # start from beginning
                 echo -e "- no Tech Design document so must be at the start of the process"
-                if $(md compose "@prompts/feature.md" --fm | md set - base_dir "{{base_dir}}" > "{{base_dir}}/feature.md"); then
+                if $(md compose "@prompts/feature.md" --fm | md set - feature "{{feat}}" | md set - base_dir "{{base_dir}}" > "{{base_dir}}/feature.md"); then
                     echo -e "- generated a tracking file for the {{BOLD}}{{feat}}{{RESET}} feature [{{DIM}}feature.md{{RESET}}]"
                     just _feature_gen "{{feat}}" "{base_dir}"
                 else
@@ -313,7 +321,7 @@ _feature_spec feat base_dir:
     mkdir -p "{{base_dir}}" >/dev/null 2>/dev/null
     if $(md edit "{{base_dir}}/spec.md"); then
         echo -e "- the {{ITALIC}}specification{{RESET}} file was created for the feature {{BOLD}}{{feat}}{{RESET}} [{{DIM}}spec.md{{RESET}}]"
-        md set "@prompt/feature.md" stage "tech-design" | md set "@prompt/feature.md" "base_dir" "{{base_dir}}" | md compose --fm > "{{base_dir}}/feature.md"
+        md set "@prompt/feature.md" feature "{{feat}}" | md set "@prompt/feature.md" stage "tech-design" | md set "@prompt/feature.md" "base_dir" "{{base_dir}}" | md compose --fm > "{{base_dir}}/feature.md"
         echo -e "- starting feature generation in {{BOLD}}{{GREEN}}$(md get "{{base_dir}}/feature.md" stage){{RESET}}"
     fi
 

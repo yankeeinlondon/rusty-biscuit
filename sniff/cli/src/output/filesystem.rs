@@ -1439,6 +1439,65 @@ pub fn print_repo_root(result: &sniff::SniffResult) {
     }
 }
 
+/// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise.
+///
+/// No text output is produced — only the exit code signals the result.
+/// Checks all dirty/untracked files against the area prefix, not just package-scoped files.
+pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+    let dir = resolve_dir(base_dir);
+    let fs = match result.filesystem.as_ref() {
+        Some(fs) => fs,
+        None => std::process::exit(1),
+    };
+    let repo = match fs.repo.as_ref() {
+        Some(r) => r,
+        None => std::process::exit(1),
+    };
+
+    let area = match repo.package_area_for_dir(&dir) {
+        Some(a) => a,
+        None => std::process::exit(1),
+    };
+
+    let git = match fs.git.as_ref() {
+        Some(g) => g,
+        None => std::process::exit(1),
+    };
+
+    let area_prefix = if area == "root" { "" } else { area };
+
+    let has_dirty = git
+        .status
+        .dirty
+        .iter()
+        .map(|d| d.filepath.to_str().unwrap_or(""))
+        .chain(
+            git.status
+                .untracked
+                .iter()
+                .map(|u| u.filepath.to_str().unwrap_or("")),
+        )
+        .any(|path| {
+            if area_prefix.is_empty() {
+                // Root area: dirty if file is not inside any non-root area
+                !repo
+                    .packages
+                    .as_ref()
+                    .map_or(false, |pkgs| {
+                        pkgs.iter()
+                            .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                    })
+            } else {
+                path.starts_with(area_prefix)
+            }
+        });
+
+    if has_dirty {
+        std::process::exit(0);
+    }
+    std::process::exit(1);
+}
+
 /// Resolve the effective directory from `--base` or fall back to CWD.
 fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
     base_dir

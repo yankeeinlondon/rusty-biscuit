@@ -27,10 +27,11 @@ pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_dirty_package_areas, print_dirty_packages, print_docs_section, print_files_section,
-    print_filesystem_section, print_language_section, print_repo_deps_text, print_repo_deps_visual,
-    print_repo_package, print_repo_package_area, print_repo_package_area_root,
-    print_repo_package_root, print_repo_packages, print_repo_root, print_repo_section,
+    print_current_package_area_dirty, print_dirty_package_areas, print_dirty_packages,
+    print_docs_section, print_files_section, print_filesystem_section, print_language_section,
+    print_repo_deps_text, print_repo_deps_visual, print_repo_package, print_repo_package_area,
+    print_repo_package_area_root, print_repo_package_root, print_repo_packages, print_repo_root,
+    print_repo_section,
 };
 pub(crate) use hardware::{
     print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
@@ -366,6 +367,9 @@ pub fn print_text(
                 }
                 Some(RepoSubcommand::RepoRoot) => {
                     print_repo_root(result);
+                }
+                Some(RepoSubcommand::IsCurrentPackageAreaDirty) => {
+                    print_current_package_area_dirty(result, base_dir);
                 }
                 None => {
                     if let Some(ref filesystem) = result.filesystem
