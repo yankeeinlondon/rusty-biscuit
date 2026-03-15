@@ -27,8 +27,8 @@ md -v delta base.md updated.md
 
 ### Arguments
 
-- `<BASE>`: original markdown document.
-- `<UPDATED>`: updated markdown document.
+- `<BASE>`: original markdown document (supports `@` file references).
+- `<UPDATED>`: updated markdown document (supports `@` file references).
 
 ### Options
 

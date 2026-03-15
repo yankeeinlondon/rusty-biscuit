@@ -150,6 +150,21 @@ pub enum Command {
         save: bool,
     },
 
+    /// Remove one or more frontmatter properties from a markdown document.
+    Rm {
+        /// Input file path (supports @ file references)
+        #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+        input: PathBuf,
+
+        /// Property names to remove
+        #[arg(value_name = "PROP", required = true, num_args = 1..)]
+        props: Vec<String>,
+
+        /// Output result as JSON with removed, remaining, and filename fields
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Open a markdown file in your preferred editor.
     ///
     /// Resolves the file using biscuit-file's FileReference system (supports `@`, `!`,
@@ -188,7 +203,7 @@ pub enum Command {
 /// Use `md --help` to see all available options.
 #[derive(Parser)]
 #[command(name = "md", about = "Markdown Awesome Tool", version)]
-#[command(subcommand_precedence_over_arg = true)]
+#[command(subcommand_precedence_over_arg = true, disable_help_subcommand = true)]
 pub struct Cli {
     /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
     #[arg(add = ArgValueCompleter::new(complete_markdown_files))]

@@ -26,7 +26,7 @@ md get doc.md title count --toml
 
 ### Arguments
 
-- `<INPUT>`: Markdown file path or `-` for stdin.
+- `<INPUT>`: Markdown file path (supports `@` file references) or `-` for stdin.
 - `<PROP>...`: One or more frontmatter property names (required).
 
 ### Options

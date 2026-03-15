@@ -255,6 +255,7 @@ _feature_gen feat base_dir:
     fi
     echo
     echo -e "🏃 starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
+    echo
     if claudine codex --yolo --compose "{{base_dir}}/prompt.md" --op "tech-design"; then
         just _speak "The tech design document for the {{feat}} feature has been created"
         echo
@@ -270,11 +271,23 @@ _feature_gen feat base_dir:
                 echo
                 echo -e "🎉 The implementation for the {{feat}} feature is complete"
                 echo -e "🏃 Committing all changes from the implementation"
+                echo
                 just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
                 if claudine opencode --compose "{{base_dir}}/prompt.md" --op "commit"; then
+                    echo
                     echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
-                    echo -e "🏃 Committing all changes from the implementation"
-                    just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+                    echo -e "🏃 starting the review process of the {{feat}} implementation"
+                    echo
+                    just _feature_stage "{{feat}}" "{{base_dir}}" "review"
+                    if claudine gemini --yolo --compose "{{base_dir}}/prompt.md" --op "review"; then
+                        echo
+                        echo -e "🎉 The review of {{feat}} has been completed"
+                        echo -e "🏃 starting the implementation of the review recommendations for {{feat}}"
+                        echo
+                    else
+                        just _speak "Failed to finish the review of the {{feat}} implementation!"
+                        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to finish the review of the {{feat}} implementation!!"
+                    fi
                 else
                     just _speak "Failed to commit the file changes from the {{feat}} implementation!"
                     echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the file changes from the {{feat}} implementation!"

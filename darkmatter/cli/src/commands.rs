@@ -108,6 +108,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_set(&input, &prop, &value, save)?;
         }
+        CliCommand::Rm { input, props, json } => {
+            run_rm(&input, &props, json, cli)?;
+        }
         CliCommand::Edit { file } => {
             run_edit(&file)?;
         }
@@ -353,6 +356,70 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
             .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
     } else {
         print!("{}", md.as_string());
+    }
+
+    Ok(())
+}
+
+/// Remove one or more frontmatter properties from a markdown document.
+///
+/// Saves the file in place. By default produces no output on success.
+/// With `-v`, prints a human-readable summary. With `--json`, outputs
+/// structured JSON.
+pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Result<()> {
+    let resolved = resolve_file_path(input)?;
+    let mut md = load_markdown(Some(input))?;
+    let fm = md.frontmatter_mut().as_map_mut();
+
+    let mut removed = Vec::new();
+    let mut not_found = Vec::new();
+
+    for prop in props {
+        if fm.shift_remove(prop).is_some() {
+            removed.push(prop.clone());
+        } else {
+            not_found.push(prop.clone());
+        }
+    }
+
+    if !not_found.is_empty() {
+        let missing = not_found.join(", ");
+        return Err(eyre!(
+            "Property {} not found in frontmatter",
+            if not_found.len() == 1 {
+                format!("\"{}\"", missing)
+            } else {
+                format!("[{}]", not_found.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(", "))
+            }
+        ));
+    }
+
+    std::fs::write(&resolved, md.as_string())
+        .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
+
+    let remaining: Vec<String> = md.frontmatter().as_map().keys().cloned().collect();
+
+    if json {
+        let output = serde_json::json!({
+            "removed": removed,
+            "remaining": remaining,
+            "filename": resolved.to_string_lossy(),
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if cli.verbose > 0 {
+        let props_label = if removed.len() == 1 {
+            format!("\"{}\" property", removed[0])
+        } else {
+            format!(
+                "[{}] properties",
+                removed.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let remaining_label = remaining.join(", ");
+        eprintln!(
+            "- removed the {} from frontmatter (\x1b[2mremaining: \x1b[3m{}\x1b[0m\x1b[2m)\x1b[0m",
+            props_label, remaining_label
+        );
     }
 
     Ok(())

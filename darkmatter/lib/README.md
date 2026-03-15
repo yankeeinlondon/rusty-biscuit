@@ -71,6 +71,8 @@ let md = Markdown::from_url(&url).await?;
 
 ### Frontmatter Operations
 
+Frontmatter is stored as an `IndexMap` to preserve key insertion order through parsing, mutation, and serialization.
+
 ```rust
 let content = r#"---
 title: Hello
@@ -83,7 +85,7 @@ let mut md: Markdown = content.into();
 // Typed access
 let title: Option<String> = md.fm_get("title")?;
 
-// Insert values
+// Insert values (appended at end, preserving existing order)
 md.fm_insert("version", "1.0")?;
 
 // Merge with strategy
@@ -91,6 +93,10 @@ md.fm_merge_with(json!({"tags": ["rust"]}), MergeStrategy::ErrorOnConflict)?;
 
 // Set defaults (document wins)
 md.fm_set_defaults(json!({"draft": false}))?;
+
+// Direct map access for removal or iteration
+let fm = md.frontmatter_mut().as_map_mut();
+fm.shift_remove("draft");
 ```
 
 ## Frontmatter Parsing and TOC Reliability
@@ -118,7 +124,7 @@ Some Markdown producers emit YAML frontmatter with tab-indented block scalar con
 
 - Non-frontmatter content is untouched.
 - Non-leading tabs are not rewritten.
-- Existing typed frontmatter access APIs (`fm_get`, `fm_insert`, `fm_merge_with`, `fm_set_defaults`) are unchanged.
+- Existing typed frontmatter access APIs (`fm_get`, `fm_insert`, `fm_merge_with`, `fm_set_defaults`, `as_map_mut`) are unchanged.
 
 ### Example: Tab-Indented Frontmatter Still Produces Correct TOC
 

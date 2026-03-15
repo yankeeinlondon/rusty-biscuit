@@ -35,7 +35,7 @@ md read README.md --output html --show
 
 ### Arguments
 
-- `[INPUT]`: Markdown file path. Use `-` for stdin. If omitted, reads stdin when piped; otherwise errors.
+- `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads stdin when piped; otherwise errors.
 
 ### Options
 

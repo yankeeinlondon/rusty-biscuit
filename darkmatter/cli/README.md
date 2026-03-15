@@ -111,6 +111,36 @@ md set doc.md title "New Title" | md set - version 2
 md compose "@prompts/feature.md" --fm | md set - feature "auth" | md set - base_dir "./features/auth"
 ```
 
+### Frontmatter Remove
+
+```bash
+# Remove a property (saves in place, silent on success)
+md rm doc.md draft
+
+# Remove multiple properties
+md rm doc.md draft wip temp
+
+# Verbose output
+md -v rm doc.md draft
+
+# JSON output
+md rm doc.md draft --json
+```
+
+### Frontmatter Get
+
+```bash
+# Single property
+md get doc.md title
+
+# Multiple properties
+md get doc.md title author tags
+
+# Output formats
+md get doc.md title --yaml
+md get doc.md title --json5
+```
+
 ### Document Cleanup
 
 ```bash

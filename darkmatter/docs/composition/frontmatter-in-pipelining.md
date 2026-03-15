@@ -5,13 +5,29 @@ description:
 
 ## Frontmatter Discarded After Use
 
-Frontmatter is an important part of the Markdown _pipelining_ process as it provides metadata to many stages of the pipeline transformation, however, at the completion of the process the default approach is to remove all Frontmatter from the composed output. The rationale of that is that the Frontmatter was there to help the composition/pipelining of content but once that's complete it is no longer needed.
+Frontmatter is an important part of the Markdown _pipelining_ process as it provides metadata to many stages of the pipeline transformation, however, at the completion of the process the default approach is to remove all Frontmatter from the composed output. The rationale is that the Frontmatter was there to help the composition/pipelining of content but once that's complete it is no longer needed.
+
+The `--frontmatter` (or `--fm`) flag on `md compose` overrides this behavior, including frontmatter in the output. This is useful for pipeline workflows where the composed document's frontmatter needs to be further manipulated (e.g., via `md set`).
+
+## Frontmatter State Initialization
+
+When the CLI's `compose` subcommand is used to trigger the Markdown pipeline, the `--state` flag provides **default values** as a JSON or JSON5 dictionary:
+
+- Null or missing frontmatter keys are filled in from `--state`.
+- Existing non-null frontmatter values are preserved (document wins).
+- This "default-fill" semantic means `--state` cannot override intentional values in the document.
+
+```bash
+# Given frontmatter: { stage: "plan", feature: null }
+md compose doc.md --state '{feature: "auth", stage: "build"}'
+# Result: stage stays "plan", feature becomes "auth"
+```
 
 ## Frontmatter Propagation
 
-When the CLI's `compose` or `publish` (note: future command) _subcommands_ are used to trigger the Markdown pipeline we have the option of providing a key/value dictionary to initialize the "state" of the pipeline. Throughout the pipelining process we use Frontmatter to represent a form of state and so when we move from any parent-to-child based transclusion we must pass along the parent's Frontmatter to the child's:
+Throughout the pipelining process we use Frontmatter to represent a form of state and so when we move from any parent-to-child based transclusion we must pass along the parent's Frontmatter to the child's:
 
-- the first time we see this propagation effect is when we kickoff with a key/value pair:
+- the first time we see this propagation effect is when we kickoff with `--state`:
       - We must propagate this key/value pair into the base document we are composing
 - every time there is a transclusion event we are also propagating the frontmatter from
 

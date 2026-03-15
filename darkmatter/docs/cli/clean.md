@@ -33,7 +33,7 @@ md README.md --save
 
 ### Arguments
 
-- `[INPUT]`: Markdown file path. Use `-` for stdin. If omitted, reads from stdin.
+- `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads from stdin.
 - `--save`: Clean in place and print a delta-style change report (same report format used by `md delta`).
 - `--indent <#>`: Normalize nested list indentation width to a consistent number of spaces (`2`, `4`, or `8`).
 
