@@ -1,9 +1,11 @@
 ---
 feature: ""
 spec: ""
+package_area: ""
 design: ""
 suggestions: ""
 docs_updated: []
+packages_impacted: []
 package_areas_affected: []
 files_modified: []
 stage: "tech-design"
@@ -32,10 +34,10 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
 
 ## Your Responsibility
 
-- You are NOT responsible for all of the steps specified above! 
+- You are NOT responsible for all of the steps specified above!
 - You ARE responsible for precisely ONE of these steps!
 - To determine which step that is you will need to look at the `stage` frontmatter property
-    - this property will match one of the steps described above
+  - this property will match one of the steps described above
 
 ## Your Task
 

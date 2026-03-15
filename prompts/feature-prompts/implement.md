@@ -16,13 +16,4 @@ You must act as an Orchestrator while implementing the plan found in {{plan}}:
                 - tests MUST NOT BE CHANGED!
                 - they are allowed to exclude any tests which they believe is a result of another package in the monorepos faults but this is UNLIKELY so the subagent should be warned to be leary of tagging a failing test for this reason
                 - if after 3 attempts a failing test can't be fixed then we should report the error to STDERR and then immediately return to the orchestrator with their status.
-    - Linting
-        - At this point the subagent should tell the orchestrator that all tests are passing and that their final step is to run lint tests
-            - spawn a sub-agent for each package area which was affected({{package_areas_affected}})
-            - each sub-agent should be instructed:
-                - which package area they are responsible for 
-                - and told to run `just lint-fix` in that package area's root directory (this can be determined by running `sniff repo package-area-root`).
-                - they must then iterate until all tests pass
-                    - tests MUST NOT BE CHANGED!
-                    - they are allowed to exclude any tests which they believe is a result of another package in the monorepos faults but this is UNLIKELY so the subagent should be warned to be leary of tagging a failing test for this reason
-                    - if after 3 attempts a failing test can't be fixed then we should report the error to STDERR and then immediately return to the orchestrator with their status.
+
