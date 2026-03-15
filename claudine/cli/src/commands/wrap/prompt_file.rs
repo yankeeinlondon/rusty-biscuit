@@ -8,6 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use indexmap::IndexMap;
+
 use color_eyre::eyre::{Result, eyre};
 use darkmatter::markdown::{Markdown, transform::TransformOptions};
 
@@ -301,7 +303,7 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
 
 /// Convert a frontmatter map to a vector of `(ENV_NAME, value)` pairs.
 pub(crate) fn frontmatter_to_env(
-    map: &HashMap<String, serde_json::Value>,
+    map: &IndexMap<String, serde_json::Value>,
 ) -> Result<Vec<(String, String)>> {
     let protected: HashSet<&str> = PROTECTED_ENV_NAMES.iter().copied().collect();
     let mut seen: HashMap<String, String> = HashMap::new(); // normalized -> original key
@@ -442,8 +444,8 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
     use serde_json::json;
-    use std::collections::HashMap;
 
     // -- normalize_env_name tests --
 
@@ -525,7 +527,7 @@ mod tests {
 
     #[test]
     fn frontmatter_to_env_basic() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("model".to_string(), json!("gpt-4"));
         map.insert("temperature".to_string(), json!(0.7));
 
@@ -536,7 +538,7 @@ mod tests {
 
     #[test]
     fn frontmatter_collision_detected() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("foo-bar".to_string(), json!("a"));
         map.insert("foo_bar".to_string(), json!("b"));
 
@@ -547,7 +549,7 @@ mod tests {
 
     #[test]
     fn frontmatter_protected_env_rejected() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("path".to_string(), json!("/usr/bin"));
 
         let err = frontmatter_to_env(&map).unwrap_err();
@@ -557,7 +559,7 @@ mod tests {
 
     #[test]
     fn frontmatter_protected_home_rejected() {
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         map.insert("home".to_string(), json!("/tmp"));
 
         let err = frontmatter_to_env(&map).unwrap_err();
