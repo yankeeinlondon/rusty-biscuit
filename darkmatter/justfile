@@ -238,12 +238,14 @@ commit:
 
 _feature_stage feat base_dir stage:
     echo -e "𝌡 switching the feature.md for {{GREEN}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
-    md set "@prompt/feature.md" stage "{{stage}}" | md set "@prompt/feature.md" base_dir "{{base_dir}}" | md compose > "{{base_dir}}/feature.md"
+    md compose "@prompts/feature.md" --fm --state '{ feature: "{{feat}}", base_dir: "{{base_dir}}", stage: "{{stage}}" }' \
+         > "{{base_dir}}/feature.md"
 
 # actually start the generation process
 _feature_gen feat base_dir:
     #!/usr/bin/env bash
     echo
+    exit 0
     if $(sniff repo is-current-package-areas-dirty); then
         cd "$(sniff repo package-area-root)" && git add .
         echo -e "- staged all files in the {{BOLD}}$(sniff repo package-area){{RESET}} package area for commit"
@@ -253,7 +255,7 @@ _feature_gen feat base_dir:
     fi
     echo
     echo -e "🏃 starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
-    if claudine codex -n --yolo "{{base_dir}}/prompt.md" --op "tech-design"; then
+    if claudine codex --yolo --compose "{{base_dir}}/prompt.md" --op "tech-design"; then
         just _speak "The tech design document for the {{feat}} feature has been created"
         echo
         echo -e "🎉 The design document for the {{feat}} feature has been created"
@@ -263,11 +265,20 @@ _feature_gen feat base_dir:
             echo -e "🎉 The plan for the {{feat}} feature has been created"
             echo -e "🏃 starting the implementation for the {{feat}} feature"
             just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
-            if claudine claude --compose --yolo "{{base_dir}}/prompt.md" --op "implement"; then
+            if claudine claude --yolo --compose "{{base_dir}}/prompt.md" --op "implement"; then
                 just _speak "The implementation for the {{feat}} feature is complete"
                 echo
                 echo -e "🎉 The implementation for the {{feat}} feature is complete"
-                echo -e "🏃 starting the planning for the {{feat}} feature"
+                echo -e "🏃 Committing all changes from the implementation"
+                just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+                if claudine opencode --compose "{{base_dir}}/prompt.md" --op "commit"; then
+                    echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
+                    echo -e "🏃 Committing all changes from the implementation"
+                    just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+                else
+                    just _speak "Failed to commit the file changes from the {{feat}} implementation!"
+                    echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the file changes from the {{feat}} implementation!"
+                fi
             else
                 just _speak "Failed to during implementation of the plan for the {{feat}} feature!"
                 echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to during implementation of the plan for the {{feat}} feature!"
@@ -289,27 +300,18 @@ _feature feat base_dir:
         echo -e "- the tracking feature file exists and is in the {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} [{{DIM}}feature.md{{RESET}}]"
         just _feature_gen "{{feat}}" "{base_dir}"
     else
-        if [ -f "{{base_dir}}/feature.md" ]; then
-            echo -e "- the feature tracking file is in place; ready to start feature generation [{{DIM}}feature.md{{RESET}}]"
-            echo -e "- starting feature generation in {{BOLD}}{{GREEN}}$(md get "{{base_dir}}/feature.md" stage){{RESET}}"
+        echo -e "- the feature tracking file is missing [{{DIM}}feature.md{{RESET}}]"
+        if [ -f "{{base_dir}}/tech-design.md" ]; then
+            echo -e "- there IS a Tech Design document [{{DIM}}tech-design.md{{RESET}}]"
+            echo -e "- {{BOLD}}{{RED}}ERROR:{{RESET}} we're in an unknown state with the feature {{BOLD}}{{feat}}{{RESET}}. Exiting."
+            echo
+            exit 1
         else
-            echo -e "- the feature tracking file is missing [{{DIM}}feature.md{{RESET}}]"
-            if [ -f "{{base_dir}}/tech-design.md" ]; then
-                echo -e "- there IS a Tech Design document [{{DIM}}tech-design.md{{RESET}}]"
-                echo -e "- {{BOLD}}{{RED}}ERROR:{{RESET}} we're in an unknown state with the feature {{BOLD}}{{feat}}{{RESET}}. Exiting."
-                echo
-                exit 1
-            else
-                # start from beginning
-                echo -e "- no Tech Design document so must be at the start of the process"
-                if $(md compose "@prompts/feature.md" --fm | md set - feature "{{feat}}" | md set - base_dir "{{base_dir}}" > "{{base_dir}}/feature.md"); then
-                    echo -e "- generated a tracking file for the {{BOLD}}{{feat}}{{RESET}} feature [{{DIM}}feature.md{{RESET}}]"
-                    just _feature_gen "{{feat}}" "{base_dir}"
-                else
-                    echo -e "Ran into a problem trying to create tracking file at: {{base_dir}}/feature.md"
-                    exit 1
-                fi
-            fi
+            # start from beginning
+            echo -e "- no Tech Design document so must be at the start of the process"
+            md compose "@prompts/feature.md" --fm  --state '{ base_dir: "{{base_dir}}", feature: "{{feat}}" }'  > "{{base_dir}}/feature.md"
+            echo -e "- generated a tracking file for the {{BOLD}}{{feat}}{{RESET}} feature [{{DIM}}feature.md{{RESET}}]"
+            just _feature_gen "{{feat}}" "{base_dir}"
         fi
     fi
 
@@ -321,7 +323,7 @@ _feature_spec feat base_dir:
     mkdir -p "{{base_dir}}" >/dev/null 2>/dev/null
     if $(md edit "{{base_dir}}/spec.md"); then
         echo -e "- the {{ITALIC}}specification{{RESET}} file was created for the feature {{BOLD}}{{feat}}{{RESET}} [{{DIM}}spec.md{{RESET}}]"
-        md set "@prompt/feature.md" feature "{{feat}}" | md set "@prompt/feature.md" stage "tech-design" | md set "@prompt/feature.md" "base_dir" "{{base_dir}}" | md compose --fm > "{{base_dir}}/feature.md"
+        md compose "@prompts/feature.md" --fm  --state '{ base_dir: "{{base_dir}}", feature: "{{feat}}" }'  > "{{base_dir}}/feature.md"
         echo -e "- starting feature generation in {{BOLD}}{{GREEN}}$(md get "{{base_dir}}/feature.md" stage){{RESET}}"
     fi
 
