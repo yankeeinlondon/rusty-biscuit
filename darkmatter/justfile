@@ -254,17 +254,17 @@ _feature_gen feat base_dir:
         echo -e "- the {{BOLD}}$(sniff repo package-area){{RESET}} package area is clean; not need for preparatory commits"
     fi
     echo
-    echo -e "🏃 starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
+    echo -e "🏃 Starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
     echo
     if claudine codex --yolo --compose "{{base_dir}}/prompt.md" --op "tech-design"; then
         just _speak "The tech design document for the {{feat}} feature has been created"
         echo
         echo -e "🎉 The design document for the {{feat}} feature has been created"
-        echo -e "🏃 starting the planning for the {{feat}} feature"
+        echo -e "🏃 Starting the planning for the {{feat}} feature"
         just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
         if claudine claude --compose --yolo "{{base_dir}}/prompt.md" --op "plan"; then
             echo -e "🎉 The plan for the {{feat}} feature has been created"
-            echo -e "🏃 starting the implementation for the {{feat}} feature"
+            echo -e "🏃 Starting the implementation for the {{feat}} feature"
             just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
             if claudine claude --yolo --compose "{{base_dir}}/prompt.md" --op "implement"; then
                 just _speak "The implementation for the {{feat}} feature is complete"
@@ -276,14 +276,17 @@ _feature_gen feat base_dir:
                 if claudine opencode --compose "{{base_dir}}/prompt.md" --op "commit"; then
                     echo
                     echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
+                    just _speak "The file changes from the implementation of {{feat}} have been committed"
                     echo -e "🏃 starting the review process of the {{feat}} implementation"
                     echo
                     just _feature_stage "{{feat}}" "{{base_dir}}" "review"
                     if claudine gemini --yolo --compose "{{base_dir}}/prompt.md" --op "review"; then
                         echo
                         echo -e "🎉 The review of {{feat}} has been completed"
-                        echo -e "🏃 starting the implementation of the review recommendations for {{feat}}"
+                        just _speak "The review of {{feat}} has been completed"
+                        echo -e "🏃 Starting the implementation of the review recommendations for {{feat}}"
                         echo
+                        just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
                     else
                         just _speak "Failed to finish the review of the {{feat}} implementation!"
                         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to finish the review of the {{feat}} implementation!!"

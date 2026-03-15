@@ -1,15 +1,7 @@
 ---
-feature: ""
-spec: ""
-package_area: ""
-design: ""
-suggestions: ""
-docs_updated: []
-packages_impacted: []
-package_areas_affected: []
-files_modified: []
-stage: "tech-design",
-base_dir: ""
+stage: "tech-design"
+feature: 
+base_dir: 
 ---
 
 # Feature
@@ -26,8 +18,6 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
 6. Implement the suggestions in the review (stage: `suggestions`)
 7. Commit the changes to git (stage: `commit-review`)
 8. Review all README.md documents (`update-readmes`)
-9. Update skill (`update-readmes`)
-10. Final Commit (`final-commit`)
 
 **IMPORTANT:**
 
@@ -49,6 +39,5 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
 ::file @prompts/feature-prompts/commit-implementation.md when="stage == 'commit-implement'"
 ::file @prompts/feature-prompts/review.md when="stage == 'review'"
 ::file @prompts/feature-prompts/suggestions.md when="stage == 'suggestions'"
+::file @prompts/feature-prompts/commit-review.md when="stage == 'commit-review'"
 ::file @prompts/feature-prompts/update-readmes.md when="stage == 'update-readmes'"
-::file @prompts/feature-prompts/update-skill.md when="stage == 'update-skill'"
-::file @prompts/feature-prompts/update-skill.md when="stage == 'final-commit'"
