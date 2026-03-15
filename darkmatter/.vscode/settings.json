@@ -16,6 +16,8 @@
         "reflog",
         "sgdisk",
         "syntect",
+        "transcludes",
+        "transcluding",
         "vgremove",
         "wipefs"
     ]

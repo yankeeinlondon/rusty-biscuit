@@ -24,4 +24,4 @@ There are few Frontmatter properties which are _excluded_ from propagation:
 
 ## Finalization
 
-We propagate frontmatter through the 
+We propagate frontmatter through the the graph of Markdown documents referenced in transclusion or otherwise. 

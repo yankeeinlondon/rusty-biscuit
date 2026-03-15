@@ -20,6 +20,6 @@ With frontmatter transclusion we imbue two frontmatter properties special meanin
     - The **epilogue** property behaves exactly the same as **prologue** except that the document or documents referenced are added _after_ the body's content not before.
 
 > **Propagation Exception:** Unlike other frontmatter properties (which propagate from parent to child during transclusion for use in replacement and interpolation), `prologue` and `epilogue` are scoped to the document that defines them. They are not inherited by child documents brought in via `::file` directives or frontmatter transclusion.
-
+>
 > **Note:** the "options" which we provide in [block transclusion](./block-transclusion.md#) -- including _conditional_ transclusion -- are not available for Frontmatter transclusion.
 

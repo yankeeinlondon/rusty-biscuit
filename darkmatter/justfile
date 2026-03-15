@@ -236,18 +236,54 @@ commit:
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff git 2>/dev/null || exit 0
 
-_feature_gen:
+_feature_stage feat base_dir stage:
+    echo -e "𝌡 switching the feature.md for {{GREEN}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
+    md set "@prompt/feature.md" stage "{{stage}}" | md compose > "{{base_dir}}/feature.md"
 
+# actually start the generation process
+_feature_gen feat base_dir:
+    #!/usr/bin/env bash
+    echo
+    echo -e "🏃 starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
+    if claudine codex -n --yolo "{{base_dir}}/prompt.md" --op "tech-design"; then
+        just _speak "The tech design document for the {{feat}} feature has been created"
+        echo
+        echo -e "🎉 The design document for the {{feat}} feature has been created"
+        echo -e "🏃 starting the planning for the {{feat}} feature"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
+        if claudine claude -n --yolo "{{base_dir}}/prompt.md" --op "plan"; then
+            echo -e "🎉 The plan for the {{feat}} feature has been created"
+            echo -e "🏃 starting the implementation for the {{feat}} feature"
+            just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
+            if claudine claude -n --yolo "{{base_dir}}/prompt.md" --op "implement"; then
+                just _speak "The implementation for the {{feat}} feature is complete"
+                echo
+                echo -e "🎉 The implementation for the {{feat}} feature is complete"
+                echo -e "🏃 starting the planning for the {{feat}} feature"
+            else
+                just _speak "Failed to during implementation of the plan for the {{feat}} feature!"
+                echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to during implementation of the plan for the {{feat}} feature!"
+            fi
+        else
+            just _speak "Failed to create the planning document for the {{feat}} feature!"
+            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the planning document for the {{feat}} feature!"
+        fi
+    else
+        just _speak "Failed to create the design document for the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the design document for the {{feat}} feature!"
+    fi
+
+# ensure we have tracking file and are ready to start
 _feature feat base_dir:
     #!/usr/bin/env bash
     echo -e "- the feature {{BOLD}}{{feat}}{{RESET}} has a {{ITALIC}}specification{{RESET}} file [{{DIM}}spec.md{{RESET}}]"
     if [ -f "{{base_dir}}/feature.md" ]; then
         echo -e "- the tracking feature file exists and is in the {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} [{{DIM}}feature.md{{RESET}}]"
+        just _feature_gen "{{feat}}" "{base_dir}"
     else
         if [ -f "{{base_dir}}/feature.md" ]; then
             echo -e "- the feature tracking file is in place; ready to start feature generation [{{DIM}}feature.md{{RESET}}]"
             echo -e "- starting feature generation in {{BOLD}}{{GREEN}}$(md get "{{base_dir}}/feature.md" stage){{RESET}}"
-
         else
             echo -e "- the feature tracking file is missing [{{DIM}}feature.md{{RESET}}]"
             if [ -f "{{base_dir}}/tech-design.md" ]; then
@@ -256,9 +292,11 @@ _feature feat base_dir:
                 echo
                 exit 1
             else
-                echo -e "- no Tech Design document so we must at the start of the process"
-                if $(md compose "@prompts/feature.md" > "{{base_dir}}/feature.md"); then
+                # start from beginning
+                echo -e "- no Tech Design document so must be at the start of the process"
+                if $(md compose "@prompts/feature.md" --fm | md set - base_dir "{{base_dir}}" > "{{base_dir}}/feature.md"); then
                     echo -e "- generated a tracking file for the {{BOLD}}{{feat}}{{RESET}} feature [{{DIM}}feature.md{{RESET}}]"
+                    just _feature_gen "{{feat}}" "{base_dir}"
                 else
                     echo -e "Ran into a problem trying to create tracking file at: {{base_dir}}/feature.md"
                     exit 1
@@ -267,6 +305,7 @@ _feature feat base_dir:
         fi
     fi
 
+# allows spec to be written in editor and then we will create a feature.md
 _feature_spec feat base_dir:
     #!/usr/bin/env bash
     echo -e "- the feature {{BOLD}}{{feat}}{{RESET}} doesn't have a {{ITALIC}}spec file{{RESET}} yet"
@@ -274,6 +313,7 @@ _feature_spec feat base_dir:
     mkdir -p "{{base_dir}}" >/dev/null 2>/dev/null
     if $(md edit "{{base_dir}}/spec.md"); then
         echo -e "- the {{ITALIC}}specification{{RESET}} file was created for the feature {{BOLD}}{{feat}}{{RESET}} [{{DIM}}spec.md{{RESET}}]"
+        md set "@prompt/feature.md" stage "tech-design" | md set "@prompt/feature.md" "base_dir" "{{base_dir}}" | md compose --fm > "{{base_dir}}/feature.md"
         echo -e "- starting feature generation in {{BOLD}}{{GREEN}}$(md get "{{base_dir}}/feature.md" stage){{RESET}}"
     fi
 
