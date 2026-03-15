@@ -16,4 +16,4 @@ You must act as an Orchestrator while implementing the plan found in "{{base_dir
                 - tests MUST NOT BE CHANGED!
                 - they are allowed to exclude any tests which they believe is a result of another package in the monorepos faults but this is UNLIKELY so the subagent should be warned to be leary of tagging a failing test for this reason
                 - if after 3 attempts a failing test can't be fixed then we should report the error to STDERR and then immediately return to the orchestrator with their status.
-
+- communicate to the caller that the implementation is implemented and all tests are passing
