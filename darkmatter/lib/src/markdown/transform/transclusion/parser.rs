@@ -6,8 +6,8 @@ use super::types::{
 use crate::markdown::transform::parse_utils::{
     Cursor, CursorError, find_code_regions, is_in_code_region,
 };
+use crate::markdown::FrontmatterMap;
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Parses block transclusion directives from markdown content.
 pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, TransclusionError> {
@@ -52,7 +52,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, Transclusi
 
 /// Parses frontmatter `prologue` and `epilogue` references.
 pub fn parse_frontmatter_refs(
-    frontmatter: &HashMap<String, Value>,
+    frontmatter: &FrontmatterMap,
 ) -> Result<FrontmatterRefs, TransclusionError> {
     let prologue = parse_reference_field(frontmatter.get("prologue"), "prologue")?;
     let epilogue = parse_reference_field(frontmatter.get("epilogue"), "epilogue")?;
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn parses_frontmatter_refs() {
-        let fm: HashMap<String, Value> = serde_json::from_value(serde_json::json!({
+        let fm: FrontmatterMap = serde_json::from_value(serde_json::json!({
             "prologue": "./a.md",
             "epilogue": ["./b.md", "./c.md"]
         }))

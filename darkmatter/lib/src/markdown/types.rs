@@ -1,11 +1,14 @@
 //! Type definitions for the markdown module.
 
 use biscuit_file::YamlParseError;
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use thiserror::Error;
 
 /// Type alias for frontmatter data.
-pub type FrontmatterMap = HashMap<String, serde_json::Value>;
+///
+/// Uses `IndexMap` to preserve insertion order so that frontmatter keys
+/// are serialized in the same order they appeared in the source document.
+pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 
 /// Errors that can occur when working with Markdown documents.
 #[derive(Error, Debug)]

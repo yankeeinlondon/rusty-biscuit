@@ -4,7 +4,6 @@ use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
 
 /// Strategy for merging frontmatter fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +23,7 @@ pub struct Frontmatter(FrontmatterMap);
 impl Frontmatter {
     /// Creates a new empty frontmatter.
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self(FrontmatterMap::new())
     }
 
     /// Creates frontmatter from a map.
@@ -86,7 +85,7 @@ impl Frontmatter {
         let other_map: FrontmatterMap = serde_json::from_value(other_value)?;
 
         for (key, value) in other_map {
-            use std::collections::hash_map::Entry;
+            use indexmap::map::Entry;
             match self.0.entry(key) {
                 Entry::Occupied(mut entry) => match strategy {
                     MergeStrategy::ErrorOnConflict => {
@@ -145,6 +144,11 @@ impl Frontmatter {
         &self.0
     }
 
+    /// Returns a mutable reference to the underlying map.
+    pub fn as_map_mut(&mut self) -> &mut FrontmatterMap {
+        &mut self.0
+    }
+
     /// Consumes self and returns the underlying map.
     pub fn into_map(self) -> FrontmatterMap {
         self.0
@@ -196,7 +200,7 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
 
     // Parse YAML (retry once after normalizing leading tab indentation)
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
-        HashMap::new()
+        FrontmatterMap::new()
     } else {
         match serde_yaml_ng::from_str(&yaml_content) {
             Ok(map) => map,
