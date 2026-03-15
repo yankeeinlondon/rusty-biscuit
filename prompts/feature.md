@@ -17,7 +17,7 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
 5. Review the plan (stage: `review`)
 6. Implement the suggestions in the review (stage: `suggestions`)
 7. Commit the changes to git (stage: `commit-review`)
-8. Review all README.md documents (`update-readmes`)
+8. Update Documents (`update-documents`)
 
 **IMPORTANT:**
 
@@ -40,4 +40,4 @@ We are in the process of building out the "{{feature}}" feature. Building a feat
 ::file @prompts/feature-prompts/review.md when="stage == 'review'"
 ::file @prompts/feature-prompts/suggestions.md when="stage == 'suggestions'"
 ::file @prompts/feature-prompts/commit-review.md when="stage == 'commit-review'"
-::file @prompts/feature-prompts/update-readmes.md when="stage == 'update-readmes'"
+::file @prompts/feature-prompts/update-documents.md when="stage == 'update-documents'"
