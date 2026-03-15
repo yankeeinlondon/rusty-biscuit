@@ -157,9 +157,23 @@ impl Markdown {
         let result = (|| {
             let mut report = TransformReport::new();
 
+            // Apply external state as defaults: fill in null/missing frontmatter keys
+            // so the document's frontmatter reflects the merged values.
+            if let Some(external) = options.external_state.as_ref().and_then(Value::as_object) {
+                let fm = self.frontmatter_mut().as_map_mut();
+                for (key, value) in external {
+                    match fm.get(key) {
+                        None | Some(Value::Null) => {
+                            fm.insert(key.clone(), value.clone());
+                        }
+                        _ => {} // frontmatter already has a non-null value
+                    }
+                }
+            }
+
             // Build effective state for replacement/interpolation and condition checks.
             let effective_state = EffectiveStateBuilder::new()
-                .with_frontmatter(self.frontmatter().as_map().clone())
+                .with_frontmatter(self.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .with_external_state(
                     options
                         .external_state

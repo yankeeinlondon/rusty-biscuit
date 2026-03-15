@@ -225,10 +225,11 @@ pub fn run_compose(
 
     let mut options = TransformOptions::new();
 
-    // Parse --state as JSON if provided
+    // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
-        let state: serde_json::Value =
-            serde_json::from_str(json_str).wrap_err("Invalid JSON in --state argument")?;
+        let parsed = biscuit_file::Json5::from_str(json_str)
+            .wrap_err("Invalid JSON/JSON5 in --state argument")?;
+        let state = parsed.value().clone();
         if !state.is_object() {
             return Err(eyre!(
                 "Invalid --state argument: expected a JSON object like {{\"name\":\"Alice\"}}"

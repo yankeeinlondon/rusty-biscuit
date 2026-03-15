@@ -25,6 +25,8 @@ pub(crate) fn deep_merge(base: &Value, overlay: &Value) -> Value {
             }
             Value::Object(merged)
         }
+        // Null overlay means "not set" — preserve the base value.
+        (_, Value::Null) => base.clone(),
         _ => overlay.clone(),
     }
 }

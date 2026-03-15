@@ -65,7 +65,7 @@ pub enum Command {
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: Option<PathBuf>,
 
-        /// Initial state as JSON key/value pairs
+        /// Default values as JSON; fills in null/missing frontmatter keys without overriding existing values
         #[arg(long, value_name = "JSON")]
         state: Option<String>,
 
