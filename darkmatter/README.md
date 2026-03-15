@@ -30,7 +30,7 @@ just -f darkmatter/justfile cli README.md
 - **Hyperlink rendering**: Clickable links in supported terminals via OSC 8
 - **Markdown cleanup**: Normalize formatting and heading levels
 - **Transclusion pipeline**: Stage 2 support for `::file`, `::code`, `prologue`, and `epilogue`
-- **Frontmatter operations**: Parse, extract, and manipulate YAML frontmatter
+- **Frontmatter operations**: Parse, extract, and manipulate YAML frontmatter with key-order preservation
 - **Visual diff**: Colored inline diffs for strings and files
 - **Table of contents**: Extract document structure as tree or JSON
 

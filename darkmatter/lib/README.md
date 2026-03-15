@@ -6,7 +6,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 
 - **Multi-format output**: Terminal (ANSI), HTML, MDAST JSON, plain string
 - **Syntax highlighting**: 200+ languages via syntect with curated theme pairs
-- **Frontmatter support**: YAML parsing with typed access and merge strategies
+- **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
 - **Mermaid diagrams**: Render to terminal images or HTML with theme support
 - **Document comparison**: Structural diff with change classification
 - **Visual diff utilities**: Reusable string/file diff rendering (no Markdown dependency)
