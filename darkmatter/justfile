@@ -238,7 +238,7 @@ commit:
 
 _feature_stage feat base_dir stage:
     echo -e "𝌡 switching the feature.md for {{GREEN}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
-    md set "@prompt/feature.md" stage "{{stage}}" | md compose > "{{base_dir}}/feature.md"
+    md set "@prompt/feature.md" stage "{{stage}}" | md set "@prompt/feature.md" base_dir "{{base_dir}}" | md compose > "{{base_dir}}/feature.md"
 
 # actually start the generation process
 _feature_gen feat base_dir:
