@@ -74,6 +74,21 @@ pub struct Json5 {
 }
 
 impl Json5 {
+    /// Returns `true` if the input string is valid JSON5.
+    #[must_use]
+    pub fn is_valid(input: impl AsRef<str>) -> bool {
+        json_five::from_str::<serde_json::Value>(input.as_ref()).is_ok()
+    }
+
+    /// Returns `true` if the input string is valid strict JSON.
+    ///
+    /// Unlike [`is_valid`](Self::is_valid), this rejects JSON5 extensions
+    /// like comments, trailing commas, and unquoted keys.
+    #[must_use]
+    pub fn is_valid_json(input: impl AsRef<str>) -> bool {
+        serde_json::from_str::<serde_json::Value>(input.as_ref()).is_ok()
+    }
+
     /// Parse a JSON5 file from the given path.
     ///
     /// ## Errors
@@ -331,6 +346,42 @@ mod tests {
     fn from_bytes_invalid_utf8() {
         let result = Json5::from_bytes(&[0xFF, 0xFE]);
         assert!(result.is_err());
+    }
+
+    // ── Validation ───────────────────────────────────────────────────
+
+    #[test]
+    fn is_valid_accepts_json5() {
+        assert!(Json5::is_valid(r#"{ key: "value" }"#));
+        assert!(Json5::is_valid("{ trailing: 1, }"));
+        assert!(Json5::is_valid("{ /* comment */ key: 1 }"));
+        assert!(Json5::is_valid("{ 'single': true }"));
+    }
+
+    #[test]
+    fn is_valid_accepts_strict_json() {
+        assert!(Json5::is_valid(r#"{"key": "value"}"#));
+    }
+
+    #[test]
+    fn is_valid_rejects_invalid() {
+        assert!(!Json5::is_valid("{ key: }"));
+        assert!(!Json5::is_valid(""));
+        assert!(!Json5::is_valid("not json at all"));
+    }
+
+    #[test]
+    fn is_valid_json_accepts_strict() {
+        assert!(Json5::is_valid_json(r#"{"key": "value"}"#));
+        assert!(Json5::is_valid_json("[1, 2, 3]"));
+        assert!(Json5::is_valid_json(r#""just a string""#));
+    }
+
+    #[test]
+    fn is_valid_json_rejects_json5_extensions() {
+        assert!(!Json5::is_valid_json(r#"{ key: "value" }"#));
+        assert!(!Json5::is_valid_json("{ /* comment */ }"));
+        assert!(!Json5::is_valid_json("{ trailing: 1, }"));
     }
 
     // ── Error handling ───────────────────────────────────────────────

@@ -122,6 +122,12 @@ pub struct Toml {
 }
 
 impl Toml {
+    /// Returns `true` if the input string is valid TOML.
+    #[must_use]
+    pub fn is_valid(input: impl AsRef<str>) -> bool {
+        toml::from_str::<toml::Value>(input.as_ref()).is_ok()
+    }
+
     /// Parse a TOML file from the given path.
     ///
     /// ## Errors
@@ -436,6 +442,25 @@ name = "test"
 "#;
         let toml = Toml::from_str(input).unwrap();
         assert_eq!(toml.raw(), input);
+    }
+
+    // ==========================================================================
+    // Validation Tests (is_valid)
+    // ==========================================================================
+
+    #[test]
+    fn test_is_valid_accepts_valid_toml() {
+        assert!(Toml::is_valid(r#"name = "test""#));
+        assert!(Toml::is_valid("[package]\nname = \"test\""));
+        assert!(Toml::is_valid("count = 42\nenabled = true"));
+    }
+
+    #[test]
+    fn test_is_valid_rejects_invalid_toml() {
+        assert!(!Toml::is_valid("key = "));
+        assert!(!Toml::is_valid("invalid = ["));
+        assert!(!Toml::is_valid(r#"name = "unclosed"#));
+        assert!(!Toml::is_valid("{ not: toml }"));
     }
 
     // ==========================================================================

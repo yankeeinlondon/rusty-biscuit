@@ -74,6 +74,9 @@ Parse TOML from files, strings, or readers. Convert to JSON or YAML.
 ```rust
 use biscuit_file::Toml;
 
+// Validate without constructing
+assert!(Toml::is_valid("[package]\nname = \"demo\""));
+
 // From a file
 let toml = Toml::new("config.toml")?;
 
@@ -94,6 +97,11 @@ Parse JSON5 from files, strings, or bytes. Convert to JSON, YAML, or TOML.
 ```rust
 use biscuit_file::Json5;
 
+// Validate without constructing
+assert!(Json5::is_valid("{ key: 'value' }"));       // JSON5
+assert!(Json5::is_valid_json(r#"{"key": "value"}"#)); // strict JSON
+
+// From a file or string
 let j = Json5::new("config.json5")?;
 let j = Json5::from_str("{ key: 'value', /* comment */ }")?;
 
@@ -115,6 +123,10 @@ Parse YAML from files, strings, or bytes. Convert to JSON or TOML.
 ```rust
 use biscuit_file::Yaml;
 
+// Validate without constructing
+assert!(Yaml::is_valid("name: demo"));
+
+// From a file, string, or bytes
 let yaml = Yaml::new("config.yaml")?;
 let yaml = Yaml::from_str("name: demo")?;
 let yaml = Yaml::from_bytes(b"name: demo")?;

@@ -212,6 +212,12 @@ pub struct Yaml {
 }
 
 impl Yaml {
+    /// Returns `true` if the input string is valid YAML.
+    #[must_use]
+    pub fn is_valid(input: impl AsRef<str>) -> bool {
+        serde_yaml_ng::from_str::<serde_yaml_ng::Value>(input.as_ref()).is_ok()
+    }
+
     /// Parse a YAML file from the given path.
     ///
     /// ## Errors
@@ -650,6 +656,19 @@ impl From<serde_yaml_ng::Value> for Yaml {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn test_is_valid_accepts_valid_yaml() {
+        assert!(Yaml::is_valid("name: test"));
+        assert!(Yaml::is_valid("items:\n  - one\n  - two"));
+        assert!(Yaml::is_valid("key: 42\nenabled: true"));
+    }
+
+    #[test]
+    fn test_is_valid_rejects_invalid_yaml() {
+        assert!(!Yaml::is_valid(":\n  - :\n  -: :\n:"));
+        assert!(!Yaml::is_valid("key: [unclosed"));
+    }
 
     #[test]
     fn test_parse_simple_yaml() {
