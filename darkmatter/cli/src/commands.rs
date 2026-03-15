@@ -60,8 +60,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             state,
             output,
             show,
+            frontmatter,
         } => {
-            run_compose(input.as_ref(), state.as_deref(), output, show, cli)?;
+            run_compose(input.as_ref(), state.as_deref(), output, show, frontmatter, cli)?;
         }
         CliCommand::Toc { input, json } => {
             let md = load_markdown(Some(&input))?;
@@ -103,8 +104,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             input,
             prop,
             value,
+            save,
         } => {
-            run_set(&input, &prop, &value)?;
+            run_set(&input, &prop, &value, save)?;
         }
         CliCommand::Edit { file } => {
             run_edit(&file)?;
@@ -144,14 +146,15 @@ pub fn run_clean(
         ));
     }
 
+    let resolved = resolve_file_path(input_path)?;
     let original = load_markdown(Some(input_path))?;
     let mut cleaned = original.clone();
     apply_cleanup(&mut cleaned, indent);
 
     let delta = original.delta(&cleaned);
     if !delta.is_unchanged() {
-        std::fs::write(input_path, cleaned.as_string())
-            .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", input_path))?;
+        std::fs::write(&resolved, cleaned.as_string())
+            .wrap_err_with(|| format!("Failed to write cleaned markdown to {:?}", resolved))?;
     }
 
     print_delta(&delta, verbose, &original, &cleaned);
@@ -215,6 +218,7 @@ pub fn run_compose(
     state_json: Option<&str>,
     output: OutputFormat,
     show: bool,
+    include_frontmatter: bool,
     cli: &Cli,
 ) -> Result<()> {
     let md = load_markdown(input)?;
@@ -252,8 +256,12 @@ pub fn run_compose(
 
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
-            // Frontmatter drives the pipeline; once composition is complete, discard it.
-            let content = transformed.content().to_string();
+            let content = if include_frontmatter {
+                transformed.as_string()
+            } else {
+                // Frontmatter drives the pipeline; once composition is complete, discard it.
+                transformed.content().to_string()
+            };
             if show {
                 let artifact = OutputArtifact {
                     content: content.clone(),
@@ -318,10 +326,18 @@ pub fn run_get(
 
 /// Set a frontmatter property on a markdown document.
 ///
-/// When input is `-` (stdin), the modified document is written to stdout.
-/// When input is a file path, the file is updated in place.
-pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str) -> Result<()> {
+/// By default the modified document is written to stdout without changing the
+/// source file. With `--save` the file is updated in place and nothing is
+/// printed.
+pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Result<()> {
     let is_stdin = input.to_str() == Some("-");
+
+    if save && is_stdin {
+        return Err(eyre!(
+            "--save requires an input file path (stdin is not supported)"
+        ));
+    }
+
     let mut md = load_markdown(Some(input))?;
 
     let value: serde_json::Value =
@@ -330,14 +346,12 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str) -> Result<()> {
     md.fm_insert(prop, value)
         .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
 
-    let output = md.as_string();
-
-    if is_stdin {
-        print!("{output}");
+    if save {
+        let resolved = resolve_file_path(input)?;
+        std::fs::write(&resolved, md.as_string())
+            .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
     } else {
-        std::fs::write(input, &output)
-            .wrap_err_with(|| format!("Failed to write to {:?}", input))?;
-        print!("{output}");
+        print!("{}", md.as_string());
     }
 
     Ok(())
@@ -598,14 +612,20 @@ pub fn run_hash(
 }
 
 /// Loads markdown from a file path or stdin.
+///
+/// Paths are resolved through biscuit-file's `FileReference` system, which
+/// supports `@`-prefixed magic paths (e.g. `@prompts/feature.md`), vault
+/// references, and other reference syntaxes. Plain paths and `-` (stdin)
+/// are handled as before.
 pub fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
     if let Some(p) = path {
         if p.to_str() == Some("-") {
             // Explicit stdin marker
             read_from_stdin()
         } else {
-            Markdown::try_from(p.as_path())
-                .wrap_err_with(|| format!("Failed to read file: {:?}", p))
+            let resolved = resolve_file_path(p)?;
+            Markdown::try_from(resolved.as_path())
+                .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))
         }
     } else {
         // No path provided - check if stdin has data
@@ -615,6 +635,35 @@ pub fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
         } else {
             // Piped input available
             read_from_stdin()
+        }
+    }
+}
+
+/// Resolves a file path through biscuit-file's `FileReference` system.
+///
+/// If the path contains `@`-prefixed magic references or other FileReference
+/// syntax, it will be resolved accordingly. Plain paths are returned as-is
+/// (made absolute if relative).
+fn resolve_file_path(raw_path: &PathBuf) -> Result<PathBuf> {
+    use biscuit_file::FileReference;
+
+    let raw = raw_path.to_string_lossy();
+    match FileReference::new(&raw) {
+        Ok(file_ref) => {
+            let resolved = file_ref
+                .resolve()
+                .wrap_err_with(|| format!("Failed to resolve file reference: {:?}", raw_path))?;
+            match resolved {
+                Some(p) => Ok(p),
+                None => {
+                    // FileReference couldn't resolve it — fall back to raw path
+                    Err(eyre!("Failed to load file: {:?}", raw_path))
+                }
+            }
+        }
+        Err(_) => {
+            // Not a valid file reference syntax — treat as plain path
+            Ok(raw_path.clone())
         }
     }
 }

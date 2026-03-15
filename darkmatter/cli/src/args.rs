@@ -76,6 +76,10 @@ pub enum Command {
         /// Render composed content to stdout AND open in default app
         #[arg(long)]
         show: bool,
+
+        /// Include frontmatter in the output (default: body only)
+        #[arg(long, visible_alias = "fm")]
+        frontmatter: bool,
     },
 
     /// Show markdown table of contents.
@@ -140,6 +144,10 @@ pub enum Command {
         /// Value to set (parsed as JSON if valid, otherwise treated as a string)
         #[arg(value_name = "VALUE")]
         value: String,
+
+        /// Write the change back to the source file (no output)
+        #[arg(long)]
+        save: bool,
     },
 
     /// Open a markdown file in your preferred editor.

@@ -948,14 +948,34 @@ fn test_set_updates_file_in_place() {
     md_cmd()
         .arg("set")
         .arg(tmp.path())
-        .args(["title", "Updated"])
+        .args(["title", "Updated", "--save"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::is_empty());
 
     let updated = std::fs::read_to_string(tmp.path()).unwrap();
     assert!(updated.contains("title: Updated"));
     assert!(updated.contains("# Content"));
     assert!(!updated.contains("Original"));
+}
+
+#[test]
+fn test_set_without_save_does_not_mutate_file() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "---\ntitle: Original\n---\n# Content\n").unwrap();
+
+    md_cmd()
+        .arg("set")
+        .arg(tmp.path())
+        .args(["title", "Updated"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title: Updated"))
+        .stdout(predicate::str::contains("# Content"));
+
+    // File should be unchanged
+    let on_disk = std::fs::read_to_string(tmp.path()).unwrap();
+    assert!(on_disk.contains("title: Original"));
 }
 
 #[test]
