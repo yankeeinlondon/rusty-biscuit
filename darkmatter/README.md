@@ -1,3 +1,9 @@
+---
+test:
+    - one
+    - two
+    - three
+---
 # Darkmatter
 
 A themed markdown renderer for terminal and browser output with syntax highlighting, Mermaid diagrams, and document processing.
