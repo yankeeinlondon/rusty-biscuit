@@ -37,6 +37,12 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Peeks at the character after the current one (skipping `current_char`).
+    fn peek_after(&self, current_char: char) -> Option<char> {
+        let next_pos = self.pos + current_char.len_utf8();
+        self.input[next_pos..].chars().next()
+    }
+
     pub fn skip_ws(&mut self) {
         while let Some(ch) = self.current() {
             if ch.is_whitespace() {
@@ -136,8 +142,19 @@ impl<'a> Cursor<'a> {
                     });
                 }
                 Some(ch) if ch == quote => {
+                    // A matching quote is only the *closing* delimiter when
+                    // followed by whitespace, EOF, or `=` (start of next
+                    // key=value pair). Otherwise treat it as a literal
+                    // character, which lets nested same-type quotes work:
+                    //   when="stage == "tech-design""
+                    let next = self.peek_after(quote);
+                    if next.is_none() || next.is_some_and(|c| c.is_whitespace() || c == '=') {
+                        self.advance();
+                        break;
+                    }
+                    // Literal quote — keep it in the output
+                    out.push(ch);
                     self.advance();
-                    break;
                 }
                 Some('\\') => {
                     self.advance();

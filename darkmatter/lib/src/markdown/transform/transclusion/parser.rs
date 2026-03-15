@@ -276,6 +276,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_nested_double_quotes_in_when() {
+        let content = r#"::file ./doc.md when="stage == "tech-design"""#;
+        let directives = parse_directives(content).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(
+            directives[0].options.when_expr,
+            Some(r#"stage == "tech-design""#.to_string())
+        );
+    }
+
+    #[test]
+    fn parses_single_quotes_in_when() {
+        let content = r#"::file ./doc.md when="stage == 'tech-design'""#;
+        let directives = parse_directives(content).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(
+            directives[0].options.when_expr,
+            Some("stage == 'tech-design'".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_nested_quotes_followed_by_another_option() {
+        let content = r#"::file ./doc.md when="stage == "plan"" quotation=true"#;
+        let directives = parse_directives(content).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(
+            directives[0].options.when_expr,
+            Some(r#"stage == "plan""#.to_string())
+        );
+        assert_eq!(directives[0].options.quotation, Some(String::new()));
+    }
+
+    #[test]
     fn parses_frontmatter_refs() {
         let fm: HashMap<String, Value> = serde_json::from_value(serde_json::json!({
             "prologue": "./a.md",
