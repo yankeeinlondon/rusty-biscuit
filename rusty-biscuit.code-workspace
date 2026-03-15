@@ -13,6 +13,10 @@
             "path": "prompts"
         },
         {
+            "name": "Monorepo Scripts",
+            "path": "scripts"
+        },
+        {
             "name": "agent-sandbox",
             "path": "agent-sandbox"
         },
