@@ -2,6 +2,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{NON_INTERACTIVE, REPO_FLAG, YOLO};
 use std::path::Path;
@@ -54,7 +55,20 @@ pub(crate) fn log_wrapper_header(
 
     let remaining = format_passthrough_args(child_args);
     if !remaining.is_empty() {
-        header_parts.push(Prose::new(format!("<dim>{remaining}</dim>")).render(term));
+        // Measure the prefix (everything before the passthrough args) plus the
+        // joining space so we know how many columns are left for the args.
+        let prefix = header_parts.join(" ");
+        let prefix_width = visible_width(&prefix) as usize;
+        // +1 for the space between prefix and args
+        let used = prefix_width + 1;
+
+        let term_width = term.width() as usize;
+        // Allow spilling onto a second line, but no further.
+        let max_width = term_width.saturating_mul(2);
+        let available = max_width.saturating_sub(used);
+
+        let truncated = truncate_args(&remaining, available);
+        header_parts.push(Prose::new(format!("<dim>{truncated}</dim>")).render(term));
     }
 
     log::message(&format!("\n{}", header_parts.join(" ")));
@@ -445,6 +459,41 @@ pub(crate) fn format_passthrough_args(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Truncate the passthrough args string to fit within `max_chars` visible columns.
+///
+/// When the args exceed the available space, we cut 4 characters before the limit
+/// and append `..."` so the total fits. If there's not even room for the ellipsis,
+/// we return just `..."`.
+fn truncate_args(args: &str, max_chars: usize) -> String {
+    if args.len() <= max_chars {
+        return args.to_string();
+    }
+
+    // We need 4 characters for the suffix: `..."`
+    const SUFFIX: &str = "...\"";
+    const SUFFIX_LEN: usize = 4;
+
+    if max_chars <= SUFFIX_LEN {
+        return SUFFIX.to_string();
+    }
+
+    let cut_at = max_chars - SUFFIX_LEN;
+
+    // Find a safe char boundary (args is UTF-8)
+    let truncated = if args.is_char_boundary(cut_at) {
+        &args[..cut_at]
+    } else {
+        // Walk backwards to find a valid char boundary
+        let mut pos = cut_at;
+        while pos > 0 && !args.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        &args[..pos]
+    };
+
+    format!("{truncated}{SUFFIX}")
+}
+
 pub(crate) fn shell_escape(arg: &str) -> String {
     if arg.is_empty() {
         return "''".to_string();
@@ -458,4 +507,53 @@ pub(crate) fn shell_escape(arg: &str) -> String {
     }
 
     format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_args_no_op_when_fits() {
+        let args = "--flag 'short prompt'";
+        assert_eq!(truncate_args(args, 50), args);
+    }
+
+    #[test]
+    fn truncate_args_exact_fit() {
+        let args = "--flag 'hello'";
+        assert_eq!(truncate_args(args, args.len()), args);
+    }
+
+    #[test]
+    fn truncate_args_truncates_with_suffix() {
+        let args = "--dangerously-skip-permissions 'this is a very long prompt that goes on'";
+        let result = truncate_args(args, 40);
+        assert!(result.ends_with("...\""));
+        assert_eq!(result.len(), 40);
+    }
+
+    #[test]
+    fn truncate_args_tiny_budget() {
+        let args = "'some long prompt'";
+        let result = truncate_args(args, 4);
+        assert_eq!(result, "...\"");
+    }
+
+    #[test]
+    fn truncate_args_budget_smaller_than_suffix() {
+        let args = "'some long prompt'";
+        let result = truncate_args(args, 2);
+        assert_eq!(result, "...\"");
+    }
+
+    #[test]
+    fn truncate_args_respects_char_boundaries() {
+        // Multi-byte chars: each é is 2 bytes
+        let args = "ééééééééééé";
+        let result = truncate_args(args, 10);
+        assert!(result.ends_with("...\""));
+        // Should not panic or produce invalid UTF-8
+        assert!(result.is_char_boundary(0));
+    }
 }
