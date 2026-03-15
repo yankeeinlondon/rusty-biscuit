@@ -1682,6 +1682,7 @@ dependencies = [
  "git2",
  "globset",
  "html-escape",
+ "indexmap 2.13.0",
  "insta",
  "lazy_static",
  "markdown",
