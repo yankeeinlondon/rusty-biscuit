@@ -16,4 +16,10 @@ You must act as an Orchestrator while implementing the plan found in "{{base_dir
                 - tests MUST NOT BE CHANGED!
                 - they are allowed to exclude any tests which they believe is a result of another package in the monorepos faults but this is UNLIKELY so the subagent should be warned to be leary of tagging a failing test for this reason
                 - if after 3 attempts a failing test can't be fixed then we should report the error to STDERR and then immediately return to the orchestrator with their status.
+- append a log summary of the implementation
+    - the log file is located at `{{base_url}}/log.md`
+    - You should start your log with a heading of `## Implementation of {{feature}}`
+    - You should summarize in a few bullets what was done during this implementation
+    - Once you've appended your log entry then 
+        - set the `implementation_files` frontmatter to the list of files which mutated as a part of this implementation (use `md set "{{base_dir}}/log.md" implementation_files "${files}" --save`)
 - communicate to the caller that the implementation is implemented and all tests are passing

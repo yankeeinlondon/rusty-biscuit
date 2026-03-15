@@ -13,7 +13,17 @@ During your review you should:
 - ensure that if this package area has both a CLI and Library that these two package have clear separations of concerns:
     - the Library should own all business logic
     - the CLI should be focused on reporting to the terminal and leveraging the library for data and logic
-- finally ensure that all public/exported symbols are adequately annotated with doc based comments
+- ensure that all public/exported symbols are adequately annotated with doc based comments
 
-Save your recommendations to: "{{base_dir}}/review.md"
+## Closure
 
+- Save your recommendations to: "{{base_dir}}/review.md"
+- Append to the log file:
+    - the log file is located at `{{base_dir}}/log.md`
+    - Start your log entry with the heading `## Review of {{feature}} Completed`
+    - Then add a timestamp
+    - Then add a short summary of the review findings
+- Once the log file has been appended to, set the frontmatter of the log file:
+    - use `md set "{{base_dir}}/log.md" review "{{base_dir}}/review.md" --save`
+    - use `md set "{{base_dir}}/log.md" last_updated "${YYYY}-${MM}-${DD}" --save`
+- Communicate to the caller that the review has been completed
