@@ -155,6 +155,7 @@
 //! write_terminal(&mut stdout, &md, options)?;
 //! ```
 
+pub mod approval;
 pub mod args;
 pub mod commands;
 pub mod output;

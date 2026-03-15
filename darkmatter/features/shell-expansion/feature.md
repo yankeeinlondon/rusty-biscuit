@@ -1,13 +1,14 @@
 ---
-stage: tech-design
-feature: shell-expansion
+stage: implement
+error: true
+feature: "shell-expansion"
 base_dir: /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion
 ---
 # Feature
 
 ## Context on Feature Building
 
-We are in the process of building out the "shell-expansion" feature. Building a feature consists of the following discrete steps:
+We are in the process of building out the "" feature. Building a feature consists of the following discrete steps:
 
 1. Create a detailed technical design (stage: `tech-design`)
 2. Create a detailed plan (stage: `plan`)
@@ -16,7 +17,7 @@ We are in the process of building out the "shell-expansion" feature. Building a 
 5. Review the plan (stage: `review`)
 6. Implement the suggestions in the review (stage: `suggestions`)
 7. Commit the changes to git (stage: `commit-review`)
-8. Review all README.md documents (`update-readmes`)
+8. Update Documents (`update-documents`)
 
 **IMPORTANT:**
 
@@ -32,22 +33,32 @@ We are in the process of building out the "shell-expansion" feature. Building a 
 
 ## Your Task
 
-### Tech Design
+### Commit files from Implementation and Design
 
-You are responsible for building the technical design for the feature "shell-expansion". You will build that technical design from the file .
+This section describes how to perform the actions necessary for the `commit-implement` stage.
 
-- You will act as an orchestrator for each step
-- You must have a subagent execute the following steps:
-    - Reviewer
-        - review the specification at
-        - create a detailed tech design and save it to /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion/tech-design.md
-    - Finalization
-        - review the tech design file at /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion/tech-design.md
-        - Ensure the file is idiomatic and well formed Markdown and that all the code block are valid code for the specified language
-        - update the document if you see changes that need to be made
-    - Summarization
-        - provide a summarization of the tech-design at /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion/tech-design.md
-- you will provide feedback to the caller at each step
-- your final response will be the summarization provided by the Summarization subagent
+- capture the current repo status before making any changes
+- before the implementation was executed, we made sure that the current package area was clean (no dirty files)
+- now that we've finished the implementation of the plan for the "" feature we need to stage and commit the files which we have modified in the implementation
+- we use commit message which follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard
+- in this case the `action` for the commit will be **feat**
+- the `scope` for the commit will almost surely be current **package area** (`sniff package-area`)
+- this means that the first line of the commit message will be something like: `feat($(sniff package-area)): implemented the "{{feature}}" feature`
+- the remaining lines of the commit should summarize the functionality provided in the feature in a number of bullet points.
+- Append to the log file:
+    - the log file is located at `{{base_dir}}/log.md`
+    - Start your log entry with the heading `## Committed Implementation Changes`
+    - Add the initial git status prior to our commit and put that information in `### Before Commit`
+    - Add the git status after our commit and put that information in `### After Commit`
+- set the `last_updated` frontmatter property on the log file
+    - use the command `md set "{{base_dir}}/log.md" last_updated "${YYYY}-${MM}-${DD}" --save`
+
+You are done when:
+
+- you have staged all the files mutated during the implementation
+- you have committed these same files with an appropriate Conventional Commit based message
+- the log file has been appended to
+
+DO NOT PUSH ANY COMMITS to a REMOTE!
 
 

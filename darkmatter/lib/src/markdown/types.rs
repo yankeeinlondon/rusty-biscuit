@@ -56,6 +56,10 @@ pub enum MarkdownError {
     /// TOC linking pipeline error.
     #[error("TOC linking error: {0}")]
     TocLinking(#[from] crate::markdown::transform::TocLinkingError),
+
+    /// Shell expansion pipeline error.
+    #[error("Shell expansion failed: {0}")]
+    ShellExpansion(#[from] crate::markdown::transform::ShellExpansionError),
 }
 
 /// Result type for markdown operations.

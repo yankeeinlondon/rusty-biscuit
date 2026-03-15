@@ -6,8 +6,9 @@
 //! 1. **Text Replacement** - Replace literal strings from frontmatter `replace` map
 //! 2. **Interpolation** - Expand `{{variable}}` expressions
 //! 3. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
-//! 4. **Cleanup** - Normalize markdown formatting
-//! 5. **Normalization** - Adjust heading levels
+//! 4. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 5. **Cleanup** - Normalize markdown formatting
+//! 6. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -33,9 +34,11 @@ mod types;
 
 pub mod interpolation;
 pub mod replacement;
+pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
 
+pub use shell_expansion::ShellExpansionError;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
@@ -51,6 +54,8 @@ use super::types::{MarkdownError, MarkdownResult};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use shell_expansion::{apply_replacements_in_reverse, execute_directive};
 
 // Re-export HeadingLevel for tests
 #[cfg(test)]
@@ -129,7 +134,7 @@ impl Markdown {
         &mut self,
         options: TransformOptions,
     ) -> MarkdownResult<TransformReport> {
-        let mut runtime = transclusion::TransclusionRuntime::new(options.transclusion.max_depth);
+        let mut runtime = shell_expansion::types::PipelineRuntime::new(options.transclusion.max_depth);
         self.run_transform_pipeline_internal(options, &mut runtime)
     }
 
@@ -137,7 +142,7 @@ impl Markdown {
     pub(crate) fn run_transform_pipeline_internal(
         &mut self,
         options: TransformOptions,
-        runtime: &mut transclusion::TransclusionRuntime,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<TransformReport> {
         let source_id = match &options.transclusion.source {
             TransformSource::Unknown => None,
@@ -151,7 +156,7 @@ impl Markdown {
         };
 
         if let Some(id) = source_id.clone() {
-            runtime.enter(id)?;
+            runtime.transclusion.enter(id)?;
         }
 
         let result = (|| {
@@ -168,6 +173,14 @@ impl Markdown {
                         }
                         _ => {} // frontmatter already has a non-null value
                     }
+                }
+            }
+
+            // Apply set overrides: unconditionally overwrite frontmatter keys.
+            if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
+                let fm = self.frontmatter_mut().as_map_mut();
+                for (key, value) in overrides {
+                    fm.insert(key.clone(), value.clone());
                 }
             }
 
@@ -216,6 +229,11 @@ impl Markdown {
                     }
                     Err(e) => return Err(e.into()),
                 }
+            }
+
+            // Stage 1: Shell Expansion
+            if options.stages.shell_expansion {
+                self.run_shell_expansion_stage(&options, runtime, &mut report)?;
             }
 
             // Stage 1: Cleanup
@@ -268,12 +286,12 @@ impl Markdown {
                 )?;
             }
 
-            report.max_transclusion_depth = runtime.deepest_seen;
+            report.max_transclusion_depth = runtime.transclusion.deepest_seen;
             Ok(report)
         })();
 
         if source_id.is_some() {
-            runtime.exit();
+            runtime.transclusion.exit();
         }
 
         result
@@ -374,12 +392,48 @@ impl Markdown {
         Ok(report)
     }
 
+    /// Runs Stage 1 shell expansion directives.
+    fn run_shell_expansion_stage(
+        &mut self,
+        options: &TransformOptions,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut TransformReport,
+    ) -> MarkdownResult<()> {
+        let directives = shell_expansion::parse_directives(&self.content)?;
+        if directives.is_empty() {
+            return Ok(());
+        }
+
+        let policy_paths = shell_expansion::resolve_policy_paths(
+            &options.shell,
+            &options.transclusion.source,
+        )?;
+        runtime.shell.ensure_loaded(&policy_paths)?;
+
+        let mut replacements = Vec::new();
+
+        for directive in directives {
+            let replacement = execute_directive(
+                &directive,
+                options,
+                &policy_paths,
+                &mut runtime.shell,
+            )?;
+            replacements.push((directive.span.clone(), replacement));
+            report.shell_expansions_applied += 1;
+        }
+
+        apply_replacements_in_reverse(&mut self.content, replacements);
+        report.shell_approvals_used += runtime.shell.take_recent_approval_count();
+        Ok(())
+    }
+
     /// Runs Stage 2 block transclusion directives.
     fn run_block_transclusion_stage(
         &mut self,
         state: &EffectiveState,
         options: &TransformOptions,
-        runtime: &mut transclusion::TransclusionRuntime,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut TransformReport,
     ) -> MarkdownResult<()> {
         let directives = transclusion::parse_directives(&self.content)?;
@@ -506,7 +560,7 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &TransformOptions,
-        runtime: &mut transclusion::TransclusionRuntime,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut TransformReport,
     ) -> MarkdownResult<()> {
         let refs = transclusion::parse_frontmatter_refs(self.frontmatter().as_map())?;
@@ -582,7 +636,7 @@ impl Markdown {
         reference: &str,
         state: &EffectiveState,
         options: &TransformOptions,
-        runtime: &mut transclusion::TransclusionRuntime,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut TransformReport,
         ignore_invalid: bool,
     ) -> MarkdownResult<Option<String>> {
@@ -653,7 +707,7 @@ impl Markdown {
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
         options: &TransformOptions,
-        runtime: &mut transclusion::TransclusionRuntime,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut TransformReport,
     ) -> MarkdownResult<String> {
         let inherited = self.build_child_external_state(state);
@@ -1173,6 +1227,7 @@ mod tests {
             replacement: true,
             interpolation: false,
             toc_linking: false,
+            shell_expansion: false,
             cleanup: true,
             normalization: false,
         });
@@ -1527,6 +1582,7 @@ Hello :wave: {{ greeting }} :smile:"#;
             replacement: true,
             interpolation: true,
             toc_linking: false,
+            shell_expansion: false,
             cleanup: false,
             normalization: false,
         });

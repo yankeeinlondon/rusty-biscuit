@@ -370,6 +370,15 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         chained_composition = true;
     }
 
+    // -- Final argument validation -------------------------------------------
+    // All prompt sources (passthrough, --prompt-file, --frontmatter-prompt,
+    // --compose) have now been processed. Validate that providers requiring a
+    // positional prompt actually have one.
+    let effective_non_interactive = non_interactive_requested
+        || inline_composition_source.is_some()
+        || chained_composition;
+    profile.validate_final_args(&child_args, effective_non_interactive)?;
+
     let mut mcp_runtime = None;
     let mut mcp_cleanup: Option<(Box<dyn claudine::mcp::inject::McpInjector>, claudine::mcp::inject::InjectionResult)> = None;
 
@@ -541,6 +550,27 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         return Ok(0);
     }
 
+    // Determine compose display mode and prompt summary for header
+    let compose_display = if inline_composition_source.is_some() {
+        Some(crate::output::ComposeDisplay::InlineCompose)
+    } else if chained_composition {
+        Some(crate::output::ComposeDisplay::Compose)
+    } else {
+        None
+    };
+
+    // For compose modes, the prompt goes to stdin (not child_args), so we need
+    // to extract a summary to display in the header. For regular runs the prompt
+    // is already in child_args.
+    let prompt_summary: Option<String> = if let Some((_, ref prepared)) = inline_composition_source
+    {
+        Some(prepared.prompt.clone())
+    } else if chained_composition {
+        stdin_seed.clone()
+    } else {
+        None
+    };
+
     // Output verbosity: --silent suppresses everything, --quiet shows header only
     if !silent_requested {
         // Header line (shown for both default and --quiet)
@@ -549,7 +579,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             yolo_enabled,
             non_interactive_requested,
             repo_requested,
+            compose_display.as_ref(),
+            effective_operation.as_deref(),
             &child_args,
+            prompt_summary.as_deref(),
             &env_plan,
             &term,
         );

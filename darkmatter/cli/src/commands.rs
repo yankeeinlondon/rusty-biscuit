@@ -58,11 +58,12 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         CliCommand::Compose {
             input,
             state,
+            set,
             output,
             show,
             frontmatter,
         } => {
-            run_compose(input.as_ref(), state.as_deref(), output, show, frontmatter, cli)?;
+            run_compose(input.as_ref(), state.as_deref(), set.as_deref(), output, show, frontmatter, cli)?;
         }
         CliCommand::Toc { input, json } => {
             let md = load_markdown(Some(&input))?;
@@ -97,8 +98,10 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             json5,
             yaml,
             toml,
+            raw,
+            compact,
         } => {
-            run_get(&input, &props, json5, yaml, toml)?;
+            run_get(&input, &props, json5, yaml, toml, raw, compact)?;
         }
         CliCommand::Set {
             input,
@@ -219,6 +222,7 @@ pub fn run_read(
 pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
+    set_json: Option<&str>,
     output: OutputFormat,
     show: bool,
     include_frontmatter: bool,
@@ -241,12 +245,47 @@ pub fn run_compose(
         options = options.with_external_state(state);
     }
 
+    // Parse --set as JSON or JSON5
+    if let Some(json_str) = set_json {
+        let parsed = biscuit_file::Json5::from_str(json_str)
+            .wrap_err("Invalid JSON/JSON5 in --set argument")?;
+        let set = parsed.value().clone();
+        if !set.is_object() {
+            return Err(eyre!(
+                "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+            ));
+        }
+        options = options.with_set_overrides(set);
+    }
+
     // Set source file for relative transclusion resolution
     if let Some(path) = input
         && path.to_str() != Some("-")
     {
         options = options.with_source_file(path);
     }
+
+    // Build shell expansion options
+    use darkmatter::markdown::transform::shell_expansion::ShellExpansionOptions;
+    use std::sync::Arc;
+
+    let is_file_input = input.is_some() && input.as_ref().unwrap().to_str() != Some("-");
+
+    let shell_opts = ShellExpansionOptions {
+        policy_root: if is_file_input {
+            input.and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+        } else {
+            None
+        },
+        approval_handler: if is_file_input && crate::approval::can_prompt_interactively() {
+            Some(Arc::new(crate::approval::CliShellApprovalHandler))
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+
+    options = options.with_shell(shell_opts);
 
     let (transformed, _report) = md
         .transform_with(options)
@@ -298,6 +337,8 @@ pub fn run_get(
     json5: bool,
     yaml: bool,
     toml: bool,
+    raw: bool,
+    compact: bool,
 ) -> Result<()> {
     let md = load_markdown(Some(input))?;
     let fm = md.frontmatter();
@@ -322,7 +363,7 @@ pub fn run_get(
         serde_json::Value::Object(map)
     };
 
-    let output = format_value(&value, json5, yaml, toml)?;
+    let output = format_value(&value, json5, yaml, toml, raw, compact)?;
     println!("{output}");
 
     Ok(())
@@ -426,7 +467,20 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
 }
 
 /// Format a `serde_json::Value` according to the requested output format.
-fn format_value(value: &serde_json::Value, json5: bool, yaml: bool, toml: bool) -> Result<String> {
+fn format_value(
+    value: &serde_json::Value,
+    json5: bool,
+    yaml: bool,
+    toml: bool,
+    raw: bool,
+    compact: bool,
+) -> Result<String> {
+    if raw {
+        return Ok(format_raw(value));
+    }
+    if compact {
+        return Ok(serde_json::to_string(value)?);
+    }
     if json5 {
         let json_str = serde_json::to_string(value)?;
         let j5 = biscuit_file::Json5::from_str(&json_str)
@@ -465,6 +519,28 @@ fn format_value(value: &serde_json::Value, json5: bool, yaml: bool, toml: bool) 
     } else {
         // Default: JSON
         Ok(serde_json::to_string_pretty(value)?)
+    }
+}
+
+/// Format a JSON value as raw output (no JSON quoting).
+///
+/// - Strings: printed without quotes
+/// - Null: empty string
+/// - Booleans/numbers: their natural representation
+/// - Arrays: one element per line (each element formatted raw)
+/// - Objects: one `key: value` pair per line (values formatted raw)
+fn format_raw(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr.iter().map(format_raw).collect::<Vec<_>>().join("\n"),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| format!("{k}: {}", format_raw(v)))
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 

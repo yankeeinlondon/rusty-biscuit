@@ -177,6 +177,20 @@ pub(crate) trait WrapperProfile: Send + Sync {
         non_interactive: bool,
     ) -> Result<()>;
 
+    // -- Final argument validation -------------------------------------------
+
+    /// Validate the final child args after all prompt sources have been
+    /// processed (passthrough, --prompt-file, --compose, --frontmatter-prompt).
+    ///
+    /// Providers that require a positional prompt (Codex, OpenCode, Goose)
+    /// should check for it here rather than in `apply_non_interactive()`,
+    /// because prompt delivery may happen after non-interactive setup.
+    ///
+    /// Default: no-op.
+    fn validate_final_args(&self, _args: &[String], _non_interactive: bool) -> Result<()> {
+        Ok(())
+    }
+
     // -- Provider-required env vars ------------------------------------------
 
     /// Env var names that this provider requires and should bypass the
@@ -369,11 +383,9 @@ impl WrapperProfile for CodexWrapper {
             args.insert(0, entrypoint.to_string());
         }
 
-        // Validate prompt is present (consistency with EnsurePromptMode providers)
-        if !has_non_flag_positional(&args[1..]) {
-            bail!("--non-interactive for codex requires a prompt after the entrypoint");
-        }
-
+        // NOTE: prompt validation is deferred to validate_final_args() because
+        // the prompt may not be in args yet (e.g. --compose/--prompt-file
+        // pipelines call apply_prompt_body() separately).
         Ok(())
     }
 
@@ -412,6 +424,13 @@ impl WrapperProfile for CodexWrapper {
             0
         };
         args.insert(insert_at, prompt.to_string());
+        Ok(())
+    }
+
+    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
+        if non_interactive && !has_non_flag_positional(&args[1..]) {
+            bail!("--non-interactive for codex requires a prompt after the entrypoint");
+        }
         Ok(())
     }
 
@@ -747,11 +766,9 @@ impl WrapperProfile for OpencodeWrapper {
             args.insert(0, entrypoint.to_string());
         }
 
-        // Validate prompt is present (consistency with EnsurePromptMode providers)
-        if !has_non_flag_positional(&args[1..]) {
-            bail!("--non-interactive for opencode requires a prompt after the entrypoint");
-        }
-
+        // NOTE: prompt validation is deferred to validate_final_args() because
+        // the prompt may not be in args yet (e.g. --compose/--prompt-file
+        // pipelines call apply_prompt_body() separately).
         Ok(())
     }
 
@@ -810,6 +827,13 @@ impl WrapperProfile for OpencodeWrapper {
         args.insert(insert_at, prompt.to_string());
         Ok(())
     }
+
+    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
+        if non_interactive && !has_non_flag_positional(&args[1..]) {
+            bail!("--non-interactive for opencode requires a prompt after the entrypoint");
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -855,11 +879,9 @@ impl WrapperProfile for GooseWrapper {
             args.insert(0, entrypoint.to_string());
         }
 
-        // Validate prompt is present (consistency with EnsurePromptMode providers)
-        if !has_non_flag_positional(&args[1..]) {
-            bail!("--non-interactive for goose requires a prompt after the entrypoint");
-        }
-
+        // NOTE: prompt validation is deferred to validate_final_args() because
+        // the prompt may not be in args yet (e.g. --compose/--prompt-file
+        // pipelines call apply_prompt_body() separately).
         Ok(())
     }
 
@@ -888,6 +910,13 @@ impl WrapperProfile for GooseWrapper {
             args.push("run".to_string());
             args.push("-t".to_string());
             args.push(prompt.to_string());
+        }
+        Ok(())
+    }
+
+    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
+        if non_interactive && !has_flag(args, "-t") && !has_non_flag_positional(&args[1..]) {
+            bail!("--non-interactive for goose requires a prompt after the entrypoint");
         }
         Ok(())
     }
@@ -1002,7 +1031,8 @@ mod tests {
         let p = profile(Provider::Codex);
         let mut args = vec!["--json".to_string()];
 
-        let err = p.apply_non_interactive(&mut args).unwrap_err();
+        p.apply_non_interactive(&mut args).unwrap();
+        let err = p.validate_final_args(&args, true).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 
@@ -1144,7 +1174,8 @@ mod tests {
         let p = profile(Provider::OpenCode);
         let mut args = vec!["--json".to_string()];
 
-        let err = p.apply_non_interactive(&mut args).unwrap_err();
+        p.apply_non_interactive(&mut args).unwrap();
+        let err = p.validate_final_args(&args, true).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 
@@ -1167,7 +1198,8 @@ mod tests {
         let p = profile(Provider::Goose);
         let mut args = Vec::new();
 
-        let err = p.apply_non_interactive(&mut args).unwrap_err();
+        p.apply_non_interactive(&mut args).unwrap();
+        let err = p.validate_final_args(&args, true).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 

@@ -444,6 +444,62 @@ fn test_compose_state_requires_json_object() {
         .stderr(predicate::str::contains("expected a JSON object"));
 }
 
+#[test]
+fn test_compose_with_set_overwrites_frontmatter() {
+    md_cmd()
+        .args(["compose", "-", "--set", r#"{"name":"Bob"}"#, "--frontmatter"])
+        .write_stdin("---\nname: Alice\n---\n# Hello {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello Bob"))
+        .stdout(predicate::str::contains("name: Bob"));
+}
+
+#[test]
+fn test_compose_with_set_adds_missing_keys() {
+    md_cmd()
+        .args(["compose", "-", "--set", r#"{"name":"Bob"}"#])
+        .write_stdin("# Hello {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello Bob"));
+}
+
+#[test]
+fn test_compose_set_and_state_combined() {
+    // --state fills defaults, --set overwrites; --set wins on overlap
+    md_cmd()
+        .args([
+            "compose", "-",
+            "--state", r#"{"greeting":"Hi","name":"Alice"}"#,
+            "--set", r#"{"name":"Bob"}"#,
+        ])
+        .write_stdin("# {{ greeting }} {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hi Bob"));
+}
+
+#[test]
+fn test_compose_set_invalid_json() {
+    md_cmd()
+        .args(["compose", "-", "--set", "bad json"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid JSON"));
+}
+
+#[test]
+fn test_compose_set_requires_json_object() {
+    md_cmd()
+        .args(["compose", "-", "--set", "[1,2,3]"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected a JSON object"));
+}
+
 // =============================================================================
 //                          HASH SUBCOMMAND TESTS
 // =============================================================================
@@ -872,6 +928,92 @@ fn test_get_tab_indented_frontmatter_property_is_populated() {
         .stdout(predicate::str::contains("\"2026-02-27\""));
 }
 
+// -- raw flag tests --
+
+#[test]
+fn test_get_raw_string_unquoted() {
+    md_cmd()
+        .args(["get", "--raw", "-", "title"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout("Hello World\n");
+}
+
+#[test]
+fn test_get_raw_number() {
+    md_cmd()
+        .args(["get", "--raw", "-", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout("42\n");
+}
+
+#[test]
+fn test_get_raw_null_returns_empty() {
+    md_cmd()
+        .args(["get", "--raw", "-", "nonexistent"])
+        .write_stdin("---\nnonexistent: null\n---\n# Doc")
+        .assert()
+        .success()
+        .stdout("\n");
+}
+
+#[test]
+fn test_get_raw_array_one_per_line() {
+    md_cmd()
+        .args(["get", "--raw", "-", "tags"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout("rust\ncli\n");
+}
+
+#[test]
+fn test_get_raw_object_key_value_lines() {
+    md_cmd()
+        .args(["get", "--raw", "-", "title", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title: Hello World"))
+        .stdout(predicate::str::contains("count: 42"));
+}
+
+// -- compact flag tests --
+
+#[test]
+fn test_get_compact_array() {
+    md_cmd()
+        .args(["get", "--compact", "-", "tags"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout("[\"rust\",\"cli\"]\n");
+}
+
+#[test]
+fn test_get_compact_object() {
+    md_cmd()
+        .args(["get", "--compact", "-", "title", "count"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\":\"Hello World\""))
+        .stdout(predicate::str::contains("\"count\":42"));
+}
+
+#[test]
+fn test_get_compact_scalar_unchanged() {
+    md_cmd()
+        .args(["get", "--compact", "-", "title"])
+        .write_stdin(FM_DOC)
+        .assert()
+        .success()
+        .stdout("\"Hello World\"\n");
+}
+
 // =============================================================================
 //                          SET SUBCOMMAND TESTS
 // =============================================================================
@@ -998,4 +1140,71 @@ fn test_get_requires_at_least_one_prop() {
         .write_stdin(FM_DOC)
         .assert()
         .failure();
+}
+
+// =============================================================================
+//                      SHELL EXPANSION TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_with_whitelisted_command_succeeds() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+
+    // Write a markdown file with a shell directive
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(&md_path, "# Test\n::shell echo hello\n").unwrap();
+
+    // Write a whitelist
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    std::fs::write(&whitelist_path, "prefix echo\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hello"));
+}
+
+#[test]
+fn test_compose_with_blacklisted_command_fails() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(&md_path, "# Test\n::shell rm -rf /\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Blacklisted").or(predicate::str::contains("dangerous")));
+}
+
+#[test]
+fn test_compose_stdin_unapproved_command_fails_with_guidance() {
+    md_cmd()
+        .arg("compose")
+        .arg("-")
+        .write_stdin("# Test\n::shell echo hello\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Approval required"));
+}
+
+#[test]
+fn test_compose_with_nonexistent_command_fails() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(&md_path, "# Test\n::shell nonexistent_command_xyz\n").unwrap();
+
+    // Write whitelist to approve the command
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    std::fs::write(&whitelist_path, "prefix nonexistent_command_xyz\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Command not found"));
 }

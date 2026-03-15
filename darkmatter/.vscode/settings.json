@@ -4,6 +4,7 @@
         "cryptsetup",
         "Darkmatter",
         "doas",
+        "esac",
         "highspeed",
         "killall",
         "lvremove",

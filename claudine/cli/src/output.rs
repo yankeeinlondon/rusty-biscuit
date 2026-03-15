@@ -4,7 +4,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{NON_INTERACTIVE, REPO_FLAG, YOLO};
+use claudine::badges::{COMPOSE, INLINE_COMPOSE, NON_INTERACTIVE, REPO_FLAG, YOLO};
 use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
@@ -13,6 +13,14 @@ use crate::commands::wrap::profile::WrapperProfile;
 use crate::commands::wrap::prompt_file::PromptFileDryRunInfo;
 use crate::log;
 
+/// Context for compose/inline-compose mode display in the header.
+pub(crate) enum ComposeDisplay {
+    /// Chained composition (`--compose`).
+    Compose,
+    /// Inline frontmatter-prompt composition (`--frontmatter-prompt`).
+    InlineCompose,
+}
+
 /// Print the one-line header: `Claudine ▸ Provider [badges] args`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn log_wrapper_header(
@@ -20,7 +28,10 @@ pub(crate) fn log_wrapper_header(
     yolo_requested: bool,
     non_interactive_requested: bool,
     repo_requested: bool,
+    compose_display: Option<&ComposeDisplay>,
+    operation: Option<&str>,
     child_args: &[String],
+    prompt_summary: Option<&str>,
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
@@ -40,8 +51,20 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(NON_INTERACTIVE.to_string());
     }
 
+    match compose_display {
+        Some(ComposeDisplay::Compose) => header_parts.push(COMPOSE.to_string()),
+        Some(ComposeDisplay::InlineCompose) => header_parts.push(INLINE_COMPOSE.to_string()),
+        None => {}
+    }
+
     if repo_requested {
         header_parts.push(REPO_FLAG.to_string());
+    }
+
+    if let Some(op) = operation {
+        header_parts.push(
+            Prose::new(format!("<green><bold>OP:</bold> {op}</green>")).render(term),
+        );
     }
 
     if let Some(package_name) = package_name_display(env_plan) {
@@ -53,7 +76,17 @@ pub(crate) fn log_wrapper_header(
         );
     }
 
-    let remaining = format_passthrough_args(child_args);
+    // Build the trailing args display: passthrough args + optional prompt summary
+    let mut remaining = format_passthrough_args(child_args);
+    if let Some(prompt) = prompt_summary {
+        let escaped = shell_escape(prompt);
+        if remaining.is_empty() {
+            remaining = escaped;
+        } else {
+            remaining = format!("{remaining} {escaped}");
+        }
+    }
+
     if !remaining.is_empty() {
         // Measure the prefix (everything before the passthrough args) plus the
         // joining space so we know how many columns are left for the args.

@@ -32,6 +32,8 @@ regex = "1.11"
 tempfile = "3.8"
 globset = "0.4"
 chrono = "0.4"
+which = "7"
+dirs = "6"
 
 # HTTP and URLs
 reqwest = { version = "0.13", features = ["json", "gzip"] }

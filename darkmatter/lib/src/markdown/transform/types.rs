@@ -37,7 +37,7 @@ use url::Url;
 ///         ..Default::default()
 ///     });
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TransformOptions {
     /// Controls which Stage 1 stages are enabled.
     pub stages: Stage1Stages,
@@ -48,11 +48,20 @@ pub struct TransformOptions {
     /// Stage 2 transclusion options.
     pub transclusion: TransclusionOptions,
 
+    /// Shell expansion options.
+    pub shell: super::shell_expansion::ShellExpansionOptions,
+
     /// External state to merge with frontmatter for interpolation/replacement.
     ///
     /// When present, this state is merged with document frontmatter using
     /// deep merge semantics in the effective state builder.
     pub external_state: Option<serde_json::Value>,
+
+    /// Override values that overwrite existing frontmatter keys.
+    ///
+    /// Unlike `external_state` which only fills in missing/null keys,
+    /// these values unconditionally overwrite frontmatter properties.
+    pub set_overrides: Option<serde_json::Value>,
 
     /// If true, the pipeline returns an error on first failure.
     /// If false, failures are recorded as warnings and the pipeline continues.
@@ -70,6 +79,23 @@ pub struct TransformOptions {
     context: TransformContext,
 }
 
+impl std::fmt::Debug for TransformOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformOptions")
+            .field("stages", &self.stages)
+            .field("stage2", &self.stage2)
+            .field("transclusion", &self.transclusion)
+            .field("shell", &self.shell)
+            .field("external_state", &self.external_state)
+            .field("set_overrides", &self.set_overrides)
+            .field("fail_fast", &self.fail_fast)
+            .field("replace_parent_wins", &self.replace_parent_wins)
+            .field("one_off_replace", &self.one_off_replace)
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
 impl TransformOptions {
     /// Creates new transform options with default stages and captured context.
     ///
@@ -81,7 +107,9 @@ impl TransformOptions {
             stages: Stage1Stages::default(),
             stage2: Stage2Stages::default(),
             transclusion: TransclusionOptions::default(),
+            shell: super::shell_expansion::ShellExpansionOptions::default(),
             external_state: None,
+            set_overrides: None,
             fail_fast: false,
             replace_parent_wins: false,
             one_off_replace: None,
@@ -115,6 +143,13 @@ impl TransformOptions {
         self
     }
 
+    /// Sets shell expansion options.
+    #[must_use]
+    pub fn with_shell(mut self, shell: super::shell_expansion::ShellExpansionOptions) -> Self {
+        self.shell = shell;
+        self
+    }
+
     /// Sets the transform source as a file path.
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
@@ -133,6 +168,13 @@ impl TransformOptions {
     #[must_use]
     pub fn with_external_state(mut self, state: serde_json::Value) -> Self {
         self.external_state = Some(state);
+        self
+    }
+
+    /// Sets override values that overwrite existing frontmatter keys.
+    #[must_use]
+    pub fn with_set_overrides(mut self, overrides: serde_json::Value) -> Self {
+        self.set_overrides = Some(overrides);
         self
     }
 
@@ -189,6 +231,9 @@ pub struct Stage1Stages {
     /// TOC linking stage (`::toc-linking` directive expansion).
     pub toc_linking: bool,
 
+    /// Shell expansion stage (`::shell` directive execution).
+    pub shell_expansion: bool,
+
     /// Markdown cleanup stage (formatting normalization).
     pub cleanup: bool,
 
@@ -202,6 +247,7 @@ impl Default for Stage1Stages {
             replacement: true,
             interpolation: true,
             toc_linking: true,
+            shell_expansion: true,
             cleanup: true,
             normalization: true,
         }
@@ -215,6 +261,7 @@ impl Stage1Stages {
             replacement: false,
             interpolation: false,
             toc_linking: false,
+            shell_expansion: false,
             cleanup: false,
             normalization: false,
         }
@@ -240,6 +287,14 @@ impl Stage1Stages {
     pub fn only_toc_linking() -> Self {
         Self {
             toc_linking: true,
+            ..Self::none()
+        }
+    }
+
+    /// Creates stages with only shell_expansion enabled.
+    pub fn only_shell_expansion() -> Self {
+        Self {
+            shell_expansion: true,
             ..Self::none()
         }
     }
@@ -481,6 +536,12 @@ pub struct TransformReport {
     /// Number of toc-linking directives expanded.
     pub toc_links_generated: usize,
 
+    /// Number of shell expansions applied.
+    pub shell_expansions_applied: usize,
+
+    /// Number of shell approvals used.
+    pub shell_approvals_used: usize,
+
     /// Whether the cleanup stage modified the content.
     pub cleanup_changed: bool,
 
@@ -511,6 +572,7 @@ impl TransformReport {
         self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
+            || self.shell_expansions_applied > 0
             || self.cleanup_changed
             || self.transclusions_applied > 0
             || self
@@ -537,6 +599,14 @@ impl TransformReport {
 
         if self.toc_links_generated > 0 {
             parts.push(format!("{} toc-link(s)", self.toc_links_generated));
+        }
+
+        if self.shell_expansions_applied > 0 {
+            parts.push(format!("{} shell expansion(s)", self.shell_expansions_applied));
+        }
+
+        if self.shell_approvals_used > 0 {
+            parts.push(format!("{} shell approval(s)", self.shell_approvals_used));
         }
 
         if self.cleanup_changed {

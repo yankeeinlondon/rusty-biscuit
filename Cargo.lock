@@ -1680,6 +1680,7 @@ dependencies = [
  "biscuit-hash",
  "biscuit-terminal",
  "chrono",
+ "dirs",
  "git2",
  "globset",
  "html-escape",
@@ -1709,6 +1710,7 @@ dependencies = [
  "two-face",
  "unicode-width 0.2.2",
  "url",
+ "which 7.0.3",
 ]
 
 [[package]]

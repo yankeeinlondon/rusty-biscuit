@@ -69,6 +69,10 @@ pub enum Command {
         #[arg(long, value_name = "JSON")]
         state: Option<String>,
 
+        /// Override values as JSON; overwrites existing frontmatter keys with the provided values
+        #[arg(long, value_name = "JSON")]
+        set: Option<String>,
+
         /// Output format (default: markdown for compose)
         #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
         output: OutputFormat,
@@ -129,6 +133,14 @@ pub enum Command {
         /// Output as TOML
         #[arg(long)]
         toml: bool,
+
+        /// Output raw values: strings unquoted, null as empty, lists as one item per line, objects as "key: value" lines
+        #[arg(long, conflicts_with_all = ["json5", "yaml", "toml", "compact"])]
+        raw: bool,
+
+        /// Output JSON on a single line for arrays and objects
+        #[arg(long, conflicts_with_all = ["json5", "yaml", "toml", "raw"])]
+        compact: bool,
     },
 
     /// Set a frontmatter property on a markdown document.

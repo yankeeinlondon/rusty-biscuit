@@ -1,11 +1,11 @@
 ### Tech Design
 
-You are responsible for building the technical design for the feature "{{feature}}". You will build that technical design from the file {{spec}}.
+You are responsible for building the technical design for the feature "{{feature}}". You will build that technical design from the file {{base_dir}}/spec.md.
 
 - You will act as an orchestrator for each step
 - You must have a subagent execute the following steps:
     - Reviewer
-        - review the specification at {{spec}}
+        - review the specification at {{base_dir}}/spec.md
         - create a detailed tech design and save it to {{base_dir}}/tech-design.md
     - Finalization
         - review the tech design file at {{base_dir}}/tech-design.md

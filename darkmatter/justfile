@@ -237,16 +237,104 @@ commit:
     @sniff git 2>/dev/null || exit 0
 
 _feature_stage feat base_dir stage:
-    echo -e "𝌡 switching the feature.md for {{GREEN}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
-    md compose "@prompts/feature.md" --fm --state '{ feature: "{{feat}}", base_dir: "{{base_dir}}", stage: "{{stage}}" }' \
-         > "{{base_dir}}/feature.md"
+    #!/usr/bin/env bash
+    echo -e "𝌡 switching the feature.md for {{BOLD}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the "{{BOLD}}{{stage}}{{RESET}}" stage"
+    md compose "@prompts/feature.md" --fm --set '{ base_dir: "{{base_dir}}", stage: "{{stage}}" }' > "{{base_dir}}/feature.md"
+
+_feature_implement feat base_dir:
+    #!/usr/bin/env bash
+    if claudine claude --yolo --compose "{{base_dir}}/feature.md" --op "implement" --quiet; then
+            just _speak "The implementation for the {{feat}} feature is complete"
+            echo
+            echo -e "🎉 The implementation for the {{feat}} feature is complete"
+            echo -e "🏃 Committing all changes from the implementation"
+            echo
+            just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+            if claudine opencode --compose "{{base_dir}}/feature.md" --op "commit" --quiet; then
+                echo
+                echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
+                just _speak "The file changes from the implementation of {{feat}} have been committed"
+                echo -e "🏃 starting the review process of the {{feat}} implementation"
+                echo
+                just _feature_stage "{{feat}}" "{{base_dir}}" "review"
+                if claudine gemini --yolo --compose "{{base_dir}}/feature.md" --op "review" --quiet; then
+                    echo
+                    echo -e "🎉 The review of {{feat}} has been completed"
+                    just _speak "The review of {{feat}} has been completed"
+                    echo -e "🏃 Starting the implementation of the review recommendations for {{feat}}"
+                    echo
+                    just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
+                    if claudine claude --yolo --compose "{{base_dir}}/feature.md" --op "review-suggestions" --quiet; then
+                        echo
+                        echo -e "🎉 The review comments for {{feat}} have been implemented"
+                        just _speak "The review comments for {{feat}} have been implemented"
+                        echo -e "🏃 Committing the file changes due to the review comments of {{feat}} being implemented"
+                        echo
+                        just _feature_stage "{{feat}}" "{{base_dir}}" "commit-review"
+
+                    else
+                        just _speak "Failed to complete the implementation of review suggestions for {{feat}}!"
+                        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to complete the implementation of review suggestions for {{feat}}!"
+                        exit 1
+                    fi
+                else
+                    just _speak "Failed to finish the review of the {{feat}} implementation!"
+                    echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to finish the review of the {{feat}} implementation!!"
+                    exit 1
+                fi
+            else
+                just _speak "Failed to commit the file changes from the {{feat}} implementation!"
+                echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the file changes from the {{feat}} implementation!"
+                exit 1
+            fi
+        else
+            just _speak "Failed while implementing the {{feat}} feature!"
+            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while implementing the {{feat}} feature!"
+            exit 1
+        fi
+
+_feature_plan feat base_dir:
+    #!/usr/bin/env bash
+    echo -e "🏃 Starting the planning process for the {{feat}} feature"
+    echo
+    just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
+    if claudine claude --yolo --compose "{{base_dir}}/feature.md" --op "plan" --quiet; then
+        echo -e "🎉 The plan for the {{feat}} feature has been created"
+        echo -e "🏃 Starting the implementation for the {{feat}} feature"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
+        just _feature_implement "{{feat}}" "{{base_dir}}"
+    else
+        just _speak "Failed to create the planning document for the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the planning document for the {{feat}} feature!"
+    fi
+
+_feature_recover feat base_dir:
+    #!/usr/bin/env bash
+    echo -e "🏥 trying to recover from error so generation of the '{{feat}}' feature may continue"
+    case "$(md get "{{base_dir}}/feature.md" stage --raw)" in
+        plan)
+            echo "plan recovery"
+            exit
+            ;;
+        implement)
+            echo "implement recovery"
+            exit
+            ;;
+        commit-implement)
+            echo "commit implementation recovery"
+            exit
+            ;;
+    esac
+    echo "no match"
+    exit 1
+
+
 
 # actually start the generation process
 _feature_gen feat base_dir:
     #!/usr/bin/env bash
     echo
-    exit 0
-    if $(sniff repo is-current-package-areas-dirty); then
+    if $(sniff repo is-current-package-area-dirty); then
         cd "$(sniff repo package-area-root)" && git add .
         echo -e "- staged all files in the {{BOLD}}$(sniff repo package-area){{RESET}} package area for commit"
         # claudine opencode --compose "@/prompts/commit.md" --op "commit"
@@ -255,80 +343,48 @@ _feature_gen feat base_dir:
     fi
     echo
     echo -e "🏃 Starting the feature generation for {{BOLD}}{{feat}}{{RESET}}"
-    echo
-    if claudine codex --yolo --compose "{{base_dir}}/prompt.md" --op "tech-design"; then
-        just _speak "The tech design document for the {{feat}} feature has been created"
-        echo
-        echo -e "🎉 The design document for the {{feat}} feature has been created"
-        echo -e "🏃 Starting the planning for the {{feat}} feature"
-        md "@prompts/feature-prompts/overview.md"
-        echo
+    if [ -f "{{base_dir}}/tech-design.md"  ]; then
+        echo -e "🧐 the tech design document for the {{feat}} feature has already been generated"
         just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
-        if claudine claude --compose --yolo "{{base_dir}}/prompt.md" --op "plan"; then
-            echo -e "🎉 The plan for the {{feat}} feature has been created"
-            echo -e "🏃 Starting the implementation for the {{feat}} feature"
-            just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
-            if claudine claude --yolo --compose "{{base_dir}}/prompt.md" --op "implement"; then
-                just _speak "The implementation for the {{feat}} feature is complete"
-                echo
-                echo -e "🎉 The implementation for the {{feat}} feature is complete"
-                echo -e "🏃 Committing all changes from the implementation"
-                echo
-                just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
-                if claudine opencode --compose "{{base_dir}}/prompt.md" --op "commit"; then
-                    echo
-                    echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
-                    just _speak "The file changes from the implementation of {{feat}} have been committed"
-                    echo -e "🏃 starting the review process of the {{feat}} implementation"
-                    echo
-                    just _feature_stage "{{feat}}" "{{base_dir}}" "review"
-                    if claudine gemini --yolo --compose "{{base_dir}}/prompt.md" --op "review"; then
-                        echo
-                        echo -e "🎉 The review of {{feat}} has been completed"
-                        just _speak "The review of {{feat}} has been completed"
-                        echo -e "🏃 Starting the implementation of the review recommendations for {{feat}}"
-                        echo
-                        just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
-                        if claudine claude --compose "{{base_dir}}/feature.md" --op "review-suggestions"; then
-                            echo
-                            echo -e "🎉 The review comments for {{feat}} have been implemented"
-                            just _speak "The review comments for {{feat}} have been implemented"
-                            echo -e "🏃 Committing the file changes due to the review comments of {{feat}} being implemented"
-                            echo
-                            just _feature_stage "{{feat}}" "{{base_dir}}" "commit-review"
-
-                        else
-                            just _speak "Failed to complete the implementation of review suggestions for {{feat}}!"
-                            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to complete the implementation of review suggestions for {{feat}}!"
-                        fi
-                    else
-                        just _speak "Failed to finish the review of the {{feat}} implementation!"
-                        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to finish the review of the {{feat}} implementation!!"
-                    fi
-                else
-                    just _speak "Failed to commit the file changes from the {{feat}} implementation!"
-                    echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the file changes from the {{feat}} implementation!"
-                fi
+        if [ -f "{{base_dir}}/plan.md" ]; then
+            echo -e "🧐 the {{BOLD}}plan{{RESET}} for the {{feat}} feature has been generated"
+            echo
+            if [[ $(md get "{{base_dir}}/feature.md" error) == "true" ]]; then
+                just _feature_recover "{{feat}}" "{{base_dir}}"
             else
-                just _speak "Failed while implementing the {{feat}} feature!"
-                echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while implementing the {{feat}} feature!"
+                echo -e "Unknown state; exiting..."
+                exit 1
             fi
         else
-            just _speak "Failed to create the planning document for the {{feat}} feature!"
-            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the planning document for the {{feat}} feature!"
+            just _feature_plan "{{feat}}" "{{base_dir}}"
         fi
     else
-        just _speak "Failed to create the design document for the {{feat}} feature!"
-        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the design document for the {{feat}} feature!"
+        if claudine codex --yolo --compose "{{base_dir}}/feature.md" --op "tech-design"; then
+            just _speak "The tech design document for the {{feat}} feature has been created"
+            echo
+            echo -e "🎉 The design document for the {{feat}} feature has been created"
+            if [[ $(md get "{{base_dir}}/feature.md" error) == "true" ]]; then
+                just_recover "{{feat}}" "{{base_dir}}"
+                exit
+            fi
+            echo -e "🏃 Starting the planning for the {{feat}} feature"
+            echo
+            just _feature_stage "{{feat}}" "{{base_dir}}" "plan"
+            just _feature_plan "{{feat}}" "{{base_dir}}"
+        else
+            just _speak "Failed to create the design document for the {{feat}} feature!"
+            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the design document for the {{feat}} feature!"
+        fi
     fi
 
 # ensure we have tracking file and are ready to start
 _feature feat base_dir:
     #!/usr/bin/env bash
     echo -e "- the feature {{BOLD}}{{feat}}{{RESET}} has a {{ITALIC}}specification{{RESET}} file [{{DIM}}spec.md{{RESET}}]"
+
     if [ -f "{{base_dir}}/feature.md" ]; then
         echo -e "- the tracking feature file exists and is in the {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} [{{DIM}}feature.md{{RESET}}]"
-        just _feature_gen "{{feat}}" "{base_dir}"
+        just _feature_gen "{{feat}}" "{{base_dir}}"
     else
         echo -e "- the feature tracking file is missing [{{DIM}}feature.md{{RESET}}]"
         if [ -f "{{base_dir}}/tech-design.md" ]; then
@@ -337,11 +393,11 @@ _feature feat base_dir:
             echo
             exit 1
         else
-            # start from beginning
-            echo -e "- no Tech Design document so must be at the start of the process"
-            md compose "@prompts/feature.md" --fm  --state '{ base_dir: "{{base_dir}}", feature: "{{feat}}" }'  > "{{base_dir}}/feature.md"
-            echo -e "- generated a tracking file for the {{BOLD}}{{feat}}{{RESET}} feature [{{DIM}}feature.md{{RESET}}]"
-            just _feature_gen "{{feat}}" "{base_dir}"
+            if [[ $(md get "{{base_dir}}/feature.md" error) == "true" ]]; then
+                just _feature_recover "{{feat}}" "{{base_dir}}"
+            else
+                just _feature_gen "{{feat}}" "{{base_dir}}"
+            fi
         fi
     fi
 
@@ -360,6 +416,11 @@ _feature_spec feat base_dir:
 # add a feature to this package area
 feature feat:
     #!/usr/bin/env bash
+    if [[ $(md get "$(sniff repo package-area-root)/features/{{feat}}/feature.md" error) == "true" ]]; then
+        echo -e "⚠️ this feature -- {{ITALIC}}which was in the {{BOLD}}$(md get "$(sniff repo package-area-root)/features/{{feat}}/feature.md" stage){{RESET}}{{ITALIC}} stage {{RESET}}-- is in an error state"
+        just _feature_recover "{{feat}}" "$(sniff repo package-area-root)/features/{{feat}}"
+        exit
+    fi
     echo
     if [ -f "$(sniff repo package-area-root)/features/{{feat}}/spec.md" ]; then
         just _feature "{{feat}}" "$(sniff repo package-area-root)/features/{{feat}}"
