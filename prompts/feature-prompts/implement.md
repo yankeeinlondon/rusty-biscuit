@@ -4,6 +4,9 @@ You must act as an **Orchestrator** while implementing the plan found in `{{base
 
 Your job is to coordinate subagents — you should NOT write implementation code yourself. Read the plan, identify phases, and delegate.
 
+::file @prompts/feature-prompts/error.md when="error == true"
+
+
 #### Step 1: Read and Understand the Plan
 
 1. Read `{{base_dir}}/plan.md` in full

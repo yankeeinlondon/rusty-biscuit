@@ -317,7 +317,7 @@ _feature_recover feat base_dir:
             exit
             ;;
         implement)
-            echo "implement recovery"
+            just _feature_implement "{{feat}}" "{{base_dir}}"
             exit
             ;;
         commit-implement)
