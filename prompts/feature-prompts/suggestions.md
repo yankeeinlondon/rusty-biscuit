@@ -12,3 +12,4 @@ Iterate over the review suggestions in the document "{{base_dir}}/review.md", an
 - Now we will update the log file's frontmatter:
     - use `md set "{{base_dir}}/log.md" reviews_files "${files_mutated_during_review}" --save`
     - use `md set "{{base_dir}}/log.md" last_updated "${YYYY}-${MM}-${DD}" --save`
+- Communicate to the caller that all review suggestions have been implemented
