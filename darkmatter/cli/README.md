@@ -78,8 +78,14 @@ md -v delta original.md updated.md
 # Compose a document through the markdown pipeline
 md compose README.md
 
-# Compose with initial state (must be a JSON object)
+# Provide default values (fills null/missing keys, preserves existing)
 md compose README.md --state '{"name":"Alice","env":"prod"}'
+
+# JSON5 is also accepted (unquoted keys, trailing commas)
+md compose README.md --state '{name: "Alice", env: "prod"}'
+
+# Include frontmatter in output
+md compose README.md --fm
 
 # Compose from stdin
 echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
@@ -87,6 +93,22 @@ echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
 # Render compose output as HTML or JSON
 md compose README.md --output html
 md compose README.md --output json
+```
+
+### Frontmatter Set
+
+```bash
+# Set a property (outputs modified document to stdout, file unchanged)
+md set doc.md title "New Title"
+
+# Save in place (no output)
+md set doc.md title "New Title" --save
+
+# Chain via pipes
+md set doc.md title "New Title" | md set - version 2
+
+# Compose and set in a pipeline
+md compose "@prompts/feature.md" --fm | md set - feature "auth" | md set - base_dir "./features/auth"
 ```
 
 ### Document Cleanup
@@ -111,7 +133,7 @@ md clean README.md --save -v
 md README.md --save
 ```
 
-Frontmatter mutation flags were removed from the CLI; composition uses frontmatter as pipeline input and outputs the composed document content.
+Frontmatter manipulation is available through `md set` (modify individual properties) and `md compose --fm` (output frontmatter with composed content). The `--state` flag on `compose` fills in null/missing frontmatter keys with default values.
 
 ### Theming and Rendering Options
 
