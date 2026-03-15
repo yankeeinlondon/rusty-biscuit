@@ -13,6 +13,7 @@ use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
+use std::process::Command;
 
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     let mut conflicts = Vec::new();
@@ -104,6 +105,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             value,
         } => {
             run_set(&input, &prop, &value)?;
+        }
+        CliCommand::Edit { file } => {
+            run_edit(&file)?;
         }
         CliCommand::Hash {
             input,
@@ -380,6 +384,164 @@ fn format_value(value: &serde_json::Value, json5: bool, yaml: bool, toml: bool) 
         // Default: JSON
         Ok(serde_json::to_string_pretty(value)?)
     }
+}
+
+/// Default editor priority when neither `$EDITOR` nor `$VISUAL` resolve to an
+/// installed binary. Ordered from most capable/modern to most basic.
+const DEFAULT_EDITOR_PRIORITY: &[sniff::programs::Editor] = &[
+    sniff::programs::Editor::Neovim,
+    sniff::programs::Editor::Helix,
+    sniff::programs::Editor::Vim,
+    sniff::programs::Editor::Zed,
+    sniff::programs::Editor::VSCode,
+    sniff::programs::Editor::VSCodium,
+    sniff::programs::Editor::Sublime,
+    sniff::programs::Editor::Micro,
+    sniff::programs::Editor::Kakoune,
+    sniff::programs::Editor::Emacs,
+    sniff::programs::Editor::Lapce,
+    sniff::programs::Editor::TextMate,
+    sniff::programs::Editor::BBEdit,
+    sniff::programs::Editor::Kate,
+    sniff::programs::Editor::Geany,
+    sniff::programs::Editor::Nano,
+    sniff::programs::Editor::Vi,
+    sniff::programs::Editor::Amp,
+    sniff::programs::Editor::XEmacs,
+    sniff::programs::Editor::PhpStorm,
+    sniff::programs::Editor::IntellijIdea,
+    sniff::programs::Editor::PyCharm,
+    sniff::programs::Editor::WebStorm,
+    sniff::programs::Editor::CLion,
+    sniff::programs::Editor::GoLand,
+    sniff::programs::Editor::Rider,
+];
+
+/// Open a file in the user's preferred editor, blocking until the editor exits.
+///
+/// Resolves the file path using biscuit-file's `FileReference` system. Creates the
+/// file if it doesn't exist. After the editor exits, validates that the file exists
+/// and is non-empty (after trimming whitespace). Prints the fully qualified path on
+/// success.
+pub fn run_edit(raw_file: &str) -> Result<()> {
+    use biscuit_file::FileReference;
+
+    // --- Resolve the file path ---
+    let path = match FileReference::new(raw_file) {
+        Ok(file_ref) => {
+            let resolved = file_ref
+                .resolve()
+                .wrap_err("Failed to resolve file reference")?;
+            match resolved {
+                Some(p) => p,
+                None => {
+                    // FileReference couldn't resolve it — treat raw input as a
+                    // relative path (may not exist yet, which is fine).
+                    std::env::current_dir()
+                        .wrap_err("Failed to get current directory")?
+                        .join(raw_file)
+                }
+            }
+        }
+        Err(_) => {
+            // Not a valid file reference syntax — treat as plain path.
+            let p = PathBuf::from(raw_file);
+            if p.is_absolute() {
+                p
+            } else {
+                std::env::current_dir()
+                    .wrap_err("Failed to get current directory")?
+                    .join(raw_file)
+            }
+        }
+    };
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .wrap_err_with(|| format!("Failed to create directory: {}", parent.display()))?;
+        }
+    }
+
+    // Create the file if it doesn't exist
+    if !path.exists() {
+        std::fs::write(&path, "")
+            .wrap_err_with(|| format!("Failed to create file: {}", path.display()))?;
+    }
+
+    // --- Select the editor ---
+    let editor_cmd = resolve_editor_command()?;
+
+    // --- Launch the editor ---
+    let canonical = path
+        .canonicalize()
+        .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
+
+    let status = Command::new(&editor_cmd)
+        .arg(&canonical)
+        .status()
+        .wrap_err_with(|| format!("Failed to launch editor: {}", editor_cmd))?;
+
+    if !status.success() {
+        return Err(eyre!(
+            "Editor exited with non-zero status: {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    // --- Validate the result ---
+    if !canonical.exists() {
+        return Err(eyre!("File was deleted during editing: {}", canonical.display()));
+    }
+
+    let content = std::fs::read_to_string(&canonical)
+        .wrap_err_with(|| format!("Failed to read file after editing: {}", canonical.display()))?;
+
+    if content.trim().is_empty() {
+        return Err(eyre!("File is empty after editing: {}", canonical.display()));
+    }
+
+    // Output the fully qualified filename
+    println!("{}", canonical.display());
+
+    Ok(())
+}
+
+/// Resolve the editor command to use, checking (in order):
+/// 1. `$EDITOR` environment variable
+/// 2. `$VISUAL` environment variable
+/// 3. First installed editor from `DEFAULT_EDITOR_PRIORITY`
+fn resolve_editor_command() -> Result<String> {
+    use sniff::programs::{ProgramMetadata, find_program};
+
+    // Check $EDITOR
+    if let Ok(editor) = std::env::var("EDITOR") {
+        let cmd = editor.split_whitespace().next().unwrap_or(&editor);
+        if find_program(cmd).is_some() {
+            return Ok(editor);
+        }
+    }
+
+    // Check $VISUAL
+    if let Ok(visual) = std::env::var("VISUAL") {
+        let cmd = visual.split_whitespace().next().unwrap_or(&visual);
+        if find_program(cmd).is_some() {
+            return Ok(visual);
+        }
+    }
+
+    // Fall back to default priority list
+    let editors = sniff::programs::InstalledEditors::new();
+    for &editor in DEFAULT_EDITOR_PRIORITY {
+        if editors.is_installed(editor) {
+            return Ok(editor.binary_name().to_string());
+        }
+    }
+
+    Err(eyre!(
+        "No editor found. Set $EDITOR or $VISUAL, or install one of: nvim, vim, code, nano"
+    ))
 }
 
 /// Hash a markdown document's frontmatter and/or body.

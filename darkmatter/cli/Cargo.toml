@@ -19,8 +19,9 @@ path = "src/main.rs"
 
 [dependencies]
 darkmatter = { path = "../lib" }
-biscuit-file = { path = "../../biscuit-file/lib", features = ["json5", "yaml", "toml"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["json5", "yaml", "toml", "file-reference"] }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
+sniff = { path = "../../sniff/lib" }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 color-eyre = "0.6"

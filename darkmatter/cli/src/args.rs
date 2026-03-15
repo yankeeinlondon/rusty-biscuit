@@ -142,6 +142,19 @@ pub enum Command {
         value: String,
     },
 
+    /// Open a markdown file in your preferred editor.
+    ///
+    /// Resolves the file using biscuit-file's FileReference system (supports `@`, `!`,
+    /// `vault:`, etc.). Creates the file if it doesn't exist. Blocks until the editor
+    /// exits. Returns the fully qualified filename on success.
+    ///
+    /// Editor priority: $EDITOR > $VISUAL > first installed from default list.
+    Edit {
+        /// File path or reference to edit
+        #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]
+        file: String,
+    },
+
     /// Hash a markdown document's frontmatter and body.
     Hash {
         /// Input file path (use "-" for stdin)
