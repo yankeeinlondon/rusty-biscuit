@@ -55,7 +55,7 @@ prompt: |-
     - research other examples online and fill in any other missing details not self-evident from the example data
     - determine how best to feed the metadata to logging and non-interactive sessions.
 
-last_update: 2026-03-16
+last_updated: 2026-03-16
 ---
 # Qwen CLI's JSON Output
 
