@@ -292,25 +292,70 @@ pub fn run_compose(
     options = options.with_shell(shell_opts);
 
     let (transformed, _report) = md.transform_with(options).map_err(|e| {
-        if let darkmatter::markdown::MarkdownError::ShellExpansion(
-            darkmatter::markdown::transform::ShellExpansionError::ApprovalRequired {
+        use darkmatter::markdown::MarkdownError::ShellExpansion;
+        use darkmatter::markdown::transform::ShellExpansionError;
+
+        match &e {
+            ShellExpansion(ShellExpansionError::ApprovalRequired {
                 command,
                 whitelist_path,
                 ..
-            },
-        ) = &e
-        {
-            // Extract the executable (first token before space) for the prefix entry
-            let executable = command.split_whitespace().next().unwrap_or(command);
-            eyre!(
-                "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+            }) => {
+                let executable = command.split_whitespace().next().unwrap_or(command);
+                eyre!(
+                    "Approval required for '{command}'.\n\
+                     To allow in non-interactive mode, add one of these to {}:\n  \
+                     exact {command}\n  \
+                     prefix {executable}",
+                    whitelist_path.display(),
+                )
+            }
+            ShellExpansion(ShellExpansionError::ExecutionFailed {
                 command,
-                whitelist_path.display(),
+                code,
+                stderr,
+                line,
+                ..
+            }) => {
+                let detail = stderr.trim();
+                if detail.is_empty() {
+                    eyre!(
+                        "Shell command failed (exit {code}) on line {line}: '{command}'"
+                    )
+                } else {
+                    eyre!(
+                        "Shell command failed (exit {code}) on line {line}: '{command}'\n{detail}"
+                    )
+                }
+            }
+            ShellExpansion(ShellExpansionError::CommandNotFound { command, line }) => {
+                eyre!(
+                    "Command not found: '{command}' (line {line})\n\
+                     Ensure '{command}' is installed and available on your PATH."
+                )
+            }
+            ShellExpansion(ShellExpansionError::Timeout {
                 command,
-                executable
-            )
-        } else {
-            eyre!("Transform failed: {}", e)
+                timeout,
+                line,
+            }) => {
+                eyre!(
+                    "Shell command timed out after {timeout:?} on line {line}: '{command}'"
+                )
+            }
+            ShellExpansion(ShellExpansionError::Blacklisted {
+                command,
+                reason,
+                line,
+            }) => {
+                eyre!(
+                    "Blocked command on line {line}: '{command}'\nReason: {reason}"
+                )
+            }
+            ShellExpansion(ShellExpansionError::Denied { command, line }) => {
+                eyre!("Command denied on line {line}: '{command}'")
+            }
+            _ => eyre!("{e}"),
         }
     })?;
 

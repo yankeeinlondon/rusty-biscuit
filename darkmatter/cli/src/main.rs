@@ -1,3 +1,6 @@
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::Result;
@@ -50,11 +53,46 @@ fn init_tracing(verbose: u8) {
         .init();
 }
 
-fn main() -> Result<()> {
-    color_eyre::install()?;
-
-    // Handle dynamic shell completions (invoked by shell completion scripts)
+fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
+
+    if let Err(e) = run() {
+        // Deduplicate chain: skip causes whose message is already contained in a prior message.
+        let top = e.to_string();
+        let mut seen = top.clone();
+        let causes: Vec<String> = e
+            .chain()
+            .skip(1)
+            .filter_map(|c| {
+                let msg = c.to_string();
+                if seen.contains(&msg) {
+                    None
+                } else {
+                    seen.push_str(&msg);
+                    Some(msg)
+                }
+            })
+            .collect();
+        let msg = if causes.is_empty() {
+            format!("<red><b>Error:</b></red> {top}")
+        } else {
+            format!(
+                "<red><b>Error:</b></red> {top}\n       {}",
+                causes
+                    .iter()
+                    .map(|c| format!("<dim>▸</dim> {c}"))
+                    .collect::<Vec<_>>()
+                    .join("\n       ")
+            )
+        };
+        let terminal = Terminal::default();
+        eprintln!("{}", Prose::new(msg).render(&terminal));
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    color_eyre::install()?;
 
     let cli = Cli::parse();
     init_tracing(cli.verbose);
