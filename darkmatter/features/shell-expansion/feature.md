@@ -1,6 +1,5 @@
 ---
-stage: implement
-error: true
+stage: commit-implement
 feature: shell-expansion
 base_dir: /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion
 ---

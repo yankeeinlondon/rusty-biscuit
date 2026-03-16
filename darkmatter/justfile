@@ -425,7 +425,7 @@ feature feat:
     if [ -f "$(sniff repo package-area-root)/features/{{feat}}/spec.md" ]; then
         just _feature "{{feat}}" "$(sniff repo package-area-root)/features/{{feat}}"
     else
-        just _feature_spec feat "$(sniff repo package-area-root)/features/{{feat}}"
+        just _feature_spec "{{feat}}" "$(sniff repo package-area-root)/features/{{feat}}"
     fi
 
 # Install the CLI
