@@ -3,7 +3,7 @@
 We have just implemented the "{{feature}}" feature and all tests are passing but your task is now to review the implementation and make sure that it has faithfully implemented everything described in:
 
 - [The Functional Specification]({{base_dir}}/spec.md)
-- [The Technical Design]({{base_dir}}/spec.md)
+- [The Technical Design]({{base_dir}}/tech-design.md)
 
 During your review you should:
 

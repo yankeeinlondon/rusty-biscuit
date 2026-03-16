@@ -463,9 +463,9 @@ This is a Rust workspace with the following modules:
 
     _Tags: filesystem, directory, traversal_
 
-- [which](https://github.com/harryfei/which-rs) _v8.0_ [📄](https://docs.rs/which)
+- [which](https://github.com/harryfei/which-rs) _v7.0_ [📄](https://docs.rs/which)
 
-    _Find executable binaries in PATH, similar to Unix which command. Supports regex pattern matching._
+    _Find executable binaries in PATH, similar to the Unix `which` command._
 
     _Tags: path, executable, search_
 

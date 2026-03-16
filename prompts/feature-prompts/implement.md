@@ -1,56 +1,63 @@
 ### Implement the Plan
 
-You must act as an **Orchestrator** while implementing the plan found in `{{base_dir}}/plan.md`.
-
-Your job is to coordinate subagents — you should NOT write implementation code yourself. Read the plan, identify phases, and delegate.
+Implement the plan found in `{{base_dir}}/plan.md` directly. You are writing the code yourself — do not attempt to delegate to subagents.
 
 ::file @prompts/feature-prompts/error.md when="error == true"
 
+#### Step 0: Mark Implementation as In-Progress
+
+```bash
+md set "{{base_dir}}/log.md" implement_complete false --save
+```
 
 #### Step 1: Read and Understand the Plan
 
 1. Read `{{base_dir}}/plan.md` in full
-2. Identify whether the plan has multiple phases or is single-phase
-3. Note inter-phase dependencies (most phases are sequential)
+2. Read `{{base_dir}}/tech-design.md` for architectural context
+3. Read `{{base_dir}}/spec.md` for the functional requirements
+4. Identify the phases and their ordering — execute them sequentially
 
-#### Step 2: Execute Phases
+#### Step 2: Implement Each Phase
 
-For each phase in the plan:
+For each phase in the plan, implement every task in order:
 
-1. **Print a status line** to the caller: `Starting Phase N: <phase title>`
-2. **Spawn a single subagent** for that phase with a prompt that includes:
-    - The phase title and number
-    - **Only the tasks for that phase** — copy/paste the relevant section from the plan, do NOT send the entire plan
-    - The feature directory: `{{base_dir}}`
-    - Instruction: "Implement all tasks in this phase. After each task, verify the code compiles with `cargo check -p <package>`. Report back which files you created or modified."
-3. **Wait for the subagent to complete** before starting the next phase (unless the plan explicitly says phases can run in parallel)
-4. **Print a status line**: `Phase N complete. Files changed: <list>`
+1. **Print a status line**: `Starting Phase N: <phase title>`
+2. For each task in the phase:
+    - Read any existing files you need to modify
+    - Write the implementation code
+    - After each task, verify the code compiles: `cargo check -p <package>`
+    - If compilation fails, fix the errors before moving to the next task
+3. **Print a status line**: `Phase N complete. Files changed: <list>`
+4. **Append to the log file** (`{{base_dir}}/log.md`) after each phase:
+    - Heading: `### Phase N: <phase title>`
+    - A brief summary of what was implemented
+    - List the files created or modified
+    - Note any compilation issues encountered and how they were resolved
 
-If a phase subagent fails or reports it cannot complete a task, STOP and report the failure to the caller with the subagent's error details. Do not proceed to the next phase.
+If a task cannot be completed, log what was accomplished so far, then STOP and report the failure with details. Do not proceed to the next phase.
 
 #### Step 3: Run Tests
 
 After ALL phases are complete:
 
-1. Run `sniff repo dirty-packages` to identify affected package areas
-2. For each affected package area, **spawn a test subagent** (these CAN run in parallel) with:
-    - The package area name
-    - The package area root directory (run `sniff repo package-area-root <area>`)
-    - Instruction: "Run `just test` in `<root_dir>`. If tests fail, read the failing test code and fix the IMPLEMENTATION (never modify tests). You have 3 attempts. Report: pass/fail, which tests failed, what you changed."
-    - **Tests MUST NOT be changed.** If a test appears to be a bug in a different package, note it but do NOT skip it without strong justification.
-3. Collect all test subagent results
-4. If any test subagent reports failure after 3 attempts, report the details to STDERR
+1. Run `just test` from the package area root to run all tests
+2. If tests fail, read the failing test code and fix the **implementation** (never modify tests)
+3. You have 3 attempts to fix failing tests
+4. If tests still fail after 3 attempts, report the details to STDERR
+
+**Tests MUST NOT be changed.** If a test appears to be a bug in a different package, note it but do NOT skip it without strong justification.
 
 #### Step 4: Log and Report
 
-1. Append a summary to `{{base_dir}}/log.md`:
-    - Heading: `## Implementation of {{feature}}`
-    - A few bullets summarizing what was done
-    - Note any test failures or issues
-2. Set the `implementation_files` frontmatter:
+1. Append a final summary to `{{base_dir}}/log.md`:
+    - Heading: `## Implementation of {{feature}} Complete`
+    - Overall status (all phases completed, test results)
+    - Note any test failures or unresolved issues
+2. Set frontmatter on the log file:
 
     ```bash
     md set "{{base_dir}}/log.md" implementation_files "${files}" --save
+    md set "{{base_dir}}/log.md" implement_complete true --save
     ```
 
 3. Communicate to the caller: implementation complete, test status, and any caveats
