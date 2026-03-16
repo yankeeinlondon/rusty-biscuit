@@ -178,7 +178,7 @@ pub struct TransformOptions {
 ```rust
 pub struct ShellExpansionOptions {
     pub timeout: std::time::Duration,
-    pub policy_dir: Option<std::path::PathBuf>,
+    pub policy_root: Option<std::path::PathBuf>,
     pub working_directory: Option<std::path::PathBuf>,
     pub approval_handler: Option<std::sync::Arc<dyn ShellApprovalHandler>>,
 }
@@ -187,15 +187,17 @@ pub struct ShellExpansionOptions {
 Defaults:
 
 - `timeout = 10s`
-- `policy_dir = None`
+- `policy_root = None`
 - `working_directory = None`
 - `approval_handler = None`
 
 Meaning:
 
-1. `policy_dir` overrides where repo detection starts for `.shell-whitelist` and `.shell-blacklist`
+1. `policy_root` overrides where `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist` are resolved
 2. `working_directory` overrides the process cwd used when executing approved commands
 3. `approval_handler = None` means the library errors with `ApprovalRequired` instead of prompting
+
+`policy_root` is a better name than `policy_dir` because the resolution target is the root directory that contains the policy files.
 
 ### Approval callback
 
@@ -458,8 +460,8 @@ The approval flow includes "blacklist", which means the implementation needs per
 
 Add a sibling policy file:
 
-- repo mode: `<repo root>/.shell-blacklist`
-- home mode: `${HOME}/.shell-blacklist`
+- repo mode: `<repo root>/.darkmatter-shell-blacklist`
+- home mode: `${HOME}/.darkmatter-shell-blacklist`
 
 User blacklist entries are checked after the built-in blacklist and before whitelist checks.
 
@@ -469,15 +471,16 @@ User blacklist entries are checked after the built-in blacklist and before white
 
 Resolve policy files this way:
 
-1. start from `options.shell.policy_dir` if set
-2. otherwise use `std::env::current_dir()`
-3. if that path is inside a git repo, use the repo root
-4. otherwise use `${HOME}`
+1. start from `options.shell.policy_root` if set
+2. otherwise use the source file's parent directory when composing from a file
+3. otherwise use `std::env::current_dir()`
+4. if that path is inside a git repo, use the repo root
+5. otherwise use `${HOME}`
 
 Policy file paths:
 
-- whitelist: `.shell-whitelist`
-- blacklist: `.shell-blacklist`
+- whitelist: `.darkmatter-shell-whitelist`
+- blacklist: `.darkmatter-shell-blacklist`
 
 This follows the functional spec for whitelist resolution and adds the minimal extra file needed to support runtime blacklisting.
 
@@ -538,13 +541,13 @@ The library never prompts directly.
 
 `AllowExactPersist`
 
-1. append `exact <normalized command line>` to `.shell-whitelist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-whitelist`
 2. reload or update in-memory whitelist
 3. execute the command
 
 `AllowCommandPersist`
 
-1. append `prefix <executable>` to `.shell-whitelist`
+1. append `prefix <executable>` to `.darkmatter-shell-whitelist`
 2. reload or update in-memory whitelist
 3. execute the command
 
@@ -561,7 +564,7 @@ The library never prompts directly.
 
 `BlacklistPersist`
 
-1. append `exact <normalized command line>` to `.shell-blacklist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-blacklist`
 2. update in-memory user blacklist
 3. return a hard error
 
@@ -590,8 +593,9 @@ This is important for `md compose -` and pipe-driven workflows, where stdin is a
 Use this resolution order:
 
 1. `options.shell.working_directory`, if set
-2. `options.shell.policy_dir`, if set
-3. `std::env::current_dir()`
+2. source file parent directory when composing from a file
+3. `options.shell.policy_root`, if set
+4. `std::env::current_dir()`
 
 This keeps command execution and policy lookup anchored to the same environment by default.
 

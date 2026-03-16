@@ -238,7 +238,11 @@ commit:
 
 _feature_stage feat base_dir stage:
     #!/usr/bin/env bash
-    echo -e "𝌡 switching the feature.md for {{BOLD}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
+    if [[ "$(md get "{{base_dir}}/feature.md" stage)" == "{{stage}}" ]]; then
+        echo -e "𝌡 re-applying the {{stage}} template to feature.md"
+    else
+        echo -e "𝌡 switching the feature.md for {{BOLD}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
+    fi
     md compose "@prompts/feature.md" --fm --set '{ base_dir: "{{base_dir}}", stage: "{{stage}}", feature: "{{feat}}" }' > "{{base_dir}}/feature.md"
 
 _feature_commit_implement feat base_dir:
@@ -251,6 +255,9 @@ _feature_commit_implement feat base_dir:
     if claudine opencode --yolo --compose "{{base_dir}}/feature.md" --op "commit" --quiet; then
         echo
         echo -e "🎉 The implementation files have been committed to git"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "review"
+        just _feature_review "{{feat}}" "{{base_dir}}"
+        exit
     else
         just _speak "Failed to commit the implementation file for the {{feat}} feature!"
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the implementation file for the {{feat}} feature!"
@@ -259,6 +266,11 @@ _feature_commit_implement feat base_dir:
 
 _feature_review feat base_dir:
     #!/usr/bin/env bash
+    if [[ $(md get "{{base_dir}}/feature.md" stage --raw) != "review" ]]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_review recipe was called but the stage was not set to 'review'!"
+        echo
+        exit 1
+    fi
     echo
     echo -e "🏃 Running a review on the {{feat}} feature"
     echo
@@ -268,6 +280,7 @@ _feature_review feat base_dir:
         echo -e "🎉 The review for the {{feat}} feature is complete: $(prose "<a href='{{base_dir}}/review.md'>Review Doc</a>")"
         just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
         just _feature_suggestions "{{feat}}" "{{base_dir}}"
+        exit
     else
         just _speak "Failed while running the review of the {{feat}} feature!"
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while running the review of the {{feat}} feature!"
@@ -276,7 +289,7 @@ _feature_review feat base_dir:
 
 _feature_suggestions feat base_dir:
     #!/usr/bin/env bash
-    if [[ $(md get "{{base_dir}}/feature.md" stage) != "suggestions" ]]; then
+    if [[ $(md get "{{base_dir}}/feature.md" stage --raw) != "suggestions" ]]; then
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_suggestions recipe was called but the stage was not set to 'suggestions'!"
         echo
         exit 1
@@ -284,7 +297,7 @@ _feature_suggestions feat base_dir:
     echo
     echo -e "🏃 Starting the implementation of the review suggestions for the {{feat}} feature"
     echo
-    if claudine gemini --yolo --compose "{{base_dir}}/feature.md" --op "implement-suggestions" --quiet; then
+    if claudine codex --yolo --compose "{{base_dir}}/feature.md" --op "implement-suggestions" --quiet; then
         just _speak "The review suggestions for the {{feat}} feature have been implemented"
         echo
         echo -e "🎉 The review suggestions for the {{feat}} feature have been implemented"
@@ -296,9 +309,10 @@ _feature_suggestions feat base_dir:
         exit 1
     fi
 
+
 _feature_commit_review feat base_dir:
     #!/usr/bin/env bash
-    if [[ $(md get "{{base_dir}}/feature.md" stage) != "commit-review" ]]; then
+    if [[ $(md get "{{base_dir}}/feature.md" stage --raw) != "commit-review" ]]; then
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_commit_review recipe was called but the stage was not set to 'commit-review'!"
         echo
         exit 1
@@ -324,7 +338,7 @@ _feature_commit_review feat base_dir:
 
 _feature_update_docs feat base_dir:
     #!/usr/bin/env bash
-        if [[ $(md get "{{base_dir}}/feature.md" stage) != "update-docs" ]]; then
+        if [[ $(md get "{{base_dir}}/feature.md" stage --raw) != "update-docs" ]]; then
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_update_docs recipe was called but the stage was not set to 'update_docs'!"
         echo
         exit 1
@@ -415,6 +429,20 @@ _feature_recover feat base_dir:
             just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
             md set "{{base_dir}}/feature.md" error true --save
             just _feature_commit_implement "{{feat}}" "{{base_dir}}"
+            exit
+            ;;
+        review)
+            echo -e "🏥 recovering to start the review again"
+            just _feature_stage "{{feat}}" "{{base_dir}}" "review"
+            md set "{{base_dir}}/feature.md" error true --save
+            just _feature_review "{{feat}}" "{{base_dir}}"
+            exit
+            ;;
+        suggestions)
+            echo -e "🏥 recovering to start the implementation of the review suggestions"
+            just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
+            md set "{{base_dir}}/feature.md" error true --save
+            just _feature_suggestions "{{feat}}" "{{base_dir}}"
             exit
             ;;
     esac

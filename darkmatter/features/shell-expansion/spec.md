@@ -222,7 +222,7 @@ Defaults:
 
 Meaning:
 
-1. `policy_dir` overrides where repo detection starts for `.shell-whitelist` and `.shell-blacklist`
+1. `policy_dir` overrides where repo detection starts for `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist`
 2. `working_directory` overrides the process cwd used when executing approved commands
 3. `approval_handler = None` means the library errors with `ApprovalRequired` instead of prompting
 
@@ -487,8 +487,8 @@ The approval flow includes "blacklist", which means the implementation needs per
 
 Add a sibling policy file:
 
-- repo mode: `<repo root>/.shell-blacklist`
-- home mode: `${HOME}/.shell-blacklist`
+- repo mode: `<repo root>/.darkmatter-shell-blacklist`
+- home mode: `${HOME}/.darkmatter-shell-blacklist`
 
 User blacklist entries are checked after the built-in blacklist and before whitelist checks.
 
@@ -505,8 +505,8 @@ Resolve policy files this way:
 
 Policy file paths:
 
-- whitelist: `.shell-whitelist`
-- blacklist: `.shell-blacklist`
+- whitelist: `.darkmatter-shell-whitelist`
+- blacklist: `.darkmatter-shell-blacklist`
 
 This follows the functional spec for whitelist resolution and adds the minimal extra file needed to support runtime blacklisting.
 
@@ -567,13 +567,13 @@ The library never prompts directly.
 
 `AllowExactPersist`
 
-1. append `exact <normalized command line>` to `.shell-whitelist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-whitelist`
 2. reload or update in-memory whitelist
 3. execute the command
 
 `AllowCommandPersist`
 
-1. append `prefix <executable>` to `.shell-whitelist`
+1. append `prefix <executable>` to `.darkmatter-shell-whitelist`
 2. reload or update in-memory whitelist
 3. execute the command
 
@@ -590,7 +590,7 @@ The library never prompts directly.
 
 `BlacklistPersist`
 
-1. append `exact <normalized command line>` to `.shell-blacklist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-blacklist`
 2. update in-memory user blacklist
 3. return a hard error
 

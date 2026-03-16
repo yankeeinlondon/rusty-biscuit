@@ -168,12 +168,14 @@ pub struct ShellRuleSet {
 }
 
 impl ShellRuleSet {
+    /// Returns `true` when `normalized` exactly matches a [`ShellRuleEntry::Exact`] rule.
     pub fn matches_exact(&self, normalized: &str) -> bool {
         self.entries
             .iter()
             .any(|e| matches!(e, ShellRuleEntry::Exact(s) if s == normalized))
     }
 
+    /// Returns `true` when `executable` matches a [`ShellRuleEntry::Prefix`] rule.
     pub fn matches_prefix(&self, executable: &str) -> bool {
         self.entries
             .iter()

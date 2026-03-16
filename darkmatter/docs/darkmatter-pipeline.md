@@ -27,10 +27,19 @@ The final stage of the Markdown processing will take the _composed_ output and r
 
 ### Operations Per Stage
 
+Stage 1 runs in a fixed order in the implementation:
+
+1. Text Replacement
+2. Interpolation
+3. TOC Linking
+4. Shell Expansion
+5. Cleanup
+6. Normalization
+
 | **Stage 1**: Preparation  | **Stage 2**: Transclusion |  **Stage 3**: Rendering    |
 | -------------             | -------------             |  ---------------           |
 | Text Replacement          | Block Transclusion        |  Table Rendering           |
-| FM Interpolation          | Frontmatter Transclusion  |  YouTube Embedding         |
+| Interpolation             | Frontmatter Transclusion  |  YouTube Embedding         |
 | TOC Linking               | Code Block Transclusion   |  Popover                   |
 | Shell Expansion           |                           |  List Expansion            |
 |                           | ▎AI: Prompt Expansion     |  Smart Image               |
@@ -38,7 +47,7 @@ The final stage of the Markdown processing will take the _composed_ output and r
 |                           | ▎AI: Consolidation        |  Disclosure Blocks         |
 |                           | ▎AI: Normalization        |  Block Columns             |
 |                           |                           |  Audio Content             |
-| Cleaning                  |                           |  Charting                  |
+| Cleanup                   |                           |  Charting                  |
 | Normalization             |                           |  Mermaid Rendering         |
 |                           |                           |  TOC Generation            |
 

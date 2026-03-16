@@ -6,6 +6,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use super::types::{ShellDirective, ShellExpansionError, ShellExpansionOptions};
@@ -143,8 +144,8 @@ pub fn execute_command(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process completed
-                let stdout_bytes = stdout_thread.join().unwrap_or_default();
-                let stderr_bytes = stderr_thread.join().unwrap_or_default();
+                let stdout_bytes = join_output_thread(stdout_thread, "stdout", directive)?;
+                let stderr_bytes = join_output_thread(stderr_thread, "stderr", directive)?;
                 let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -195,9 +196,34 @@ pub fn execute_command(
     }
 }
 
+fn join_output_thread(
+    handle: JoinHandle<Vec<u8>>,
+    stream_name: &str,
+    directive: &ShellDirective,
+) -> Result<Vec<u8>, ShellExpansionError> {
+    handle.join().map_err(|panic_payload| {
+        let detail = if let Some(message) = panic_payload.downcast_ref::<&str>() {
+            *message
+        } else if let Some(message) = panic_payload.downcast_ref::<String>() {
+            message.as_str()
+        } else {
+            "unknown panic payload"
+        };
+
+        ShellExpansionError::ExecutionFailed {
+            command: directive.raw_command.clone(),
+            code: -1,
+            stdout: String::new(),
+            stderr: format!("{stream_name} capture thread panicked: {detail}"),
+            line: directive.line,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -371,12 +397,65 @@ mod tests {
 
     #[test]
     fn stderr_is_captured_and_combined() {
-        // Use a command that writes to stderr
-        // `ls` on a non-existent file writes to stderr and exits non-zero
-        // But for this test, we want success + stderr, so use a different approach
-        // Use `echo` to stdout and simulate stderr (hard to do cross-platform)
-        // Alternative: use sh -c, but that's blacklisted
-        // Let's skip this test for now since it's hard to implement cross-platform
-        // The implementation already combines stdout and stderr in the success case
+        let Some(python) = find_python() else {
+            return;
+        };
+
+        let directive = ShellDirective {
+            raw_command: format!("{} -c ...", python.display()),
+            executable: python.to_string_lossy().to_string(),
+            args: vec![
+                "-c".to_string(),
+                "import sys; sys.stderr.write('oops'); sys.stdout.write('ok')".to_string(),
+            ],
+            span: 0..10,
+            line: 1,
+        };
+        let options = ShellExpansionOptions::default();
+        let source = TransformSource::Unknown;
+
+        let output = execute_command(&directive, &options, &source).unwrap();
+        assert_eq!(output, "ok\noops");
+    }
+
+    #[test]
+    fn join_output_thread_reports_panic() {
+        let directive = ShellDirective {
+            raw_command: "echo hello".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            span: 0..10,
+            line: 7,
+        };
+        let handle = std::thread::spawn(|| -> Vec<u8> {
+            panic!("boom");
+        });
+
+        let err = join_output_thread(handle, "stdout", &directive).unwrap_err();
+        match err {
+            ShellExpansionError::ExecutionFailed {
+                code, stderr, line, ..
+            } => {
+                assert_eq!(code, -1);
+                assert_eq!(line, 7);
+                assert!(stderr.contains("stdout capture thread panicked"));
+                assert!(stderr.contains("boom"));
+            }
+            other => panic!("Expected ExecutionFailed, got {other:?}"),
+        }
+    }
+
+    fn find_python() -> Option<PathBuf> {
+        ["python3", "python"]
+            .into_iter()
+            .find_map(|candidate| which::which(candidate).ok())
+            .filter(|path| !path.as_os_str().is_empty())
+    }
+
+    #[test]
+    fn find_python_returns_python_binary_when_available() {
+        if let Some(path) = find_python() {
+            assert_ne!(path.as_os_str(), OsStr::new(""));
+        }
     }
 }

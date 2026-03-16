@@ -28,6 +28,7 @@ This is likely a deliberate namespacing choice to avoid collisions, but it diver
 **Severity:** Medium
 
 The spec (section "CLI behavior") and tech design both require that when prompting is not possible, the error should include:
+
 1. The command
 2. The whitelist file path
 3. The exact `exact ...` and `prefix ...` entries the user can add manually
@@ -35,6 +36,7 @@ The spec (section "CLI behavior") and tech design both require that when prompti
 The current `ApprovalRequired` error includes the command and paths, but the CLI does not format the additional guidance about manual entries when displaying this error in non-interactive mode. Users piping through `md compose -` will get a generic error without actionable instructions.
 
 **Suggestion:** In the CLI error handler for `ApprovalRequired`, format a message like:
+
 ```
 To approve this command, add one of these lines to <whitelist_path>:
   exact <normalized_command>
@@ -60,6 +62,7 @@ The tokenizer correctly rejects `>>` and `||` because the single-character check
 **Severity:** Low
 
 The following public methods lack `///` doc comments:
+
 - `ShellRuleSet::matches_exact()`
 - `ShellRuleSet::matches_prefix()`
 
@@ -96,6 +99,7 @@ In `executor.rs`, stdout/stderr drain threads use `unwrap_or_default()` on join 
 **Severity:** Low
 
 The plan (Task 3.4) calls for:
+
 - Updating `docs/dependencies.md` with the `which` crate entry
 - Updating `darkmatter/docs/darkmatter-pipeline.md` with the new stage ordering
 
@@ -112,11 +116,13 @@ In `store.rs`, lines in policy files that don't match `exact <cmd>` or `prefix <
 ## Separation of Concerns
 
 **Library/CLI boundary is clean.** The library:
+
 - Owns all business logic (parsing, validation, blacklist, execution, policy management)
 - Never prompts directly
 - Exposes the `ShellApprovalHandler` trait for caller-owned prompting
 
 The CLI:
+
 - Implements `CliShellApprovalHandler` with terminal prompting
 - Detects interactive conditions (file input + terminal stdin/stderr)
 - Attaches the handler conditionally in `run_compose()`
@@ -149,14 +155,14 @@ This is well-architected and matches the design intent.
 
 ### Should Consider
 
-3. **Add `>>` and `||` tokenizer tests** (#4) — Low effort, improves confidence
-4. **Add doc comments to `ShellRuleSet` methods** (#5) — Project convention
-5. **Add `tracing::warn!` for malformed policy lines** (#10) — Debugging aid
-6. **Update pipeline docs** (#9) — Stage ordering documentation
+1. **Add `>>` and `||` tokenizer tests** (#4) — Low effort, improves confidence
+2. **Add doc comments to `ShellRuleSet` methods** (#5) — Project convention
+3. **Add `tracing::warn!` for malformed policy lines** (#10) — Debugging aid
+4. **Update pipeline docs** (#9) — Stage ordering documentation
 
 ### Nice to Have
 
-7. **Fix Windows line ending handling** (#3) — Edge case, unlikely on macOS
-8. **Add `append_blacklist_prefix()`** (#6) — API symmetry
-9. **Add allow-once recursive transclusion test** (#7.2)
-10. **Reconcile policy file naming** (#1) — Ensure spec and implementation agree
+1. **Fix Windows line ending handling** (#3) — Edge case, unlikely on macOS
+2. **Add `append_blacklist_prefix()`** (#6) — API symmetry
+3. **Add allow-once recursive transclusion test** (#7.2)
+4. **Reconcile policy file naming** (#1) — Ensure spec and implementation agree

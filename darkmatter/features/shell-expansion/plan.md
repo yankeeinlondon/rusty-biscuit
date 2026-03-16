@@ -218,7 +218,7 @@ Implement policy file discovery, loading, and persistence.
 3. Otherwise use `std::env::current_dir()`
 4. If path is inside a git repo, walk up to find `.git` and use that directory
 5. Otherwise use `${HOME}`
-6. Return `ShellPolicyPaths { whitelist: root/.shell-whitelist, blacklist: root/.shell-blacklist }`
+6. Return `ShellPolicyPaths { whitelist: root/.darkmatter-shell-whitelist, blacklist: root/.darkmatter-shell-blacklist }`
 
 **Loading** (`load_ruleset`):
 - Parse line-oriented format: `exact <command>` and `prefix <command>`
@@ -624,10 +624,10 @@ Update `run_compose()`:
 1. `md compose file.md` with whitelisted command succeeds
 2. `md compose file.md` with blacklisted command fails with blacklist error
 3. `md compose -` (stdin) with unapproved command fails with manual whitelist guidance in error message
-4. Persisted approval in `.shell-whitelist` is reused on later runs
+4. Persisted approval in `.darkmatter-shell-whitelist` is reused on later runs
 5. `md compose file.md` with non-existent command fails with "does not exist" error
 
-Use `tempfile` for isolated test directories with `.shell-whitelist` files.
+Use `tempfile` for isolated test directories with `.darkmatter-shell-whitelist` files.
 Use `assert_cmd` for CLI invocation testing.
 
 **Acceptance criteria**:

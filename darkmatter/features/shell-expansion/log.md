@@ -1,11 +1,12 @@
 ---
 spec: darkmatter/features/shell-expansion/spec.md
 tech_design: darkmatter/features/shell-expansion/tech-design.md
-last_updated: 2026-03-15
+last_updated: 2026-03-16
 plan: darkmatter/features/shell-expansion/plan.md
 review: darkmatter/features/shell-expansion/review.md
 implement_complete: false
 implementation_files: darkmatter/lib/src/markdown/transform/shell_expansion/types.rs, darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs, darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs, darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs, darkmatter/lib/src/markdown/transform/shell_expansion/store.rs, darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs, darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs, darkmatter/lib/src/markdown/transform/mod.rs, darkmatter/lib/src/markdown/transform/types.rs, darkmatter/lib/src/markdown/types.rs, darkmatter/cli/src/approval.rs, darkmatter/cli/src/commands.rs, darkmatter/cli/src/lib.rs
+reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,darkmatter/cli/tests/cli.rs,darkmatter/docs/darkmatter-pipeline.md,darkmatter/docs/designs/shell-expansion.md,darkmatter/docs/preparation/shell-expansion.md,darkmatter/features/shell-expansion/spec.md,darkmatter/features/shell-expansion/tech-design.md,darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs,darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs,darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs,darkmatter/lib/src/markdown/transform/shell_expansion/store.rs,darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs,darkmatter/lib/src/markdown/transform/shell_expansion/types.rs,docs/dependencies.md
 ---
 ## Tech Design for shell-expansion Complete
 
@@ -23,7 +24,7 @@ implementation_files: darkmatter/lib/src/markdown/transform/shell_expansion/type
 
 - **Module layout**: New `transform/shell_expansion/` module with six files: `mod.rs` (orchestration), `parser.rs` (directive scanning), `tokenize.rs` (argv tokenization), `policy.rs` (blacklist/whitelist matching), `store.rs` (policy file discovery/load/append), `executor.rs` (process spawn/timeout/capture), `types.rs` (data types and errors).
 
-- **Security model**: Three-layer defense -- (1) built-in blacklist with structured rules (Executable, ExecutablePrefix, SubcommandPrefix, ArgExact, ArgPrefix, RawToken), (2) persisted user blacklist (`.shell-blacklist`), (3) persisted whitelist (`.shell-whitelist`) with `exact` and `prefix` entries. Shell metacharacters (`|`, `;`, `&&`, `>`, `` ` ``, `$(`) are rejected at tokenization. Shell-interpreter wrappers (`sh -c`, `bash -c`, etc.) are explicitly blocked.
+- **Security model**: Three-layer defense -- (1) built-in blacklist with structured rules (Executable, ExecutablePrefix, SubcommandPrefix, ArgExact, ArgPrefix, RawToken), (2) persisted user blacklist (`.darkmatter-shell-blacklist`), (3) persisted whitelist (`.darkmatter-shell-whitelist`) with `exact` and `prefix` entries. Shell metacharacters (`|`, `;`, `&&`, `>`, `` ` ``, `$(`) are rejected at tokenization. Shell-interpreter wrappers (`sh -c`, `bash -c`, etc.) are explicitly blocked.
 
 - **Execution model**: 10-second default timeout; stdin always null; stdout/stderr piped and captured concurrently; child killed on timeout; exit 0 with empty output removes the directive; non-zero exit is a hard pipeline failure including captured streams in the error. Working directory resolves from explicit option, then source file parent, then policy_root, then CWD.
 
@@ -105,3 +106,223 @@ All Phase 3 components were already implemented:
 ## Implementation of shell-expansion Complete
 
 All three phases complete. 86 unit tests + 15 doctests pass. The only failing test (`test_table_very_narrow_width`) is a pre-existing issue in the terminal table rendering module, unrelated to shell expansion. No regressions in the full 1324-test suite.
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 01:59:27 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes:**
+
+- Added explicit non-interactive CLI approval guidance with `exact` and `prefix` manual whitelist entries, plus CLI coverage for stdin and file-driven compose failures.
+- Refactored the CLI approval prompt for testability and added prompt-flow tests for valid selection and retry-on-invalid input.
+- Fixed CRLF directive span handling in the shell parser and added explicit tokenizer coverage for `>>` and `||` rejection.
+- Added missing rustdoc on `ShellRuleSet` match helpers, completed the store API with `append_blacklist_prefix()`, and documented malformed policy-line warning behavior.
+- Added integration coverage for interpolation-before-shell expansion, recursive allow-once behavior, hard shell failures with `fail_fast = false`, stderr-success capture, and executor drain-thread panic handling.
+- Reconciled shared docs, feature docs, and dependency docs with the implemented `.darkmatter-shell-whitelist` / `.darkmatter-shell-blacklist` naming and the fixed Stage 1 pipeline order.
+- Verification: `just test` in `darkmatter/` still hits the pre-existing unrelated failure `markdown::output::terminal::tests::test_table_very_narrow_width`; targeted `cargo test -p darkmatter shell_expansion` passed (97/97) and full `cargo test -p darkmatter-cli` passed.
+
+## Committed Implementation Changes
+
+**Timestamp:** 2026-03-15
+
+### Before Commit
+
+```
+On branch main
+Your branch is ahead of 'origin/main' by 6 commits.
+
+Changes to be committed:
+  new file:   darkmatter/docs/orchestration-in-non-interactive-sessions.md
+  modified:   darkmatter/features/shell-expansion/feature.md
+  modified:   darkmatter/features/shell-expansion/log.md
+  new file:   darkmatter/features/shell-expansion/review.md
+  modified:   darkmatter/justfile
+  modified:   darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs
+  modified:   darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs
+
+Changes not staged for commit:
+  modified:   darkmatter/features/shell-expansion/feature.md
+  modified:   prompts/feature-prompts/commit-implementation.md
+  modified:   prompts/feature-prompts/implement.md
+  modified:   prompts/feature-prompts/review.md
+```
+
+### After Commit
+
+```
+On branch main
+Your branch is ahead of 'origin/main' by 7 commits.
+
+Changes not staged for commit:
+  modified:   prompts/feature-prompts/commit-implementation.md
+  modified:   prompts/feature-prompts/implement.md
+  modified:   prompts/feature-prompts/review.md
+```
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 02:07:32 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes made:**
+
+- Added non-interactive CLI approval guidance that prints the whitelist path plus manual `exact ...` and `prefix ...` entries, and covered both stdin and file-based compose failures.
+- Refactored the CLI approval prompt for direct IO-based testing and added prompt-flow tests for valid input and retry-after-invalid input behavior.
+- Fixed shell directive span handling for CRLF line endings and added explicit tokenizer coverage for `>>` and `||` rejection.
+- Added missing rustdoc for `ShellRuleSet` match helpers, completed the policy-store API with `append_blacklist_prefix()`, and warned on malformed policy lines instead of silently skipping them.
+- Added integration coverage for interpolation-before-shell expansion, recursive allow-once persistence, shell failures remaining hard with `fail_fast = false`, stderr-only successful output capture, and executor output-thread panic handling.
+- Updated feature docs and general docs to match the implemented `.darkmatter-shell-whitelist` / `.darkmatter-shell-blacklist` naming and the current Stage 1 pipeline order, including the `which` dependency entry.
+
+**Verification from this pass:**
+
+- `cargo test -p darkmatter shell_expansion` passed (`97/97`)
+- `cargo test -p darkmatter-cli` passed, including the shell-expansion CLI guidance and prompt tests
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 02:05:07 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes:**
+
+- Verified the review-suggestion implementation already present in the workspace across CLI behavior, parser/tokenizer hardening, policy-store API and diagnostics, executor panic handling, integration coverage, and docs/spec alignment.
+- Confirmed non-interactive approval failures now print manual whitelist instructions with both `exact` and `prefix` entries, plus CLI prompt-flow coverage for valid and invalid selections.
+- Confirmed CRLF directive spans, explicit `>>` and `||` rejection tests, rustdoc on `ShellRuleSet` helpers, `append_blacklist_prefix()`, malformed policy-line warnings, stderr capture, recursive allow-once behavior, and hard shell failures with `fail_fast = false`.
+- Confirmed docs now consistently use `.darkmatter-shell-whitelist` / `.darkmatter-shell-blacklist`, document the Stage 1 shell-expansion ordering, and include the `which` dependency entry.
+- Verification: `just test` in `darkmatter/` still fails only on the pre-existing unrelated `markdown::output::terminal::tests::test_table_very_narrow_width`; `cargo test -p darkmatter shell_expansion` passed (97/97), and `cargo test -p darkmatter-cli` reached passing unit and integration suites for the shell-expansion CLI coverage.
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 02:06:32 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes:**
+
+- Confirmed the current workspace already includes all review suggestions and preserved the finalized review mutation set in the feature log.
+- Verified non-interactive approval errors include exact manual whitelist guidance, parser/tokenizer/store/executor follow-up fixes are present, and docs/spec files match the implemented `.darkmatter-shell-*` policy naming and Stage 1 order.
+- Verification: `cargo test -p darkmatter shell_expansion` passed (97/97); `cargo test -p darkmatter-cli --lib` passed; `cargo test -p darkmatter-cli --test cli test_compose_stdin_unapproved_command_fails_with_guidance` passed; `cargo test -p darkmatter-cli --test cli test_compose_file_unapproved_command_fails_with_guidance` passed.
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 02:08:13 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes:**
+
+- Verified the shared workspace already contains the full review-suggestion implementation across CLI guidance, parser/tokenizer follow-ups, store and executor hardening, integration coverage, and document/spec alignment.
+- Confirmed the missing review items are covered: manual non-interactive whitelist guidance, interpolation-before-shell expansion, recursive allow-once behavior, hard shell failures with `fail_fast = false`, interactive approval prompt tests, stderr-success capture, CRLF span handling, `>>` and `||` rejection tests, rustdoc on public helpers, `append_blacklist_prefix()`, malformed policy-line warnings, and executor join panic handling.
+- Verification: `cargo test -p darkmatter shell_expansion` passed (97/97); `cargo test -p darkmatter-cli` passed through library and CLI test suites on the shared checkout.
+
+## Review Suggestions Implemented
+
+**Timestamp:** 2026-03-16 02:07:05 PDT
+
+**Files mutated during review implementation:**
+
+- `darkmatter/cli/src/approval.rs`
+- `darkmatter/cli/src/commands.rs`
+- `darkmatter/cli/tests/cli.rs`
+- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/designs/shell-expansion.md`
+- `darkmatter/docs/preparation/shell-expansion.md`
+- `darkmatter/features/shell-expansion/spec.md`
+- `darkmatter/features/shell-expansion/tech-design.md`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `docs/dependencies.md`
+
+**Summary of changes:**
+
+- Delegated the review items across subagents, then reconciled their findings against the shared workspace rather than replaying already-present edits.
+- Confirmed the implemented review set covers non-interactive approval guidance, CRLF parser spans, explicit `>>` and `||` tokenizer coverage, rustdoc on public shell-policy helpers, blacklist prefix append symmetry, malformed policy-line warnings, executor join panic handling, integration coverage, and doc/spec alignment.
+- Confirmed docs and feature artifacts consistently describe `.darkmatter-shell-whitelist` / `.darkmatter-shell-blacklist`, the fixed Stage 1 order, and the `which` dependency.

@@ -287,9 +287,28 @@ pub fn run_compose(
 
     options = options.with_shell(shell_opts);
 
-    let (transformed, _report) = md
-        .transform_with(options)
-        .map_err(|e| eyre!("Transform failed: {}", e))?;
+    let (transformed, _report) = md.transform_with(options).map_err(|e| {
+        if let darkmatter::markdown::MarkdownError::ShellExpansion(
+            darkmatter::markdown::transform::ShellExpansionError::ApprovalRequired {
+                command,
+                whitelist_path,
+                ..
+            },
+        ) = &e
+        {
+            // Extract the executable (first token before space) for the prefix entry
+            let executable = command.split_whitespace().next().unwrap_or(command);
+            eyre!(
+                "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+                command,
+                whitelist_path.display(),
+                command,
+                executable
+            )
+        } else {
+            eyre!("Transform failed: {}", e)
+        }
+    })?;
 
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
     let code_theme = cli

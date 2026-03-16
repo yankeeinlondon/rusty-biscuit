@@ -1,5 +1,5 @@
 ---
-stage: commit-implement
+stage: suggestions
 feature: shell-expansion
 base_dir: /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion
 ---
@@ -32,33 +32,20 @@ We are in the process of building out the "shell-expansion" feature. Building a 
 
 ## Your Task
 
-### Commit files from Implementation and Design
+### Implement Review Suggestions (`suggestions`)
 
-This section describes how to perform the actions necessary for the `commit-implement` stage.
+Iterate over the review suggestions in the document "/Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion/review.md", and for each:
 
-- capture the current repo status before making any changes
-- before the implementation was executed, we made sure that the current package area was clean (no dirty files)
-- now that we've finished the implementation of the plan for the "shell-expansion" feature we need to stage and commit the files which we have modified in the implementation
-- we use commit message which follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard
-- in this case the `action` for the commit will be **feat**
-- the `scope` for the commit will almost surely be current **package area** (`sniff package-area`)
-- this means that the first line of the commit message will be something like: `feat($(sniff package-area)): implemented the "{{feature}}" feature`
-- the remaining lines of the commit should summarize the functionality provided in the feature in a number of bullet points.
+- create a subagent and pass the subagent the suggestion to implement and test
 - Append to the log file:
-    - the log file is located at `{{base_dir}}/log.md`
-    - Start your log entry with the heading `## Committed Implementation Changes`
-    - Add the initial git status prior to our commit and put that information in `### Before Commit`
-    - Add the git status after our commit and put that information in `### After Commit`
-- set the `last_updated` frontmatter property on the log file
-    - use the command `md set "{{base_dir}}/log.md" last_updated "${YYYY}-${MM}-${DD}" --save`
-
-You are done when:
-
-- you have staged all the files mutated during the implementation
-- you have committed these same files with an appropriate Conventional Commit based message
-- the log file has been appended to
-
-DO NOT PUSH ANY COMMITS to a REMOTE!
-NEVER USE `git reset` command!
+    - the log file is located at: `{{base_dir}}/log.md`
+    - start your log entry with the heading `## Review Suggestions Implemented`
+    - then add a timestamp
+    - then list out the files which were mutated during the review implementation
+    - then summarize the changes made
+- Now we will update the log file's frontmatter:
+    - use `md set "{{base_dir}}/log.md" reviews_files "${files_mutated_during_review}" --save`
+    - use `md set "{{base_dir}}/log.md" last_updated "${YYYY}-${MM}-${DD}" --save`
+- Communicate to the caller that all review suggestions have been implemented
 
 

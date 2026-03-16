@@ -31,13 +31,13 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
     let mut line_num = 1;
     let mut byte_offset = 0;
 
-    for line in content.lines() {
+    for line_slice in content.split_inclusive('\n') {
         let line_start = byte_offset;
-        let line_with_newline_end = if byte_offset + line.len() < content.len() {
-            byte_offset + line.len() + 1 // Include newline
-        } else {
-            byte_offset + line.len()
-        };
+        let line = line_slice
+            .strip_suffix('\n')
+            .and_then(|line| line.strip_suffix('\r').or(Some(line)))
+            .unwrap_or(line_slice);
+        let line_with_newline_end = byte_offset + line_slice.len();
 
         // Check if this line is inside a code region
         if !is_in_code_region(line_start, &code_regions) {
@@ -155,12 +155,34 @@ And `::shell echo inline` should also be ignored.
     }
 
     #[test]
+    fn parse_directive_span_includes_crlf() {
+        let content = "::shell echo hello\r\nNext line\r\n::shell pwd\r\n";
+        let directives = parse_directives(content).unwrap();
+        assert_eq!(directives.len(), 2);
+        assert_eq!(directives[0].span.start, 0);
+        assert_eq!(directives[0].span.end, 20); // Includes \r\n
+        assert_eq!(&content[directives[0].span.clone()], "::shell echo hello\r\n");
+        assert_eq!(directives[1].line, 3);
+        assert_eq!(&content[directives[1].span.clone()], "::shell pwd\r\n");
+    }
+
+    #[test]
     fn parse_directive_without_trailing_newline() {
         let content = "::shell echo hello";
         let directives = parse_directives(content).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].span.start, 0);
         assert_eq!(directives[0].span.end, content.len());
+    }
+
+    #[test]
+    fn parse_directive_span_includes_crlf_newline() {
+        let content = "::shell echo hello\r\nNext line\r\n";
+        let directives = parse_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].span.start, 0);
+        assert_eq!(directives[0].span.end, 20);
+        assert_eq!(&content[directives[0].span.clone()], "::shell echo hello\r\n");
     }
 
     #[test]

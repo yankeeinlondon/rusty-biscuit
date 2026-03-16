@@ -208,6 +208,7 @@ mod integration_tests {
     use super::*;
     use crate::markdown::Markdown;
     use crate::markdown::transform::{Stage1Stages, TransformOptions};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -220,6 +221,34 @@ mod integration_tests {
             &self,
             _request: ShellApprovalRequest,
         ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(self.decision.clone())
+        }
+    }
+
+    struct CountingApprovalHandler {
+        decision: ShellApprovalDecision,
+        approvals: AtomicUsize,
+    }
+
+    impl CountingApprovalHandler {
+        fn new(decision: ShellApprovalDecision) -> Self {
+            Self {
+                decision,
+                approvals: AtomicUsize::new(0),
+            }
+        }
+
+        fn approvals(&self) -> usize {
+            self.approvals.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ShellApprovalHandler for CountingApprovalHandler {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            self.approvals.fetch_add(1, Ordering::SeqCst);
             Ok(self.decision.clone())
         }
     }
@@ -385,5 +414,97 @@ mod integration_tests {
         assert!(transformed.content().contains("world"));
         assert_eq!(report.shell_expansions_applied, 2);
         assert_eq!(report.shell_approvals_used, 2);
+    }
+
+    #[test]
+    fn pipeline_interpolation_feeds_into_shell_expansion() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"---
+name: world
+---
+# Test
+::shell echo {{ name }}
+"#;
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                interpolation: true,
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        // The {{ name }} should be interpolated to "world" before shell execution
+        assert!(transformed.content().contains("world"));
+        assert!(!transformed.content().contains("::shell"));
+        assert!(!transformed.content().contains("{{ name }}"));
+        assert_eq!(report.shell_expansions_applied, 1);
+    }
+
+    #[test]
+    fn allow_once_persists_across_recursive_transclusion() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("root.md");
+        let child = temp_dir.path().join("child.md");
+
+        std::fs::write(&root, "# Root\n\n::shell echo hello\n\n::file ./child.md\n").unwrap();
+        std::fs::write(&child, "## Child\n\n::shell echo hello\n").unwrap();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+        let options = TransformOptions::new()
+            .with_source_file(&root)
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::default()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (transformed, report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .transform_with(options)
+            .unwrap();
+
+        assert_eq!(handler.approvals(), 1);
+        assert_eq!(report.shell_approvals_used, 1);
+        assert_eq!(transformed.content().matches("hello").count(), 2);
+    }
+
+    #[test]
+    fn shell_errors_remain_hard_failures_when_fail_fast_is_false() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell rm -rf /\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_fail_fast(false)
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let err = md.transform_with(options).unwrap_err();
+        assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("dangerous"));
     }
 }

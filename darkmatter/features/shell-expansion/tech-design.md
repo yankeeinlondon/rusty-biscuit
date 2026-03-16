@@ -223,7 +223,7 @@ Recommended defaults:
 
 Meaning:
 
-1. `policy_root` overrides where `.shell-whitelist` and `.shell-blacklist` are resolved
+1. `policy_root` overrides where `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist` are resolved
 2. `working_directory` overrides the cwd used for process execution
 3. `approval_handler = None` means the library must fail with an approval-required error instead of trying to prompt
 
@@ -577,8 +577,8 @@ The spec's `blacklist` approval action requires a persisted user blacklist in ad
 
 Policy file:
 
-- repo mode: `<repo-root>/.shell-blacklist`
-- home mode: `${HOME}/.shell-blacklist`
+- repo mode: `<repo-root>/.darkmatter-shell-blacklist`
+- home mode: `${HOME}/.darkmatter-shell-blacklist`
 
 User blacklist checks should run after built-in blacklist checks and before whitelist checks.
 
@@ -598,8 +598,8 @@ This is the one intentional improvement over the literal spec. The spec talks ab
 
 Policy file names:
 
-- `.shell-whitelist`
-- `.shell-blacklist`
+- `.darkmatter-shell-whitelist`
+- `.darkmatter-shell-blacklist`
 
 ### File format
 
@@ -652,13 +652,13 @@ The library never prompts directly.
 
 `AllowExactPersist`:
 
-1. append `exact <normalized command line>` to `.shell-whitelist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-whitelist`
 2. update the in-memory whitelist
 3. execute the command
 
 `AllowCommandPersist`:
 
-1. append `prefix <executable>` to `.shell-whitelist`
+1. append `prefix <executable>` to `.darkmatter-shell-whitelist`
 2. update the in-memory whitelist
 3. execute the command
 
@@ -675,7 +675,7 @@ The library never prompts directly.
 
 `BlacklistPersist`:
 
-1. append `exact <normalized command line>` to `.shell-blacklist`
+1. append `exact <normalized command line>` to `.darkmatter-shell-blacklist`
 2. update the in-memory user blacklist
 3. return a hard error
 
@@ -1012,7 +1012,7 @@ Ship v1 with:
 
 1. direct process execution through `std::process::Command`
 2. strict rejection of shell operators and shell-interpreter wrapper forms
-3. append-only `.shell-whitelist` and `.shell-blacklist` files
+3. append-only `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist` files
 4. a caller-owned approval callback
 5. a shared runtime that survives recursive composition
 

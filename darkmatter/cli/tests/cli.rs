@@ -1182,13 +1182,47 @@ fn test_compose_with_blacklisted_command_fails() {
 
 #[test]
 fn test_compose_stdin_unapproved_command_fails_with_guidance() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
     md_cmd()
+        .current_dir(temp_dir.path())
+        .env("HOME", temp_dir.path())
         .arg("compose")
         .arg("-")
         .write_stdin("# Test\n::shell echo hello\n")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Approval required"));
+        .stderr(predicate::str::contains("Approval required for 'echo hello'."))
+        .stderr(predicate::str::contains(
+            "To allow in non-interactive mode, add one of these to",
+        ))
+        .stderr(predicate::str::contains(whitelist_path.display().to_string()))
+        .stderr(predicate::str::contains("exact echo hello"))
+        .stderr(predicate::str::contains("prefix echo"));
+}
+
+#[test]
+fn test_compose_file_unapproved_command_fails_with_guidance() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
+    std::fs::write(&md_path, "# Test\n::shell echo hello\n").unwrap();
+
+    md_cmd()
+        .current_dir(temp_dir.path())
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Approval required for 'echo hello'."))
+        .stderr(predicate::str::contains(
+            "To allow in non-interactive mode, add one of these to",
+        ))
+        .stderr(predicate::str::contains(whitelist_path.display().to_string()))
+        .stderr(predicate::str::contains("exact echo hello"))
+        .stderr(predicate::str::contains("prefix echo"));
 }
 
 #[test]

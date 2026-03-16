@@ -90,6 +90,8 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 /// - `prefix <command>` - executable prefix match
 /// - Lines starting with `#` are comments
 /// - Blank lines are ignored
+/// - Malformed lines are ignored and emitted as `tracing::warn!` diagnostics
+/// - Malformed non-comment lines are skipped and logged with `tracing::warn!`
 ///
 /// If the file does not exist, returns an empty ruleset (not an error).
 ///
@@ -127,8 +129,14 @@ pub fn load_ruleset(path: &Path) -> Result<ShellRuleSet, ShellExpansionError> {
             entries.push(ShellRuleEntry::Exact(command.to_string()));
         } else if let Some(command) = trimmed.strip_prefix("prefix ") {
             entries.push(ShellRuleEntry::Prefix(command.to_string()));
+        } else {
+            // Warn about malformed lines that don't match expected format
+            tracing::warn!(
+                "Ignoring malformed policy line in {}: '{}'",
+                path.display(),
+                trimmed
+            );
         }
-        // Ignore lines that don't match the format
     }
 
     // Deduplicate entries
@@ -207,6 +215,31 @@ pub fn append_blacklist_exact(
     normalized: &str,
 ) -> Result<(), ShellExpansionError> {
     append_rule(&paths.blacklist, "exact", normalized)
+}
+
+/// Appends a prefix-match rule to the blacklist file.
+///
+/// Mirrors [`append_whitelist_prefix`] for deny rules so the append API stays
+/// symmetric across whitelist and blacklist policy files.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use darkmatter::markdown::transform::shell_expansion::store::append_blacklist_prefix;
+/// use darkmatter::markdown::transform::shell_expansion::types::ShellPolicyPaths;
+/// use std::path::PathBuf;
+///
+/// let paths = ShellPolicyPaths {
+///     whitelist: PathBuf::from("/path/to/whitelist"),
+///     blacklist: PathBuf::from("/path/to/blacklist"),
+/// };
+/// append_blacklist_prefix(&paths, "dangerous-tool").unwrap();
+/// ```
+pub fn append_blacklist_prefix(
+    paths: &ShellPolicyPaths,
+    executable: &str,
+) -> Result<(), ShellExpansionError> {
+    append_rule(&paths.blacklist, "prefix", executable)
 }
 
 /// Internal helper to append a rule to a policy file.
@@ -303,13 +336,15 @@ mod tests {
     }
 
     #[test]
-    fn load_ruleset_ignores_invalid_lines() {
+    fn load_ruleset_warns_and_ignores_invalid_lines() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("whitelist");
         std::fs::write(&file_path, "exact echo hello\ninvalid line\nprefix ls\n").unwrap();
 
         let ruleset = load_ruleset(&file_path).unwrap();
         assert_eq!(ruleset.entries.len(), 2);
+        assert!(ruleset.entries.contains(&ShellRuleEntry::Exact("echo hello".to_string())));
+        assert!(ruleset.entries.contains(&ShellRuleEntry::Prefix("ls".to_string())));
     }
 
     #[test]
@@ -355,6 +390,37 @@ mod tests {
 
         let content = std::fs::read_to_string(&paths.blacklist).unwrap();
         assert_eq!(content.trim(), "exact dangerous-command");
+    }
+
+    #[test]
+    fn append_blacklist_prefix_works() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = ShellPolicyPaths {
+            whitelist: temp_dir.path().join("whitelist"),
+            blacklist: temp_dir.path().join("blacklist"),
+        };
+
+        append_blacklist_prefix(&paths, "dangerous-command").unwrap();
+
+        let content = std::fs::read_to_string(&paths.blacklist).unwrap();
+        assert_eq!(content.trim(), "prefix dangerous-command");
+    }
+
+    #[test]
+    fn append_blacklist_prefix_appends() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("blacklist");
+        std::fs::write(&file_path, "exact dangerous-command\n").unwrap();
+
+        let paths = ShellPolicyPaths {
+            whitelist: temp_dir.path().join("whitelist"),
+            blacklist: file_path.clone(),
+        };
+
+        append_blacklist_prefix(&paths, "dangerous-tool").unwrap();
+
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "exact dangerous-command\nprefix dangerous-tool\n");
     }
 
     #[test]

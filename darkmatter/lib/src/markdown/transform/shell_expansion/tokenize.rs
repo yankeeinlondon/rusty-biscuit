@@ -383,4 +383,22 @@ mod tests {
             .to_string()
             .contains("Trailing backslash"));
     }
+
+    #[test]
+    fn tokenize_double_redirect_fails() {
+        let result = tokenize("echo hello >> file.txt");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Output redirection"));
+    }
+
+    #[test]
+    fn tokenize_double_pipe_fails() {
+        let result = tokenize("echo hello || echo world");
+        assert!(result.is_err());
+        // The first `|` is caught, which triggers the pipe error
+        assert!(result.unwrap_err().to_string().contains("pipes"));
+    }
 }

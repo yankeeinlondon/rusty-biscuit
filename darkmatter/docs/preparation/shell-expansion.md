@@ -9,9 +9,14 @@ We allow the output of shell commands to be injected into a Markdown page using 
 This is a powerful feature but if left unguarded it could be a very damaging one too. To prevent malicious or accidentally harmful commands from being run we have a two stage security design:
 
 1. there are a set of [Blacklisted Commands and Syntax](#blacklisted-commands-and-syntax) which will NEVER be allowed to be run
-2. we maintain a list of approved commands in a "whitelist" file:
-     - located in `[repo root]/.shell-whitelist` if CWD is a git repo
-     - otherwise located in `${HOME}/.shell-whitelist`
+2. we maintain a list of approved commands in a namespaced "whitelist" file:
+     - located in `[repo root]/.darkmatter-shell-whitelist` if CWD is a git repo
+     - otherwise located in `${HOME}/.darkmatter-shell-whitelist`
+
+We also maintain a companion namespaced blacklist file for user-denied commands:
+
+- located in `[repo root]/.darkmatter-shell-blacklist` if CWD is a git repo
+- otherwise located in `${HOME}/.darkmatter-shell-blacklist`
 
 When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will iterate over all `::shell` lines and:
 
@@ -90,11 +95,11 @@ The following commands will never be allowed as they are part of the global blac
 
 When a command that does NOT match the Blacklist and is not registered in the Whitelist either then we must ask the user if they want to:
 
-- allow exact command (add command with all params to whitelist)
-- allow command with any parameters (add command with wildcard signature for params to whitelist)
-- allow once (all the current execution but do not add to whitelist)
-- deny (exit the pipeline process with an error but don't add to blacklist)
-- blacklist (exits the pipeline with an error and adds this command to the blacklist)
+- allow exact command (add command with all params to `.darkmatter-shell-whitelist`)
+- allow command with any parameters (add command with wildcard signature for params to `.darkmatter-shell-whitelist`)
+- allow once (all the current execution but do not add to `.darkmatter-shell-whitelist`)
+- deny (exit the pipeline process with an error but don't add to `.darkmatter-shell-blacklist`)
+- blacklist (exits the pipeline with an error and adds this command to `.darkmatter-shell-blacklist`)
 
 
 --- 
