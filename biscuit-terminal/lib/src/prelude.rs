@@ -29,4 +29,8 @@ pub use crate::components::todo::Todo;
 pub use crate::components::two_column::{ColumnWidth, TwoColumn};
 pub use crate::terminal::Terminal;
 pub use crate::utils::color::{BasicColor, Color, Tailwind as TailwindColor, WebColor};
+pub use crate::utils::escape_codes::{
+    strip_color_codes, strip_cursor_movement_codes, strip_escape_codes, strip_osc8_links,
+    strip_query_codes,
+};
 pub use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
