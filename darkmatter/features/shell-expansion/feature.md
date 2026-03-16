@@ -1,13 +1,14 @@
 ---
-stage: commit-implement
-feature: null
+stage: implement
+error: true
+feature: shell-expansion
 base_dir: /Volumes/coding/personal/rusty-biscuit/darkmatter/features/shell-expansion
 ---
 # Feature
 
 ## Context on Feature Building
 
-We are in the process of building out the "" feature. Building a feature consists of the following discrete steps:
+We are in the process of building out the "shell-expansion" feature. Building a feature consists of the following discrete steps:
 
 1. Create a detailed technical design (stage: `tech-design`)
 2. Create a detailed plan (stage: `plan`)
@@ -38,7 +39,7 @@ This section describes how to perform the actions necessary for the `commit-impl
 
 - capture the current repo status before making any changes
 - before the implementation was executed, we made sure that the current package area was clean (no dirty files)
-- now that we've finished the implementation of the plan for the "" feature we need to stage and commit the files which we have modified in the implementation
+- now that we've finished the implementation of the plan for the "shell-expansion" feature we need to stage and commit the files which we have modified in the implementation
 - we use commit message which follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) standard
 - in this case the `action` for the commit will be **feat**
 - the `scope` for the commit will almost surely be current **package area** (`sniff package-area`)

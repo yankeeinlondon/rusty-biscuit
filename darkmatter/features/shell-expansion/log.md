@@ -3,7 +3,6 @@ tech_design: darkmatter/features/shell-expansion/tech-design.md
 last_updated: 2026-03-15
 plan: darkmatter/features/shell-expansion/plan.md
 ---
-
 ## Tech Design for shell-expansion Complete
 
 **Timestamp:** 2026-03-15
@@ -37,6 +36,7 @@ plan: darkmatter/features/shell-expansion/plan.md
 The implementation plan organizes the shell-expansion feature into 3 phases with 14 tasks total.
 
 **Phase 1 — Types, Parser, Tokenizer, Blacklist, Policy Store** (7 tasks):
+
 - Task 1.1: Core types (`types.rs`) — ShellDirective, ShellExpansionOptions, ShellApprovalHandler trait, ShellExpansionError, PipelineRuntime, BlacklistRule
 - Task 1.2: Argv tokenizer (`tokenize.rs`) — shell-like tokenization with quoting support and metacharacter rejection
 - Task 1.3: Directive parser (`parser.rs`) — line scanning with code-region exclusion, builds ShellDirective list
@@ -46,12 +46,14 @@ The implementation plan organizes the shell-expansion feature into 3 phases with
 - Task 1.7: Phase 1 tests
 
 **Phase 2 — Executor, Pipeline Runtime, Pipeline Integration** (4 tasks):
+
 - Task 2.1: Command executor (`executor.rs`) — process spawn, timeout, stdout/stderr capture, working directory resolution
 - Task 2.2: Pipeline runtime refactor — replace TransclusionRuntime with PipelineRuntime in recursive pipeline threading
 - Task 2.3: Wire shell expansion stage — insert between TOC linking and cleanup, implement execute_directive orchestration and reverse-order replacement
 - Task 2.4: Phase 2 tests — executor unit tests, pipeline integration tests, runtime sharing tests
 
 **Phase 3 — CLI Approval Handler, CLI Integration, Documentation** (3 tasks + docs):
+
 - Task 3.1: CLI approval handler — interactive prompt on stderr with 5 choices, terminal detection
 - Task 3.2: CLI compose integration — conditional handler attachment in run_compose()
 - Task 3.3: CLI integration tests — whitelisted/blacklisted/non-interactive scenarios
