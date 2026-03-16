@@ -4,11 +4,13 @@
 
 ### Raster Image
 
-![zigbee](zigbee-signal-repeater.png)
+Here's a PNG image of a graph database:
 
-- [Zigbee2MQTT](https://www.zigbee2mqtt.io/)
+![PNG](./graph-db.png)
 
 ### SVG
+
+Here's a database SVG.
 
 ![SVG](./db.svg)
 
@@ -89,8 +91,6 @@ Block quotes are trigger by the use of the `>` character at the beginning of a l
 
 
 This same text is rendered in the VSCode previewer as:
-
-![VSCode's rendering](vscode-blockquote.png)
 
 ## No Language Code Blocks
 

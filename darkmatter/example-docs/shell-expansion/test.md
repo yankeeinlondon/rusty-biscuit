@@ -4,7 +4,4 @@
 
 ::shell echo "hi"
 
-## Git Status
-
-::shell sniff git --plain
 
