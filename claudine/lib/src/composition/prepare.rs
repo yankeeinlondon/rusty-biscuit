@@ -40,13 +40,29 @@ pub fn prepare_inline_prompt(
 
     let agent_hint = fm.as_map().get("agent").cloned();
 
+    let mut prompt = transformed.content().to_string();
+
+    // Append guardrails so the agent doesn't mangle the source file.
+    prompt.push_str(INLINE_PROMPT_GUARDRAILS);
+
     Ok(PreparedPrompt {
         mode: CompositionMode::InlineFrontmatterPrompt,
         resolved_path: source.resolved_path.clone(),
-        prompt: transformed.content().to_string(),
+        prompt,
         source_agent_hint: agent_hint,
     })
 }
+
+/// Guardrail instructions appended to every `--frontmatter-prompt` prompt.
+///
+/// Prevents the agent from rewriting the frontmatter, creating separate
+/// documents, or otherwise defeating the inline-composition workflow.
+const INLINE_PROMPT_GUARDRAILS: &str = "\n\n\
+> **IMPORTANT:**\n\
+>\n\
+> - Never change the `prompt` frontmatter property, that property is to read and should not be reformatted or changed in any way\n\
+> - Your task is to use the prompt from the `prompt` property to update the body of this document\n\
+> - Do not create another document and have this document link to it unless the frontmatter `prompt` explicitly tells you to\n";
 
 /// Prepare a chained prompt from a full source document.
 ///
@@ -124,9 +140,14 @@ mod tests {
         let prepared = prepare_inline_prompt(&source).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(
-            prepared.prompt.trim() == "List three colors",
+            prepared.prompt.contains("List three colors"),
             "expected prompt to contain 'List three colors', got: {:?}",
             prepared.prompt
+        );
+        // Verify guardrails are appended
+        assert!(
+            prepared.prompt.contains("Never change the `prompt` frontmatter property"),
+            "expected inline prompt guardrails to be appended"
         );
         assert!(prepared.source_agent_hint.is_none());
     }

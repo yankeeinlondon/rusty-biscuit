@@ -1,6 +1,6 @@
 ---
 prompt: |-
-	The Gemini CLI can output a stream of JSONL output when the `--output-format stream-json` flag is included. In non-interactive sessions which claudine wraps this is much more valuable than just text as it provides metadata we wouldn't get otherwise.
+	The Opencode CLI can output a stream of JSONL output when the `--output-format stream-json` flag is included. In non-interactive sessions which claudine wraps this is much more valuable than just text as it provides metadata we wouldn't get otherwise.
 
     Here's an example of the JSONL data you might get in a request:
 
@@ -54,6 +54,13 @@ prompt: |-
     
     - research other examples online and fill in any other missing details not self-evident from the example data
     - determine how best to feed the metadata to logging and non-interactive sessions.
+
+    The final output should be well formed, idiomatic Markdown. Links are Markdown links, Tables are Markdown tables. If you want to display a visual representation, using Mermaid code blocks are a good approach to this.
+
+    **IMPORTANT:**
+
+    - DO NOT CHANGE THE FRONTMATTER other than updating the `last_updated` property to today's date
+    - Write the content of your research into the body of this document, DO NOT create another document and have this document link to it!
 
 last_update: 2026-03-16
 ---

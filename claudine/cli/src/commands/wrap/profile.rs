@@ -211,7 +211,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// because prompt delivery may happen after non-interactive setup.
     ///
     /// Default: no-op.
-    fn validate_final_args(&self, _args: &[String], _non_interactive: bool) -> Result<()> {
+    fn validate_final_args(
+        &self,
+        _args: &[String],
+        _non_interactive: bool,
+        _has_stdin: bool,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -458,8 +463,13 @@ impl WrapperProfile for CodexWrapper {
         Ok(())
     }
 
-    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
-        if non_interactive && !has_non_flag_positional(&args[1..]) {
+    fn validate_final_args(
+        &self,
+        args: &[String],
+        non_interactive: bool,
+        has_stdin: bool,
+    ) -> Result<()> {
+        if non_interactive && !has_stdin && !has_non_flag_positional(&args[1..]) {
             bail!("--non-interactive for codex requires a prompt after the entrypoint");
         }
         Ok(())
@@ -596,22 +606,26 @@ impl WrapperProfile for GeminiWrapper {
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         match format {
             OutputFormat::Json => {
-                if !has_flag(args, "--output") {
-                    args.push("--output".to_string());
+                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
+                    args.push("--output-format".to_string());
                     args.push("json".to_string());
                 }
                 None
             }
             OutputFormat::Text => {
-                if !has_flag(args, "--output") {
-                    args.push("--output".to_string());
+                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
+                    args.push("--output-format".to_string());
                     args.push("text".to_string());
                 }
                 None
             }
-            OutputFormat::Stream => Some(
-                "Gemini does not support --output stream; use json or text instead".to_string(),
-            ),
+            OutputFormat::Stream => {
+                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
+                    args.push("--output-format".to_string());
+                    args.push("stream-json".to_string());
+                }
+                None
+            }
         }
     }
 
@@ -896,8 +910,13 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(())
     }
 
-    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
-        if non_interactive && !has_non_flag_positional(&args[1..]) {
+    fn validate_final_args(
+        &self,
+        args: &[String],
+        non_interactive: bool,
+        has_stdin: bool,
+    ) -> Result<()> {
+        if non_interactive && !has_stdin && !has_non_flag_positional(&args[1..]) {
             bail!("--non-interactive for opencode requires a prompt after the entrypoint");
         }
         Ok(())
@@ -982,8 +1001,13 @@ impl WrapperProfile for GooseWrapper {
         Ok(())
     }
 
-    fn validate_final_args(&self, args: &[String], non_interactive: bool) -> Result<()> {
-        if non_interactive && !has_flag(args, "-t") && !has_non_flag_positional(&args[1..]) {
+    fn validate_final_args(
+        &self,
+        args: &[String],
+        non_interactive: bool,
+        has_stdin: bool,
+    ) -> Result<()> {
+        if non_interactive && !has_stdin && !has_flag(args, "-t") && !has_non_flag_positional(&args[1..]) {
             bail!("--non-interactive for goose requires a prompt after the entrypoint");
         }
         Ok(())
@@ -1101,7 +1125,7 @@ mod tests {
         let mut args = vec!["--json".to_string()];
 
         p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true).unwrap_err();
+        let err = p.validate_final_args(&args, true, false).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 
@@ -1262,7 +1286,7 @@ mod tests {
         let mut args = vec!["--json".to_string()];
 
         p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true).unwrap_err();
+        let err = p.validate_final_args(&args, true, false).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 
@@ -1286,7 +1310,7 @@ mod tests {
         let mut args = Vec::new();
 
         p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true).unwrap_err();
+        let err = p.validate_final_args(&args, true, false).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
     }
 
@@ -1348,6 +1372,29 @@ mod tests {
             assert!(warning.is_none(), "Claude should support --output {format}");
             assert!(!args.is_empty());
         }
+    }
+
+    #[test]
+    fn gemini_output_format_uses_output_format_flag_and_supports_stream_json() {
+        let p = profile(Provider::Gemini);
+
+        let mut json_args = Vec::new();
+        assert!(p
+            .apply_output_format(&mut json_args, OutputFormat::Json)
+            .is_none());
+        assert_eq!(json_args, vec!["--output-format", "json"]);
+
+        let mut text_args = Vec::new();
+        assert!(p
+            .apply_output_format(&mut text_args, OutputFormat::Text)
+            .is_none());
+        assert_eq!(text_args, vec!["--output-format", "text"]);
+
+        let mut stream_args = Vec::new();
+        assert!(p
+            .apply_output_format(&mut stream_args, OutputFormat::Stream)
+            .is_none());
+        assert_eq!(stream_args, vec!["--output-format", "stream-json"]);
     }
 
     #[test]

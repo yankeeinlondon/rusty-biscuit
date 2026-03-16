@@ -278,11 +278,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // Detect conflict with existing prompt source
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
 
-        // Deliver composed body to provider
+        // Deliver the composed prompt to the provider BEFORE applying
+        // non-interactive mode, because some providers (Gemini) validate
+        // that a prompt is present in args during apply_non_interactive.
         let delivery_method =
             if matches!(provider, Provider::Claude | Provider::KimiCode)
-                || (matches!(provider, Provider::Codex | Provider::OpenCode)
-                    && non_interactive_requested)
+                || matches!(provider, Provider::Codex | Provider::OpenCode)
             {
                 "stdin"
             } else {
@@ -292,8 +293,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &mut child_args,
             &mut stdin_seed,
             &composed.body,
-            non_interactive_requested,
+            true, // always non-interactive for prompt-file composition
         )?;
+
+        // Force non-interactive for prompt-file composition
+        if !non_interactive_requested {
+            profile.apply_non_interactive(&mut child_args)?;
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
 
         // Add prompt-file env vars to child environment
         for (key, value) in &composed.env_overrides {
@@ -383,9 +390,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // --compose) have now been processed. Validate that providers requiring a
     // positional prompt actually have one.
     let effective_non_interactive = non_interactive_requested
+        || prompt_file_dry_run.is_some()
         || inline_composition_source.is_some()
         || chained_composition;
-    profile.validate_final_args(&child_args, effective_non_interactive)?;
+    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+
+    // If a composition pipeline inferred non-interactive mode, update the
+    // INTERACTIVE env var that was set before the pipelines ran.
+    if effective_non_interactive && !non_interactive_requested {
+        env_plan
+            .env
+            .insert("INTERACTIVE".into(), "false".into());
+    }
 
     let mut mcp_runtime = None;
     let mut mcp_cleanup: Option<(Box<dyn claudine::mcp::inject::McpInjector>, claudine::mcp::inject::InjectionResult)> = None;
@@ -585,7 +601,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         crate::output::log_wrapper_header(
             profile,
             yolo_enabled,
-            non_interactive_requested,
+            effective_non_interactive,
             repo_requested,
             compose_display.as_ref(),
             effective_operation.as_deref(),
@@ -627,7 +643,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         }
     }
 
-    let stdout_noise = if non_interactive_requested || inline_composition_source.is_some() || chained_composition {
+    let stdout_noise = if effective_non_interactive {
         profile.stdout_noise_prefixes()
     } else {
         &[]

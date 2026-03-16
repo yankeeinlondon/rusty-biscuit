@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, bail, eyre};
 use darkmatter::markdown::{Markdown, transform::TransformOptions};
 
 use super::profile::WrapperProfile;
@@ -284,19 +284,21 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
         )
     })?;
 
-    let mut body = transformed.content().to_string();
+    let body = transformed.content().to_string();
     let fm_map = transformed.frontmatter().as_map();
-    let mut env_overrides = frontmatter_to_env(fm_map)?;
 
-    // If the markdown body is empty but frontmatter contains a `prompt` key,
-    // promote it to the body. This supports prompt-only files where the entire
-    // prompt lives in frontmatter (e.g. for parameterized prompt templates).
-    if body.trim().is_empty() {
-        if let Some(idx) = env_overrides.iter().position(|(k, _)| k == "PROMPT") {
-            body = env_overrides.remove(idx).1;
-        }
+    // If the body is empty but frontmatter has a `prompt` key, the user likely
+    // wants --frontmatter-prompt (--fp) instead of --prompt-file.
+    if body.trim().is_empty() && fm_map.contains_key("prompt") {
+        bail!(
+            "prompt file '{}' has an empty body but contains a frontmatter `prompt` key; \
+             use <blue>--frontmatter-prompt</blue> (or <blue>--fp</blue>) instead of \
+             <blue>--prompt-file</blue> for this file",
+            resolved.resolved_path.display()
+        );
     }
 
+    let env_overrides = frontmatter_to_env(fm_map)?;
     let env_names: Vec<String> = env_overrides.iter().map(|(k, _)| k.clone()).collect();
 
     Ok(ComposedPrompt {
