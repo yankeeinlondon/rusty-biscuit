@@ -562,6 +562,8 @@ exit 0
 "#,
     );
 
+    // Gemini does not support YOLO; --yolo should produce a warning but
+    // must NOT inject --approval-mode into the child args.
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
@@ -572,8 +574,9 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"--approval-mode"));
-    assert!(args.contains(&"yolo"));
+    assert!(!args.contains(&"--approval-mode"), "gemini should not receive --approval-mode");
+    assert!(args.contains(&"-p"));
+    assert!(args.contains(&"summarize"));
 }
 
 // ---------------------------------------------------------------------------

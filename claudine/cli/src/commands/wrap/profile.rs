@@ -456,43 +456,20 @@ impl WrapperProfile for GeminiWrapper {
 
     fn apply_yolo(
         &self,
-        args: &mut Vec<String>,
+        _args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        let flag = "--approval-mode";
-        let value = "yolo";
-        let aliases: &[&str] = &["--yolo", "-y"];
-
-        if has_any_flag(args, flag, aliases) {
-            if let Some(existing) = option_value(args, flag)
-                && !existing.eq_ignore_ascii_case(value)
-            {
-                bail!("--yolo conflicts with existing '{flag} {existing}' for gemini");
-            }
-            return Ok(None);
-        }
-
-        args.push(flag.to_string());
-        args.push(value.to_string());
-        Ok(None)
+        Ok(Some(
+            "--yolo is not supported for 'gemini' (no auto-approve mechanism) and was ignored"
+                .to_string(),
+        ))
     }
 
     fn has_supported_yolo(&self) -> bool {
-        true
+        false
     }
 
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        let flag = "--approval-mode";
-        let aliases: &[&str] = &["--yolo", "-y"];
-        if has_any_flag(args, flag, aliases)
-            && option_value(args, flag).is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
-        {
-            bail!(
-                "do not pass <blue>{flag} yolo</blue> directly to claudine gemini; \
-                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
-                 Claudine uses this CLI convention for all agents it provides a wrapper to."
-            );
-        }
+    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
         Ok(())
     }
 
@@ -1037,25 +1014,14 @@ mod tests {
     }
 
     #[test]
-    fn gemini_yolo_mapping_is_idempotent() {
+    fn gemini_yolo_returns_warning_and_does_not_mutate_args() {
         let p = profile(Provider::Gemini);
-        let mut args = vec!["--approval-mode".to_string(), "yolo".to_string()];
+        let mut args = vec!["--prompt".to_string(), "hello".to_string()];
         let mut env_overrides = Vec::new();
 
-        p.apply_yolo(&mut args, &mut env_overrides).unwrap();
-        p.apply_yolo(&mut args, &mut env_overrides).unwrap();
-
-        assert_eq!(args, vec!["--approval-mode", "yolo"]);
-    }
-
-    #[test]
-    fn gemini_yolo_conflicts_with_non_yolo_approval_mode() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec!["--approval-mode".to_string(), "default".to_string()];
-        let mut env_overrides = Vec::new();
-
-        let error = p.apply_yolo(&mut args, &mut env_overrides).unwrap_err();
-        assert!(error.to_string().contains("conflicts"));
+        let warning = p.apply_yolo(&mut args, &mut env_overrides).unwrap();
+        assert!(warning.unwrap().contains("ignored"));
+        assert_eq!(args, vec!["--prompt", "hello"]);
     }
 
     #[test]
