@@ -238,60 +238,146 @@ commit:
 
 _feature_stage feat base_dir stage:
     #!/usr/bin/env bash
-    echo -e "𝌡 switching the feature.md for {{BOLD}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the "{{BOLD}}{{stage}}{{RESET}}" stage"
+    echo -e "𝌡 switching the feature.md for {{BOLD}}{{feat}}{{RESET}}'s stage from {{BOLD}}$(md get "{{base_dir}}/feature.md" stage){{RESET}} to the {{BOLD}}{{stage}}{{RESET}} stage"
     md compose "@prompts/feature.md" --fm --set '{ base_dir: "{{base_dir}}", stage: "{{stage}}", feature: "{{feat}}" }' > "{{base_dir}}/feature.md"
+
+_feature_commit_implement feat base_dir:
+    #!/usr/bin/env bash
+    git add .
+    echo -e "🏃 Staged all changes in the {{BOLD}}$(sniff repo package-area){{RESET}} package area"
+    just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+    echo -e "🏃 Running the commit-implement stage"
+    echo
+    if claudine opencode --yolo --compose "{{base_dir}}/feature.md" --op "commit" --quiet; then
+        echo
+        echo -e "🎉 The implementation files have been committed to git"
+    else
+        just _speak "Failed to commit the implementation file for the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the implementation file for the {{feat}} feature!"
+        exit 1
+    fi
+
+_feature_review feat base_dir:
+    #!/usr/bin/env bash
+    echo
+    echo -e "🏃 Running a review on the {{feat}} feature"
+    echo
+    if claudine gemini --yolo --compose "{{base_dir}}/feature.md" --op "review" --quiet; then
+        just _speak "The review for the {{feat}} feature is complete"
+        echo
+        echo -e "🎉 The review for the {{feat}} feature is complete: $(prose "<a href='{{base_dir}}/review.md'>Review Doc</a>")"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
+        just _feature_suggestions "{{feat}}" "{{base_dir}}"
+    else
+        just _speak "Failed while running the review of the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while running the review of the {{feat}} feature!"
+        exit 1
+    fi
+
+_feature_suggestions feat base_dir:
+    #!/usr/bin/env bash
+    if [[ $(md get "{{base_dir}}/feature.md" stage) != "suggestions" ]]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_suggestions recipe was called but the stage was not set to 'suggestions'!"
+        echo
+        exit 1
+    fi
+    echo
+    echo -e "🏃 Starting the implementation of the review suggestions for the {{feat}} feature"
+    echo
+    if claudine gemini --yolo --compose "{{base_dir}}/feature.md" --op "implement-suggestions" --quiet; then
+        just _speak "The review suggestions for the {{feat}} feature have been implemented"
+        echo
+        echo -e "🎉 The review suggestions for the {{feat}} feature have been implemented"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
+        just _feature_suggestions "{{feat}}" "{{base_dir}}"
+    else
+        just _speak "Failed while implementing the review suggestions for {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while implementing the review suggestions for {{feat}} feature!"
+        exit 1
+    fi
+
+_feature_commit_review feat base_dir:
+    #!/usr/bin/env bash
+    if [[ $(md get "{{base_dir}}/feature.md" stage) != "commit-review" ]]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_commit_review recipe was called but the stage was not set to 'commit-review'!"
+        echo
+        exit 1
+    fi
+    echo
+    git add .
+    echo -e "✅ All files in the $(sniff repo package-area) package area have been {{ITALIC}}staged{{RESET}} for commit"
+    echo
+    sniff git
+    echo
+    echo -e "🏃 Starting commit process"
+    if claudine opencode --yolo --compose "{{base_dir}}/feature.md" --op "commit" --quiet; then
+        just _speak "The review suggestions for {{feat}} have been implemented and committed to git"
+        echo
+        echo -e "🎉 The review suggestions for {{feat}} have been implemented and committed to git"
+        just _feature_stage "{{feat}}" "{{base_dir}}" "update-docs"
+        just _feature_update_docs "{{feat}}" "{{base_dir}}"
+    else
+        just _speak "Failed to commit the review suggestions of the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the review suggestions of the {{feat}} feature!"
+        exit 1
+    fi
+
+_feature_update_docs feat base_dir:
+    #!/usr/bin/env bash
+        if [[ $(md get "{{base_dir}}/feature.md" stage) != "update-docs" ]]; then
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} the _feature_update_docs recipe was called but the stage was not set to 'update_docs'!"
+        echo
+        exit 1
+    fi
+    echo
+    echo -e "🏃 Updating documents to remove drift created by implementing the {{feat}} feature"
+    if claudine opencode --yolo --compose "{{base_dir}}/feature.md" --op "update-docs" --quiet; then
+        just _speak "The documents in $(sniff repo package-area) have been updated to accommodate the changes introduced by the {{feat}} feature"
+        echo
+        echo -e "🎉 The documents in $(sniff repo package-area) have been updated to accommodate the changes introduced by the {{feat}} feature"
+        echo
+        echo -e "🚀 the feature {{feat}} has been implemented, reviewed, and drift from docs removed!"
+        echo -e "   now get out there and use the {{feat}} functionality!"
+        echo
+        exit
+    else
+        just _speak "Failed to commit the review suggestions of the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the review suggestions of the {{feat}} feature!"
+        exit 1
+    fi
 
 _feature_implement feat base_dir:
     #!/usr/bin/env bash
     if claudine claude --yolo --compose "{{base_dir}}/feature.md" --op "implement" --quiet; then
+        if $(sniff repo package-area-has-source-code-changes -v); then
             just _speak "The implementation for the {{feat}} feature is complete"
             echo
             echo -e "🎉 The implementation for the {{feat}} feature is complete"
-            echo -e "🏃 Committing all changes from the implementation"
-            echo
-            just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
-            if claudine opencode --compose "{{base_dir}}/feature.md" --op "commit" --quiet; then
-                echo
-                echo -e "🎉 The file changes from the implementation of {{feat}} have been committed"
-                just _speak "The file changes from the implementation of {{feat}} have been committed"
-                echo -e "🏃 starting the review process of the {{feat}} implementation"
-                echo
-                just _feature_stage "{{feat}}" "{{base_dir}}" "review"
-                if claudine gemini --yolo --compose "{{base_dir}}/feature.md" --op "review" --quiet; then
-                    echo
-                    echo -e "🎉 The review of {{feat}} has been completed"
-                    just _speak "The review of {{feat}} has been completed"
-                    echo -e "🏃 Starting the implementation of the review recommendations for {{feat}}"
-                    echo
-                    just _feature_stage "{{feat}}" "{{base_dir}}" "suggestions"
-                    if claudine claude --yolo --compose "{{base_dir}}/feature.md" --op "review-suggestions" --quiet; then
-                        echo
-                        echo -e "🎉 The review comments for {{feat}} have been implemented"
-                        just _speak "The review comments for {{feat}} have been implemented"
-                        echo -e "🏃 Committing the file changes due to the review comments of {{feat}} being implemented"
-                        echo
-                        just _feature_stage "{{feat}}" "{{base_dir}}" "commit-review"
-
-                    else
-                        just _speak "Failed to complete the implementation of review suggestions for {{feat}}!"
-                        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to complete the implementation of review suggestions for {{feat}}!"
-                        exit 1
-                    fi
-                else
-                    just _speak "Failed to finish the review of the {{feat}} implementation!"
-                    echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to finish the review of the {{feat}} implementation!!"
-                    exit 1
-                fi
+            just _feature_commit_implement "{{feat}}" "{{base_dir}}"
+            exit
+        else
+            echo -e "🐞 The implementation agent finished but did not set the 'implement_complete' flag"
+            echo -e "🏃 We will turn on the error state and retry running the implementation agent"
+            md set "{{base_dir}}/feature.md" error true --save
+            just _feature_implement "{{feat}}" "{{base_dir}}"
+            if [[ $(sniff repo package-area-has-source-code-changes -v) ]]; then
+                echo -e "🎉 On the second attempt the implementation agent was successful"
+                just _feature_commit_implement "{{feat}}" "{{base_dir}}"
+                exit
             else
-                just _speak "Failed to commit the file changes from the {{feat}} implementation!"
-                echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to commit the file changes from the {{feat}} implementation!"
+                echo -e "🤮 The second attempt with the implementation agent also did not complete!"
+                just _speak "Failed implementing the {{feat}} feature!"
+                echo -e "Exiting ..."
+                echo
                 exit 1
             fi
-        else
-            just _speak "Failed while implementing the {{feat}} feature!"
-            echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while implementing the {{feat}} feature!"
-            exit 1
         fi
+
+    else
+        just _speak "Failed while implementing the {{feat}} feature!"
+        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed while implementing the {{feat}} feature!"
+        exit 1
+    fi
 
 _feature_plan feat base_dir:
     #!/usr/bin/env bash
@@ -303,9 +389,11 @@ _feature_plan feat base_dir:
         echo -e "🏃 Starting the implementation for the {{feat}} feature"
         just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
         just _feature_implement "{{feat}}" "{{base_dir}}"
+        exit
     else
         just _speak "Failed to create the planning document for the {{feat}} feature!"
         echo -e "{{BOLD}}{{RED}}Error:{{RESET}} failed to create the planning document for the {{feat}} feature!"
+        exit 1
     fi
 
 _feature_recover feat base_dir:
@@ -317,11 +405,16 @@ _feature_recover feat base_dir:
             exit
             ;;
         implement)
+            just _feature_stage "{{feat}}" "{{base_dir}}" "implement"
+            md set "{{base_dir}}/feature.md" error true --save
             just _feature_implement "{{feat}}" "{{base_dir}}"
             exit
             ;;
         commit-implement)
-            echo "commit implementation recovery"
+            echo -e "🏥 recovering to commit the implementation files"
+            just _feature_stage "{{feat}}" "{{base_dir}}" "commit-implement"
+            md set "{{base_dir}}/feature.md" error true --save
+            just _feature_commit_implement "{{feat}}" "{{base_dir}}"
             exit
             ;;
     esac

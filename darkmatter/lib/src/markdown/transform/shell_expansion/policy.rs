@@ -151,10 +151,10 @@ const BUILTIN_BLACKLIST: &[BlacklistRule] = &[
 /// ```
 /// use darkmatter::markdown::transform::shell_expansion::policy::check_builtin_blacklist;
 ///
-/// let reason = check_builtin_blacklist("rm", &["-rf", "/"]);
+/// let reason = check_builtin_blacklist("rm", &["-rf".to_string(), "/".to_string()]);
 /// assert!(reason.is_some());
 ///
-/// let reason = check_builtin_blacklist("echo", &["hello"]);
+/// let reason = check_builtin_blacklist("echo", &["hello".to_string()]);
 /// assert!(reason.is_none());
 /// ```
 pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<String> {

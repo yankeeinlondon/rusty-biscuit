@@ -207,7 +207,7 @@ pub fn apply_replacements_in_reverse(
 mod integration_tests {
     use super::*;
     use crate::markdown::Markdown;
-    use crate::markdown::transform::{Stage1Stages, TransformOptions, TransformSource};
+    use crate::markdown::transform::{Stage1Stages, TransformOptions};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -228,7 +228,7 @@ mod integration_tests {
     fn pipeline_replaces_shell_directive_with_output() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell echo hello\nSome text\n";
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -241,8 +241,7 @@ mod integration_tests {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
                 ..Default::default()
-            })
-;
+            });
 
         let (transformed, report) = md.transform_with(options).unwrap();
 
@@ -263,7 +262,7 @@ mod integration_tests {
 ::shell echo inside
 ```
 "#;
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -276,8 +275,7 @@ mod integration_tests {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
                 ..Default::default()
-            })
-;
+            });
 
         let (transformed, report) = md.transform_with(options).unwrap();
 
@@ -291,7 +289,7 @@ mod integration_tests {
     fn pipeline_fails_with_blacklisted_command() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell rm -rf /\n";
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -304,8 +302,7 @@ mod integration_tests {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
                 ..Default::default()
-            })
-;
+            });
 
         let result = md.transform_with(options);
         assert!(result.is_err());
@@ -317,7 +314,7 @@ mod integration_tests {
     fn pipeline_fails_without_approval_handler() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell echo hello\n";
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -328,8 +325,7 @@ mod integration_tests {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: None,
                 ..Default::default()
-            })
-;
+            });
 
         let result = md.transform_with(options);
         assert!(result.is_err());
@@ -344,7 +340,7 @@ mod integration_tests {
         std::fs::write(&whitelist_path, "prefix echo\n").unwrap();
 
         let content = "# Test\n::shell echo hello\n";
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -355,8 +351,7 @@ mod integration_tests {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: None, // No handler needed - whitelisted
                 ..Default::default()
-            })
-;
+            });
 
         let (transformed, report) = md.transform_with(options).unwrap();
 
@@ -369,7 +364,7 @@ mod integration_tests {
     fn pipeline_report_counts_are_correct() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell echo hello\n::shell echo world\n";
-        let mut md: Markdown = content.into();
+        let md: Markdown = content.into();
 
         let options = TransformOptions::new()
             .with_stages(Stage1Stages {
@@ -382,8 +377,7 @@ mod integration_tests {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
                 ..Default::default()
-            })
-;
+            });
 
         let (transformed, report) = md.transform_with(options).unwrap();
 

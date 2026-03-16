@@ -1,7 +1,11 @@
 ---
+spec: darkmatter/features/shell-expansion/spec.md
 tech_design: darkmatter/features/shell-expansion/tech-design.md
 last_updated: 2026-03-15
 plan: darkmatter/features/shell-expansion/plan.md
+review: darkmatter/features/shell-expansion/review.md
+implement_complete: false
+implementation_files: darkmatter/lib/src/markdown/transform/shell_expansion/types.rs, darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs, darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs, darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs, darkmatter/lib/src/markdown/transform/shell_expansion/store.rs, darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs, darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs, darkmatter/lib/src/markdown/transform/mod.rs, darkmatter/lib/src/markdown/transform/types.rs, darkmatter/lib/src/markdown/types.rs, darkmatter/cli/src/approval.rs, darkmatter/cli/src/commands.rs, darkmatter/cli/src/lib.rs
 ---
 ## Tech Design for shell-expansion Complete
 
@@ -60,3 +64,44 @@ The implementation plan organizes the shell-expansion feature into 3 phases with
 - Task 3.4: Documentation updates — dependencies.md, pipeline docs
 
 **Key risks**: Phase 2 Task 2.2 (PipelineRuntime refactor) touches recursive pipeline plumbing and is highest-risk for regressions. All existing transform and transclusion tests must pass before proceeding.
+
+### Phase 1: Types, Parser, Tokenizer, Blacklist, Policy Store
+
+All Phase 1 components were already implemented in a prior session. Verified all files exist and compile:
+
+- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs` — ShellDirective, ShellExpansionOptions, ShellApprovalHandler, ShellExpansionError, PipelineRuntime, BlacklistRule, ShellRuleSet, ShellExpansionRuntime
+- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs` — tokenize() with quoting support and metacharacter rejection (36 unit tests)
+- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs` — parse_directives() with code-region exclusion (12 unit tests)
+- `darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs` — check_builtin_blacklist(), check_user_blacklist(), check_whitelist(), normalize_command() (18 unit tests)
+- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs` — resolve_policy_paths(), load_ruleset(), append helpers (10 unit tests)
+- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs` — execute_directive(), apply_replacements_in_reverse() + 6 integration tests
+- `darkmatter/lib/src/markdown/transform/types.rs` — Stage1Stages, TransformOptions, TransformReport already include shell expansion fields
+- `darkmatter/lib/src/markdown/types.rs` — MarkdownError::ShellExpansion variant already present
+- `darkmatter/lib/Cargo.toml` — `which = "7"` and `dirs = "6"` already present
+
+### Phase 2: Executor, Pipeline Runtime, Pipeline Integration
+
+All Phase 2 components were already implemented:
+
+- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs` — execute_command() with timeout, output capture, working directory resolution (7 unit tests)
+- `darkmatter/lib/src/markdown/transform/mod.rs` — PipelineRuntime used in run_transform_pipeline(), shell expansion stage wired between TOC linking and cleanup, recursive transclusion shares PipelineRuntime
+
+### Phase 3: CLI Approval Handler, CLI Integration, Documentation
+
+All Phase 3 components were already implemented:
+
+- `darkmatter/cli/src/approval.rs` — CliShellApprovalHandler with interactive 5-choice prompt, can_prompt_interactively() check
+- `darkmatter/cli/src/commands.rs` — run_compose() builds ShellExpansionOptions with conditional approval handler based on file input and terminal detection
+- `darkmatter/docs/darkmatter-pipeline.md` — already includes shell expansion in the pipeline table
+- `docs/dependencies.md` — `which` crate already documented
+
+### Cleanup Fixes Applied
+
+- Fixed doctest in `policy.rs` — `check_builtin_blacklist` example used `&str` slices instead of `&[String]`
+- Fixed 6 unnecessary `mut` warnings in integration test bindings in `mod.rs`
+- Fixed unused `TransformSource` import in integration tests
+- Fixed trailing semicolons on struct initializations in tests
+
+## Implementation of shell-expansion Complete
+
+All three phases complete. 86 unit tests + 15 doctests pass. The only failing test (`test_table_very_narrow_width`) is a pre-existing issue in the terminal table rendering module, unrelated to shell expansion. No regressions in the full 1324-test suite.

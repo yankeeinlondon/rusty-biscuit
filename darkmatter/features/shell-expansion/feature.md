@@ -59,5 +59,6 @@ You are done when:
 - the log file has been appended to
 
 DO NOT PUSH ANY COMMITS to a REMOTE!
+NEVER USE `git reset` command!
 
 
