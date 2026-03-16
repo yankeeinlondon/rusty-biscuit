@@ -62,6 +62,10 @@ impl ProviderAdapter for RooAdapter {
         false
     }
 
+    fn non_blocking_ack(&self) -> Option<Value> {
+        None // Roo Code hooks are fire-and-forget
+    }
+
     fn format_response(
         &self,
         _event: &AgenticEvent,

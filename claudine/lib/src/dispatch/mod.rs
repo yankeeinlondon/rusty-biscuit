@@ -248,7 +248,7 @@ fn finalize_response(
 
     if !can_block {
         return Ok(DispatchOutcome {
-            response: None,
+            response: adapter.non_blocking_ack(),
             exit_code: stop_session.then_some(2),
             protect_pre,
             protect_post,
@@ -346,7 +346,9 @@ mod tests {
         let env = EnvironmentContext::default();
 
         let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
-        assert_eq!(outcome, DispatchOutcome::default());
+        // Claude adapter returns {} ack for non-blocking events
+        assert_eq!(outcome.response, Some(Value::Object(Default::default())));
+        assert_eq!(outcome.exit_code, None);
     }
 
     #[test]
@@ -454,7 +456,9 @@ mod tests {
         };
 
         let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
-        assert_eq!(outcome, DispatchOutcome::default());
+        // Claude adapter returns {} ack for non-blocking events
+        assert_eq!(outcome.response, Some(Value::Object(Default::default())));
+        assert_eq!(outcome.exit_code, None);
 
         let content = std::fs::read_to_string(log_path).unwrap();
         assert!(content.contains("repo-scoped-123"));

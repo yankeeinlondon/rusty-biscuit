@@ -311,6 +311,33 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
     context
 }
 
+/// Lightweight environment detection for hook handlers.
+///
+/// Only detects git and repository context (needed for log path
+/// resolution and event metadata). Skips OS, hardware, and network
+/// detection to minimize latency — critical for hooks where the
+/// provider may cancel slow processes during shutdown.
+pub fn detect_environment_fast(cwd: &Path) -> EnvironmentContext {
+    let config = sniff::SniffConfig::new()
+        .base_dir(cwd.to_path_buf())
+        .deep(false)
+        .commit_count(0)
+        .skip_os()
+        .skip_hardware()
+        .skip_network();
+
+    let result = sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
+        os: None,
+        hardware: None,
+        network: None,
+        filesystem: None,
+    });
+
+    let mut context = EnvironmentContext::from(result);
+    apply_wrapper_package_context(&mut context, &lookup_env_var);
+    context
+}
+
 fn apply_wrapper_package_context(
     context: &mut EnvironmentContext,
     lookup: &dyn Fn(&str) -> Option<String>,

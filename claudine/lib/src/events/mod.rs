@@ -14,6 +14,7 @@ pub use config::{
 };
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
+    detect_environment_fast,
 };
 pub use event_meta::EventMeta;
 pub use init_defaults::{

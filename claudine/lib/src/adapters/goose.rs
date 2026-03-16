@@ -60,6 +60,10 @@ impl ProviderAdapter for GooseAdapter {
         false
     }
 
+    fn non_blocking_ack(&self) -> Option<Value> {
+        None // Goose hooks are fire-and-forget
+    }
+
     fn format_response(
         &self,
         _event: &AgenticEvent,

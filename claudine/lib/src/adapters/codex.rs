@@ -101,6 +101,10 @@ impl ProviderAdapter for CodexAdapter {
         false
     }
 
+    fn non_blocking_ack(&self) -> Option<Value> {
+        None // Codex uses notify endpoints, not stdout
+    }
+
     fn format_response(
         &self,
         _event: &AgenticEvent,

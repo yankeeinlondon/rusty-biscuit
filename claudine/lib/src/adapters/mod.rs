@@ -63,6 +63,19 @@ pub trait ProviderAdapter: Send + Sync {
     /// Whether this provider/event pair supports blocking response semantics.
     fn can_block(&self, event: &AgenticEvent) -> bool;
 
+    /// Acknowledgment payload for non-blocking events.
+    ///
+    /// Providers that read hook stdout (Claude, Gemini, Kimi, OpenCode, Qwen)
+    /// need a JSON acknowledgment even for non-blocking events like SessionEnd,
+    /// otherwise they interpret silent stdout as "hook cancelled."
+    ///
+    /// Fire-and-forget providers (Codex, Goose, Roo) return `None`.
+    ///
+    /// Default: `Some(json!({}))` — a safe empty JSON object.
+    fn non_blocking_ack(&self) -> Option<Value> {
+        Some(Value::Object(Default::default()))
+    }
+
     /// Convert unified hook response into provider-native response payload.
     fn format_response(
         &self,
