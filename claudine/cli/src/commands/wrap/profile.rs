@@ -1,4 +1,5 @@
 use claudine::events::Provider;
+use claudine::stream::StreamProtocol;
 use color_eyre::eyre::{Result, bail};
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,24 @@ pub(crate) trait WrapperProfile: Send + Sync {
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &[]
     }
+
+    // -- Structured stream support -------------------------------------------
+
+    /// Whether this provider supports internal structured streaming.
+    fn supports_structured_stream(&self) -> bool {
+        false
+    }
+
+    /// The stream protocol this provider uses.
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        None
+    }
+
+    /// Apply internal structured stream flags to child args.
+    ///
+    /// Called only when `supports_structured_stream()` returns true and
+    /// the user did not explicitly request an output format.
+    fn apply_structured_stream(&self, _args: &mut Vec<String>) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +374,21 @@ impl WrapperProfile for ClaudeWrapper {
         *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::StreamJson)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        args.push("--print".to_string());
+        args.push("--verbose".to_string());
+        args.push("--output-format".to_string());
+        args.push("stream-json".to_string());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +512,20 @@ impl WrapperProfile for CodexWrapper {
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["OPENAI_API_KEY", "CODEX_API_KEY"]
     }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::Jsonl)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Codex uses `exec --json` for structured output.
+        // The `exec` subcommand is expected to already be present.
+        args.push("--json".to_string());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -559,11 +607,10 @@ impl WrapperProfile for GeminiWrapper {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
                 continue;
             };
-            if value.get("role").and_then(|v| v.as_str()) == Some("assistant") {
-                if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            if value.get("role").and_then(|v| v.as_str()) == Some("assistant")
+                && let Some(content) = value.get("content").and_then(|v| v.as_str()) {
                     result.push_str(content);
                 }
-            }
         }
         result
     }
@@ -640,6 +687,19 @@ impl WrapperProfile for GeminiWrapper {
         args.push(prompt.to_string());
         Ok(())
     }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::StreamJson)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        args.push("--output-format".to_string());
+        args.push("stream-json".to_string());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -706,6 +766,20 @@ impl WrapperProfile for KimiWrapper {
         }
         *stdin_seed = Some(prompt.to_string());
         Ok(())
+    }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::StreamJson)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        args.push("--print".to_string());
+        args.push("--output-format".to_string());
+        args.push("stream-json".to_string());
     }
 }
 
@@ -800,6 +874,19 @@ impl WrapperProfile for QwenWrapper {
         args.push("--prompt".to_string());
         args.push(prompt.to_string());
         Ok(())
+    }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::StreamJson)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        args.push("--output-format".to_string());
+        args.push("stream-json".to_string());
     }
 }
 
@@ -920,6 +1007,19 @@ impl WrapperProfile for OpencodeWrapper {
             bail!("--non-interactive for opencode requires a prompt after the entrypoint");
         }
         Ok(())
+    }
+
+    fn supports_structured_stream(&self) -> bool {
+        true
+    }
+
+    fn stream_protocol(&self) -> Option<StreamProtocol> {
+        Some(StreamProtocol::Ndjson)
+    }
+
+    fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        args.push("--output-format".to_string());
+        args.push("json".to_string());
     }
 }
 

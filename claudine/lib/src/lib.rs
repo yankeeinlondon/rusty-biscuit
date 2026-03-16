@@ -11,3 +11,4 @@ pub mod linking;
 pub mod mcp;
 pub mod reporting;
 pub mod services;
+pub mod stream;

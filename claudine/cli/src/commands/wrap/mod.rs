@@ -650,58 +650,143 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
     let stderr_noise = profile.stderr_noise_prefixes();
 
+    // Decide whether to use internal structured stream parsing.
+    // Conditions: provider supports it, non-interactive, no explicit output format.
+    let use_structured = profile.supports_structured_stream()
+        && effective_non_interactive
+        && args.output.is_none();
+
+    if use_structured {
+        profile.apply_structured_stream(&mut child_args);
+    }
+
     // For captured-output paths (inline compose), let the profile inject
     // structured output flags (e.g. Gemini's --output-format stream-json)
     // so we can reliably extract the assistant response from noisy stdout.
     // Chained compose uses run_child (forwards to terminal), so it relies
     // on prefix-based noise filtering instead.
-    if inline_composition_source.is_some() {
+    if !use_structured && inline_composition_source.is_some() {
         profile.prepare_captured_output(&mut child_args);
     }
 
     let exit_code = if let Some((source, _prepared)) = inline_composition_source {
-        // Inline composition: capture output and update file
-        let captured = exec::run_child_capture(
+        if use_structured {
+            // Inline composition with structured stream parsing
+            let parser_config = claudine::stream::ParserConfig {
+                model: args.model.clone(),
+            };
+            let parser = claudine::stream::create_parser(
+                provider,
+                claudine::stream::parser::NullSink,
+                parser_config,
+            );
+            let summary = exec::run_child_stream_capture(
+                binary_path.as_path(),
+                &child_args,
+                &env_plan.env,
+                child_cwd,
+                args.timeout,
+                stdin_seed.as_deref(),
+                parser,
+            )?;
+
+            if summary.exit_code == 0 {
+                let mut updated_md = source.markdown.clone();
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                updated_md.fm_insert("last_updated", &today)
+                    .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+                *updated_md.content_mut() = summary.assistant_text.clone();
+
+                let doc_string = updated_md.as_string();
+                claudine::config::atomic::atomic_write(
+                    &source.resolved_path,
+                    doc_string.as_bytes(),
+                )
+                .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
+
+                if !silent_requested && !quiet_requested {
+                    log::message(&format!(
+                        "  \x1b[32m✓\x1b[0m Updated {}",
+                        source.resolved_path.display()
+                    ));
+                }
+            } else if summary.is_error
+                && let Some(msg) = &summary.error_message {
+                    eprintln!("{msg}");
+                }
+
+            // Write synthetic summary event for reporting
+            emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested);
+
+            Ok(summary.exit_code)
+        } else {
+            // Inline composition: capture output and update file (legacy path)
+            let captured = exec::run_child_capture(
+                binary_path.as_path(),
+                &child_args,
+                &env_plan.env,
+                child_cwd,
+                args.timeout,
+                exec::ChildIoOptions {
+                    stdout_noise_prefixes: stdout_noise,
+                    stderr_noise_prefixes: stderr_noise,
+                    stdin_seed: stdin_seed.as_deref(),
+                },
+            )?;
+
+            if captured.exit_code == 0 {
+                let mut updated_md = source.markdown.clone();
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                updated_md.fm_insert("last_updated", &today)
+                    .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+                *updated_md.content_mut() = profile.parse_captured_output(&captured.stdout);
+
+                let doc_string = updated_md.as_string();
+                claudine::config::atomic::atomic_write(
+                    &source.resolved_path,
+                    doc_string.as_bytes(),
+                )
+                .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
+
+                if !silent_requested && !quiet_requested {
+                    log::message(&format!(
+                        "  \x1b[32m✓\x1b[0m Updated {}",
+                        source.resolved_path.display()
+                    ));
+                }
+            } else if !captured.stderr.is_empty() {
+                eprintln!("{}", captured.stderr);
+            }
+
+            Ok(captured.exit_code)
+        }
+    } else if use_structured {
+        // Normal execution with structured stream parsing
+        let parser_config = claudine::stream::ParserConfig {
+            model: args.model.clone(),
+        };
+        let parser = claudine::stream::create_parser(
+            provider,
+            claudine::stream::parser::NullSink,
+            parser_config,
+        );
+        let summary = exec::run_child_stream(
             binary_path.as_path(),
             &child_args,
             &env_plan.env,
             child_cwd,
             args.timeout,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed: stdin_seed.as_deref(),
-            },
+            stderr_noise,
+            stdin_seed.as_deref(),
+            parser,
         )?;
 
-        if captured.exit_code == 0 {
-            // Build updated document: original frontmatter + last_updated + captured body
-            let mut updated_md = source.markdown.clone();
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            updated_md.fm_insert("last_updated", &today)
-                .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-            *updated_md.content_mut() = profile.parse_captured_output(&captured.stdout);
+        // Emit stderr summaries and write synthetic event
+        emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested);
 
-            let doc_string = updated_md.as_string();
-            claudine::config::atomic::atomic_write(
-                &source.resolved_path,
-                doc_string.as_bytes(),
-            )
-            .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
-
-            if !silent_requested && !quiet_requested {
-                log::message(&format!(
-                    "  \x1b[32m✓\x1b[0m Updated {}",
-                    source.resolved_path.display()
-                ));
-            }
-        } else if !captured.stderr.is_empty() {
-            eprintln!("{}", captured.stderr);
-        }
-
-        Ok(captured.exit_code)
+        Ok(summary.exit_code)
     } else {
-        // Normal execution: forward I/O to terminal
+        // Normal execution: forward I/O to terminal (legacy path)
         exec::run_child(
             binary_path.as_path(),
             &child_args,
@@ -754,6 +839,43 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
         }
     }
     None
+}
+
+/// Emit stderr summaries and write synthetic JSONL event after a structured stream session.
+fn emit_stream_summary(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    profile: &dyn WrapperProfile,
+    _env_plan: &env::EnvPlan,
+    silent: bool,
+    quiet: bool,
+) {
+    use claudine::stream::stderr::{Verbosity, format_completion_summary, format_compact_completion};
+
+    let verbosity = match (quiet, silent) {
+        (_, true) => Verbosity::Silent,
+        (true, _) => Verbosity::Quiet,
+        _ => Verbosity::Normal,
+    };
+
+    if verbosity != Verbosity::Silent {
+        let line = match verbosity {
+            Verbosity::Quiet => format_compact_completion(summary),
+            Verbosity::Normal => format_completion_summary(summary),
+            Verbosity::Silent => None,
+        };
+        if let Some(line) = line {
+            eprintln!("{line}");
+        }
+    }
+
+    // Write synthetic summary event to JSONL (best-effort)
+    if let Some(protocol) = profile.stream_protocol() {
+        let env_context = claudine::events::EnvironmentContext::default();
+        let meta = claudine::stream::reporting::summary_to_event_meta(summary, protocol, &env_context);
+        if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
+            tracing::warn!("Failed to write stream summary event: {e}");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

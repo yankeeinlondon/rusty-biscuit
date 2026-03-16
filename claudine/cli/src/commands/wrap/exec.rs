@@ -5,6 +5,8 @@ use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 
+use claudine::stream::parser::{StreamParseError, StreamParser};
+use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
 pub(crate) struct ChildIoOptions<'a> {
@@ -384,6 +386,220 @@ pub(crate) fn run_child_capture(
         stdout,
         stderr,
     })
+}
+
+/// Spawn a provider child process with structured stream parsing.
+///
+/// Stdout is piped through the provider's stream parser. Parsed
+/// assistant text is written to the real stdout. Metadata accumulates
+/// in the parser state. Stderr is forwarded normally (with noise filtering).
+///
+/// Returns the stream execution summary (which includes exit code).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_child_stream(
+    binary: &Path,
+    args: &[String],
+    env: &HashMap<OsString, OsString>,
+    cwd: &Path,
+    timeout: Option<u64>,
+    stderr_noise_prefixes: &[&str],
+    stdin_seed: Option<&str>,
+    parser: Box<dyn StreamParser>,
+) -> Result<StreamExecutionSummary> {
+    debug_assert!(env.contains_key(&OsString::from("PATH")));
+    debug_assert!(env.contains_key(&OsString::from("HOME")));
+
+    let filter_stderr = !stderr_noise_prefixes.is_empty();
+    let needs_stdin_pipe = stdin_seed.is_some();
+
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env)
+        .current_dir(cwd)
+        .stdin(if needs_stdin_pipe {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
+        .stdout(Stdio::piped())
+        .stderr(if filter_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        });
+
+    let mut child = command.spawn()?;
+
+    // Write stdin seed and close the pipe so the child sees EOF.
+    if let Some(seed) = stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take() {
+            stdin_pipe.write_all(seed.as_bytes())?;
+        }
+
+    // Pipe stdout through the stream parser
+    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout_pipe);
+        let mut out = std::io::stdout().lock();
+        let mut parser = parser;
+        let mut fallback_mode = false;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+
+            if fallback_mode {
+                // Fatal parse error: forward remaining raw stdout
+                let _ = writeln!(out, "{line}");
+                continue;
+            }
+
+            match parser.feed_line(&line) {
+                Ok(Some(text)) => {
+                    let _ = out.write_all(text.as_bytes());
+                    let _ = out.flush();
+                }
+                Ok(None) => {
+                    // Metadata-only line
+                }
+                Err(StreamParseError::MalformedLine { .. }) => {
+                    // Log warning but continue parsing
+                    let _ = writeln!(std::io::stderr(), "warning: malformed stream line");
+                }
+                Err(StreamParseError::Fatal(_)) => {
+                    // Fall back to raw forwarding
+                    fallback_mode = true;
+                    let _ = writeln!(out, "{line}");
+                }
+            }
+        }
+
+        parser
+    });
+
+    // Stderr noise filtering thread
+    let stderr_handle = if filter_stderr {
+        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let prefixes: Vec<String> = stderr_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        Some(thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            let mut err = std::io::stderr().lock();
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+                    continue;
+                }
+                let _ = writeln!(err, "{line}");
+            }
+        }))
+    } else {
+        None
+    };
+
+    let exit_code = if let Some(seconds) = timeout {
+        wait_with_timeout(&mut child, seconds)?
+    } else {
+        wait_with_signal_handling(&mut child)?
+    };
+
+    let parser = stdout_handle.join().unwrap_or_else(|_| {
+        // If the thread panicked, create a minimal error summary
+        Box::new(ErrorParser { exit_code })
+    });
+
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
+    }
+
+    Ok(parser.finish(exit_code))
+}
+
+/// Spawn a provider child process with structured stream parsing, capturing output.
+///
+/// Like `run_child_stream` but captures assistant text instead of printing.
+/// Used by compose and inline-update flows.
+pub(crate) fn run_child_stream_capture(
+    binary: &Path,
+    args: &[String],
+    env: &HashMap<OsString, OsString>,
+    cwd: &Path,
+    timeout: Option<u64>,
+    stdin_seed: Option<&str>,
+    parser: Box<dyn StreamParser>,
+) -> Result<StreamExecutionSummary> {
+    debug_assert!(env.contains_key(&OsString::from("PATH")));
+    debug_assert!(env.contains_key(&OsString::from("HOME")));
+
+    let needs_stdin_pipe = stdin_seed.is_some();
+
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env)
+        .current_dir(cwd)
+        .stdin(if needs_stdin_pipe {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    if let Some(seed) = stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take() {
+            stdin_pipe.write_all(seed.as_bytes())?;
+        }
+
+    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout_pipe);
+        let mut parser = parser;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            // Feed all lines; text accumulates in parser.assistant_text
+            let _ = parser.feed_line(&line);
+        }
+
+        parser
+    });
+
+    let exit_code = if let Some(seconds) = timeout {
+        wait_with_timeout(&mut child, seconds)?
+    } else {
+        wait_with_signal_handling(&mut child)?
+    };
+
+    let parser = stdout_handle.join().unwrap_or_else(|_| {
+        Box::new(ErrorParser { exit_code })
+    });
+
+    Ok(parser.finish(exit_code))
+}
+
+/// Minimal fallback parser used when the real parser thread panics.
+struct ErrorParser {
+    exit_code: i32,
+}
+
+impl StreamParser for ErrorParser {
+    fn feed_line(&mut self, _line: &str) -> std::result::Result<Option<String>, StreamParseError> {
+        Ok(None)
+    }
+
+    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
+        StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("parse_failure".into()),
+            error_message: Some("Stream parser thread panicked".into()),
+            exit_code: self.exit_code,
+            ..Default::default()
+        }
+    }
 }
 
 fn exit_code_from_status(status: ExitStatus) -> i32 {
