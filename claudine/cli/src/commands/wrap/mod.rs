@@ -324,19 +324,21 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // Detect conflict with existing prompt source
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
 
-        // Force non-interactive for inline composition
-        if !non_interactive_requested {
-            profile.apply_non_interactive(&mut child_args)?;
-            profile.apply_non_interactive_defaults(&mut child_args);
-        }
-
-        // Deliver the composed prompt to the provider
+        // Deliver the composed prompt to the provider BEFORE applying
+        // non-interactive mode, because some providers (Gemini) validate
+        // that a prompt is present in args during apply_non_interactive.
         profile.apply_prompt_body(
             &mut child_args,
             &mut stdin_seed,
             &prepared.prompt,
             true, // always non-interactive for inline composition
         )?;
+
+        // Force non-interactive for inline composition
+        if !non_interactive_requested {
+            profile.apply_non_interactive(&mut child_args)?;
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
 
         inline_composition_source = Some((source, prepared));
     }
@@ -353,19 +355,21 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // Detect conflict with existing prompt source
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
 
-        // Force non-interactive for chained composition
-        if !non_interactive_requested {
-            profile.apply_non_interactive(&mut child_args)?;
-            profile.apply_non_interactive_defaults(&mut child_args);
-        }
-
-        // Deliver the composed document to the provider
+        // Deliver the composed document to the provider BEFORE applying
+        // non-interactive mode, because some providers (Gemini) validate
+        // that a prompt is present in args during apply_non_interactive.
         profile.apply_prompt_body(
             &mut child_args,
             &mut stdin_seed,
             &prepared.prompt,
             true, // always non-interactive for chained composition
         )?;
+
+        // Force non-interactive for chained composition
+        if !non_interactive_requested {
+            profile.apply_non_interactive(&mut child_args)?;
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
 
         chained_composition = true;
     }
@@ -626,6 +630,15 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
     let stderr_noise = profile.stderr_noise_prefixes();
 
+    // For captured-output paths (inline compose), let the profile inject
+    // structured output flags (e.g. Gemini's --output-format stream-json)
+    // so we can reliably extract the assistant response from noisy stdout.
+    // Chained compose uses run_child (forwards to terminal), so it relies
+    // on prefix-based noise filtering instead.
+    if inline_composition_source.is_some() {
+        profile.prepare_captured_output(&mut child_args);
+    }
+
     let exit_code = if let Some((source, _prepared)) = inline_composition_source {
         // Inline composition: capture output and update file
         let captured = exec::run_child_capture(
@@ -647,7 +660,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             updated_md.fm_insert("last_updated", &today)
                 .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-            *updated_md.content_mut() = captured.stdout;
+            *updated_md.content_mut() = profile.parse_captured_output(&captured.stdout);
 
             let doc_string = updated_md.as_string();
             claudine::config::atomic::atomic_write(

@@ -5,7 +5,7 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::debug;
 
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider, detect_environment};
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider, detect_environment_fast};
 
 use crate::provider_values::provider_value_parser;
 
@@ -32,7 +32,7 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     let raw = read_stdin_json()?;
     let provider = resolve_provider(args.provider.as_deref(), &raw)?;
     let cwd = std::env::current_dir().unwrap_or_default();
-    let env = detect_environment(&cwd);
+    let env = detect_environment_fast(&cwd);
 
     let event_label = args.event.as_deref().unwrap_or("event");
     debug!(%provider, event = %event_label, "Handling event");

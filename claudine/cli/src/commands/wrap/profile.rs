@@ -149,6 +149,30 @@ pub(crate) trait WrapperProfile: Send + Sync {
         &[]
     }
 
+    // -- Captured output (compose mode) ----------------------------------------
+
+    /// Inject provider-specific flags needed for reliable captured output.
+    ///
+    /// Providers that dump noise to stdout (hook logs, skill conflicts, etc.)
+    /// can override this to request a structured output format that
+    /// `parse_captured_output` knows how to parse.
+    ///
+    /// Only called for compose / captured-output paths, NOT for regular
+    /// non-interactive mode where stdout is forwarded to the terminal.
+    ///
+    /// Default: no-op.
+    fn prepare_captured_output(&self, _args: &mut Vec<String>) {}
+
+    /// Extract the assistant response from captured stdout.
+    ///
+    /// Called after `run_child_capture` when `prepare_captured_output` was
+    /// used to inject structured output flags.
+    ///
+    /// Default: returns raw stdout unchanged.
+    fn parse_captured_output(&self, raw: &str) -> String {
+        raw.to_string()
+    }
+
     // -- Stderr noise filtering -----------------------------------------------
 
     /// Line prefixes that should be stripped from stderr in all modes.
@@ -456,25 +480,75 @@ impl WrapperProfile for GeminiWrapper {
 
     fn apply_yolo(
         &self,
-        _args: &mut Vec<String>,
+        args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        Ok(Some(
-            "--yolo is not supported for 'gemini' (no auto-approve mechanism) and was ignored"
-                .to_string(),
-        ))
+        let flag = "--approval-mode";
+        let value = "yolo";
+        let aliases: &[&str] = &["--yolo", "-y"];
+
+        if has_any_flag(args, flag, aliases) {
+            if let Some(existing) = option_value(args, flag)
+                && !existing.eq_ignore_ascii_case(value)
+            {
+                bail!("--yolo conflicts with existing '{flag} {existing}' for gemini");
+            }
+            return Ok(None);
+        }
+
+        args.push(flag.to_string());
+        args.push(value.to_string());
+        Ok(None)
     }
 
     fn has_supported_yolo(&self) -> bool {
-        false
+        true
     }
 
-    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
+    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
+        let flag = "--approval-mode";
+        let aliases: &[&str] = &["--yolo", "-y"];
+        if has_any_flag(args, flag, aliases)
+            && option_value(args, flag).is_some_and(|v| v.eq_ignore_ascii_case("yolo"))
+        {
+            bail!(
+                "do not pass <blue>{flag} yolo</blue> directly to claudine gemini; \
+                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
+                 Claudine uses this CLI convention for all agents it provides a wrapper to."
+            );
+        }
         Ok(())
     }
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    }
+
+    fn prepare_captured_output(&self, args: &mut Vec<String>) {
+        // Use stream-json so we can reliably separate the assistant
+        // response from hook logs, skill conflict notices, and other
+        // noise that Gemini dumps to stdout.
+        if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
+            args.push("--output-format".to_string());
+            args.push("stream-json".to_string());
+        }
+    }
+
+    fn parse_captured_output(&self, raw: &str) -> String {
+        // Extract assistant content from stream-json lines.
+        // Each line is a JSON object; we want {"type":"message","role":"assistant","content":"..."}
+        let mut result = String::new();
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if value.get("role").and_then(|v| v.as_str()) == Some("assistant") {
+                if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+                    result.push_str(content);
+                }
+            }
+        }
+        result
     }
 
     fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
@@ -483,11 +557,15 @@ impl WrapperProfile for GeminiWrapper {
             "Expanding hook command: ",
             "Hook execution for ",
             "Skill conflict detected: ",
+            "[LocalAgentExecutor]",
         ]
     }
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &["Skill conflict detected: "]
+        &[
+            "Skill conflict detected: ",
+            "[LocalAgentExecutor]",
+        ]
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
@@ -932,6 +1010,7 @@ fn find_first_positional(args: &[String]) -> Option<usize> {
             || arg == "-o"
             || arg == "--auth-type"
             || arg == "--sandbox-image"
+            || arg == "--approval-mode"
         {
             skip_next = true;
             continue;
@@ -1014,14 +1093,25 @@ mod tests {
     }
 
     #[test]
-    fn gemini_yolo_returns_warning_and_does_not_mutate_args() {
+    fn gemini_yolo_mapping_is_idempotent() {
         let p = profile(Provider::Gemini);
-        let mut args = vec!["--prompt".to_string(), "hello".to_string()];
+        let mut args = vec!["--approval-mode".to_string(), "yolo".to_string()];
         let mut env_overrides = Vec::new();
 
-        let warning = p.apply_yolo(&mut args, &mut env_overrides).unwrap();
-        assert!(warning.unwrap().contains("ignored"));
-        assert_eq!(args, vec!["--prompt", "hello"]);
+        p.apply_yolo(&mut args, &mut env_overrides).unwrap();
+        p.apply_yolo(&mut args, &mut env_overrides).unwrap();
+
+        assert_eq!(args, vec!["--approval-mode", "yolo"]);
+    }
+
+    #[test]
+    fn gemini_yolo_conflicts_with_non_yolo_approval_mode() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec!["--approval-mode".to_string(), "default".to_string()];
+        let mut env_overrides = Vec::new();
+
+        let error = p.apply_yolo(&mut args, &mut env_overrides).unwrap_err();
+        assert!(error.to_string().contains("conflicts"));
     }
 
     #[test]
@@ -1075,6 +1165,24 @@ mod tests {
         p.apply_non_interactive(&mut args).unwrap();
 
         assert_eq!(args, vec!["--model", "flash", "--prompt", "explain this"]);
+    }
+
+    #[test]
+    fn gemini_non_interactive_skips_approval_mode_value() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec![
+            "--approval-mode".to_string(),
+            "yolo".to_string(),
+            "explain this".to_string(),
+        ];
+
+        p.apply_non_interactive(&mut args).unwrap();
+
+        // "yolo" must stay as --approval-mode's value, not be stolen as a positional
+        assert_eq!(
+            args,
+            vec!["--approval-mode", "yolo", "--prompt", "explain this"]
+        );
     }
 
     #[test]

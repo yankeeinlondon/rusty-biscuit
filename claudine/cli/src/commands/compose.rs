@@ -259,16 +259,21 @@ fn run_provider_composition(
     let mut child_args = Vec::new();
     let mut stdin_seed: Option<String> = None;
 
-    wrapper_profile.apply_non_interactive(&mut child_args)?;
-    wrapper_profile.apply_non_interactive_defaults(&mut child_args);
-
-    // Deliver the prompt
+    // Deliver the prompt BEFORE applying non-interactive mode, because
+    // some providers (Gemini) validate that a prompt is present in args
+    // during apply_non_interactive.
     wrapper_profile.apply_prompt_body(
         &mut child_args,
         &mut stdin_seed,
         &prepared.prompt,
         true,
     )?;
+
+    wrapper_profile.apply_non_interactive(&mut child_args)?;
+    wrapper_profile.apply_non_interactive_defaults(&mut child_args);
+
+    // Inject structured output flags for reliable capture
+    wrapper_profile.prepare_captured_output(&mut child_args);
 
     // Build env
     let env_plan = env::build_child_env(
@@ -302,10 +307,12 @@ fn run_provider_composition(
         },
     )?;
 
+    let parsed_stdout = wrapper_profile.parse_captured_output(&captured.stdout);
+
     match prepared.mode {
         CompositionMode::ChainedDocument => {
             if captured.exit_code == 0 {
-                print!("{}", captured.stdout);
+                print!("{}", parsed_stdout);
             } else if !captured.stderr.is_empty() {
                 eprintln!("{}", captured.stderr);
             }
@@ -318,7 +325,7 @@ fn run_provider_composition(
                 updated_md
                     .fm_insert("last_updated", &today)
                     .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                *updated_md.content_mut() = captured.stdout;
+                *updated_md.content_mut() = parsed_stdout;
 
                 let doc_string = updated_md.as_string();
                 claudine::config::atomic::atomic_write(
