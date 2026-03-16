@@ -279,11 +279,15 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
 
         // Deliver composed body to provider
-        let delivery_method = if matches!(provider, Provider::Claude | Provider::KimiCode) {
-            "stdin"
-        } else {
-            "args"
-        };
+        let delivery_method =
+            if matches!(provider, Provider::Claude | Provider::KimiCode)
+                || (matches!(provider, Provider::Codex | Provider::OpenCode)
+                    && non_interactive_requested)
+            {
+                "stdin"
+            } else {
+                "args"
+            };
         profile.apply_prompt_body(
             &mut child_args,
             &mut stdin_seed,

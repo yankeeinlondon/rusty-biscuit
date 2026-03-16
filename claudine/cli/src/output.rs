@@ -539,7 +539,12 @@ pub(crate) fn shell_escape(arg: &str) -> String {
         return arg.to_string();
     }
 
-    format!("'{}'", arg.replace('\'', "'\\''"))
+    let escaped = arg
+        .replace('\'', "'\\''")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t");
+    format!("'{escaped}'")
 }
 
 #[cfg(test)]
@@ -578,6 +583,16 @@ mod tests {
         let args = "'some long prompt'";
         let result = truncate_args(args, 2);
         assert_eq!(result, "...\"");
+    }
+
+    #[test]
+    fn shell_escape_replaces_newlines() {
+        assert_eq!(shell_escape("Hi.\nHow are you?"), "'Hi.\\nHow are you?'");
+    }
+
+    #[test]
+    fn shell_escape_replaces_tabs_and_carriage_returns() {
+        assert_eq!(shell_escape("a\tb\rc"), "'a\\tb\\rc'");
     }
 
     #[test]

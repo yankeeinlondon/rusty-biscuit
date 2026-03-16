@@ -437,17 +437,24 @@ impl WrapperProfile for CodexWrapper {
     fn apply_prompt_body(
         &self,
         args: &mut Vec<String>,
-        _stdin_seed: &mut Option<String>,
+        stdin_seed: &mut Option<String>,
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<()> {
-        // Codex: insert prompt as positional after "exec" (index 1 in args)
-        let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
-            1
+        if non_interactive {
+            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
+            // errors when prompt-file content exceeds OS argument length limits.
+            // Codex exec reads from stdin when no positional prompt is provided.
+            *stdin_seed = Some(prompt.to_string());
         } else {
-            0
-        };
-        args.insert(insert_at, prompt.to_string());
+            // Interactive: insert as positional after "exec"
+            let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
+                1
+            } else {
+                0
+            };
+            args.insert(insert_at, prompt.to_string());
+        }
         Ok(())
     }
 
@@ -869,17 +876,23 @@ impl WrapperProfile for OpencodeWrapper {
     fn apply_prompt_body(
         &self,
         args: &mut Vec<String>,
-        _stdin_seed: &mut Option<String>,
+        stdin_seed: &mut Option<String>,
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<()> {
-        // OpenCode: insert prompt as positional after "run" (index 1 in args)
-        let insert_at = if args.first().is_some_and(|f| f == "run") {
-            1
+        if non_interactive {
+            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
+            // errors when prompt-file content exceeds OS argument length limits.
+            *stdin_seed = Some(prompt.to_string());
         } else {
-            0
-        };
-        args.insert(insert_at, prompt.to_string());
+            // Interactive: insert as positional after "run"
+            let insert_at = if args.first().is_some_and(|f| f == "run") {
+                1
+            } else {
+                0
+            };
+            args.insert(insert_at, prompt.to_string());
+        }
         Ok(())
     }
 

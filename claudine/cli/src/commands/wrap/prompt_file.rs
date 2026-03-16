@@ -284,9 +284,19 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
         )
     })?;
 
-    let body = transformed.content().to_string();
+    let mut body = transformed.content().to_string();
     let fm_map = transformed.frontmatter().as_map();
-    let env_overrides = frontmatter_to_env(fm_map)?;
+    let mut env_overrides = frontmatter_to_env(fm_map)?;
+
+    // If the markdown body is empty but frontmatter contains a `prompt` key,
+    // promote it to the body. This supports prompt-only files where the entire
+    // prompt lives in frontmatter (e.g. for parameterized prompt templates).
+    if body.trim().is_empty() {
+        if let Some(idx) = env_overrides.iter().position(|(k, _)| k == "PROMPT") {
+            body = env_overrides.remove(idx).1;
+        }
+    }
+
     let env_names: Vec<String> = env_overrides.iter().map(|(k, _)| k.clone()).collect();
 
     Ok(ComposedPrompt {
