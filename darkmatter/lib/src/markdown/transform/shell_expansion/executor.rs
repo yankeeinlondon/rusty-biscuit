@@ -42,7 +42,9 @@ pub fn resolve_working_directory(
     }
     if let TransformSource::File(path) = source {
         if let Some(parent) = path.parent() {
-            return parent.to_path_buf();
+            if !parent.as_os_str().is_empty() {
+                return parent.to_path_buf();
+            }
         }
     }
     if let Some(ref root) = shell_opts.policy_root {
@@ -442,6 +444,91 @@ mod tests {
                 assert!(stderr.contains("boom"));
             }
             other => panic!("Expected ExecutionFailed, got {other:?}"),
+        }
+    }
+
+    /// Regression test: a bare filename like "file.md" has parent "" which
+    /// previously caused Command::current_dir("") to fail with exit -1.
+    #[test]
+    fn bare_filename_source_falls_through_to_cwd() {
+        let options = ShellExpansionOptions::default();
+        // "file.md" has parent "" — must not produce an empty working directory
+        let source = TransformSource::File(PathBuf::from("file.md"));
+        let wd = resolve_working_directory(&options, &source);
+        assert!(
+            !wd.as_os_str().is_empty(),
+            "Working directory must not be empty for bare filenames"
+        );
+    }
+
+    /// Regression test: executing a command when the source is a bare filename
+    /// must succeed — the previous bug caused spawn to fail with exit -1.
+    #[test]
+    fn execute_command_with_bare_filename_source_succeeds() {
+        let directive = ShellDirective {
+            raw_command: "echo works".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["works".to_string()],
+            span: 0..16,
+            line: 5,
+        };
+        let options = ShellExpansionOptions::default();
+        let source = TransformSource::File(PathBuf::from("test.md"));
+
+        let output = execute_command(&directive, &options, &source).unwrap();
+        assert_eq!(output.trim(), "works");
+    }
+
+    /// Execute a command with quoted arguments to verify tokenizer → executor flow.
+    #[test]
+    fn execute_command_with_quoted_args() {
+        let directive = ShellDirective {
+            raw_command: r#"echo "hello world""#.to_string(),
+            executable: "echo".to_string(),
+            args: vec!["hello world".to_string()],
+            span: 0..18,
+            line: 1,
+        };
+        let options = ShellExpansionOptions::default();
+        let source = TransformSource::Unknown;
+
+        let output = execute_command(&directive, &options, &source).unwrap();
+        assert_eq!(output.trim(), "hello world");
+    }
+
+    /// Non-zero exit code preserves stdout and stderr in the error.
+    #[test]
+    fn execution_failed_includes_output_streams() {
+        let Some(python) = find_python() else {
+            return;
+        };
+
+        let directive = ShellDirective {
+            raw_command: format!("{} -c ...", python.display()),
+            executable: python.to_string_lossy().to_string(),
+            args: vec![
+                "-c".to_string(),
+                "import sys; sys.stdout.write('out'); sys.stderr.write('err'); sys.exit(42)"
+                    .to_string(),
+            ],
+            span: 0..10,
+            line: 1,
+        };
+        let options = ShellExpansionOptions::default();
+        let source = TransformSource::Unknown;
+
+        match execute_command(&directive, &options, &source) {
+            Err(ShellExpansionError::ExecutionFailed {
+                code,
+                stdout,
+                stderr,
+                ..
+            }) => {
+                assert_eq!(code, 42);
+                assert_eq!(stdout, "out");
+                assert_eq!(stderr, "err");
+            }
+            other => panic!("Expected ExecutionFailed with code 42, got: {:?}", other),
         }
     }
 

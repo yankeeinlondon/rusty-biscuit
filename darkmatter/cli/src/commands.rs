@@ -273,7 +273,11 @@ pub fn run_compose(
 
     let shell_opts = ShellExpansionOptions {
         policy_root: if is_file_input {
-            input.and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+            input.and_then(|p| {
+                p.parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map(|parent| parent.to_path_buf())
+            })
         } else {
             None
         },

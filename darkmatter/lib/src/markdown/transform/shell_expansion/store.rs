@@ -37,7 +37,7 @@ pub fn resolve_policy_paths(
         // Determine base directory from source
         let base_dir = match source {
             TransformSource::File(path) => {
-                if let Some(parent) = path.parent() {
+                if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
                     parent.to_path_buf()
                 } else {
                     std::env::current_dir().map_err(|e| ShellExpansionError::PolicyIo {

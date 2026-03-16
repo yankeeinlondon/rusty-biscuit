@@ -484,6 +484,147 @@ name: world
         assert_eq!(transformed.content().matches("hello").count(), 2);
     }
 
+    /// Regression test: when the source file is a bare filename (no directory
+    /// component), execution must still succeed — the previous bug set current_dir
+    /// to an empty string, causing spawn to fail with exit -1.
+    #[test]
+    fn pipeline_works_with_bare_filename_source() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "# Test\n::shell echo hello\n").unwrap();
+
+        // Use a bare filename as the source (not an absolute path)
+        let md = Markdown::try_from(file_path.as_path()).unwrap();
+
+        let options = TransformOptions::new()
+            .with_source_file(&file_path)
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("hello"));
+        assert_eq!(report.shell_expansions_applied, 1);
+    }
+
+    /// Denied commands produce a hard error, not a warning.
+    #[test]
+    fn pipeline_denied_command_produces_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo hello\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::Deny,
+                })),
+                ..Default::default()
+            });
+
+        let err = md.transform_with(options).unwrap_err();
+        assert!(err.to_string().contains("denied") || err.to_string().contains("Denied"));
+    }
+
+    /// AllowExactPersist writes the normalized command to the whitelist file.
+    #[test]
+    fn pipeline_allow_exact_persist_writes_whitelist() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo hello\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowExactPersist,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("hello"));
+
+        let whitelist = std::fs::read_to_string(
+            temp_dir.path().join(".darkmatter-shell-whitelist"),
+        )
+        .unwrap();
+        assert!(whitelist.contains("exact echo hello"));
+    }
+
+    /// BlacklistPersist writes to the blacklist and errors.
+    #[test]
+    fn pipeline_blacklist_persist_writes_and_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo hello\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::BlacklistPersist,
+                })),
+                ..Default::default()
+            });
+
+        let err = md.transform_with(options).unwrap_err();
+        assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("blacklist"));
+
+        let blacklist = std::fs::read_to_string(
+            temp_dir.path().join(".darkmatter-shell-blacklist"),
+        )
+        .unwrap();
+        assert!(blacklist.contains("exact echo hello"));
+    }
+
+    /// Empty command output removes the directive line entirely.
+    #[test]
+    fn pipeline_empty_output_removes_directive() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell true\nAfter\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(!transformed.content().contains("::shell"));
+        assert!(transformed.content().contains("After"));
+        assert_eq!(report.shell_expansions_applied, 1);
+    }
+
     #[test]
     fn shell_errors_remain_hard_failures_when_fail_fast_is_false() {
         let temp_dir = TempDir::new().unwrap();
