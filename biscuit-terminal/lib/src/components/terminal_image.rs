@@ -477,14 +477,70 @@ impl TerminalImage {
 
     /// Load the image from disk.
     ///
+    /// Supports raster formats (PNG, JPEG, GIF, WebP, etc.) via the `image` crate
+    /// and SVG files via `resvg` rasterization.
+    ///
     /// ## Errors
     ///
     /// Returns `TerminalImageError::ImageLoadError` if the image cannot be loaded.
     pub fn load_image(&self) -> Result<DynamicImage, TerminalImageError> {
-        let img = ImageReader::open(&self.filename)?
-            .with_guessed_format()?
-            .decode()?;
-        Ok(img)
+        if self.is_svg() {
+            self.load_svg()
+        } else {
+            let img = ImageReader::open(&self.filename)?
+                .with_guessed_format()?
+                .decode()?;
+            Ok(img)
+        }
+    }
+
+    /// Check if the file is an SVG based on extension.
+    fn is_svg(&self) -> bool {
+        Path::new(&self.filename)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+    }
+
+    /// Rasterize an SVG file to a `DynamicImage` using resvg.
+    fn load_svg(&self) -> Result<DynamicImage, TerminalImageError> {
+        let svg_data = std::fs::read(&self.filename)?;
+        let tree = resvg::usvg::Tree::from_data(&svg_data, &resvg::usvg::Options::default())
+            .map_err(|e| TerminalImageError::EncodingError {
+                message: format!("SVG parse error: {e}"),
+            })?;
+
+        let size = tree.size();
+        let (w, h) = (size.width() as u32, size.height() as u32);
+        if w == 0 || h == 0 {
+            return Err(TerminalImageError::EncodingError {
+                message: "SVG has zero dimensions".to_string(),
+            });
+        }
+
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h).ok_or_else(|| {
+            TerminalImageError::EncodingError {
+                message: format!("Failed to create {w}x{h} pixmap for SVG"),
+            }
+        })?;
+
+        resvg::render(&tree, resvg::usvg::Transform::default(), &mut pixmap.as_mut());
+
+        // tiny_skia stores premultiplied alpha — demultiply for image::RgbaImage
+        let mut rgba = pixmap.data().to_vec();
+        for chunk in rgba.chunks_exact_mut(4) {
+            let a = chunk[3] as u16;
+            if a > 0 && a < 255 {
+                chunk[0] = ((chunk[0] as u16 * 255 + a / 2) / a).min(255) as u8;
+                chunk[1] = ((chunk[1] as u16 * 255 + a / 2) / a).min(255) as u8;
+                chunk[2] = ((chunk[2] as u16 * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+        image::RgbaImage::from_raw(w, h, rgba)
+            .map(DynamicImage::ImageRgba8)
+            .ok_or_else(|| TerminalImageError::EncodingError {
+                message: "Failed to create image from SVG rasterization".to_string(),
+            })
     }
 
     /// Encode a DynamicImage as PNG bytes.
@@ -1568,6 +1624,56 @@ mod tests {
         let loaded = img.load_image().unwrap();
         assert_eq!(loaded.width(), 2);
         assert_eq!(loaded.height(), 2);
+    }
+
+    #[test]
+    fn test_terminal_image_load_svg() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.svg");
+        std::fs::write(
+            &file_path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+                <rect width="100" height="50" fill="red"/>
+            </svg>"#,
+        )
+        .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        assert!(img.is_svg());
+        let loaded = img.load_image().unwrap();
+        assert_eq!(loaded.width(), 100);
+        assert_eq!(loaded.height(), 50);
+    }
+
+    #[test]
+    fn test_terminal_image_svg_invalid_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("bad.svg");
+        std::fs::write(&file_path, "not valid svg").unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        assert!(img.load_image().is_err());
+    }
+
+    #[test]
+    fn test_terminal_image_is_svg_detection() {
+        let img_svg = TerminalImage {
+            filename: "/tmp/test.svg".to_string(),
+            ..Default::default()
+        };
+        assert!(img_svg.is_svg());
+
+        let img_svg_upper = TerminalImage {
+            filename: "/tmp/test.SVG".to_string(),
+            ..Default::default()
+        };
+        assert!(img_svg_upper.is_svg());
+
+        let img_png = TerminalImage {
+            filename: "/tmp/test.png".to_string(),
+            ..Default::default()
+        };
+        assert!(!img_png.is_svg());
     }
 
     #[test]

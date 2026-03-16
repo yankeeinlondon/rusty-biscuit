@@ -38,6 +38,9 @@ unic-langid = "0.9.6"
 # Terminal image rendering
 viuer = { version = "0.11", features = ["print-file"] }
 
+# SVG rasterization for terminal image rendering
+resvg = "0.45"
+
 # CLI argument parsing (optional, for ValueEnum derive)
 clap = { version = "4", features = ["derive"], optional = true }
 
