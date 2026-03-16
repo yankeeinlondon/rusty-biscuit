@@ -1498,6 +1498,117 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
     std::process::exit(1);
 }
 
+/// Source code file extensions considered for change detection.
+const SOURCE_CODE_EXTENSIONS: &[&str] = &[
+    // Rust
+    "rs",
+    // TypeScript / JavaScript
+    "ts", "tsx", "js", "jsx", "mjs", "mts", "cjs", "cts",
+    // Web
+    "vue", "svelte", "html", "htm", "css", "scss", "sass", "less",
+    // Python
+    "py", "pyi",
+    // Go
+    "go",
+    // C / C++
+    "c", "h", "cpp", "hpp", "cc", "cxx",
+    // Java / Kotlin
+    "java", "kt", "kts",
+    // Shell
+    "sh", "bash", "zsh",
+    // Ruby
+    "rb",
+    // Swift
+    "swift",
+    // SQL
+    "sql",
+];
+
+/// Returns true if a file path has a source code extension.
+fn is_source_code_file(path: &str) -> bool {
+    let ext = match path.rsplit('.').next() {
+        Some(e) if e != path => e,
+        _ => return false,
+    };
+    SOURCE_CODE_EXTENSIONS.iter().any(|&s| s.eq_ignore_ascii_case(ext))
+}
+
+/// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
+///
+/// With `verbose >= 1`, prints a human-readable message before exiting.
+pub fn print_package_area_has_source_code_changes(
+    result: &sniff::SniffResult,
+    base_dir: Option<&Path>,
+    verbose: u8,
+) {
+    let dir = resolve_dir(base_dir);
+    let fs = match result.filesystem.as_ref() {
+        Some(fs) => fs,
+        None => std::process::exit(1),
+    };
+    let repo = match fs.repo.as_ref() {
+        Some(r) => r,
+        None => std::process::exit(1),
+    };
+
+    let area = match repo.package_area_for_dir(&dir) {
+        Some(a) => a,
+        None => std::process::exit(1),
+    };
+
+    let git = match fs.git.as_ref() {
+        Some(g) => g,
+        None => std::process::exit(1),
+    };
+
+    let area_prefix = if area == "root" { "" } else { area };
+
+    let source_change_count = git
+        .status
+        .dirty
+        .iter()
+        .map(|d| d.filepath.to_str().unwrap_or(""))
+        .chain(
+            git.status
+                .untracked
+                .iter()
+                .map(|u| u.filepath.to_str().unwrap_or("")),
+        )
+        .filter(|path| {
+            let in_area = if area_prefix.is_empty() {
+                !repo
+                    .packages
+                    .as_ref()
+                    .map_or(false, |pkgs| {
+                        pkgs.iter()
+                            .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                    })
+            } else {
+                path.starts_with(area_prefix)
+            };
+            in_area && is_source_code_file(path)
+        })
+        .count();
+
+    if verbose > 0 {
+        if source_change_count > 0 {
+            println!(
+                "{} source file{} changed in the {} package area",
+                source_change_count,
+                if source_change_count == 1 { "" } else { "s" },
+                area,
+            );
+        } else {
+            println!("no source files changed in the {} package area", area);
+        }
+    }
+
+    if source_change_count > 0 {
+        std::process::exit(0);
+    }
+    std::process::exit(1);
+}
+
 /// Resolve the effective directory from `--base` or fall back to CWD.
 fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
     base_dir

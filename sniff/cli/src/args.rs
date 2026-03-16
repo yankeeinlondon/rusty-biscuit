@@ -366,6 +366,8 @@ pub enum RepoSubcommand {
     RepoRoot,
     /// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise
     IsCurrentPackageAreaDirty,
+    /// Exit 0 if the current package area has source code changes, exit 1 otherwise
+    PackageAreaHasSourceCodeChanges,
 }
 
 impl Commands {
@@ -746,6 +748,7 @@ Commands:
     sniff repo package-area-root     Root directory of the current package area
     sniff repo repo-root             Root directory of the repository
     sniff repo is-current-package-area-dirty  Exit 0 if CWD's area is dirty, 1 otherwise
+    sniff repo package-area-has-source-code-changes  Exit 0 if CWD's area has source changes
     sniff language                   Show only language detection results
     sniff files                      Show broad file associations
     sniff files --association image  Show only image file statistics
@@ -1020,6 +1023,15 @@ mod tests {
                 cli.command,
                 Some(Commands::Repo {
                     repo_subcommand: Some(RepoSubcommand::IsCurrentPackageAreaDirty),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "package-area-has-source-code-changes"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::PackageAreaHasSourceCodeChanges),
                     ..
                 })
             ));
