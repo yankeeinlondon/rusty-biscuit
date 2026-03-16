@@ -514,11 +514,9 @@ _feature feat base_dir:
             echo
             exit 1
         else
-            if [[ $(md get "{{base_dir}}/feature.md" error) == "true" ]]; then
-                just _feature_recover "{{feat}}" "{{base_dir}}"
-            else
-                just _feature_gen "{{feat}}" "{{base_dir}}"
-            fi
+            just _feature_stage "{{feat}}" "{{base_dir}}" "tech-design"
+            just _feature_gen "{{feat}}" "{{base_dir}}"
+            exit
         fi
     fi
 

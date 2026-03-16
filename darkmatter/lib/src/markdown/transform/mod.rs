@@ -29,10 +29,12 @@
 //! ```
 
 pub(crate) mod parse_utils;
+mod conditions;
 mod state;
 mod types;
 
 pub mod interpolation;
+pub mod page_blocks;
 pub mod replacement;
 pub mod shell_expansion;
 pub mod toc_linking;
@@ -266,6 +268,11 @@ impl Markdown {
                 }
             }
 
+            // Stage 2: page blocks (conditional content regions).
+            if options.stage2.page_blocks {
+                self.run_page_blocks_stage(&effective_state, &mut report)?;
+            }
+
             // Stage 2: block transclusion directives.
             if options.stage2.block_transclusion {
                 self.run_block_transclusion_stage(
@@ -425,6 +432,44 @@ impl Markdown {
 
         apply_replacements_in_reverse(&mut self.content, replacements);
         report.shell_approvals_used += runtime.shell.take_recent_approval_count();
+        Ok(())
+    }
+
+    /// Runs Stage 2 page blocks (conditional content regions).
+    fn run_page_blocks_stage(
+        &mut self,
+        state: &EffectiveState,
+        report: &mut TransformReport,
+    ) -> MarkdownResult<()> {
+        let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
+        if regions.is_empty() {
+            return Ok(());
+        }
+
+        // Warn for unknown options
+        fn warn_unknown_options(
+            region: &page_blocks::PageBlockRegion,
+            report: &mut TransformReport,
+        ) {
+            for unknown in &region.options.unknown_options {
+                report.add_warning(
+                    TransformWarning::new(
+                        "page_blocks",
+                        format!("Unknown page block option: '{}'", unknown),
+                    )
+                    .at_line(region.start_line),
+                );
+            }
+            for child in &region.children {
+                warn_unknown_options(child, report);
+            }
+        }
+        for region in &regions {
+            warn_unknown_options(region, report);
+        }
+
+        self.content =
+            page_blocks::engine::render_page_blocks(&self.content, &regions, state, report)?;
         Ok(())
     }
 
@@ -2318,5 +2363,114 @@ Rounded: {{ round(pi) }}"#;
             "H2 should become H5, got:\n{}",
             transformed.content()
         );
+    }
+
+    // ── Page block integration tests ────────────────────────────────────
+
+    #[test]
+    fn page_block_true_preserves_content_through_pipeline() {
+        let content = "---\nflag: true\n---\n\nbefore\n\n::block when=\"flag\"\n\nkept content\n\n::end-block\n\nafter\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages::none())
+            .with_stage2(Stage2Stages::only_page_blocks());
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(
+            transformed.content().contains("kept content"),
+            "True block body should be preserved, got:\n{}",
+            transformed.content()
+        );
+        assert!(
+            transformed.content().contains("before"),
+            "Content before block should be preserved"
+        );
+        assert!(
+            transformed.content().contains("after"),
+            "Content after block should be preserved"
+        );
+        assert_eq!(report.page_blocks_rendered, 1);
+    }
+
+    #[test]
+    fn page_block_false_removes_content_through_pipeline() {
+        let content =
+            "---\nflag: false\n---\n\nbefore\n\n::block when=\"flag\"\n\nremoved\n\n::end-block\n\nafter\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages::none())
+            .with_stage2(Stage2Stages::only_page_blocks());
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(
+            !transformed.content().contains("removed"),
+            "False block body should be removed, got:\n{}",
+            transformed.content()
+        );
+        assert!(transformed.content().contains("before"));
+        assert!(transformed.content().contains("after"));
+        assert_eq!(report.page_blocks_skipped, 1);
+    }
+
+    #[test]
+    fn page_block_coexists_with_interpolation() {
+        // Stage 1 interpolation output should be visible to page block conditions
+        let content = "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new().with_stages(Stage1Stages {
+            interpolation: true,
+            ..Stage1Stages::none()
+        });
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(
+            transformed.content().contains("Shown: true"),
+            "Interpolation should run before page blocks, got:\n{}",
+            transformed.content()
+        );
+        assert_eq!(report.page_blocks_rendered, 1);
+        assert!(report.interpolations_applied > 0);
+    }
+
+    #[test]
+    fn page_block_report_and_warnings_populated() {
+        let content = "---\na: true\nb: false\n---\n\n::block when=\"a\" unknown=\"x\"\n\nA\n\n::end-block\n\n::block when=\"b\"\n\nB\n\n::end-block\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages::none())
+            .with_stage2(Stage2Stages::only_page_blocks());
+
+        let (_, report) = md.transform_with(options).unwrap();
+        assert_eq!(report.page_blocks_rendered, 1);
+        assert_eq!(report.page_blocks_skipped, 1);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("unknown")),
+            "Should warn about unknown option"
+        );
+    }
+
+    #[test]
+    fn page_block_toggle_disabled_leaves_directives_as_text() {
+        let content = "::block when=\"x\"\nbody\n::end-block\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages::none())
+            .with_stage2(Stage2Stages::none());
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(
+            transformed.content().contains("::block"),
+            "With page_blocks disabled, directives should be left as text"
+        );
+        assert_eq!(report.page_blocks_rendered, 0);
+        assert_eq!(report.page_blocks_skipped, 0);
     }
 }

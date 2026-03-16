@@ -60,6 +60,10 @@ pub enum MarkdownError {
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
     ShellExpansion(#[from] crate::markdown::transform::ShellExpansionError),
+
+    /// Page block pipeline error.
+    #[error("Page block error: {0}")]
+    PageBlock(#[from] crate::markdown::transform::page_blocks::PageBlockError),
 }
 
 /// Result type for markdown operations.

@@ -319,6 +319,9 @@ impl Stage1Stages {
 /// Controls which Stage 2 transclusion stages are enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stage2Stages {
+    /// Page block conditional regions (`::block` / `::end-block`).
+    pub page_blocks: bool,
+
     /// Block directive transclusion (`::file`, `::code`, `::url`).
     pub block_transclusion: bool,
 
@@ -329,6 +332,7 @@ pub struct Stage2Stages {
 impl Default for Stage2Stages {
     fn default() -> Self {
         Self {
+            page_blocks: true,
             block_transclusion: true,
             fm_transclusion: true,
         }
@@ -339,8 +343,17 @@ impl Stage2Stages {
     /// Creates stages with all disabled.
     pub fn none() -> Self {
         Self {
+            page_blocks: false,
             block_transclusion: false,
             fm_transclusion: false,
+        }
+    }
+
+    /// Creates stages with only page blocks enabled.
+    pub fn only_page_blocks() -> Self {
+        Self {
+            page_blocks: true,
+            ..Self::none()
         }
     }
 
@@ -348,15 +361,15 @@ impl Stage2Stages {
     pub fn only_block() -> Self {
         Self {
             block_transclusion: true,
-            fm_transclusion: false,
+            ..Self::none()
         }
     }
 
     /// Creates stages with only frontmatter transclusion enabled.
     pub fn only_frontmatter() -> Self {
         Self {
-            block_transclusion: false,
             fm_transclusion: true,
+            ..Self::none()
         }
     }
 }
@@ -548,6 +561,12 @@ pub struct TransformReport {
     /// Normalization report if normalization was performed.
     pub normalization_report: Option<NormalizationReport>,
 
+    /// Number of page blocks that evaluated to true and were rendered.
+    pub page_blocks_rendered: usize,
+
+    /// Number of page blocks that evaluated to false and were skipped.
+    pub page_blocks_skipped: usize,
+
     /// Number of transclusions applied.
     pub transclusions_applied: usize,
 
@@ -574,6 +593,7 @@ impl TransformReport {
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
             || self.cleanup_changed
+            || self.page_blocks_rendered > 0
             || self.transclusions_applied > 0
             || self
                 .normalization_report
@@ -611,6 +631,14 @@ impl TransformReport {
 
         if self.cleanup_changed {
             parts.push("cleanup applied".to_string());
+        }
+
+        if self.page_blocks_rendered > 0 {
+            parts.push(format!("{} page block(s) rendered", self.page_blocks_rendered));
+        }
+
+        if self.page_blocks_skipped > 0 {
+            parts.push(format!("{} page block(s) skipped", self.page_blocks_skipped));
         }
 
         if self.transclusions_applied > 0 {

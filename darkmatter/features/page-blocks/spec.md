@@ -33,7 +33,7 @@ Bar is the best
 
 ## Conditional Logic
 
-The conditional logic in the `when` variable is the same conditional logic provided by the [block transclusion](../transclusion/block-transclusion.md#conditional-transclusion)'s `when` clauses. 
+The conditional logic in the `when` variable is the same conditional logic provided by the [block transclusion](@darkmatter/docs/transclusion/block-transclusion.md#conditional-transclusion)'s `when` clauses. 
 
 ### ENV variables
 
@@ -48,3 +48,7 @@ display when the AGENT environment variable is set
 ::block when="env.AGENT == 'claude'"
 display when the AGENT environment variable is equal to 'claude'
 ::end-block
+
+```
+
+
