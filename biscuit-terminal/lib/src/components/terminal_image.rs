@@ -524,7 +524,11 @@ impl TerminalImage {
             }
         })?;
 
-        resvg::render(&tree, resvg::usvg::Transform::default(), &mut pixmap.as_mut());
+        resvg::render(
+            &tree,
+            resvg::usvg::Transform::default(),
+            &mut pixmap.as_mut(),
+        );
 
         // tiny_skia stores premultiplied alpha — demultiply for image::RgbaImage
         let mut rgba = pixmap.data().to_vec();

@@ -318,13 +318,7 @@ mod tests {
         let mut opts = default_options();
         opts.resolve_repo_root = false;
 
-        let err = resolve_path(
-            "@/shared.md",
-            &opts,
-            &TransformSource::Unknown,
-            1,
-        )
-        .unwrap_err();
+        let err = resolve_path("@/shared.md", &opts, &TransformSource::Unknown, 1).unwrap_err();
 
         assert!(matches!(err, TransclusionError::InvalidReference { .. }));
     }

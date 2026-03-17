@@ -230,9 +230,7 @@ fn interpolate(
             TemplateSegment::Literal(s) => result.push_str(s),
             TemplateSegment::EnvVar(name) => {
                 let value = ctx.env.get(name).ok_or_else(|| {
-                    FileReferenceError::MissingEnvironmentVariable {
-                        name: name.clone(),
-                    }
+                    FileReferenceError::MissingEnvironmentVariable { name: name.clone() }
                 })?;
                 result.push_str(value);
             }

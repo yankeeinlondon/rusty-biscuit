@@ -13,16 +13,11 @@ pub(crate) struct ResolutionContext {
 impl ResolutionContext {
     /// Build from live process state.
     pub fn from_ambient() -> Result<Self, FileReferenceError> {
-        let cwd =
-            std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
+        let cwd = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
         let home_dir = home_dir();
         let env = std::env::vars().collect();
 
-        Ok(Self {
-            cwd,
-            home_dir,
-            env,
-        })
+        Ok(Self { cwd, home_dir, env })
     }
 }
 
@@ -81,9 +76,7 @@ pub(crate) fn find_package_area(
         .collect();
 
     // Find the member whose directory is an ancestor of CWD
-    let cwd_normalized = cwd
-        .canonicalize()
-        .unwrap_or_else(|_| cwd.to_path_buf());
+    let cwd_normalized = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
 
     for (pkg_dir, area) in &members {
         let pkg_normalized = pkg_dir

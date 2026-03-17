@@ -28,8 +28,8 @@
 //! let report = md.transform_with(options).unwrap();
 //! ```
 
-pub(crate) mod parse_utils;
 mod conditions;
+pub(crate) mod parse_utils;
 mod state;
 mod types;
 
@@ -136,7 +136,8 @@ impl Markdown {
         &mut self,
         options: TransformOptions,
     ) -> MarkdownResult<TransformReport> {
-        let mut runtime = shell_expansion::types::PipelineRuntime::new(options.transclusion.max_depth);
+        let mut runtime =
+            shell_expansion::types::PipelineRuntime::new(options.transclusion.max_depth);
         self.run_transform_pipeline_internal(options, &mut runtime)
     }
 
@@ -188,7 +189,13 @@ impl Markdown {
 
             // Build effective state for replacement/interpolation and condition checks.
             let effective_state = EffectiveStateBuilder::new()
-                .with_frontmatter(self.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                .with_frontmatter(
+                    self.frontmatter()
+                        .as_map()
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                )
                 .with_external_state(
                     options
                         .external_state
@@ -411,21 +418,15 @@ impl Markdown {
             return Ok(());
         }
 
-        let policy_paths = shell_expansion::resolve_policy_paths(
-            &options.shell,
-            &options.transclusion.source,
-        )?;
+        let policy_paths =
+            shell_expansion::resolve_policy_paths(&options.shell, &options.transclusion.source)?;
         runtime.shell.ensure_loaded(&policy_paths)?;
 
         let mut replacements = Vec::new();
 
         for directive in directives {
-            let replacement = execute_directive(
-                &directive,
-                options,
-                &policy_paths,
-                &mut runtime.shell,
-            )?;
+            let replacement =
+                execute_directive(&directive, options, &policy_paths, &mut runtime.shell)?;
             replacements.push((directive.span.clone(), replacement));
             report.shell_expansions_applied += 1;
         }
@@ -2395,8 +2396,7 @@ Rounded: {{ round(pi) }}"#;
 
     #[test]
     fn page_block_false_removes_content_through_pipeline() {
-        let content =
-            "---\nflag: false\n---\n\nbefore\n\n::block when=\"flag\"\n\nremoved\n\n::end-block\n\nafter\n";
+        let content = "---\nflag: false\n---\n\nbefore\n\n::block when=\"flag\"\n\nremoved\n\n::end-block\n\nafter\n";
         let md: Markdown = content.into();
 
         let options = TransformOptions::new()
@@ -2417,7 +2417,8 @@ Rounded: {{ round(pi) }}"#;
     #[test]
     fn page_block_coexists_with_interpolation() {
         // Stage 1 interpolation output should be visible to page block conditions
-        let content = "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
+        let content =
+            "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
         let md: Markdown = content.into();
 
         let options = TransformOptions::new().with_stages(Stage1Stages {

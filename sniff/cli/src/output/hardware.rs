@@ -72,7 +72,8 @@ pub fn render_hardware_section(
         out,
         "CPU: {} ({} logical cores)",
         hardware.cpu.brand, hardware.cpu.logical_cores
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(out, "Architecture: {}", hardware.cpu.arch).unwrap();
     if let Some(physical) = hardware.cpu.physical_cores {
         writeln!(out, "Physical cores: {}", physical).unwrap();
@@ -87,12 +88,18 @@ pub fn render_hardware_section(
     writeln!(out).unwrap();
 
     writeln!(out, "Memory:").unwrap();
-    writeln!(out, "  Total: {}", format_bytes(hardware.memory.total_bytes)).unwrap();
+    writeln!(
+        out,
+        "  Total: {}",
+        format_bytes(hardware.memory.total_bytes)
+    )
+    .unwrap();
     writeln!(
         out,
         "  Available: {}",
         format_bytes(hardware.memory.available_bytes)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(out, "  Used: {}", format_bytes(hardware.memory.used_bytes)).unwrap();
     if hardware.memory.total_swap > 0 {
         writeln!(
@@ -100,7 +107,8 @@ pub fn render_hardware_section(
             "  Swap: {} total, {} used",
             format_bytes(hardware.memory.total_swap),
             format_bytes(hardware.memory.used_swap)
-        ).unwrap();
+        )
+        .unwrap();
     }
     writeln!(out).unwrap();
 
@@ -339,7 +347,8 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
             out,
             "  {} ({}, {}){}",
             dev.name, dev.kind, dev.direction, marker_str
-        ).unwrap();
+        )
+        .unwrap();
 
         if verbose > 0 {
             if dev.sample_rate > 0.0 {
@@ -347,7 +356,8 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
                     out,
                     "    Sample rate: {} Hz",
                     format_sample_rate(dev.sample_rate)
-                ).unwrap();
+                )
+                .unwrap();
             }
             if dev.output_channels > 0 {
                 writeln!(out, "    Output channels: {}", dev.output_channels).unwrap();
@@ -376,7 +386,10 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
 }
 
 /// Render standalone audio devices section (for `sniff audio-devices`).
-pub fn render_audio_devices_section(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) -> String {
+pub fn render_audio_devices_section(
+    devices: &[sniff::hardware::AudioDeviceInfo],
+    verbose: u8,
+) -> String {
     let mut out = String::new();
 
     writeln!(out, "=== Audio Devices ===").unwrap();

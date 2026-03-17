@@ -93,8 +93,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                         } else {
                             return Err(ShellExpansionError::ParseDirective {
                                 line: 0,
-                                message: "Unterminated escape sequence in double quote"
-                                    .to_string(),
+                                message: "Unterminated escape sequence in double quote".to_string(),
                             });
                         }
                     } else if ch == '"' {
@@ -266,10 +265,7 @@ mod tests {
     fn tokenize_empty_input_fails() {
         let result = tokenize("");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Empty command"));
+        assert!(result.unwrap_err().to_string().contains("Empty command"));
     }
 
     #[test]
@@ -282,20 +278,24 @@ mod tests {
     fn tokenize_unterminated_single_quote_fails() {
         let result = tokenize("echo 'unterminated");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unterminated single quote"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unterminated single quote")
+        );
     }
 
     #[test]
     fn tokenize_unterminated_double_quote_fails() {
         let result = tokenize(r#"echo "unterminated"#);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unterminated double quote"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unterminated double quote")
+        );
     }
 
     #[test]
@@ -316,50 +316,60 @@ mod tests {
     fn tokenize_input_redirect_fails() {
         let result = tokenize("cat < file.txt");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Input redirection"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Input redirection")
+        );
     }
 
     #[test]
     fn tokenize_output_redirect_fails() {
         let result = tokenize("echo hello > file.txt");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Output redirection"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Output redirection")
+        );
     }
 
     #[test]
     fn tokenize_backtick_fails() {
         let result = tokenize("echo `date`");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Command substitution"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Command substitution")
+        );
     }
 
     #[test]
     fn tokenize_command_substitution_fails() {
         let result = tokenize("echo $(date)");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Command substitution"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Command substitution")
+        );
     }
 
     #[test]
     fn tokenize_double_ampersand_fails() {
         let result = tokenize("make && make install");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Conditional execution"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Conditional execution")
+        );
     }
 
     #[test]
@@ -378,20 +388,24 @@ mod tests {
     fn tokenize_trailing_backslash_fails() {
         let result = tokenize("echo hello\\");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Trailing backslash"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Trailing backslash")
+        );
     }
 
     #[test]
     fn tokenize_double_redirect_fails() {
         let result = tokenize("echo hello >> file.txt");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Output redirection"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Output redirection")
+        );
     }
 
     #[test]

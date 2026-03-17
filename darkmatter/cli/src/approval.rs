@@ -53,11 +53,13 @@ fn approve_with_io<R: BufRead, W: Write>(
             "4" => return Ok(ShellApprovalDecision::Deny),
             "5" => return Ok(ShellApprovalDecision::BlacklistPersist),
             _ => {
-                let err_msg =
-                    Prose::new("<red>Invalid choice. Please enter 1-5.</red>").render_optimistic(None);
-                writeln!(output, "  {err_msg}").map_err(|source| ShellExpansionError::PolicyIo {
-                    path: request.whitelist_path.clone(),
-                    source,
+                let err_msg = Prose::new("<red>Invalid choice. Please enter 1-5.</red>")
+                    .render_optimistic(None);
+                writeln!(output, "  {err_msg}").map_err(|source| {
+                    ShellExpansionError::PolicyIo {
+                        path: request.whitelist_path.clone(),
+                        source,
+                    }
                 })?;
             }
         }
@@ -85,9 +87,11 @@ fn write_prompt<W: Write>(
     let source_value =
         Prose::new(format!("<bold>{source_desc}:{}</bold>", request.line)).render_optimistic(None);
     let cmd_label = Prose::new("<dim>Command:</dim>").render_optimistic(None);
-    let cmd_value =
-        Prose::new(format!("<bold><cyan>{}</cyan></bold>", escape_prose(&request.raw_command)))
-            .render_optimistic(None);
+    let cmd_value = Prose::new(format!(
+        "<bold><cyan>{}</cyan></bold>",
+        escape_prose(&request.raw_command)
+    ))
+    .render_optimistic(None);
 
     w(output, format_args!("\n  {header}\n"))?;
     w(output, format_args!("  {source_label}  {source_value}\n"))?;
@@ -108,20 +112,16 @@ fn write_prompt<W: Write>(
 
     // Options with color-coded numbers and dim descriptions
     let opt1_num = Prose::new("<green>1</green>").render_optimistic(None);
-    let opt1_desc = Prose::new(
-        format!(
-            "<dim>(persists \"{}\" to whitelist)</dim>",
-            escape_prose(&request.raw_command)
-        ),
-    )
+    let opt1_desc = Prose::new(format!(
+        "<dim>(persists \"{}\" to whitelist)</dim>",
+        escape_prose(&request.raw_command)
+    ))
     .render_optimistic(None);
     let opt2_num = Prose::new("<green>2</green>").render_optimistic(None);
-    let opt2_desc = Prose::new(
-        format!(
-            "<dim>(persists \"{}\" with any args to whitelist)</dim>",
-            escape_prose(&request.executable)
-        ),
-    )
+    let opt2_desc = Prose::new(format!(
+        "<dim>(persists \"{}\" with any args to whitelist)</dim>",
+        escape_prose(&request.executable)
+    ))
     .render_optimistic(None);
     let opt3_num = Prose::new("<cyan>3</cyan>").render_optimistic(None);
     let opt3_desc = Prose::new("<dim>(this session only)</dim>").render_optimistic(None);
@@ -260,7 +260,8 @@ mod tests {
 
             let decision = approve_with_io(&request, &mut input, &mut output).unwrap();
             assert_eq!(
-                decision, expected,
+                decision,
+                expected,
                 "Input '{}' should produce {:?}",
                 input_str.trim(),
                 expected
@@ -289,8 +290,7 @@ mod tests {
     #[test]
     fn prompt_shows_url_source() {
         let mut request = request();
-        request.source =
-            TransformSource::Url("https://example.com/doc.md".parse().unwrap());
+        request.source = TransformSource::Url("https://example.com/doc.md".parse().unwrap());
         let mut input = Cursor::new(b"3\n".to_vec());
         let mut output = Vec::new();
 

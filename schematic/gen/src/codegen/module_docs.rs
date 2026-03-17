@@ -99,7 +99,9 @@ impl<'a> ModuleDocBuilder<'a> {
             AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
             AuthStrategy::OAuth2(config) => {
                 let flow = match config.grant_type {
-                    schematic_define::OAuth2GrantType::AuthorizationCodePkce => "Authorization Code with PKCE",
+                    schematic_define::OAuth2GrantType::AuthorizationCodePkce => {
+                        "Authorization Code with PKCE"
+                    }
                     schematic_define::OAuth2GrantType::ClientCredentials => "Client Credentials",
                     schematic_define::OAuth2GrantType::DeviceCode => "Device Code",
                     _ => "OAuth2",
@@ -109,10 +111,7 @@ impl<'a> ModuleDocBuilder<'a> {
                 } else {
                     format!(" Default scopes: `{}`.", config.default_scopes.join("`, `"))
                 };
-                format!(
-                    "Uses OAuth2 authentication ({} flow).{}",
-                    flow, scopes_info
-                )
+                format!("Uses OAuth2 authentication ({} flow).{}", flow, scopes_info)
             }
             // Handle future variants (non_exhaustive)
             _ => "Uses custom authentication.".to_string(),

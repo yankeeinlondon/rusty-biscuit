@@ -291,7 +291,12 @@ pub fn render_text(
                 out.push_str(&render_network_section(network, verbose));
             }
             if let Some(ref filesystem) = result.filesystem {
-                out.push_str(&render_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested));
+                out.push_str(&render_filesystem_section(
+                    filesystem,
+                    verbose,
+                    repo_root,
+                    latest_versions_requested,
+                ));
             }
         }
         OutputFilter::Os => {
@@ -311,7 +316,12 @@ pub fn render_text(
         }
         OutputFilter::Filesystem => {
             if let Some(ref filesystem) = result.filesystem {
-                out.push_str(&render_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested));
+                out.push_str(&render_filesystem_section(
+                    filesystem,
+                    verbose,
+                    repo_root,
+                    latest_versions_requested,
+                ));
             }
         }
         OutputFilter::Cpu => {
@@ -331,12 +341,19 @@ pub fn render_text(
         }
         OutputFilter::Storage => {
             if let Some(ref hardware) = result.hardware {
-                out.push_str(&render_storage_section(&hardware.storage, verbose, repo_root));
+                out.push_str(&render_storage_section(
+                    &hardware.storage,
+                    verbose,
+                    repo_root,
+                ));
             }
         }
         OutputFilter::AudioDevices => {
             if let Some(ref hardware) = result.hardware {
-                out.push_str(&render_audio_devices_section(&hardware.audio_devices, verbose));
+                out.push_str(&render_audio_devices_section(
+                    &hardware.audio_devices,
+                    verbose,
+                ));
             }
         }
         OutputFilter::Git | OutputFilter::Repo => {
@@ -426,7 +443,13 @@ pub fn render_text(
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
-                        out.push_str(&render_repo_section(repo, verbose, repo_root, filter.as_deref(), latest_versions_requested));
+                        out.push_str(&render_repo_section(
+                            repo,
+                            verbose,
+                            repo_root,
+                            filter.as_deref(),
+                            latest_versions_requested,
+                        ));
                     }
                 }
                 None => {
@@ -439,7 +462,13 @@ pub fn render_text(
                     } else if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
-                        out.push_str(&render_repo_section(repo, verbose, repo_root, None, latest_versions_requested));
+                        out.push_str(&render_repo_section(
+                            repo,
+                            verbose,
+                            repo_root,
+                            None,
+                            latest_versions_requested,
+                        ));
                     }
                 }
                 _ => {

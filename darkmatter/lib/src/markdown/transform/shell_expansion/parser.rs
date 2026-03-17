@@ -44,15 +44,14 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
             let trimmed = line.trim();
             if let Some(command_text) = trimmed.strip_prefix("::shell ") {
                 // Parse the command
-                let tokens = tokenize(command_text).map_err(|e| {
-                    ShellExpansionError::ParseDirective {
+                let tokens =
+                    tokenize(command_text).map_err(|e| ShellExpansionError::ParseDirective {
                         line: line_num,
                         message: match e {
                             ShellExpansionError::ParseDirective { message, .. } => message,
                             _ => e.to_string(),
                         },
-                    }
-                })?;
+                    })?;
 
                 if tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
@@ -161,7 +160,10 @@ And `::shell echo inline` should also be ignored.
         assert_eq!(directives.len(), 2);
         assert_eq!(directives[0].span.start, 0);
         assert_eq!(directives[0].span.end, 20); // Includes \r\n
-        assert_eq!(&content[directives[0].span.clone()], "::shell echo hello\r\n");
+        assert_eq!(
+            &content[directives[0].span.clone()],
+            "::shell echo hello\r\n"
+        );
         assert_eq!(directives[1].line, 3);
         assert_eq!(&content[directives[1].span.clone()], "::shell pwd\r\n");
     }
@@ -182,7 +184,10 @@ And `::shell echo inline` should also be ignored.
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].span.start, 0);
         assert_eq!(directives[0].span.end, 20);
-        assert_eq!(&content[directives[0].span.clone()], "::shell echo hello\r\n");
+        assert_eq!(
+            &content[directives[0].span.clone()],
+            "::shell echo hello\r\n"
+        );
     }
 
     #[test]

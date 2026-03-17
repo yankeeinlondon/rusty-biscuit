@@ -89,12 +89,11 @@ pub fn execute_command(
     source: &TransformSource,
 ) -> Result<String, ShellExpansionError> {
     // 1. Resolve executable with which::which
-    let resolved_path = which::which(&directive.executable).map_err(|_| {
-        ShellExpansionError::CommandNotFound {
+    let resolved_path =
+        which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
             command: directive.executable.clone(),
             line: directive.line,
-        }
-    })?;
+        })?;
 
     // 2. Resolve working directory
     let working_dir = resolve_working_directory(shell_opts, source);
@@ -108,13 +107,15 @@ pub fn execute_command(
         .stderr(std::process::Stdio::piped());
 
     // 4. Spawn
-    let mut child = cmd.spawn().map_err(|e| ShellExpansionError::ExecutionFailed {
-        command: directive.raw_command.clone(),
-        code: -1,
-        stdout: String::new(),
-        stderr: e.to_string(),
-        line: directive.line,
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ShellExpansionError::ExecutionFailed {
+            command: directive.raw_command.clone(),
+            code: -1,
+            stdout: String::new(),
+            stderr: e.to_string(),
+            line: directive.line,
+        })?;
 
     // 5. Drain stdout and stderr concurrently via threads
     let stdout_handle = child.stdout.take();

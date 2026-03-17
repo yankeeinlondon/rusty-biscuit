@@ -169,7 +169,12 @@ fn render_documents(docs: &[DocumentRef], term: &Terminal) -> String {
     if !items.is_empty() {
         let mut out = String::new();
         writeln!(out).unwrap();
-        write!(out, "{}", Prose::new("<b><u>Documents</u></b>").display(term)).unwrap();
+        write!(
+            out,
+            "{}",
+            Prose::new("<b><u>Documents</u></b>").display(term)
+        )
+        .unwrap();
         write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
         out
     } else {

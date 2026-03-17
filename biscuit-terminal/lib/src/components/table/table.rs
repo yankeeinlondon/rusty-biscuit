@@ -1662,16 +1662,10 @@ impl Table {
                         let mut patched = line_content.to_string();
                         if !restore.is_empty() && patched.contains("\x1b[") {
                             // Full SGR reset – restore both bg and fg
-                            patched = patched.replace(
-                                "\x1b[0m",
-                                &format!("\x1b[0m{restore}"),
-                            );
+                            patched = patched.replace("\x1b[0m", &format!("\x1b[0m{restore}"));
                             // Background-only reset – restore just bg
                             if let Some(bg) = active_bg {
-                                patched = patched.replace(
-                                    "\x1b[49m",
-                                    &format!("\x1b[49m{bg}"),
-                                );
+                                patched = patched.replace("\x1b[49m", &format!("\x1b[49m{bg}"));
                             }
                         }
                         // Ensure stripe is active for trailing padding too
@@ -4626,13 +4620,9 @@ mod tests {
             .match_indices("\x1b[49m")
             .filter_map(|(pos, _)| {
                 let after = pos + "\x1b[49m".len();
-                striped_line.get(after..).and_then(|s| {
-                    if s.starts_with(bg) {
-                        Some(pos)
-                    } else {
-                        None
-                    }
-                })
+                striped_line
+                    .get(after..)
+                    .and_then(|s| if s.starts_with(bg) { Some(pos) } else { None })
             })
             .collect();
         assert!(
@@ -4669,13 +4659,9 @@ mod tests {
             .match_indices("\x1b[49m")
             .filter_map(|(pos, _)| {
                 let after = pos + "\x1b[49m".len();
-                striped_line.get(after..).and_then(|s| {
-                    if s.starts_with(bg) {
-                        Some(pos)
-                    } else {
-                        None
-                    }
-                })
+                striped_line
+                    .get(after..)
+                    .and_then(|s| if s.starts_with(bg) { Some(pos) } else { None })
             })
             .collect();
         assert!(

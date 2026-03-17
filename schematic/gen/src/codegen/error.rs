@@ -32,8 +32,8 @@ pub fn generate_request_parts_type() -> TokenStream {
 
 /// Generates the SchematicError enum for runtime errors.
 ///
-        /// This error type is used by generated API client code and provides variants
-        /// for all error conditions that can occur during API requests:
+/// This error type is used by generated API client code and provides variants
+/// for all error conditions that can occur during API requests:
 ///
 /// - `Http`: HTTP request failures (network errors, timeouts)
 /// - `Json`: JSON deserialization failures

@@ -74,8 +74,7 @@ fn render_body(
         };
 
         if condition {
-            let body =
-                render_body(content, &child.body_span, &child.children, state, report)?;
+            let body = render_body(content, &child.body_span, &child.children, state, report)?;
             output.push_str(&body);
             report.page_blocks_rendered += 1;
         } else {
@@ -216,10 +215,7 @@ mod tests {
         let mut report = TransformReport::default();
         let result = render_page_blocks(content, &regions, &state, &mut report);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            PageBlockError::Condition(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PageBlockError::Condition(_)));
     }
 
     // ── Edge case regression tests ──────────────────────────────────────
@@ -251,8 +247,7 @@ mod tests {
 
     #[test]
     fn adjacent_blocks_mixed_conditions() {
-        let content =
-            "::block when=\"a\"\nA\n::end-block\n::block when=\"b\"\nB\n::end-block\n::block when=\"c\"\nC\n::end-block\n";
+        let content = "::block when=\"a\"\nA\n::end-block\n::block when=\"b\"\nB\n::end-block\n::block when=\"c\"\nC\n::end-block\n";
         let state = state_with(json!({"a": false, "b": true, "c": false}));
         let (output, report) = render(content, &state);
         assert_eq!(output, "B\n");
@@ -262,7 +257,8 @@ mod tests {
 
     #[test]
     fn deeply_nested_three_levels_all_true() {
-        let content = "::block\nL1\n::block\nL2\n::block\nL3\n::end-block\n::end-block\n::end-block\n";
+        let content =
+            "::block\nL1\n::block\nL2\n::block\nL3\n::end-block\n::end-block\n::end-block\n";
         let state = state_with(json!({}));
         let (output, report) = render(content, &state);
         assert_eq!(output, "L1\nL2\nL3\n");

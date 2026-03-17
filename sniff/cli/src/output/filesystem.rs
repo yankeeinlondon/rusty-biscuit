@@ -445,7 +445,11 @@ pub fn render_hash_section(
 /// - **Meta**: Remote tracking status, branches, git config
 ///
 /// Format a file path with the directory dimmed and filename bold, plus optional action.
-fn format_file_line(path: &std::path::Path, verbose: u8, action: &sniff::filesystem::git::FileAction) -> String {
+fn format_file_line(
+    path: &std::path::Path,
+    verbose: u8,
+    action: &sniff::filesystem::git::FileAction,
+) -> String {
     let path_str = path.display().to_string();
     let (dir, name) = split_path(&path_str);
     let action_suffix = if verbose > 0 {
@@ -494,7 +498,11 @@ pub fn render_git_file_list(
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
-pub fn render_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize, verbose: u8) -> String {
+pub fn render_git_section(
+    git: &sniff::filesystem::git::GitInfo,
+    history_count: usize,
+    verbose: u8,
+) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
 
@@ -523,11 +531,9 @@ pub fn render_git_section(git: &sniff::filesystem::git::GitInfo, history_count: 
         // The most recent `unpushed_count` commits (at the end) are unpushed.
         let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
         let commit_url = if is_pushed {
-            commit_url_base
-                .as_ref()
-                .map(|(base, provider)| {
-                    format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
-                })
+            commit_url_base.as_ref().map(|(base, provider)| {
+                format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
+            })
         } else {
             None
         };
@@ -558,7 +564,10 @@ pub fn render_git_section(git: &sniff::filesystem::git::GitInfo, history_count: 
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
         let line = if dir.is_empty() {
-            format!("<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}", name)
+            format!(
+                "<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}",
+                name
+            )
         } else {
             format!(
                 "<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>{diff_stats}",
@@ -1336,7 +1345,7 @@ pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&s
             names.join(", ")
         }
         _ => String::from(
-            "- the \"--dirty-packages\" switch is only intended to be used in a monorepo"
+            "- the \"--dirty-packages\" switch is only intended to be used in a monorepo",
         ),
     }
 }
@@ -1344,7 +1353,10 @@ pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&s
 /// Render package area names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+pub fn render_dirty_package_areas(
+    result: &sniff::SniffResult,
+    repo_filter: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1368,7 +1380,7 @@ pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Opti
             }
         }
         _ => String::from(
-            "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo"
+            "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
         ),
     }
 }
@@ -1377,7 +1389,11 @@ pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Opti
 ///
 /// With `verbose >= 1`, appends the package root directory on the same line.
 /// Returns empty string if not in a package.
-pub fn render_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, verbose: u8) -> String {
+pub fn render_repo_package(
+    result: &sniff::SniffResult,
+    base_dir: Option<&Path>,
+    verbose: u8,
+) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1424,7 +1440,10 @@ pub fn render_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&P
 /// Render the root directory of the package area containing the given directory.
 ///
 /// Returns empty string if not in a package area.
-pub fn render_repo_package_area_root(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
+pub fn render_repo_package_area_root(
+    result: &sniff::SniffResult,
+    base_dir: Option<&Path>,
+) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1493,13 +1512,10 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
         .any(|path| {
             if area_prefix.is_empty() {
                 // Root area: dirty if file is not inside any non-root area
-                !repo
-                    .packages
-                    .as_ref()
-                    .map_or(false, |pkgs| {
-                        pkgs.iter()
-                            .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
-                    })
+                !repo.packages.as_ref().map_or(false, |pkgs| {
+                    pkgs.iter()
+                        .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                })
             } else {
                 path.starts_with(area_prefix)
             }
@@ -1514,26 +1530,16 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
 /// Source code file extensions considered for change detection.
 const SOURCE_CODE_EXTENSIONS: &[&str] = &[
     // Rust
-    "rs",
-    // TypeScript / JavaScript
-    "ts", "tsx", "js", "jsx", "mjs", "mts", "cjs", "cts",
-    // Web
-    "vue", "svelte", "html", "htm", "css", "scss", "sass", "less",
-    // Python
-    "py", "pyi",
-    // Go
-    "go",
-    // C / C++
-    "c", "h", "cpp", "hpp", "cc", "cxx",
-    // Java / Kotlin
-    "java", "kt", "kts",
-    // Shell
-    "sh", "bash", "zsh",
-    // Ruby
-    "rb",
-    // Swift
-    "swift",
-    // SQL
+    "rs", // TypeScript / JavaScript
+    "ts", "tsx", "js", "jsx", "mjs", "mts", "cjs", "cts", // Web
+    "vue", "svelte", "html", "htm", "css", "scss", "sass", "less", // Python
+    "py", "pyi", // Go
+    "go",  // C / C++
+    "c", "h", "cpp", "hpp", "cc", "cxx", // Java / Kotlin
+    "java", "kt", "kts", // Shell
+    "sh", "bash", "zsh",   // Ruby
+    "rb",    // Swift
+    "swift", // SQL
     "sql",
 ];
 
@@ -1543,7 +1549,9 @@ fn is_source_code_file(path: &str) -> bool {
         Some(e) if e != path => e,
         _ => return false,
     };
-    SOURCE_CODE_EXTENSIONS.iter().any(|&s| s.eq_ignore_ascii_case(ext))
+    SOURCE_CODE_EXTENSIONS
+        .iter()
+        .any(|&s| s.eq_ignore_ascii_case(ext))
 }
 
 /// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
@@ -1589,13 +1597,10 @@ pub fn print_package_area_has_source_code_changes(
         )
         .filter(|path| {
             let in_area = if area_prefix.is_empty() {
-                !repo
-                    .packages
-                    .as_ref()
-                    .map_or(false, |pkgs| {
-                        pkgs.iter()
-                            .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
-                    })
+                !repo.packages.as_ref().map_or(false, |pkgs| {
+                    pkgs.iter()
+                        .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
+                })
             } else {
                 path.starts_with(area_prefix)
             };
@@ -1650,7 +1655,12 @@ pub fn render_repo_section(
         writeln!(out, "{}", list.render(&terminal)).unwrap();
 
         if let Some(summary) = summarize_repo_updates(repo, None, latest_versions_requested) {
-            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
+            write!(
+                out,
+                "{}",
+                render_update_summary(&summary, latest_versions_requested, verbose, &terminal)
+            )
+            .unwrap();
         }
         return out;
     }
@@ -1715,7 +1725,12 @@ pub fn render_repo_section(
         writeln!(out, "{}", list.render(&terminal)).unwrap();
 
         if let Some(summary) = update_summary {
-            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
+            write!(
+                out,
+                "{}",
+                render_update_summary(&summary, latest_versions_requested, verbose, &terminal)
+            )
+            .unwrap();
         }
 
         // Legend for indicators
@@ -1811,7 +1826,8 @@ pub fn render_language_section(
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     let mut table = Table::new()
@@ -1847,7 +1863,8 @@ pub fn render_language_section(
             out,
             "Frameworks: {}",
             render_framework_summary(&langs.frameworks)
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     let footer = Prose::new(format!(
@@ -1893,7 +1910,11 @@ pub(crate) fn filter_file_breakdown(
     }
 }
 
-pub fn render_files_section(files: &FileAssociationBreakdown, verbose: u8, filter: &FilesFilter) -> String {
+pub fn render_files_section(
+    files: &FileAssociationBreakdown,
+    verbose: u8,
+    filter: &FilesFilter,
+) -> String {
     use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
@@ -1927,7 +1948,8 @@ pub fn render_files_section(files: &FileAssociationBreakdown, verbose: u8, filte
             out,
             "Frameworks: {}",
             render_framework_summary(&filtered.by_framework)
-        ).unwrap();
+        )
+        .unwrap();
     }
     if verbose > 0 && !filtered.by_language.is_empty() {
         writeln!(
@@ -1939,7 +1961,8 @@ pub fn render_files_section(files: &FileAssociationBreakdown, verbose: u8, filte
                 .map(|language| format!("{} ({})", language.language, language.total_file_count))
                 .collect::<Vec<_>>()
                 .join(", ")
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     out
@@ -1977,7 +2000,8 @@ pub fn render_filesystem_section(
             "Languages ({} contributing files out of {} scanned):",
             format_number(langs.total_language_files),
             format_number(langs.total_files_scanned)
-        ).unwrap();
+        )
+        .unwrap();
         if let Some(ref primary) = langs.primary {
             writeln!(out, "  Primary: {}", primary).unwrap();
         }
@@ -1991,7 +2015,8 @@ pub fn render_filesystem_section(
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ")
-            ).unwrap();
+            )
+            .unwrap();
         }
         let show_count = if verbose > 0 { 10 } else { 5 };
         for lang in langs.languages.iter().take(show_count) {
@@ -2002,7 +2027,8 @@ pub fn render_filesystem_section(
                 format_number(lang.direct_file_count),
                 format_number(lang.framework_file_count),
                 lang.percentage
-            ).unwrap();
+            )
+            .unwrap();
             if verbose > 1 && !lang.direct_files.is_empty() {
                 let file_show_count = 3.min(lang.direct_files.len());
                 for file in lang.direct_files.iter().take(file_show_count) {
@@ -2013,7 +2039,8 @@ pub fn render_filesystem_section(
                         out,
                         "    ... and {} more files",
                         lang.direct_files.len() - file_show_count
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
             }
         }
@@ -2025,7 +2052,8 @@ pub fn render_filesystem_section(
                 out,
                 "  Frameworks: {}",
                 render_framework_summary(&langs.frameworks)
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
     if let Some(ref files) = fs.files {
@@ -2038,7 +2066,8 @@ pub fn render_filesystem_section(
                 stats.association,
                 format_number(stats.file_count),
                 stats.percentage
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
     writeln!(out).unwrap();
@@ -2054,7 +2083,8 @@ pub fn render_filesystem_section(
             } else {
                 root_str
             }
-        ).unwrap();
+        )
+        .unwrap();
         if let Some(ref branch) = git.current_branch {
             writeln!(out, "  Branch: {}", branch).unwrap();
         }
@@ -2067,7 +2097,12 @@ pub fn render_filesystem_section(
         // Show HEAD commit (first recent commit)
         if let Some(commit) = git.recent.first() {
             writeln!(out, "  HEAD: {} ({})", &commit.sha[..8], commit.author).unwrap();
-            writeln!(out, "  Message: {}", commit.message.lines().next().unwrap_or("")).unwrap();
+            writeln!(
+                out,
+                "  Message: {}",
+                commit.message.lines().next().unwrap_or("")
+            )
+            .unwrap();
             // Show which remotes have this commit (deep mode)
             if let Some(ref remotes) = commit.remotes {
                 writeln!(out, "    Synced to: {}", remotes.join(", ")).unwrap();
@@ -2083,7 +2118,8 @@ pub fn render_filesystem_section(
             out,
             "  Status: {} ({} staged, {} unstaged, {} untracked)",
             dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
-        ).unwrap();
+        )
+        .unwrap();
 
         // Show is_behind status (deep mode only)
         if let Some(ref behind) = git.status.is_behind {
@@ -2149,7 +2185,8 @@ pub fn render_filesystem_section(
                     out,
                     "    ... and {} more",
                     git.status.untracked.len() - show_count
-                ).unwrap();
+                )
+                .unwrap();
             }
         }
 
@@ -2158,7 +2195,14 @@ pub fn render_filesystem_section(
             writeln!(out, "  Worktrees:").unwrap();
             for (branch, info) in &git.worktrees {
                 let dirty_indicator = if info.dirty { " (dirty)" } else { "" };
-                writeln!(out, "    {} @ {}{}", branch, &info.sha[..8], dirty_indicator).unwrap();
+                writeln!(
+                    out,
+                    "    {} @ {}{}",
+                    branch,
+                    &info.sha[..8],
+                    dirty_indicator
+                )
+                .unwrap();
                 if verbose > 1 {
                     writeln!(out, "      Path: {}", info.filepath.display()).unwrap();
                 }
@@ -2209,7 +2253,12 @@ pub fn render_filesystem_section(
             writeln!(out, "  Root: {}", relative_path(&repo.root, repo_root)).unwrap();
             if let Some(summary) = update_summary {
                 let terminal = Terminal::default();
-                write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
+                write!(
+                    out,
+                    "{}",
+                    render_update_summary(&summary, latest_versions_requested, verbose, &terminal)
+                )
+                .unwrap();
             }
             return out;
         }
@@ -2250,7 +2299,12 @@ pub fn render_filesystem_section(
 
         if let Some(summary) = update_summary {
             let terminal = Terminal::default();
-            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
+            write!(
+                out,
+                "{}",
+                render_update_summary(&summary, latest_versions_requested, verbose, &terminal)
+            )
+            .unwrap();
         }
 
         let has_updatable = repo
@@ -2410,7 +2464,10 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
 /// Builds a Mermaid flowchart from package dependency data and renders it
 /// inline using `MermaidRenderer`. Falls back to a code block if the
 /// terminal cannot display images or mmdc is not available.
-pub fn render_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) -> String {
+pub fn render_repo_deps_visual(
+    repo: &sniff::filesystem::repo::RepoInfo,
+    repo_filter: Option<&str>,
+) -> String {
     if !repo.is_monorepo {
         return String::from("deps requires a monorepo (no workspace packages found)");
     }
@@ -2449,7 +2506,10 @@ pub fn render_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_fi
 /// Each package with dependencies or dependents is shown as a top-level item
 /// with `depends-on` and `used-by` sub-items. Isolates (packages with neither)
 /// are omitted unless an explicit filter is set.
-pub fn render_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) -> String {
+pub fn render_repo_deps_text(
+    repo: &sniff::filesystem::repo::RepoInfo,
+    repo_filter: Option<&str>,
+) -> String {
     let mut out = String::new();
 
     if !repo.is_monorepo {
@@ -2526,7 +2586,8 @@ pub fn render_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filt
             "<dim><i>use the <blue>--ui</blue> flag to show this in a visual format</i></dim>"
         )
         .render(&term)
-    ).unwrap();
+    )
+    .unwrap();
 
     out
 }

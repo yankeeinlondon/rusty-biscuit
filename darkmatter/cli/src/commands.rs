@@ -63,7 +63,15 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             show,
             frontmatter,
         } => {
-            run_compose(input.as_ref(), state.as_deref(), set.as_deref(), output, show, frontmatter, cli)?;
+            run_compose(
+                input.as_ref(),
+                state.as_deref(),
+                set.as_deref(),
+                output,
+                show,
+                frontmatter,
+                cli,
+            )?;
         }
         CliCommand::Toc { input, json } => {
             let md = load_markdown(Some(&input))?;
@@ -319,9 +327,7 @@ pub fn run_compose(
             }) => {
                 let detail = stderr.trim();
                 if detail.is_empty() {
-                    eyre!(
-                        "Shell command failed (exit {code}) on line {line}: '{command}'"
-                    )
+                    eyre!("Shell command failed (exit {code}) on line {line}: '{command}'")
                 } else {
                     eyre!(
                         "Shell command failed (exit {code}) on line {line}: '{command}'\n{detail}"
@@ -339,18 +345,14 @@ pub fn run_compose(
                 timeout,
                 line,
             }) => {
-                eyre!(
-                    "Shell command timed out after {timeout:?} on line {line}: '{command}'"
-                )
+                eyre!("Shell command timed out after {timeout:?} on line {line}: '{command}'")
             }
             ShellExpansion(ShellExpansionError::Blacklisted {
                 command,
                 reason,
                 line,
             }) => {
-                eyre!(
-                    "Blocked command on line {line}: '{command}'\nReason: {reason}"
-                )
+                eyre!("Blocked command on line {line}: '{command}'\nReason: {reason}")
             }
             ShellExpansion(ShellExpansionError::Denied { command, line }) => {
                 eyre!("Command denied on line {line}: '{command}'")
@@ -453,8 +455,8 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
 
     let mut md = load_markdown(Some(input))?;
 
-    let value: serde_json::Value =
-        serde_json::from_str(raw_value).unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
+    let value: serde_json::Value = serde_json::from_str(raw_value)
+        .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
 
     md.fm_insert(prop, value)
         .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
@@ -498,7 +500,14 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
             if not_found.len() == 1 {
                 format!("\"{}\"", missing)
             } else {
-                format!("[{}]", not_found.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(", "))
+                format!(
+                    "[{}]",
+                    not_found
+                        .iter()
+                        .map(|p| format!("\"{p}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
         ));
     }
@@ -521,7 +530,11 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
         } else {
             format!(
                 "[{}] properties",
-                removed.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(", ")
+                removed
+                    .iter()
+                    .map(|p| format!("\"{p}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         };
         let remaining_label = remaining.join(", ");
@@ -718,14 +731,20 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
 
     // --- Validate the result ---
     if !canonical.exists() {
-        return Err(eyre!("File was deleted during editing: {}", canonical.display()));
+        return Err(eyre!(
+            "File was deleted during editing: {}",
+            canonical.display()
+        ));
     }
 
     let content = std::fs::read_to_string(&canonical)
         .wrap_err_with(|| format!("Failed to read file after editing: {}", canonical.display()))?;
 
     if content.trim().is_empty() {
-        return Err(eyre!("File is empty after editing: {}", canonical.display()));
+        return Err(eyre!(
+            "File is empty after editing: {}",
+            canonical.display()
+        ));
     }
 
     // Output the fully qualified filename

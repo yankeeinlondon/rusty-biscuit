@@ -280,10 +280,7 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
                     }
                     openapiv3::OAuth2Flows {
                         authorization_code: Some(openapiv3::AuthorizationCodeOAuth2Flow {
-                            authorization_url: config
-                                .authorization_url
-                                .clone()
-                                .unwrap_or_default(),
+                            authorization_url: config.authorization_url.clone().unwrap_or_default(),
                             token_url: config.token_url.clone(),
                             refresh_url: None,
                             scopes,

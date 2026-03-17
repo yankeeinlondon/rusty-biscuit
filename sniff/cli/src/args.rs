@@ -11,19 +11,45 @@ pub const DEFAULT_COMMIT_COUNT: usize = 10;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum RepoAction {
-    Structure { filter: Option<String>, latest_versions: bool },
-    GitStatus { history: usize, refresh_remotes: bool, package: Option<String> },
-    Hash { sha: String },
-    StagedFiles { package: Option<String> },
-    UnstagedFiles { package: Option<String> },
-    UntrackedFiles { package: Option<String> },
-    Remote { remote: String },
-    Deps { filter: Option<String>, ui: bool },
-    Packages { filter: Option<String> },
+    Structure {
+        filter: Option<String>,
+        latest_versions: bool,
+    },
+    GitStatus {
+        history: usize,
+        refresh_remotes: bool,
+        package: Option<String>,
+    },
+    Hash {
+        sha: String,
+    },
+    StagedFiles {
+        package: Option<String>,
+    },
+    UnstagedFiles {
+        package: Option<String>,
+    },
+    UntrackedFiles {
+        package: Option<String>,
+    },
+    Remote {
+        remote: String,
+    },
+    Deps {
+        filter: Option<String>,
+        ui: bool,
+    },
+    Packages {
+        filter: Option<String>,
+    },
     Package,
     PackageArea,
-    DirtyPackages { filter: Option<String> },
-    DirtyPackageAreas { filter: Option<String> },
+    DirtyPackages {
+        filter: Option<String>,
+    },
+    DirtyPackageAreas {
+        filter: Option<String>,
+    },
     PackageRoot,
     PackageAreaRoot,
     RepoRoot,
@@ -574,7 +600,10 @@ impl Commands {
     pub fn history(&self) -> usize {
         match self {
             Commands::Git { history, .. } => *history,
-            Commands::Repo { repo_subcommand: Some(RepoSubcommand::GitStatus { history, .. }), .. } => *history,
+            Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::GitStatus { history, .. }),
+                ..
+            } => *history,
             _ => DEFAULT_COMMIT_COUNT,
         }
     }
@@ -590,7 +619,10 @@ impl Commands {
                 refresh_remotes: true,
                 ..
             } | Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::GitStatus { refresh_remotes: true, .. }),
+                repo_subcommand: Some(RepoSubcommand::GitStatus {
+                    refresh_remotes: true,
+                    ..
+                }),
                 ..
             }
         )
@@ -643,68 +675,73 @@ impl Commands {
     /// Normalize a Repo command into a RepoAction for dispatch.
     pub fn to_repo_action(&self) -> Option<RepoAction> {
         match self {
-            Commands::Repo { latest_versions, filter, repo_subcommand } => {
-                Some(match repo_subcommand {
-                    None => RepoAction::Structure {
-                        filter: filter.clone(),
-                        latest_versions: *latest_versions,
-                    },
-                    Some(RepoSubcommand::Structure { filter: sub_filter }) => {
-                        RepoAction::Structure {
-                            filter: sub_filter.clone().or_else(|| filter.clone()),
-                            latest_versions: *latest_versions,
-                        }
-                    },
-                    Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }) => {
-                        RepoAction::GitStatus {
-                            history: *history,
-                            refresh_remotes: *refresh_remotes,
-                            package: package.clone(),
-                        }
-                    },
-                    Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
-                    Some(RepoSubcommand::StagedFiles { package }) => {
-                        RepoAction::StagedFiles { package: package.clone() }
-                    },
-                    Some(RepoSubcommand::UnstagedFiles { package }) => {
-                        RepoAction::UnstagedFiles { package: package.clone() }
-                    },
-                    Some(RepoSubcommand::UntrackedFiles { package }) => {
-                        RepoAction::UntrackedFiles { package: package.clone() }
-                    },
-                    Some(RepoSubcommand::Remote { remote }) => {
-                        RepoAction::Remote { remote: remote.clone() }
-                    },
-                    Some(RepoSubcommand::Deps { ui, filter: sub_filter }) => {
-                        RepoAction::Deps {
-                            filter: sub_filter.clone().or_else(|| filter.clone()),
-                            ui: *ui,
-                        }
-                    },
-                    Some(RepoSubcommand::Packages { filter: sub_filter }) => {
-                        RepoAction::Packages {
-                            filter: sub_filter.clone().or_else(|| filter.clone()),
-                        }
-                    },
-                    Some(RepoSubcommand::Package) => RepoAction::Package,
-                    Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
-                    Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
-                        RepoAction::DirtyPackages {
-                            filter: sub_filter.clone().or_else(|| filter.clone()),
-                        }
-                    },
-                    Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
-                        RepoAction::DirtyPackageAreas {
-                            filter: sub_filter.clone().or_else(|| filter.clone()),
-                        }
-                    },
-                    Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
-                    Some(RepoSubcommand::PackageAreaRoot) => RepoAction::PackageAreaRoot,
-                    Some(RepoSubcommand::RepoRoot) => RepoAction::RepoRoot,
-                    Some(RepoSubcommand::IsCurrentPackageAreaDirty) => RepoAction::IsCurrentPackageAreaDirty,
-                    Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => RepoAction::PackageAreaHasSourceCodeChanges,
-                })
-            },
+            Commands::Repo {
+                latest_versions,
+                filter,
+                repo_subcommand,
+            } => Some(match repo_subcommand {
+                None => RepoAction::Structure {
+                    filter: filter.clone(),
+                    latest_versions: *latest_versions,
+                },
+                Some(RepoSubcommand::Structure { filter: sub_filter }) => RepoAction::Structure {
+                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                    latest_versions: *latest_versions,
+                },
+                Some(RepoSubcommand::GitStatus {
+                    history,
+                    refresh_remotes,
+                    package,
+                }) => RepoAction::GitStatus {
+                    history: *history,
+                    refresh_remotes: *refresh_remotes,
+                    package: package.clone(),
+                },
+                Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
+                Some(RepoSubcommand::StagedFiles { package }) => RepoAction::StagedFiles {
+                    package: package.clone(),
+                },
+                Some(RepoSubcommand::UnstagedFiles { package }) => RepoAction::UnstagedFiles {
+                    package: package.clone(),
+                },
+                Some(RepoSubcommand::UntrackedFiles { package }) => RepoAction::UntrackedFiles {
+                    package: package.clone(),
+                },
+                Some(RepoSubcommand::Remote { remote }) => RepoAction::Remote {
+                    remote: remote.clone(),
+                },
+                Some(RepoSubcommand::Deps {
+                    ui,
+                    filter: sub_filter,
+                }) => RepoAction::Deps {
+                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                    ui: *ui,
+                },
+                Some(RepoSubcommand::Packages { filter: sub_filter }) => RepoAction::Packages {
+                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                },
+                Some(RepoSubcommand::Package) => RepoAction::Package,
+                Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
+                Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
+                    RepoAction::DirtyPackages {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
+                    RepoAction::DirtyPackageAreas {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
+                Some(RepoSubcommand::PackageAreaRoot) => RepoAction::PackageAreaRoot,
+                Some(RepoSubcommand::RepoRoot) => RepoAction::RepoRoot,
+                Some(RepoSubcommand::IsCurrentPackageAreaDirty) => {
+                    RepoAction::IsCurrentPackageAreaDirty
+                }
+                Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => {
+                    RepoAction::PackageAreaHasSourceCodeChanges
+                }
+            }),
             _ => None,
         }
     }
@@ -712,22 +749,39 @@ impl Commands {
     /// Normalize a legacy Git command into a RepoAction for dispatch.
     pub fn git_to_repo_action(&self) -> Option<RepoAction> {
         match self {
-            Commands::Git { history, refresh_remotes, package, remote, git_subcommand, .. } => {
+            Commands::Git {
+                history,
+                refresh_remotes,
+                package,
+                remote,
+                git_subcommand,
+                ..
+            } => {
                 if let Some(remote_ref) = remote {
-                    return Some(RepoAction::Remote { remote: remote_ref.clone() });
+                    return Some(RepoAction::Remote {
+                        remote: remote_ref.clone(),
+                    });
                 }
                 match git_subcommand {
-                    Some(GitSubcommand::Hash { sha }) => Some(RepoAction::Hash { sha: sha.clone() }),
-                    Some(GitSubcommand::Staged) => Some(RepoAction::StagedFiles { package: package.clone() }),
-                    Some(GitSubcommand::Unstaged) => Some(RepoAction::UnstagedFiles { package: package.clone() }),
-                    Some(GitSubcommand::Untracked) => Some(RepoAction::UntrackedFiles { package: package.clone() }),
+                    Some(GitSubcommand::Hash { sha }) => {
+                        Some(RepoAction::Hash { sha: sha.clone() })
+                    }
+                    Some(GitSubcommand::Staged) => Some(RepoAction::StagedFiles {
+                        package: package.clone(),
+                    }),
+                    Some(GitSubcommand::Unstaged) => Some(RepoAction::UnstagedFiles {
+                        package: package.clone(),
+                    }),
+                    Some(GitSubcommand::Untracked) => Some(RepoAction::UntrackedFiles {
+                        package: package.clone(),
+                    }),
                     None => Some(RepoAction::GitStatus {
                         history: *history,
                         refresh_remotes: *refresh_remotes,
                         package: package.clone(),
                     }),
                 }
-            },
+            }
             _ => None,
         }
     }
@@ -1276,7 +1330,11 @@ mod tests {
 
             assert!(cmd.latest_versions());
             // Normalization captures filter
-            if let Some(RepoAction::Structure { filter, latest_versions }) = cmd.to_repo_action() {
+            if let Some(RepoAction::Structure {
+                filter,
+                latest_versions,
+            }) = cmd.to_repo_action()
+            {
                 assert_eq!(filter.as_deref(), Some("biscuit"));
                 assert!(latest_versions);
             } else {
@@ -1446,7 +1504,12 @@ mod tests {
         fn repo_git_status_parses() {
             let cli = parse_args(&["repo", "git-status"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }),
+                repo_subcommand:
+                    Some(RepoSubcommand::GitStatus {
+                        history,
+                        refresh_remotes,
+                        package,
+                    }),
                 ..
             }) = cli.command
             {
@@ -1460,9 +1523,23 @@ mod tests {
 
         #[test]
         fn repo_git_status_with_flags_parses() {
-            let cli = parse_args(&["repo", "git-status", "--history", "20", "--refresh-remotes", "--package", "homelab"]).unwrap();
+            let cli = parse_args(&[
+                "repo",
+                "git-status",
+                "--history",
+                "20",
+                "--refresh-remotes",
+                "--package",
+                "homelab",
+            ])
+            .unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }),
+                repo_subcommand:
+                    Some(RepoSubcommand::GitStatus {
+                        history,
+                        refresh_remotes,
+                        package,
+                    }),
                 ..
             }) = cli.command
             {
@@ -1566,7 +1643,10 @@ mod tests {
                 repo_subcommand: None,
             };
             match cmd.to_repo_action() {
-                Some(RepoAction::Structure { filter, latest_versions }) => {
+                Some(RepoAction::Structure {
+                    filter,
+                    latest_versions,
+                }) => {
                     assert_eq!(filter.as_deref(), Some("biscuit"));
                     assert!(latest_versions);
                 }
@@ -1586,7 +1666,11 @@ mod tests {
                 }),
             };
             match cmd.to_repo_action() {
-                Some(RepoAction::GitStatus { history, refresh_remotes, package }) => {
+                Some(RepoAction::GitStatus {
+                    history,
+                    refresh_remotes,
+                    package,
+                }) => {
                     assert_eq!(history, 25);
                     assert!(refresh_remotes);
                     assert_eq!(package.as_deref(), Some("homelab"));
@@ -1606,7 +1690,11 @@ mod tests {
                 git_subcommand: None,
             };
             match cmd.git_to_repo_action() {
-                Some(RepoAction::GitStatus { history, refresh_remotes, package }) => {
+                Some(RepoAction::GitStatus {
+                    history,
+                    refresh_remotes,
+                    package,
+                }) => {
                     assert_eq!(history, 15);
                     assert!(refresh_remotes);
                     assert!(package.is_none());
@@ -1641,7 +1729,9 @@ mod tests {
                 package: None,
                 remote: None,
                 help: None,
-                git_subcommand: Some(GitSubcommand::Hash { sha: "abc123".to_string() }),
+                git_subcommand: Some(GitSubcommand::Hash {
+                    sha: "abc123".to_string(),
+                }),
             };
             match cmd.git_to_repo_action() {
                 Some(RepoAction::Hash { sha }) => {

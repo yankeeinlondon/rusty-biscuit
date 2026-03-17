@@ -529,7 +529,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
-        ..Default::default()
+            ..Default::default()
         };
 
         let api = RestApi {
@@ -716,7 +716,7 @@ mod tests {
             basic_user: None,
             basic_pass: None,
             api_key: None,
-        ..Default::default()
+            ..Default::default()
         };
 
         let api = RestApi {

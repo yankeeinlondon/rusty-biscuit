@@ -41,7 +41,8 @@ pub fn render_os_section(os: &sniff::OsInfo, verbose: u8) -> String {
                 "Package Managers: Primary: {} ({} detected)",
                 primary_str,
                 pkg_managers.managers.len()
-            ).unwrap();
+            )
+            .unwrap();
         } else {
             // Detailed output at verbose level 1+
             writeln!(out, "Package Managers:").unwrap();

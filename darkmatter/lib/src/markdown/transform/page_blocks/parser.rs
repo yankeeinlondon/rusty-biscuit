@@ -21,8 +21,7 @@ pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBloc
     let bytes = content.as_bytes();
 
     // Stack entries: (block_start_byte, body_start_byte, start_line, options, children)
-    let mut stack: Vec<(usize, usize, usize, PageBlockOptions, Vec<PageBlockRegion>)> =
-        Vec::new();
+    let mut stack: Vec<(usize, usize, usize, PageBlockOptions, Vec<PageBlockRegion>)> = Vec::new();
     let mut top_level: Vec<PageBlockRegion> = Vec::new();
 
     let mut line_start = 0usize;
@@ -47,13 +46,7 @@ pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBloc
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let options = parse_block_options(after.trim(), line_number)?;
                         let body_start = span_end; // body starts after the ::block line
-                        stack.push((
-                            line_start,
-                            body_start,
-                            line_number,
-                            options,
-                            Vec::new(),
-                        ));
+                        stack.push((line_start, body_start, line_number, options, Vec::new()));
                     }
                 } else if let Some(after) = trimmed.strip_prefix("::end-block") {
                     // Validate no trailing non-whitespace content
@@ -170,7 +163,8 @@ mod tests {
 
     #[test]
     fn multiple_sibling_blocks() {
-        let content = "::block when=\"a\"\nfirst\n::end-block\n::block when=\"b\"\nsecond\n::end-block\n";
+        let content =
+            "::block when=\"a\"\nfirst\n::end-block\n::block when=\"b\"\nsecond\n::end-block\n";
         let regions = parse_page_blocks(content).unwrap();
         assert_eq!(regions.len(), 2);
         assert_eq!(regions[0].options.when_expr, Some("a".to_string()));
@@ -181,8 +175,7 @@ mod tests {
 
     #[test]
     fn nested_blocks() {
-        let content =
-            "::block when=\"outer\"\nouter body\n::block when=\"inner\"\ninner body\n::end-block\n::end-block\n";
+        let content = "::block when=\"outer\"\nouter body\n::block when=\"inner\"\ninner body\n::end-block\n::end-block\n";
         let regions = parse_page_blocks(content).unwrap();
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].children.len(), 1);
@@ -294,7 +287,8 @@ mod tests {
 
     #[test]
     fn deeply_nested_blocks_three_levels() {
-        let content = "::block\nL1\n::block\nL2\n::block\nL3\n::end-block\n::end-block\n::end-block\n";
+        let content =
+            "::block\nL1\n::block\nL2\n::block\nL3\n::end-block\n::end-block\n::end-block\n";
         let regions = parse_page_blocks(content).unwrap();
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].children.len(), 1);

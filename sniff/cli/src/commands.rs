@@ -68,7 +68,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 output::print_programs_json(&programs, output_filter)?;
             } else {
-                let rendered = output::render_programs_markdown(&programs, cli.verbose, output_filter);
+                let rendered =
+                    output::render_programs_markdown(&programs, cli.verbose, output_filter);
                 output::emit_text(&rendered, cli.plain);
             }
             return Ok(());
@@ -85,7 +86,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 output::print_services_json(&services_info, state_filter)?;
             } else {
-                output::emit_text(&output::render_services_text(&services_info, cli.verbose, state_filter), cli.plain);
+                output::emit_text(
+                    &output::render_services_text(&services_info, cli.verbose, state_filter),
+                    cli.plain,
+                );
             }
             return Ok(());
         }
@@ -103,9 +107,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Normalize to RepoAction for unified dispatch
-    let repo_action = cli.command.as_ref().and_then(|cmd| {
-        cmd.to_repo_action().or_else(|| cmd.git_to_repo_action())
-    });
+    let repo_action = cli
+        .command
+        .as_ref()
+        .and_then(|cmd| cmd.to_repo_action().or_else(|| cmd.git_to_repo_action()));
 
     // Handle RepoAction variants that don't need full detection as early returns
     if let Some(ref action) = repo_action {
@@ -116,18 +121,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else if is_owner_repo_shorthand(remote) {
                     return handle_shorthand(remote, cli.json, cli.plain, cli.verbose).await;
                 } else {
-                    let url = resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
-                        format!(
-                            "Could not find remote '{}' in the current repository",
-                            remote
-                        )
-                    })?;
+                    let url =
+                        resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
+                            format!(
+                                "Could not find remote '{}' in the current repository",
+                                remote
+                            )
+                        })?;
                     return handle_remote_url(&url, cli.json, cli.plain, cli.verbose).await;
                 }
             }
             crate::args::RepoAction::Hash { sha } => {
-                let dir = base_dir.as_deref().unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir).map_err(|e| format!("Not a git repository: {}", e))?;
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let repo = git2::Repository::discover(dir)
+                    .map_err(|e| format!("Not a git repository: {}", e))?;
                 let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
                     .ok_or_else(|| format!("Commit not found: {}", sha))?;
                 let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
@@ -143,7 +152,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     println!("{}", serde_json::to_string_pretty(&json)?);
                 } else {
                     let commit_url = commit_url_from_repo(&repo, &commit.sha);
-                    output::emit_text(&output::render_hash_section(&commit, &files, cli.verbose, commit_url.as_deref()), cli.plain);
+                    output::emit_text(
+                        &output::render_hash_section(
+                            &commit,
+                            &files,
+                            cli.verbose,
+                            commit_url.as_deref(),
+                        ),
+                        cli.plain,
+                    );
                 }
                 return Ok(());
             }
@@ -151,9 +168,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             | crate::args::RepoAction::UnstagedFiles { package: _ }
             | crate::args::RepoAction::UntrackedFiles { package: _ } => {
                 let status_filter = match action {
-                    crate::args::RepoAction::StagedFiles { .. } => sniff::filesystem::git::FileStatus::Staged,
-                    crate::args::RepoAction::UnstagedFiles { .. } => sniff::filesystem::git::FileStatus::Modified,
-                    crate::args::RepoAction::UntrackedFiles { .. } => sniff::filesystem::git::FileStatus::Untracked,
+                    crate::args::RepoAction::StagedFiles { .. } => {
+                        sniff::filesystem::git::FileStatus::Staged
+                    }
+                    crate::args::RepoAction::UnstagedFiles { .. } => {
+                        sniff::filesystem::git::FileStatus::Modified
+                    }
+                    crate::args::RepoAction::UntrackedFiles { .. } => {
+                        sniff::filesystem::git::FileStatus::Untracked
+                    }
                     _ => unreachable!(),
                 };
                 // Use the existing file-list logic
@@ -162,9 +185,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     config = config.base_dir(base.clone());
                 }
                 let result = sniff::detect_with_config(config)?;
-                if let Some(ref fs) = result.filesystem && let Some(ref git) = fs.git {
+                if let Some(ref fs) = result.filesystem
+                    && let Some(ref git) = fs.git
+                {
                     if cli.json {
-                        let files: Vec<_> = git.file_changes.iter()
+                        let files: Vec<_> = git
+                            .file_changes
+                            .iter()
                             .filter(|f| match status_filter {
                                 sniff::filesystem::git::FileStatus::Staged => {
                                     f.status == sniff::filesystem::git::FileStatus::Staged
@@ -179,7 +206,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .collect();
                         println!("{}", serde_json::to_string_pretty(&files)?);
                     } else {
-                        output::emit_text(&output::render_git_file_list(git, &status_filter, cli.verbose), cli.plain);
+                        output::emit_text(
+                            &output::render_git_file_list(git, &status_filter, cli.verbose),
+                            cli.plain,
+                        );
                     }
                 }
                 return Ok(());
@@ -198,8 +228,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let refresh_remotes_enabled = match &repo_action {
-        Some(crate::args::RepoAction::GitStatus { refresh_remotes: true, .. }) => true,
-        _ => cli.command.as_ref().is_some_and(|command| command.refresh_remotes()),
+        Some(crate::args::RepoAction::GitStatus {
+            refresh_remotes: true,
+            ..
+        }) => true,
+        _ => cli
+            .command
+            .as_ref()
+            .is_some_and(|command| command.refresh_remotes()),
     };
     if refresh_remotes_enabled {
         config = config.deep(true);
@@ -208,7 +244,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Set commit count from history flag
     let history_count = match &repo_action {
         Some(crate::args::RepoAction::GitStatus { history, .. }) => *history,
-        _ => cli.command.as_ref().map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
+        _ => cli
+            .command
+            .as_ref()
+            .map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
     };
     config = config.commit_count(history_count);
 
@@ -324,8 +363,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let latest_versions_enabled = match &repo_action {
-        Some(crate::args::RepoAction::Structure { latest_versions: true, .. }) => true,
-        _ => cli.command.as_ref().is_some_and(|command| command.latest_versions()),
+        Some(crate::args::RepoAction::Structure {
+            latest_versions: true,
+            ..
+        }) => true,
+        _ => cli
+            .command
+            .as_ref()
+            .is_some_and(|command| command.latest_versions()),
     };
 
     if latest_versions_enabled {
@@ -508,7 +553,10 @@ fn commit_url_from_repo(repo: &git2::Repository, sha: &str) -> Option<String> {
         None
     }?;
 
-    Some(format!("{base}/{owner_repo}/{}/{sha}", provider.commit_path_segment()))
+    Some(format!(
+        "{base}/{owner_repo}/{}/{sha}",
+        provider.commit_path_segment()
+    ))
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.

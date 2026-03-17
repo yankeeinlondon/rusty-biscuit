@@ -155,8 +155,7 @@ impl FileReference {
 
         let base_dir = match base {
             Some(b) => b.to_path_buf(),
-            None => std::env::current_dir()
-                .map_err(FileReferenceError::CurrentDirectory)?,
+            None => std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?,
         };
 
         let relative = resolve::diff_paths(&resolved, &base_dir).ok_or_else(|| {

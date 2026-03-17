@@ -1,6 +1,8 @@
 //! Policy file discovery, loading, and persistence.
 
-use super::types::{ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet};
+use super::types::{
+    ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
+};
 use crate::markdown::transform::TransformSource;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -297,7 +299,12 @@ mod tests {
 
         let paths = resolve_policy_paths(&options, &source).unwrap();
         // Should use the parent directory (temp_dir) or walk up to find git root
-        assert!(paths.whitelist.to_string_lossy().contains(".darkmatter-shell-whitelist"));
+        assert!(
+            paths
+                .whitelist
+                .to_string_lossy()
+                .contains(".darkmatter-shell-whitelist")
+        );
     }
 
     #[test]
@@ -319,17 +326,32 @@ mod tests {
 
         let ruleset = load_ruleset(&file_path).unwrap();
         assert_eq!(ruleset.entries.len(), 3);
-        assert!(ruleset.entries.contains(&ShellRuleEntry::Exact("echo hello".to_string())));
-        assert!(ruleset.entries.contains(&ShellRuleEntry::Prefix("ls".to_string())));
-        assert!(ruleset.entries.contains(&ShellRuleEntry::Exact("pwd".to_string())));
+        assert!(
+            ruleset
+                .entries
+                .contains(&ShellRuleEntry::Exact("echo hello".to_string()))
+        );
+        assert!(
+            ruleset
+                .entries
+                .contains(&ShellRuleEntry::Prefix("ls".to_string()))
+        );
+        assert!(
+            ruleset
+                .entries
+                .contains(&ShellRuleEntry::Exact("pwd".to_string()))
+        );
     }
 
     #[test]
     fn load_ruleset_deduplicates() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("whitelist");
-        std::fs::write(&file_path, "exact echo hello\nexact echo hello\nprefix ls\nprefix ls\n")
-            .unwrap();
+        std::fs::write(
+            &file_path,
+            "exact echo hello\nexact echo hello\nprefix ls\nprefix ls\n",
+        )
+        .unwrap();
 
         let ruleset = load_ruleset(&file_path).unwrap();
         assert_eq!(ruleset.entries.len(), 2);
@@ -343,8 +365,16 @@ mod tests {
 
         let ruleset = load_ruleset(&file_path).unwrap();
         assert_eq!(ruleset.entries.len(), 2);
-        assert!(ruleset.entries.contains(&ShellRuleEntry::Exact("echo hello".to_string())));
-        assert!(ruleset.entries.contains(&ShellRuleEntry::Prefix("ls".to_string())));
+        assert!(
+            ruleset
+                .entries
+                .contains(&ShellRuleEntry::Exact("echo hello".to_string()))
+        );
+        assert!(
+            ruleset
+                .entries
+                .contains(&ShellRuleEntry::Prefix("ls".to_string()))
+        );
     }
 
     #[test]

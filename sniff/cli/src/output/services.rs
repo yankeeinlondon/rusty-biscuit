@@ -5,7 +5,11 @@ use std::fmt::Write;
 use sniff::services::{Service, ServiceState, ServicesInfo};
 
 /// Render services information as text.
-pub fn render_services_text(info: &ServicesInfo, verbose: u8, state_filter: ServiceState) -> String {
+pub fn render_services_text(
+    info: &ServicesInfo,
+    verbose: u8,
+    state_filter: ServiceState,
+) -> String {
     let mut out = String::new();
     writeln!(out, "=== Services ===").unwrap();
     writeln!(out, "Init System: {}", info.init_system).unwrap();
@@ -50,7 +54,8 @@ pub fn render_services_text(info: &ServicesInfo, verbose: u8, state_filter: Serv
                 info.services.len(),
                 total_running,
                 total_stopped
-            ).unwrap();
+            )
+            .unwrap();
         }
         ServiceState::Running => {
             writeln!(out, "Running Services: {}", filtered.len()).unwrap();

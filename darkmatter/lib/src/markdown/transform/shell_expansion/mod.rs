@@ -33,15 +33,17 @@ pub mod store;
 pub mod tokenize;
 pub mod types;
 
-pub use alias::{resolve_alias, ResolvedAlias};
+pub use alias::{ResolvedAlias, resolve_alias};
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
-pub use policy::{check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command};
+pub use policy::{
+    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
+};
 pub use store::resolve_policy_paths;
 pub use types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellDirective,
-    ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleSet,
-    ShellExpansionRuntime,
+    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
+    ShellRuleSet,
 };
 
 use crate::markdown::transform::TransformOptions;
@@ -142,12 +144,18 @@ pub fn execute_directive(
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
                 store::append_whitelist_exact(policy_paths, &normalized)?;
-                shell_runtime.whitelist.entries.push(types::ShellRuleEntry::Exact(normalized));
+                shell_runtime
+                    .whitelist
+                    .entries
+                    .push(types::ShellRuleEntry::Exact(normalized));
                 executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
             ShellApprovalDecision::AllowCommandPersist => {
                 store::append_whitelist_prefix(policy_paths, &effective.executable)?;
-                shell_runtime.whitelist.entries.push(types::ShellRuleEntry::Prefix(effective.executable.clone()));
+                shell_runtime
+                    .whitelist
+                    .entries
+                    .push(types::ShellRuleEntry::Prefix(effective.executable.clone()));
                 executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
             ShellApprovalDecision::AllowOnce => {
@@ -155,15 +163,16 @@ pub fn execute_directive(
                 shell_runtime.approvals_used += 1;
                 executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
-            ShellApprovalDecision::Deny => {
-                Err(ShellExpansionError::Denied {
-                    command: display_command(directive, alias_name.as_deref()),
-                    line: directive.line,
-                })
-            }
+            ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
+                command: display_command(directive, alias_name.as_deref()),
+                line: directive.line,
+            }),
             ShellApprovalDecision::BlacklistPersist => {
                 store::append_blacklist_exact(policy_paths, &normalized)?;
-                shell_runtime.user_blacklist.entries.push(types::ShellRuleEntry::Exact(normalized));
+                shell_runtime
+                    .user_blacklist
+                    .entries
+                    .push(types::ShellRuleEntry::Exact(normalized));
                 Err(ShellExpansionError::Blacklisted {
                     command: display_command(directive, alias_name.as_deref()),
                     reason: "user blacklisted".to_string(),
@@ -260,8 +269,8 @@ mod integration_tests {
     use super::*;
     use crate::markdown::Markdown;
     use crate::markdown::transform::{Stage1Stages, TransformOptions};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     struct MockApprovalHandler {
@@ -614,10 +623,8 @@ name: world
         let (transformed, _) = md.transform_with(options).unwrap();
         assert!(transformed.content().contains("hello"));
 
-        let whitelist = std::fs::read_to_string(
-            temp_dir.path().join(".darkmatter-shell-whitelist"),
-        )
-        .unwrap();
+        let whitelist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
         assert!(whitelist.contains("exact echo hello"));
     }
 
@@ -644,10 +651,8 @@ name: world
         let err = md.transform_with(options).unwrap_err();
         assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("blacklist"));
 
-        let blacklist = std::fs::read_to_string(
-            temp_dir.path().join(".darkmatter-shell-blacklist"),
-        )
-        .unwrap();
+        let blacklist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-blacklist")).unwrap();
         assert!(blacklist.contains("exact echo hello"));
     }
 

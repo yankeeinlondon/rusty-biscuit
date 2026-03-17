@@ -182,7 +182,10 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
                     ));
                 }
             }
-            BlacklistRule::ArgExact { executable: cmd, arg } => {
+            BlacklistRule::ArgExact {
+                executable: cmd,
+                arg,
+            } => {
                 if executable == *cmd && args.iter().any(|a| a == *arg) {
                     return Some(format!("'{} {}' is a dangerous operation", cmd, arg));
                 }
@@ -278,7 +281,10 @@ pub fn normalize_command(executable: &str, args: &[String]) -> String {
 
     for arg in args {
         if needs_quoting(arg) {
-            parts.push(format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\"")));
+            parts.push(format!(
+                "\"{}\"",
+                arg.replace('\\', "\\\\").replace('"', "\\\"")
+            ));
         } else {
             parts.push(arg.clone());
         }
@@ -332,7 +338,11 @@ mod tests {
     fn builtin_blacklist_rejects_git_push_force() {
         let reason = check_builtin_blacklist(
             "git",
-            &["push".to_string(), "--force".to_string(), "origin".to_string()],
+            &[
+                "push".to_string(),
+                "--force".to_string(),
+                "origin".to_string(),
+            ],
         );
         assert!(reason.is_some());
     }
@@ -371,7 +381,12 @@ mod tests {
     fn builtin_blacklist_rejects_find_delete() {
         let reason = check_builtin_blacklist(
             "find",
-            &[".".to_string(), "-name".to_string(), "*.tmp".to_string(), "-delete".to_string()],
+            &[
+                ".".to_string(),
+                "-name".to_string(),
+                "*.tmp".to_string(),
+                "-delete".to_string(),
+            ],
         );
         assert!(reason.is_some());
     }
@@ -523,6 +538,9 @@ mod tests {
     #[test]
     fn args_start_with_non_matching() {
         assert!(!args_start_with(&["status".to_string()], &["reset"]));
-        assert!(!args_start_with(&["push".to_string()], &["push", "--force"]));
+        assert!(!args_start_with(
+            &["push".to_string()],
+            &["push", "--force"]
+        ));
     }
 }

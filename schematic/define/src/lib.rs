@@ -148,13 +148,15 @@ pub mod websocket;
 pub mod openapi;
 
 // Re-export main types at crate root
-pub use auth::{ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
-pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+pub use auth::{
+    ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy,
+};
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
     TypeRef,
 };
+pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use params::{
     EndpointParams, PaginationResponse, PaginationStyle, ParamDef, ParamStyle, QueryParamType,
 };

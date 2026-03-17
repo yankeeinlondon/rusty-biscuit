@@ -8,8 +8,8 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy, OAuth2Config,
-    OAuth2ClientAuthMethod, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
+    OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
 };
 use schematic_gen::output::assemble_api_code;
 

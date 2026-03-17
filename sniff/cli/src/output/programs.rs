@@ -282,7 +282,11 @@ fn collect_program_entries(
 /// ## Returns
 ///
 /// A String containing the formatted table ready for terminal output.
-pub fn render_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) -> String {
+pub fn render_programs_markdown(
+    programs: &ProgramsInfo,
+    verbose: u8,
+    filter: OutputFilter,
+) -> String {
     let include_versions = verbose > 1;
     let entries = collect_program_entries(programs, filter, include_versions);
     let term = Terminal::default();

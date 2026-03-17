@@ -447,7 +447,13 @@ fn test_compose_state_requires_json_object() {
 #[test]
 fn test_compose_with_set_overwrites_frontmatter() {
     md_cmd()
-        .args(["compose", "-", "--set", r#"{"name":"Bob"}"#, "--frontmatter"])
+        .args([
+            "compose",
+            "-",
+            "--set",
+            r#"{"name":"Bob"}"#,
+            "--frontmatter",
+        ])
         .write_stdin("---\nname: Alice\n---\n# Hello {{ name }}")
         .assert()
         .success()
@@ -470,9 +476,12 @@ fn test_compose_set_and_state_combined() {
     // --state fills defaults, --set overwrites; --set wins on overlap
     md_cmd()
         .args([
-            "compose", "-",
-            "--state", r#"{"greeting":"Hi","name":"Alice"}"#,
-            "--set", r#"{"name":"Bob"}"#,
+            "compose",
+            "-",
+            "--state",
+            r#"{"greeting":"Hi","name":"Alice"}"#,
+            "--set",
+            r#"{"name":"Bob"}"#,
         ])
         .write_stdin("# {{ greeting }} {{ name }}")
         .assert()
@@ -1122,7 +1131,8 @@ fn test_set_without_save_does_not_mutate_file() {
 
 #[test]
 fn test_set_preserves_body_content() {
-    let input = "---\ntitle: Test\n---\n# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
+    let input =
+        "---\ntitle: Test\n---\n# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
     md_cmd()
         .args(["set", "-", "version", "2"])
         .write_stdin(input)
@@ -1193,11 +1203,15 @@ fn test_compose_stdin_unapproved_command_fails_with_guidance() {
         .write_stdin("# Test\n::shell echo hello\n")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Approval required for 'echo hello'."))
+        .stderr(predicate::str::contains(
+            "Approval required for 'echo hello'.",
+        ))
         .stderr(predicate::str::contains(
             "To allow in non-interactive mode, add one of these to",
         ))
-        .stderr(predicate::str::contains(whitelist_path.display().to_string()))
+        .stderr(predicate::str::contains(
+            whitelist_path.display().to_string(),
+        ))
         .stderr(predicate::str::contains("exact echo hello"))
         .stderr(predicate::str::contains("prefix echo"));
 }
@@ -1216,11 +1230,15 @@ fn test_compose_file_unapproved_command_fails_with_guidance() {
         .arg(&md_path)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Approval required for 'echo hello'."))
+        .stderr(predicate::str::contains(
+            "Approval required for 'echo hello'.",
+        ))
         .stderr(predicate::str::contains(
             "To allow in non-interactive mode, add one of these to",
         ))
-        .stderr(predicate::str::contains(whitelist_path.display().to_string()))
+        .stderr(predicate::str::contains(
+            whitelist_path.display().to_string(),
+        ))
         .stderr(predicate::str::contains("exact echo hello"))
         .stderr(predicate::str::contains("prefix echo"));
 }

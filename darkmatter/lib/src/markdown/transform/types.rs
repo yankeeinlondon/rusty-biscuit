@@ -622,7 +622,10 @@ impl TransformReport {
         }
 
         if self.shell_expansions_applied > 0 {
-            parts.push(format!("{} shell expansion(s)", self.shell_expansions_applied));
+            parts.push(format!(
+                "{} shell expansion(s)",
+                self.shell_expansions_applied
+            ));
         }
 
         if self.shell_approvals_used > 0 {
@@ -634,11 +637,17 @@ impl TransformReport {
         }
 
         if self.page_blocks_rendered > 0 {
-            parts.push(format!("{} page block(s) rendered", self.page_blocks_rendered));
+            parts.push(format!(
+                "{} page block(s) rendered",
+                self.page_blocks_rendered
+            ));
         }
 
         if self.page_blocks_skipped > 0 {
-            parts.push(format!("{} page block(s) skipped", self.page_blocks_skipped));
+            parts.push(format!(
+                "{} page block(s) skipped",
+                self.page_blocks_skipped
+            ));
         }
 
         if self.transclusions_applied > 0 {
