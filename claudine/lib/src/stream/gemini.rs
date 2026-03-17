@@ -66,46 +66,63 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             return None;
         }
 
-        let content = obj.get("content").and_then(|c| c.as_array())?;
-        let mut text_parts = String::new();
-        for part in content {
-            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                text_parts.push_str(text);
+        let content_val = obj.get("content")?;
+
+        // Gemini emits content as a plain string (confirmed from types.d.ts),
+        // but handle array format defensively in case future versions change.
+        let text = if let Some(s) = content_val.as_str() {
+            s.to_string()
+        } else if let Some(arr) = content_val.as_array() {
+            let mut parts = String::new();
+            for part in arr {
+                if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
+                    parts.push_str(t);
+                }
             }
-        }
-        if text_parts.is_empty() {
+            parts
+        } else {
+            return None;
+        };
+
+        if text.is_empty() {
             return None;
         }
-        self.assistant_text.push_str(&text_parts);
-        Some(text_parts)
+        self.assistant_text.push_str(&text);
+        Some(text)
     }
 
     fn handle_result(&mut self, obj: &Value) {
-        self.duration_ms = obj.get("duration_ms").and_then(|v| v.as_u64());
-        self.num_turns = obj
-            .get("num_turns")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
+        // Result status: "success" or "error"
         self.provider_status = obj
-            .get("stop_reason")
+            .get("status")
             .and_then(|v| v.as_str())
             .map(String::from);
+
+        // Handle result-level errors
+        if obj.get("status").and_then(|v| v.as_str()) == Some("error") {
+            self.is_error = true;
+            if let Some(err) = obj.get("error") {
+                self.error_kind = err.get("type").and_then(|v| v.as_str()).map(String::from);
+                self.error_message = err.get("message").and_then(|v| v.as_str()).map(String::from);
+            }
+        }
+
         self.cost_usd = obj.get("cost_usd").and_then(|v| v.as_f64());
 
-        // Gemini uses stats or usage for token info
-        let stats = obj.get("stats").or_else(|| obj.get("usage"));
+        // Gemini stats: {total_tokens, input_tokens, output_tokens, cached, input, duration_ms, tool_calls}
+        let stats = obj.get("stats");
         if let Some(stats) = stats {
-            let input = stats
-                .get("input_tokens")
-                .or_else(|| stats.get("total_input"))
-                .and_then(|v| v.as_u64());
-            let output = stats
-                .get("output_tokens")
-                .and_then(|v| v.as_u64());
-            let cache_read = stats
-                .get("cache_read_input_tokens")
-                .or_else(|| stats.get("cached_input"))
-                .and_then(|v| v.as_u64());
+            self.duration_ms = stats.get("duration_ms").and_then(|v| v.as_u64());
+
+            // Tool calls from stats
+            if let Some(tc) = stats.get("tool_calls").and_then(|v| v.as_u64()) {
+                self.tool_calls = tc as u32;
+            }
+
+            let input = stats.get("input_tokens").and_then(|v| v.as_u64());
+            let output = stats.get("output_tokens").and_then(|v| v.as_u64());
+            // "cached" = cached prompt tokens (maps to cache_read)
+            let cache_read = stats.get("cached").and_then(|v| v.as_u64());
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
                 _ => stats.get("total_tokens").and_then(|v| v.as_u64()),
@@ -123,15 +140,14 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
 
     fn handle_error(&mut self, obj: &Value) {
         self.is_error = true;
+        // Real format: {"type":"error","severity":"warning","message":"Loop detected"}
         self.error_kind = obj
-            .get("error")
-            .and_then(|e| e.get("type"))
-            .and_then(|t| t.as_str())
+            .get("severity")
+            .and_then(|v| v.as_str())
             .map(String::from);
         self.error_message = obj
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
+            .get("message")
+            .and_then(|v| v.as_str())
             .map(String::from);
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
@@ -224,69 +240,119 @@ mod tests {
     }
 
     #[test]
-    fn happy_path() {
+    fn happy_path_real_gemini_format() {
         let mut parser = make_parser();
 
         parser
-            .feed_line(r#"{"type":"init","session_id":"gem-1","model":"gemini-2.5-pro"}"#)
+            .feed_line(r#"{"type":"init","timestamp":"2026-03-16T12:00:00Z","session_id":"gem-1","model":"gemini-2.5-pro"}"#)
             .unwrap();
 
+        // Gemini emits content as a plain string, with delta: true for streaming
         let text = parser
             .feed_line(
-                r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Gemini"}]}"#,
+                r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Hello from ","delta":true}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Hello from Gemini".into()));
+        assert_eq!(text, Some("Hello from ".into()));
 
+        let text2 = parser
+            .feed_line(
+                r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Gemini","delta":true}"#,
+            )
+            .unwrap();
+        assert_eq!(text2, Some("Gemini".into()));
+
+        // Real result with stats object
         parser
-            .feed_line(r#"{"type":"result","duration_ms":8000,"stats":{"input_tokens":500,"output_tokens":250},"cost_usd":0.002}"#)
+            .feed_line(r#"{"type":"result","timestamp":"2026-03-16T12:00:02Z","status":"success","stats":{"total_tokens":750,"input_tokens":500,"output_tokens":250,"cached":100,"input":400,"duration_ms":8000,"tool_calls":0}}"#)
             .unwrap();
 
         let summary = parser.finish(0);
         assert_eq!(summary.provider, Provider::Gemini);
         assert_eq!(summary.session_id.as_deref(), Some("gem-1"));
         assert_eq!(summary.assistant_text, "Hello from Gemini");
+        assert_eq!(summary.provider_status.as_deref(), Some("success"));
+        assert_eq!(summary.duration_ms, Some(8000));
 
         let usage = summary.token_usage.unwrap();
         assert_eq!(usage.input, Some(500));
         assert_eq!(usage.output, Some(250));
         assert_eq!(usage.total, Some(750));
+        assert_eq!(usage.cache_read, Some(100));
     }
 
     #[test]
-    fn non_assistant_messages_ignored() {
+    fn user_messages_ignored() {
         let mut parser = make_parser();
         let text = parser
             .feed_line(
-                r#"{"type":"message","role":"user","content":[{"text":"User message"}]}"#,
+                r#"{"type":"message","role":"user","content":"User message"}"#,
             )
             .unwrap();
         assert_eq!(text, None);
     }
 
     #[test]
-    fn error_handling() {
+    fn error_event() {
+        let mut parser = make_parser();
+        // Non-fatal error event (severity: warning/error)
+        parser
+            .feed_line(r#"{"type":"error","timestamp":"2026-03-16T12:00:00Z","severity":"warning","message":"Loop detected"}"#)
+            .unwrap();
+
+        let summary = parser.finish(0);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_message.as_deref(), Some("Loop detected"));
+    }
+
+    #[test]
+    fn result_error_status() {
         let mut parser = make_parser();
         parser
-            .feed_line(r#"{"type":"error","error":{"type":"quota_exceeded","message":"Quota exceeded"}}"#)
+            .feed_line(r#"{"type":"result","timestamp":"2026-03-16T12:00:00Z","status":"error","error":{"type":"FatalTurnLimitedError","message":"Reached max turns"}}"#)
             .unwrap();
 
         let summary = parser.finish(1);
         assert!(summary.is_error);
-        assert_eq!(summary.error_kind.as_deref(), Some("quota_exceeded"));
+        assert_eq!(summary.error_kind.as_deref(), Some("FatalTurnLimitedError"));
+        assert_eq!(summary.error_message.as_deref(), Some("Reached max turns"));
     }
 
     #[test]
-    fn tool_counting() {
+    fn tool_counting_from_events() {
         let mut parser = make_parser();
         parser
-            .feed_line(r#"{"type":"tool_use","name":"search","tool_id":"t1"}"#)
+            .feed_line(r#"{"type":"tool_use","timestamp":"2026-03-16T12:00:00Z","tool_name":"search","tool_id":"t1","parameters":{}}"#)
             .unwrap();
         parser
-            .feed_line(r#"{"type":"tool_result","tool_id":"t1","content":"result"}"#)
+            .feed_line(r#"{"type":"tool_result","timestamp":"2026-03-16T12:00:01Z","tool_id":"t1","status":"success","output":"found it"}"#)
             .unwrap();
 
         let summary = parser.finish(0);
         assert_eq!(summary.tool_calls, Some(1));
+    }
+
+    #[test]
+    fn tool_count_from_stats_overrides_events() {
+        let mut parser = make_parser();
+        // Even without tool_use events, stats.tool_calls is authoritative
+        parser
+            .feed_line(r#"{"type":"result","timestamp":"2026-03-16T12:00:00Z","status":"success","stats":{"total_tokens":100,"input_tokens":80,"output_tokens":20,"cached":0,"input":80,"duration_ms":1000,"tool_calls":5}}"#)
+            .unwrap();
+
+        let summary = parser.finish(0);
+        assert_eq!(summary.tool_calls, Some(5));
+    }
+
+    #[test]
+    fn content_as_array_fallback() {
+        // Defensive: handle content as array in case future Gemini versions change
+        let mut parser = make_parser();
+        let text = parser
+            .feed_line(
+                r#"{"type":"message","role":"assistant","content":[{"text":"Array format"}]}"#,
+            )
+            .unwrap();
+        assert_eq!(text, Some("Array format".into()));
     }
 }
