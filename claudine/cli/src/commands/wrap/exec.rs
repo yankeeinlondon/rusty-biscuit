@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
+use std::time::Instant;
 
 use claudine::stream::parser::{StreamParseError, StreamParser};
 use claudine::stream::summary::StreamExecutionSummary;
@@ -406,6 +407,7 @@ pub(crate) fn run_child_stream(
 
     let filter_stderr = !stderr_noise_prefixes.is_empty();
     let needs_stdin_pipe = stdin_seed.is_some();
+    let started_at = Instant::now();
 
     let mut command = Command::new(binary);
     command
@@ -524,7 +526,12 @@ pub(crate) fn run_child_stream(
         }
     }
 
-    Ok(parser.finish(exit_code))
+    let mut summary = parser.finish(exit_code);
+    if summary.duration_ms.is_none() {
+        summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
+
+    Ok(summary)
 }
 
 /// Spawn a provider child process with structured stream parsing, capturing output.
@@ -545,6 +552,7 @@ pub(crate) fn run_child_stream_capture(
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
     let needs_stdin_pipe = stdin_seed.is_some();
+    let started_at = Instant::now();
 
     let mut command = Command::new(binary);
     command
@@ -618,6 +626,9 @@ pub(crate) fn run_child_stream_capture(
     let stderr_text = stderr_handle.join().unwrap_or_default();
 
     let mut summary = parser.finish(exit_code);
+    if summary.duration_ms.is_none() {
+        summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
     if !stderr_text.trim().is_empty() {
         if summary.error_message.is_none() && exit_code != 0 {
             summary.error_message = Some(stderr_text.lines().next().unwrap_or("").to_string());
@@ -719,5 +730,44 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
                 .unwrap()
                 .contains("provider stderr line")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn structured_stream_falls_back_to_wall_clock_duration_when_missing() {
+        let env = current_env();
+        let cwd = std::env::current_dir().unwrap();
+        let parser = claudine::stream::create_parser(
+            claudine::events::Provider::OpenCode,
+            claudine::stream::parser::NullSink,
+            claudine::stream::ParserConfig {
+                model: Some("minimax/MiniMax-M2.5-highspeed".into()),
+            },
+        );
+        let script = r#"
+printf '%s\n' '{"type":"session_start","model":"minimax/MiniMax-M2.5-highspeed"}'
+printf '%s\n' '{"type":"step_start","sessionID":"ses_1"}'
+printf '%s\n' '{"type":"text","text":"hello"}'
+printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens":{"input":150,"output":101,"total":251,"cache":{"read":42}}}}'
+"#;
+        let args = vec!["-c".to_string(), script.to_string()];
+
+        let summary = run_child_stream(
+            Path::new("/bin/sh"),
+            &args,
+            &env,
+            &cwd,
+            Some(5),
+            &[],
+            false,
+            None,
+            parser,
+        )
+        .unwrap();
+
+        assert_eq!(summary.exit_code, 0);
+        assert_eq!(summary.assistant_text, "hello");
+        assert!(summary.duration_ms.is_some());
+        assert!(summary.duration_ms.unwrap() < 5_000);
     }
 }
