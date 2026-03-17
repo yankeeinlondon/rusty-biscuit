@@ -397,6 +397,7 @@ pub(crate) fn run_child_stream(
     cwd: &Path,
     timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
+    suppress_stderr_on_success: bool,
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
 ) -> Result<StreamExecutionSummary> {
@@ -483,14 +484,23 @@ pub(crate) fn run_child_stream(
             .collect();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
-            let mut err = std::io::stderr().lock();
+            let mut captured = String::new();
             for line in reader.lines() {
                 let Ok(line) = line else { break };
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
                 }
-                let _ = writeln!(err, "{line}");
+                if suppress_stderr_on_success {
+                    if !captured.is_empty() {
+                        captured.push('\n');
+                    }
+                    captured.push_str(&line);
+                } else {
+                    let mut err = std::io::stderr().lock();
+                    let _ = writeln!(err, "{line}");
+                }
             }
+            captured
         }))
     } else {
         None
@@ -508,7 +518,10 @@ pub(crate) fn run_child_stream(
     });
 
     if let Some(handle) = stderr_handle {
-        let _ = handle.join();
+        let captured = handle.join().unwrap_or_default();
+        if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
+            eprintln!("{captured}");
+        }
     }
 
     Ok(parser.finish(exit_code))

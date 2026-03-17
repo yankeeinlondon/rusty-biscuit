@@ -201,9 +201,17 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.rate_limit = Some(info);
     }
 
-    fn handle_tool_use(&mut self) {
+    fn handle_tool_use(&mut self, obj: &Value) {
         self.tool_calls += 1;
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(tool_name) = obj
+            .get("name")
+            .or_else(|| obj.get("tool_name"))
+            .and_then(|v| v.as_str())
+        {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name.to_string()));
+        }
         self.sink.on_before_tool(&meta);
     }
 
@@ -265,11 +273,11 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
                     .and_then(|t| t.as_str())
                     == Some("tool_use") =>
             {
-                self.handle_tool_use();
+                self.handle_tool_use(&obj);
                 Ok(None)
             }
             "tool_use" => {
-                self.handle_tool_use();
+                self.handle_tool_use(&obj);
                 Ok(None)
             }
             "tool_result" => {

@@ -1044,7 +1044,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(!default_stderr.contains("Malformed JSON"));
     assert!(default_stderr.contains("Loop detected"));
     assert!(default_stderr.contains("\n\n✓ 1.5s"));
-    assert!(default_stderr.contains("✓ 1.5s"));
+    assert!(default_stderr.contains("20 input tokens"));
+    assert!(default_stderr.contains("10 output tokens"));
+    assert!(default_stderr.contains("5 cached tokens"));
+    assert!(default_stderr.contains("no tool calls"));
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
@@ -1059,7 +1062,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(!quiet_stderr.contains("Malformed JSON"));
     assert!(quiet_stderr.contains("Loop detected"));
     assert!(quiet_stderr.contains("\n\n✓ 1.5s"));
-    assert!(quiet_stderr.contains("✓ 1.5s"));
+    assert!(quiet_stderr.contains("20 input tokens"));
+    assert!(quiet_stderr.contains("10 output tokens"));
+    assert!(quiet_stderr.contains("5 cached tokens"));
+    assert!(quiet_stderr.contains("no tool calls"));
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
@@ -1074,6 +1080,46 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(!silent_stderr.contains("Malformed JSON"));
     assert!(!silent_stderr.contains("Loop detected"));
     assert!(!silent_stderr.contains("✓ 1.5s"));
+}
+
+#[cfg(unix)]
+#[test]
+fn gemini_structured_success_suppresses_provider_stderr_noise() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("gemini"),
+        r#"#!/bin/sh
+cat >&2 <<'EOF'
+    at throwErrorIfNotOK (file:///tmp/fake.mjs:1:1)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+EOF
+printf '%s\n' '{"type":"init","session_id":"gem-err","model":"gemini-2.5-pro"}'
+printf '%s\n' '{"type":"message","role":"assistant","content":"Recovered answer"}'
+printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"input_tokens":20,"output_tokens":10,"cached":5,"input":15,"duration_ms":1500,"tool_calls":0}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .assert()
+        .success()
+        .stdout("Recovered answer");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!stderr_plain.contains("throwErrorIfNotOK"));
+    assert!(!stderr_plain.contains("processTicksAndRejections"));
+    assert!(stderr_plain.contains("20 input tokens"));
+    assert!(stderr_plain.contains("10 output tokens"));
+    assert!(stderr_plain.contains("5 cached tokens"));
+    assert!(stderr_plain.contains("no tool calls"));
 }
 
 #[cfg(unix)]
@@ -1105,6 +1151,10 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr_plain.contains("\n\n✓ 1.5s"));
+    assert!(stderr_plain.contains("20 input tokens"));
+    assert!(stderr_plain.contains("10 output tokens"));
+    assert!(stderr_plain.contains("5 cached tokens"));
+    assert!(stderr_plain.contains("no tool calls"));
 }
 
 #[cfg(unix)]
@@ -1143,6 +1193,9 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
     assert!(stderr_plain.contains("11 cached tokens"));
     assert!(stderr_plain.contains("$0.02 cost basis"));
     assert!(stderr_plain.contains("1 tool call"));
+    assert!(stderr_plain.contains("tools used: search"));
+    assert!(stderr_plain.contains("model: gemini-2.5-pro"));
+    assert!(stderr_plain.contains("stop reason: success"));
 }
 
 #[cfg(unix)]
@@ -1159,7 +1212,8 @@ fn structured_quiet_verbose_uses_old_verbose_summary_renderer() {
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-1","model":"claude-sonnet-4"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Quiet verbose summary"}]}}'
-printf '%s\n' '{"type":"result","subtype":"success","duration_ms":4600,"usage":{"input_tokens":3,"output_tokens":60,"cache_read_input_tokens":11},"total_cost_usd":0.02}'
+printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"sky.md"}}'
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":2,"duration_ms":4600,"usage":{"input_tokens":3,"output_tokens":60,"cache_read_input_tokens":11},"total_cost_usd":0.02}'
 "#,
     );
 
@@ -1179,6 +1233,42 @@ printf '%s\n' '{"type":"result","subtype":"success","duration_ms":4600,"usage":{
     assert!(stderr_plain.contains("60 output tokens"));
     assert!(stderr_plain.contains("11 cached tokens"));
     assert!(stderr_plain.contains("$0.02 cost basis"));
+    assert!(stderr_plain.contains("1 tool call"));
+    assert!(stderr_plain.contains("tools used: read_file"));
+    assert!(stderr_plain.contains("model: claude-sonnet-4"));
+    assert!(stderr_plain.contains("turns: 2"));
+    assert!(stderr_plain.contains("stop reason: end_turn"));
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_verbose_summary_reports_no_tool_calls_when_absent() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-2","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"No tools here"}],"role":"assistant"}}'
+printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage":{"input_tokens":3,"output_tokens":60,"cache_read_input_tokens":11}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["claude", "--ni", "-v", "say hi"])
+        .assert()
+        .success()
+        .stdout("No tools here");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr_plain.contains("no tool calls"));
 }
 
 #[cfg(unix)]

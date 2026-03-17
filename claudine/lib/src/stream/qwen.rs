@@ -201,7 +201,15 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             }
             "tool_use" | "tool_call" => {
                 self.tool_calls += 1;
-                let meta = EventMeta::default();
+                let mut meta = EventMeta::default();
+                if let Some(tool_name) = obj
+                    .get("name")
+                    .or_else(|| obj.get("tool_name"))
+                    .and_then(|v| v.as_str())
+                {
+                    meta.extra
+                        .insert("tool_name".into(), Value::String(tool_name.to_string()));
+                }
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }

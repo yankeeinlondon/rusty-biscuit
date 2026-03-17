@@ -187,6 +187,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
         &[]
     }
 
+    /// When true, structured non-interactive runs buffer filtered stderr and
+    /// only surface it if the provider exits with an error.
+    fn suppress_structured_stderr_on_success(&self) -> bool {
+        false
+    }
+
     // -- Prompt-file delivery -------------------------------------------------
 
     /// Deliver a composed prompt body to the provider.
@@ -630,6 +636,10 @@ impl WrapperProfile for GeminiWrapper {
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
         &["Skill conflict detected: ", "[LocalAgentExecutor]"]
+    }
+
+    fn suppress_structured_stderr_on_success(&self) -> bool {
+        true
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {

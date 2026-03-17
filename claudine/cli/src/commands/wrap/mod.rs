@@ -18,6 +18,7 @@ use sniff::programs::InstalledAiClients;
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::log;
 
@@ -65,6 +66,19 @@ impl StructuredCodexOutput {
 
 type StreamDispatchFn = Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>;
 
+#[derive(Debug, Clone, Default)]
+struct StructuredSummaryDetails {
+    tool_names: Vec<String>,
+}
+
+impl StructuredSummaryDetails {
+    fn record_tool_name(&mut self, tool_name: &str) {
+        if !tool_name.is_empty() && !self.tool_names.iter().any(|name| name == tool_name) {
+            self.tool_names.push(tool_name.to_string());
+        }
+    }
+}
+
 struct LiveStreamSink {
     provider: Provider,
     env: EnvironmentContext,
@@ -72,27 +86,40 @@ struct LiveStreamSink {
     session_id: Option<String>,
     model: Option<String>,
     start_emitted: bool,
+    summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     dispatch: StreamDispatchFn,
 }
 
 impl LiveStreamSink {
-    fn new(provider: Provider, env: EnvironmentContext, verbosity: Verbosity) -> Self {
+    fn new(
+        provider: Provider,
+        env: EnvironmentContext,
+        verbosity: Verbosity,
+        summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+    ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
-        Self::with_dispatcher(provider, env, verbosity, move |event, meta| {
-            if let Some(handle) = handle.as_ref()
-                && let Err(error) = handle.block_on(claudine::dispatch::dispatch_event_meta(
-                    provider, event, meta,
-                ))
-            {
-                tracing::warn!(%provider, %event, "live stream dispatch failed: {error}");
-            }
-        })
+        Self::with_dispatcher(
+            provider,
+            env,
+            verbosity,
+            summary_details,
+            move |event, meta| {
+                if let Some(handle) = handle.as_ref()
+                    && let Err(error) = handle.block_on(claudine::dispatch::dispatch_event_meta(
+                        provider, event, meta,
+                    ))
+                {
+                    tracing::warn!(%provider, %event, "live stream dispatch failed: {error}");
+                }
+            },
+        )
     }
 
     fn with_dispatcher<F>(
         provider: Provider,
         env: EnvironmentContext,
         verbosity: Verbosity,
+        summary_details: Arc<Mutex<StructuredSummaryDetails>>,
         dispatch: F,
     ) -> Self
     where
@@ -105,6 +132,7 @@ impl LiveStreamSink {
             session_id: None,
             model: None,
             start_emitted: false,
+            summary_details,
             dispatch: Box::new(dispatch),
         }
     }
@@ -195,6 +223,12 @@ impl LiveStreamSink {
 
     fn dispatch_event(&mut self, event: AgenticEvent, meta: &StreamEventMeta) {
         let dispatch_meta = self.build_meta(event, meta);
+        if event == AgenticEvent::BeforeTool
+            && let Some(tool_name) = dispatch_meta.tool_name.as_deref()
+            && let Ok(mut details) = self.summary_details.lock()
+        {
+            details.record_tool_name(tool_name);
+        }
         if event == AgenticEvent::SessionStart {
             self.emit_start_summary();
         }
@@ -947,13 +981,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     let exit_code = if let Some((source, _prepared)) = inline_composition_source {
         if use_structured {
+            let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
             // Inline composition with structured stream parsing
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
             let parser = claudine::stream::create_parser(
                 provider,
-                LiveStreamSink::new(provider, env_context.clone(), stream_verbosity),
+                LiveStreamSink::new(
+                    provider,
+                    env_context.clone(),
+                    stream_verbosity,
+                    summary_details.clone(),
+                ),
                 parser_config,
             );
             let mut summary = exec::run_child_stream_capture(
@@ -1007,6 +1047,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 &env_context,
                 stream_verbosity,
                 verbose_requested,
+                &summary_details.lock().unwrap().clone(),
             );
 
             Ok(summary.exit_code)
@@ -1053,13 +1094,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             Ok(captured.exit_code)
         }
     } else if use_structured {
+        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         // Normal execution with structured stream parsing
         let parser_config = claudine::stream::ParserConfig {
             model: args.model.clone(),
         };
         let parser = claudine::stream::create_parser(
             provider,
-            LiveStreamSink::new(provider, env_context.clone(), stream_verbosity),
+            LiveStreamSink::new(
+                provider,
+                env_context.clone(),
+                stream_verbosity,
+                summary_details.clone(),
+            ),
             parser_config,
         );
         let mut summary = exec::run_child_stream(
@@ -1069,6 +1116,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             child_cwd,
             args.timeout,
             stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
             stdin_seed.as_deref(),
             parser,
         )?;
@@ -1087,6 +1135,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &env_context,
             stream_verbosity,
             verbose_requested,
+            &summary_details.lock().unwrap().clone(),
         );
 
         Ok(summary.exit_code)
@@ -1153,15 +1202,19 @@ fn emit_stream_summary(
     env_context: &EnvironmentContext,
     verbosity: Verbosity,
     verbose: bool,
+    details: &StructuredSummaryDetails,
 ) {
-    let completion_markup = if verbosity == Verbosity::Silent {
+    let primary_markup = if verbosity == Verbosity::Silent {
         None
-    } else if verbose {
-        format_verbose_summary_prose(summary)
     } else {
         format_summary_prose(summary)
     };
-    if let Some(markup) = completion_markup {
+    let secondary_markup = if verbosity == Verbosity::Silent || !verbose {
+        None
+    } else {
+        format_verbose_summary_details_prose(summary, details)
+    };
+    if primary_markup.is_some() || secondary_markup.is_some() {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
 
@@ -1172,8 +1225,15 @@ fn emit_stream_summary(
         } else {
             "\n\n"
         };
-        let rendered = Prose::new(markup).render_optimistic(None);
-        eprint!("{separator}{rendered}\n");
+        eprint!("{separator}");
+        if let Some(markup) = primary_markup {
+            let rendered = Prose::new(markup).render_optimistic(None);
+            eprint!("{rendered}\n");
+        }
+        if let Some(markup) = secondary_markup {
+            let rendered = Prose::new(markup).render_optimistic(None);
+            eprint!("  {rendered}\n");
+        }
     }
 
     // Write synthetic summary event to JSONL (best-effort)
@@ -1209,42 +1269,6 @@ fn format_summary_prose(
         if let Some(output) = usage.output {
             parts.push(format!("{} <i>output tokens</i>", format_number(output)));
         }
-    }
-
-    if let Some(cost) = summary.cost_usd {
-        parts.push(format!("{} <i>cost basis</i>", format_cost(cost)));
-    }
-
-    if parts.is_empty() {
-        return None;
-    }
-
-    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
-}
-
-fn format_verbose_summary_prose(
-    summary: &claudine::stream::summary::StreamExecutionSummary,
-) -> Option<String> {
-    use claudine::stream::stderr::{format_cost, format_duration, format_number};
-
-    let prefix = if summary.is_error {
-        "\u{2717}"
-    } else {
-        "\u{2713}"
-    };
-    let mut parts = Vec::new();
-
-    if let Some(ms) = summary.duration_ms {
-        parts.push(format_duration(ms));
-    }
-
-    if let Some(usage) = &summary.token_usage {
-        if let Some(input) = usage.input {
-            parts.push(format!("{} <i>input tokens</i>", format_number(input)));
-        }
-        if let Some(output) = usage.output {
-            parts.push(format!("{} <i>output tokens</i>", format_number(output)));
-        }
         if let Some(cache) = usage.cache_read
             && cache > 0
         {
@@ -1256,17 +1280,44 @@ fn format_verbose_summary_prose(
         parts.push(format!("{} <i>cost basis</i>", format_cost(cost)));
     }
 
-    if let Some(tc) = summary.tool_calls {
-        parts.push(format!(
+    match summary.tool_calls {
+        Some(tc) => parts.push(format!(
             "{tc} <i>tool call{}</i>",
             if tc == 1 { "" } else { "s" }
+        )),
+        None => parts.push("<i>no tool calls</i>".to_string()),
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
+}
+
+fn format_verbose_summary_details_prose(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    details: &StructuredSummaryDetails,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if !details.tool_names.is_empty() {
+        parts.push(format!(
+            "<i>tools used</i>: {}",
+            details.tool_names.join(", ")
         ));
     }
 
-    if let Some(turns) = summary.num_turns
-        && turns > 1
-    {
-        parts.push(format!("{turns} <i>turns</i>"));
+    if let Some(model) = &summary.model {
+        parts.push(format!("<i>model</i>: {model}"));
+    }
+
+    if let Some(turns) = summary.num_turns {
+        parts.push(format!("<i>turns</i>: {turns}",));
+    }
+
+    if let Some(stop_reason) = &summary.provider_status {
+        parts.push(format!("<i>stop reason</i>: {stop_reason}"));
     }
 
     if summary.is_error
@@ -1279,7 +1330,7 @@ fn format_verbose_summary_prose(
         return None;
     }
 
-    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
+    Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1660,6 +1711,7 @@ mod tests {
             Provider::Codex,
             EnvironmentContext::default(),
             Verbosity::Silent,
+            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
                 sink_events.lock().unwrap().push(meta);
             },
