@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
@@ -55,10 +55,7 @@ impl ProviderAdapter for KimiCodeAdapter {
         }
 
         // Capture usage from StatusUpdate events (flat or nested under `payload`).
-        let usage_source = raw
-            .get("payload")
-            .filter(|p| p.is_object())
-            .unwrap_or(raw);
+        let usage_source = raw.get("payload").filter(|p| p.is_object()).unwrap_or(raw);
         capture_kimi_usage(&mut meta.extra, usage_source);
 
         Ok((event, meta))

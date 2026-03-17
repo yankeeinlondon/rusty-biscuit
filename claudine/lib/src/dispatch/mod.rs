@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
 use crate::error::{ClaudineError, Result};
-use crate::events::{EnvironmentContext, Provider, ResolvedHook};
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
 use crate::services::{
     ProtectDecision, ProtectInput, ProtectOutcome, ProtectService, ProviderProtectProfiles,
 };
@@ -49,6 +49,30 @@ pub async fn dispatch(
         Err(error) => return Err(error.into()),
     };
 
+    prepare_meta_for_dispatch(&mut meta, env);
+
+    dispatch_preparsed(provider, event, meta).await
+}
+
+/// Dispatch a normalized event that has already been mapped into Claudine's
+/// shared event vocabulary.
+///
+/// This is used by wrapper-managed structured streams, which already parse
+/// provider output into coarse lifecycle events and therefore do not need to
+/// round-trip back through a provider adapter.
+pub async fn dispatch_event_meta(
+    provider: Provider,
+    event: AgenticEvent,
+    mut meta: EventMeta,
+) -> Result<DispatchOutcome> {
+    meta.provider = provider;
+    meta.event = event;
+    let env = meta.env.clone();
+    prepare_meta_for_dispatch(&mut meta, &env);
+    dispatch_preparsed(provider, event, meta).await
+}
+
+fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
     meta.env = env.clone();
 
     // If the wrapper injected a session ID and the adapter didn't extract one
@@ -71,10 +95,18 @@ pub async fn dispatch(
             .entry("yolo".to_string())
             .or_insert_with(|| Value::String(yolo));
     }
+}
+
+async fn dispatch_preparsed(
+    provider: Provider,
+    event: AgenticEvent,
+    meta: EventMeta,
+) -> Result<DispatchOutcome> {
+    let adapter = adapters::adapter_for(provider);
 
     info!(%provider, %event, "Dispatching event");
 
-    let config = match loader::load_runtime_config(None, runtime_repo_root(env)) {
+    let config = match loader::load_runtime_config(None, runtime_repo_root(&meta.env)) {
         Ok(config) => config,
         Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
             debug!("No .claudine config found, skipping dispatch");

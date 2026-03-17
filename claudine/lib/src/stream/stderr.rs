@@ -20,11 +20,7 @@ pub fn format_start_summary(summary: &StreamExecutionSummary) -> Option<String> 
     // Provider + session ID
     let provider_name = format!("{:?}", summary.provider).to_lowercase();
     if let Some(sid) = &summary.session_id {
-        let short_id = if sid.len() > 12 {
-            &sid[..12]
-        } else {
-            sid
-        };
+        let short_id = if sid.len() > 12 { &sid[..12] } else { sid };
         parts.push(format!("{provider_name} session {short_id}"));
     } else {
         parts.push(format!("{provider_name} session"));
@@ -35,7 +31,7 @@ pub fn format_start_summary(summary: &StreamExecutionSummary) -> Option<String> 
         parts.push(model.clone());
     }
 
-    if parts.len() <= 1 {
+    if summary.session_id.is_none() && summary.model.is_none() {
         return None;
     }
 
@@ -51,7 +47,11 @@ pub fn format_warning(message: &str) -> String {
 ///
 /// Returns `None` if there's insufficient information.
 pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<String> {
-    let prefix = if summary.is_error { "\u{2717}" } else { "\u{2713}" };
+    let prefix = if summary.is_error {
+        "\u{2717}"
+    } else {
+        "\u{2713}"
+    };
 
     let mut parts = Vec::new();
 
@@ -70,9 +70,10 @@ pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<Str
             token_parts.push(format!("{} out", format_number(output)));
         }
         if let Some(cache) = usage.cache_read
-            && cache > 0 {
-                token_parts.push(format!("{} cache", format_number(cache)));
-            }
+            && cache > 0
+        {
+            token_parts.push(format!("{} cache", format_number(cache)));
+        }
         if !token_parts.is_empty() {
             parts.push(token_parts.join(" / "));
         }
@@ -85,17 +86,15 @@ pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<Str
 
     // Tool calls
     if let Some(tc) = summary.tool_calls {
-        parts.push(format!(
-            "{tc} tool{}",
-            if tc == 1 { "" } else { "s" }
-        ));
+        parts.push(format!("{tc} tool{}", if tc == 1 { "" } else { "s" }));
     }
 
     // Error info
     if summary.is_error
-        && let Some(msg) = &summary.error_message {
-            parts.push(msg.clone());
-        }
+        && let Some(msg) = &summary.error_message
+    {
+        parts.push(msg.clone());
+    }
 
     if parts.is_empty() {
         return None;
@@ -108,7 +107,11 @@ pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<Str
 ///
 /// Returns `None` if there's insufficient information.
 pub fn format_compact_completion(summary: &StreamExecutionSummary) -> Option<String> {
-    let prefix = if summary.is_error { "\u{2717}" } else { "\u{2713}" };
+    let prefix = if summary.is_error {
+        "\u{2717}"
+    } else {
+        "\u{2713}"
+    };
 
     let mut parts = Vec::new();
 
@@ -119,13 +122,14 @@ pub fn format_compact_completion(summary: &StreamExecutionSummary) -> Option<Str
 
     // Compact token usage: input→output tokens
     if let Some(usage) = &summary.token_usage
-        && let (Some(input), Some(output)) = (usage.input, usage.output) {
-            parts.push(format!(
-                "{}\u{2192}{} tokens",
-                format_number(input),
-                format_number(output)
-            ));
-        }
+        && let (Some(input), Some(output)) = (usage.input, usage.output)
+    {
+        parts.push(format!(
+            "{}\u{2192}{} tokens",
+            format_number(input),
+            format_number(output)
+        ));
+    }
 
     // Cost
     if let Some(cost) = summary.cost_usd {
@@ -139,7 +143,8 @@ pub fn format_compact_completion(summary: &StreamExecutionSummary) -> Option<Str
     Some(format!("{prefix} {}", parts.join(" \u{00b7} ")))
 }
 
-fn format_duration(ms: u64) -> String {
+/// Formats a duration in milliseconds as a human-readable string.
+pub fn format_duration(ms: u64) -> String {
     let secs = ms as f64 / 1000.0;
     if secs < 10.0 {
         format!("{secs:.1}s")
@@ -148,7 +153,8 @@ fn format_duration(ms: u64) -> String {
     }
 }
 
-fn format_number(n: u64) -> String {
+/// Formats a token count with K/M suffixes.
+pub fn format_number(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
@@ -158,7 +164,8 @@ fn format_number(n: u64) -> String {
     }
 }
 
-fn format_cost(cost: f64) -> String {
+/// Formats a USD cost with appropriate decimal places.
+pub fn format_cost(cost: f64) -> String {
     if cost < 0.01 {
         format!("${cost:.4}")
     } else {
@@ -198,6 +205,7 @@ mod tests {
             rate_limit: None,
             context_usage: None,
             raw_summary: None,
+            stderr_text: None,
         }
     }
 

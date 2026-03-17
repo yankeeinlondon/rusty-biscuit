@@ -80,17 +80,19 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
 
         // Try direct text field
         if let Some(text) = obj.get("text").and_then(|t| t.as_str())
-            && !text.is_empty() {
-                self.assistant_text.push_str(text);
-                return Some(text.to_string());
-            }
+            && !text.is_empty()
+        {
+            self.assistant_text.push_str(text);
+            return Some(text.to_string());
+        }
 
         // Try content as string
         if let Some(text) = obj.get("content").and_then(|c| c.as_str())
-            && !text.is_empty() {
-                self.assistant_text.push_str(text);
-                return Some(text.to_string());
-            }
+            && !text.is_empty()
+        {
+            self.assistant_text.push_str(text);
+            return Some(text.to_string());
+        }
 
         None
     }
@@ -133,12 +135,13 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         if let Some(ctx) = obj.get("context_usage").or_else(|| obj.get("context")) {
             let used = ctx.get("used").and_then(|v| v.as_u64());
             let total = ctx.get("total").and_then(|v| v.as_u64());
-            let percent = ctx.get("percent").and_then(|v| v.as_f64()).or_else(|| {
-                match (used, total) {
-                    (Some(u), Some(t)) if t > 0 => Some((u as f64 / t as f64) * 100.0),
-                    _ => None,
-                }
-            });
+            let percent =
+                ctx.get("percent")
+                    .and_then(|v| v.as_f64())
+                    .or_else(|| match (used, total) {
+                        (Some(u), Some(t)) if t > 0 => Some((u as f64 / t as f64) * 100.0),
+                        _ => None,
+                    });
 
             let context = ContextUsage {
                 used,
@@ -147,13 +150,14 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             };
 
             if let Some(pct) = percent
-                && pct >= CONTEXT_PRESSURE_WARN_PERCENT {
-                    self.sink.on_warning(&format!(
-                        "Context window pressure: {pct:.0}% used ({}/{} tokens)",
-                        used.unwrap_or(0),
-                        total.unwrap_or(0)
-                    ));
-                }
+                && pct >= CONTEXT_PRESSURE_WARN_PERCENT
+            {
+                self.sink.on_warning(&format!(
+                    "Context window pressure: {pct:.0}% used ({}/{} tokens)",
+                    used.unwrap_or(0),
+                    total.unwrap_or(0)
+                ));
+            }
 
             self.context_usage = Some(context);
         }
@@ -202,9 +206,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
                 self.handle_init(&obj);
                 Ok(None)
             }
-            "assistant" | "message" | "content" | "ContentPart" => {
-                Ok(self.handle_content(&obj))
-            }
+            "assistant" | "message" | "content" | "ContentPart" => Ok(self.handle_content(&obj)),
             "StatusUpdate" | "status_update" | "status" => {
                 self.handle_status_update(&obj);
                 Ok(None)
@@ -252,6 +254,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             rate_limit: None,
             context_usage: self.context_usage,
             raw_summary: None,
+            stderr_text: None,
         }
     }
 }
@@ -294,9 +297,7 @@ mod tests {
             .unwrap();
 
         parser
-            .feed_line(
-                r#"{"type":"assistant","content":[{"text":"Hello from Kimi"}]}"#,
-            )
+            .feed_line(r#"{"type":"assistant","content":[{"text":"Hello from Kimi"}]}"#)
             .unwrap();
 
         // First status update
@@ -330,9 +331,7 @@ mod tests {
         let mut parser = Box::new(KimiStreamParser::new(sink));
 
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#)
             .unwrap();
 
         let warnings: Vec<String> = parser.sink.warnings.lock().unwrap().clone();
@@ -352,9 +351,7 @@ mod tests {
         let mut parser = Box::new(KimiStreamParser::new(sink));
 
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#)
             .unwrap();
 
         let warnings: Vec<String> = parser.sink.warnings.lock().unwrap().clone();

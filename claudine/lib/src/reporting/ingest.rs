@@ -376,10 +376,7 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
         .and_then(|v| v.get("cache_read"))
         .and_then(Value::as_u64)
         .and_then(|v| i64::try_from(v).ok());
-    let cost_usd = meta
-        .extra
-        .get("cost_usd")
-        .and_then(Value::as_f64);
+    let cost_usd = meta.extra.get("cost_usd").and_then(Value::as_f64);
 
     let extra_json = serde_json::to_string(&meta.extra)?;
     let env_json = serde_json::to_string(&meta.env)?;

@@ -39,7 +39,7 @@ pub fn create_parser(
 ) -> Box<dyn StreamParser> {
     match provider {
         Provider::Claude => Box::new(claude::ClaudeStreamParser::new(sink)),
-        Provider::Codex => Box::new(codex::CodexStreamParser::new(sink)),
+        Provider::Codex => Box::new(codex::CodexStreamParser::new(sink, config.model)),
         Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(sink)),
         Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(sink)),
         Provider::OpenCode => Box::new(opencode::OpenCodeStreamParser::new(sink, config.model)),

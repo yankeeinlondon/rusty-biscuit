@@ -4,8 +4,8 @@ use std::io::Write;
 use chrono::Utc;
 use serde_json::Value;
 
-use super::summary::StreamExecutionSummary;
 use super::StreamProtocol;
+use super::summary::StreamExecutionSummary;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 use crate::reporting::paths;
 
@@ -37,10 +37,7 @@ pub fn summary_to_event_meta(
         StreamProtocol::Ndjson => "ndjson",
         StreamProtocol::Jsonl => "jsonl",
     };
-    extra.insert(
-        "stream_protocol".into(),
-        Value::String(protocol_str.into()),
-    );
+    extra.insert("stream_protocol".into(), Value::String(protocol_str.into()));
 
     // Model
     if let Some(model) = &summary.model {
@@ -67,9 +64,10 @@ pub fn summary_to_event_meta(
 
     // Cost
     if let Some(cost) = summary.cost_usd
-        && let Some(n) = serde_json::Number::from_f64(cost) {
-            extra.insert("cost_usd".into(), Value::Number(n));
-        }
+        && let Some(n) = serde_json::Number::from_f64(cost)
+    {
+        extra.insert("cost_usd".into(), Value::Number(n));
+    }
 
     // Duration
     if let Some(ms) = summary.duration_ms {
@@ -90,6 +88,24 @@ pub fn summary_to_event_meta(
     // Tool calls
     if let Some(tc) = summary.tool_calls {
         extra.insert("tool_calls".into(), Value::Number(tc.into()));
+    }
+
+    let mut provider_summary = serde_json::Map::new();
+    if let Some(raw_summary) = &summary.raw_summary {
+        provider_summary.insert("raw_summary".into(), raw_summary.clone());
+    }
+    if let Some(rate_limit) = &summary.rate_limit
+        && let Ok(value) = serde_json::to_value(rate_limit)
+    {
+        provider_summary.insert("rate_limit".into(), value);
+    }
+    if let Some(context_usage) = &summary.context_usage
+        && let Ok(value) = serde_json::to_value(context_usage)
+    {
+        provider_summary.insert("context_usage".into(), value);
+    }
+    if !provider_summary.is_empty() {
+        extra.insert("provider_summary".into(), Value::Object(provider_summary));
     }
 
     EventMeta {
@@ -117,16 +133,15 @@ pub fn summary_to_event_meta(
 /// This function is for synthetic summary events only — it must NOT
 /// trigger user-configured hooks.
 pub fn write_summary_event(meta: &EventMeta) -> Result<(), std::io::Error> {
-    let path = paths::resolve_file_log_path(None, true).map_err(|e| {
-        std::io::Error::other(e.to_string())
-    })?;
+    let path = paths::resolve_file_log_path(None, true)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let mut line =
-        serde_json::to_string(meta).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut line = serde_json::to_string(meta)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     line.push('\n');
 
     std::fs::OpenOptions::new()
@@ -169,6 +184,7 @@ mod tests {
             rate_limit: None,
             context_usage: None,
             raw_summary: None,
+            stderr_text: None,
         }
     }
 
@@ -212,6 +228,37 @@ mod tests {
             Value::String("end_turn".into())
         );
         assert_eq!(meta.extra["tool_calls"], Value::Number(5.into()));
+    }
+
+    #[test]
+    fn summary_to_event_meta_maps_provider_summary_fields() {
+        let mut summary = make_test_summary();
+        summary.rate_limit = Some(crate::stream::summary::RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: Some(1500),
+            message: Some("Slow down".into()),
+        });
+        summary.context_usage = Some(crate::stream::summary::ContextUsage {
+            used: Some(90),
+            total: Some(100),
+            percent: Some(90.0),
+        });
+        summary.raw_summary = Some(serde_json::json!({"stop_reason":"end_turn"}));
+
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+
+        assert_eq!(
+            meta.extra["provider_summary"]["raw_summary"]["stop_reason"],
+            Value::String("end_turn".into())
+        );
+        assert_eq!(
+            meta.extra["provider_summary"]["rate_limit"]["is_throttled"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            meta.extra["provider_summary"]["context_usage"]["percent"],
+            Value::from(90.0)
+        );
     }
 
     #[test]
@@ -262,9 +309,6 @@ mod tests {
         );
 
         let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
-        assert_eq!(
-            meta.extra["stream_protocol"],
-            Value::String("jsonl".into())
-        );
+        assert_eq!(meta.extra["stream_protocol"], Value::String("jsonl".into()));
     }
 }

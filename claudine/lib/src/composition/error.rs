@@ -52,7 +52,9 @@ pub enum CompositionError {
     },
 
     /// Interactive selection is required but no TTY is available.
-    #[error("interactive provider selection required but no TTY available; set AGENT env var or add an `agent` frontmatter property")]
+    #[error(
+        "interactive provider selection required but no TTY available; set AGENT env var or add an `agent` frontmatter property"
+    )]
     InteractiveSelectionRequired,
 
     /// The provider child process could not be launched.

@@ -482,18 +482,14 @@ fn render_sessions_report(report: &SessionsReport) {
     ]);
 
     for session in &report.sessions {
-        let repo= if term.width() > 140 {
+        let repo = if term.width() > 140 {
             repo_label(session.repo_org.as_deref(), session.repo_name.as_deref())
         } else {
             repo_label(None, session.repo_name.as_deref())
         };
 
         let errors = session.tool_error_count + session.turn_error_count;
-        let session_id = session
-            .session_id
-            .as_deref()
-            .unwrap_or("—")
-            .to_string();
+        let session_id = session.session_id.as_deref().unwrap_or("—").to_string();
         table.add_row(vec![
             session
                 .started_at
@@ -536,8 +532,7 @@ fn render_session_detail(report: &SessionDetailReport) {
     )));
 
     // ── Identity card ──
-    let provider_markup =
-        render_provider_link(&session.provider, session.turn_error_count > 0);
+    let provider_markup = render_provider_link(&session.provider, session.turn_error_count > 0);
     let model = session.model.as_deref().unwrap_or("—");
     let perm = session.permission_mode.as_deref().unwrap_or("—");
     log::data(&p(&format!(
@@ -688,8 +683,7 @@ fn render_session_detail(report: &SessionDetailReport) {
             TableColumn::new("").with_fixed_width(3),
             TableColumn::new("Time").with_fixed_width(8),
             TableColumn::new("Event"),
-            TableColumn::new("Detail")
-                .with_word_wrap(WordWrap::WrapProse(None, None)),
+            TableColumn::new("Detail").with_word_wrap(WordWrap::WrapProse(None, None)),
         ]);
 
         for event in &report.events {
@@ -721,23 +715,20 @@ fn render_session_detail(report: &SessionDetailReport) {
 
             // Error, prompt, or notification
             if let Some(error) = &event.error {
-                detail_parts.push(Prose::new(format!(
-                    "<red>{}</red>",
-                    truncate_str(error, 80)
-                ))
-                .render_optimistic(None));
+                detail_parts.push(
+                    Prose::new(format!("<red>{}</red>", truncate_str(error, 80)))
+                        .render_optimistic(None),
+                );
             } else if let Some(prompt) = &event.prompt {
-                detail_parts.push(Prose::new(format!(
-                    "<dim>\"{}\"</dim>",
-                    truncate_str(prompt, 80)
-                ))
-                .render_optimistic(None));
+                detail_parts.push(
+                    Prose::new(format!("<dim>\"{}\"</dim>", truncate_str(prompt, 80)))
+                        .render_optimistic(None),
+                );
             } else if let Some(msg) = &event.notification_message {
-                detail_parts.push(Prose::new(format!(
-                    "<dim>{}</dim>",
-                    truncate_str(msg, 80)
-                ))
-                .render_optimistic(None));
+                detail_parts.push(
+                    Prose::new(format!("<dim>{}</dim>", truncate_str(msg, 80)))
+                        .render_optimistic(None),
+                );
             }
 
             table.add_row(vec![
@@ -865,11 +856,7 @@ fn render_errors_report(report: &ErrorsReport) {
     ]);
 
     for item in &report.errors {
-        let session_display = item
-            .session_id
-            .as_deref()
-            .unwrap_or("—")
-            .to_string();
+        let session_display = item.session_id.as_deref().unwrap_or("—").to_string();
         let error_display = if item.error.is_empty() {
             "(no details)".to_string()
         } else {
@@ -887,17 +874,12 @@ fn render_errors_report(report: &ErrorsReport) {
 
     // Show additional detail per error when there's info beyond what the table shows.
     for (index, item) in report.errors.iter().enumerate() {
-        let has_detail = item.prompt.is_some()
-            || item.tool_name.is_some()
-            || item.model.is_some();
+        let has_detail = item.prompt.is_some() || item.tool_name.is_some() || item.model.is_some();
         if !has_detail {
             continue;
         }
 
-        let mut lines = vec![format!(
-            "<dim>─── Error {} ───</dim>",
-            index + 1
-        )];
+        let mut lines = vec![format!("<dim>─── Error {} ───</dim>", index + 1)];
         if let Some(model) = &item.model {
             lines.push(format!("  <dim>Model:</dim>  {model}"));
         }
@@ -971,13 +953,10 @@ fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
     // }
 
     let _tool_calls = if term.width() > 120 {
-        Some(TableColumn::new("Tool\nCalls")
-            .with_type(ColumnType::Integer)
-        )
+        Some(TableColumn::new("Tool\nCalls").with_type(ColumnType::Integer))
     } else {
         None
     };
-
 
     let mut table = base_table(vec![
         TableColumn::new("Date").with_fixed_width(10),
@@ -1003,11 +982,10 @@ fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
             .with_type(ColumnType::Integer)
             .with_alignment(Alignment::Center)
             .with_fixed_width(4),
-        TableColumn::new("Repos")
-            .with_word_wrap(WordWrap::WrapProse(None, None)),
-        TableColumn::new("Providers")
-            .with_word_wrap(WordWrap::WrapProse(None, None)),
-    ]).alternate_background_color();
+        TableColumn::new("Repos").with_word_wrap(WordWrap::WrapProse(None, None)),
+        TableColumn::new("Providers").with_word_wrap(WordWrap::WrapProse(None, None)),
+    ])
+    .alternate_background_color();
 
     for point in &report.points {
         table.add_row(vec![

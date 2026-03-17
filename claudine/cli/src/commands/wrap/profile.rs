@@ -524,7 +524,9 @@ impl WrapperProfile for CodexWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Codex uses `exec --json` for structured output.
         // The `exec` subcommand is expected to already be present.
-        args.push("--json".to_string());
+        if !has_flag(args, "--json") {
+            args.push("--json".to_string());
+        }
     }
 }
 
@@ -608,9 +610,10 @@ impl WrapperProfile for GeminiWrapper {
                 continue;
             };
             if value.get("role").and_then(|v| v.as_str()) == Some("assistant")
-                && let Some(content) = value.get("content").and_then(|v| v.as_str()) {
-                    result.push_str(content);
-                }
+                && let Some(content) = value.get("content").and_then(|v| v.as_str())
+            {
+                result.push_str(content);
+            }
         }
         result
     }
@@ -626,10 +629,7 @@ impl WrapperProfile for GeminiWrapper {
     }
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &[
-            "Skill conflict detected: ",
-            "[LocalAgentExecutor]",
-        ]
+        &["Skill conflict detected: ", "[LocalAgentExecutor]"]
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
@@ -1107,7 +1107,11 @@ impl WrapperProfile for GooseWrapper {
         non_interactive: bool,
         has_stdin: bool,
     ) -> Result<()> {
-        if non_interactive && !has_stdin && !has_flag(args, "-t") && !has_non_flag_positional(&args[1..]) {
+        if non_interactive
+            && !has_stdin
+            && !has_flag(args, "-t")
+            && !has_non_flag_positional(&args[1..])
+        {
             bail!("--non-interactive for goose requires a prompt after the entrypoint");
         }
         Ok(())
@@ -1479,21 +1483,24 @@ mod tests {
         let p = profile(Provider::Gemini);
 
         let mut json_args = Vec::new();
-        assert!(p
-            .apply_output_format(&mut json_args, OutputFormat::Json)
-            .is_none());
+        assert!(
+            p.apply_output_format(&mut json_args, OutputFormat::Json)
+                .is_none()
+        );
         assert_eq!(json_args, vec!["--output-format", "json"]);
 
         let mut text_args = Vec::new();
-        assert!(p
-            .apply_output_format(&mut text_args, OutputFormat::Text)
-            .is_none());
+        assert!(
+            p.apply_output_format(&mut text_args, OutputFormat::Text)
+                .is_none()
+        );
         assert_eq!(text_args, vec!["--output-format", "text"]);
 
         let mut stream_args = Vec::new();
-        assert!(p
-            .apply_output_format(&mut stream_args, OutputFormat::Stream)
-            .is_none());
+        assert!(
+            p.apply_output_format(&mut stream_args, OutputFormat::Stream)
+                .is_none()
+        );
         assert_eq!(stream_args, vec!["--output-format", "stream-json"]);
     }
 

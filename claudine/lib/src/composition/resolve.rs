@@ -34,9 +34,8 @@ pub fn resolve_composition_source(
         ));
     }
 
-    let markdown = Markdown::try_from(resolved_path.as_path()).map_err(|e| {
-        CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display()))
-    })?;
+    let markdown = Markdown::try_from(resolved_path.as_path())
+        .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
 
     Ok(ResolvedCompositionSource {
         original_ref: file_ref.to_string(),

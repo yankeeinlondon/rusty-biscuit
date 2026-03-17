@@ -65,9 +65,7 @@ async fn main() -> Result<()> {
         Some(Commands::Goose(args)) => {
             commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
         }
-        Some(Commands::Compose(args)) => {
-            commands::compose::run_compose(args, cli.verbose)
-        }
+        Some(Commands::Compose(args)) => commands::compose::run_compose(args, cli.verbose),
         None => {
             // No subcommand given - show help
             Cli::command().print_help()?;

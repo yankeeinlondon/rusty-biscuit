@@ -74,11 +74,15 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
 fn run_compose_inner(args: ComposeArgs, _verbose: u8) -> Result<i32> {
     // Determine mode and file reference
     let (mode, file_ref) = match &args.subcommand {
-        Some(ComposeSubcommand::Inline(inline_args)) => {
-            (CompositionMode::InlineFrontmatterPrompt, inline_args.file.clone())
-        }
+        Some(ComposeSubcommand::Inline(inline_args)) => (
+            CompositionMode::InlineFrontmatterPrompt,
+            inline_args.file.clone(),
+        ),
         None => {
-            let file = args.file.as_ref().ok_or_else(|| eyre!("file argument is required"))?;
+            let file = args
+                .file
+                .as_ref()
+                .ok_or_else(|| eyre!("file argument is required"))?;
             (CompositionMode::ChainedDocument, file.clone())
         }
     };
@@ -98,18 +102,15 @@ fn run_compose_inner(args: ComposeArgs, _verbose: u8) -> Result<i32> {
         .collect();
 
     // Resolve source document
-    let source = composition::resolve_composition_source(&file_ref)
-        .map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&file_ref).map_err(|e| eyre!("{e}"))?;
 
     // Prepare prompt
     let prepared = match mode {
         CompositionMode::InlineFrontmatterPrompt => {
-            composition::prepare_inline_prompt(&source)
-                .map_err(|e| eyre!("{e}"))?
+            composition::prepare_inline_prompt(&source).map_err(|e| eyre!("{e}"))?
         }
         CompositionMode::ChainedDocument => {
-            composition::prepare_chained_prompt(&source)
-                .map_err(|e| eyre!("{e}"))?
+            composition::prepare_chained_prompt(&source).map_err(|e| eyre!("{e}"))?
         }
     };
 
@@ -211,9 +212,7 @@ fn execute_composition(
     }
 
     for (i, provider) in providers_to_try.iter().enumerate() {
-        let result = run_provider_composition(
-            source, prepared, *provider, clients, args,
-        );
+        let result = run_provider_composition(source, prepared, *provider, clients, args);
 
         match result {
             Ok(code) => return Ok(code),
@@ -262,12 +261,7 @@ fn run_provider_composition(
     // Deliver the prompt BEFORE applying non-interactive mode, because
     // some providers (Gemini) validate that a prompt is present in args
     // during apply_non_interactive.
-    wrapper_profile.apply_prompt_body(
-        &mut child_args,
-        &mut stdin_seed,
-        &prepared.prompt,
-        true,
-    )?;
+    wrapper_profile.apply_prompt_body(&mut child_args, &mut stdin_seed, &prepared.prompt, true)?;
 
     wrapper_profile.apply_non_interactive(&mut child_args)?;
     wrapper_profile.apply_non_interactive_defaults(&mut child_args);
@@ -280,13 +274,13 @@ fn run_provider_composition(
         wrapper_profile,
         provider,
         &[],   // no include overrides
-        false,  // no yolo
-        false,  // non-interactive
-        &[],    // no raw agent params
+        false, // no yolo
+        false, // non-interactive
+        &[],   // no raw agent params
         &cwd,
-        &[],    // no env overrides
-        false,  // no repo mode
-        false,  // no mcp shadow home
+        &[],   // no env overrides
+        false, // no repo mode
+        false, // no mcp shadow home
     )?;
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
@@ -392,11 +386,7 @@ fn is_tty() -> bool {
 fn load_provider_preferences() -> Vec<Provider> {
     // TODO: Load from claudine settings once settings infrastructure exists.
     // For now, return a sensible default ordering.
-    vec![
-        Provider::Claude,
-        Provider::Codex,
-        Provider::Gemini,
-    ]
+    vec![Provider::Claude, Provider::Codex, Provider::Gemini]
 }
 
 fn reason_label(reason: SelectionReason) -> &'static str {

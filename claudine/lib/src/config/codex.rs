@@ -78,25 +78,28 @@ impl AgentConfigurator for CodexConfigurator {
 
         // Check for existing notify value, but ignore claudine's own
         // direct-notify or wrapper entries — those aren't user commands.
-        let existing_notify = doc.get("notify").and_then(|v| {
-            // Extract existing command from array or string
-            if let Some(arr) = v.as_array() {
-                let parts: Vec<String> = arr
-                    .iter()
-                    .filter_map(|item| item.as_str().map(String::from))
-                    .collect();
-                if !parts.is_empty() {
-                    Some(parts.join(" "))
+        let existing_notify = doc
+            .get("notify")
+            .and_then(|v| {
+                // Extract existing command from array or string
+                if let Some(arr) = v.as_array() {
+                    let parts: Vec<String> = arr
+                        .iter()
+                        .filter_map(|item| item.as_str().map(String::from))
+                        .collect();
+                    if !parts.is_empty() {
+                        Some(parts.join(" "))
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    v.as_str().map(String::from)
                 }
-            } else {
-                v.as_str().map(String::from)
-            }
-        }).filter(|_cmd| {
-            // Don't preserve claudine's own commands as "original"
-            !is_claudine_notify(&doc) && !is_claudine_wrapper(&doc, config_dir)
-        });
+            })
+            .filter(|_cmd| {
+                // Don't preserve claudine's own commands as "original"
+                !is_claudine_notify(&doc) && !is_claudine_wrapper(&doc, config_dir)
+            });
 
         let wrapper_path = wrapper_script_path(config_dir);
         create_wrapper_script(&wrapper_path, existing_notify.as_deref())?;
@@ -549,7 +552,11 @@ mod tests {
         // is_registered sees the direct notify → true
         assert!(configurator.is_registered(Some(tmp.path())).unwrap());
         // But is_in_sync should detect missing wrapper → false
-        assert!(!configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
+        assert!(
+            !configurator
+                .is_in_sync(&hooker_config, Some(tmp.path()))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -558,17 +565,17 @@ mod tests {
         let config = tmp.path().join("config.toml");
         let wrapper = tmp.path().join("codex-notify-wrapper.sh");
         // Config points to wrapper path, but wrapper file doesn't exist
-        fs::write(
-            &config,
-            format!("notify = [\"{}\"]\n", wrapper.display()),
-        )
-        .unwrap();
+        fs::write(&config, format!("notify = [\"{}\"]\n", wrapper.display())).unwrap();
 
         let configurator = CodexConfigurator;
         let hooker_config = test_config();
 
         // Wrapper path matches but file is missing → out of sync
-        assert!(!configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
+        assert!(
+            !configurator
+                .is_in_sync(&hooker_config, Some(tmp.path()))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -581,10 +588,16 @@ mod tests {
         let hooker_config = test_config();
 
         // Register properly (creates wrapper + updates config)
-        configurator.register(&hooker_config, Some(tmp.path())).unwrap();
+        configurator
+            .register(&hooker_config, Some(tmp.path()))
+            .unwrap();
 
         // Now should be in sync
-        assert!(configurator.is_in_sync(&hooker_config, Some(tmp.path())).unwrap());
+        assert!(
+            configurator
+                .is_in_sync(&hooker_config, Some(tmp.path()))
+                .unwrap()
+        );
     }
 
     #[test]

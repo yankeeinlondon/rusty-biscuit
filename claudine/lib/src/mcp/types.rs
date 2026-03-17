@@ -359,7 +359,10 @@ pub fn slugify(name: &str) -> String {
 /// 2. launcher-aware executable or script name for local servers
 /// 3. xxHash fallback of the normalized server definition
 pub fn derive_server_name(server: &McpServer, explicit_name: Option<&str>) -> String {
-    if let Some(name) = explicit_name.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(name) = explicit_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return name.to_string();
     }
 
@@ -549,7 +552,10 @@ mod tests {
     #[test]
     fn derive_server_name_prefers_explicit_name() {
         let server = test_server("ignored");
-        assert_eq!(derive_server_name(&server, Some("Calendar MCP")), "Calendar MCP");
+        assert_eq!(
+            derive_server_name(&server, Some("Calendar MCP")),
+            "Calendar MCP"
+        );
     }
 
     #[test]

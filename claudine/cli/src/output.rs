@@ -67,9 +67,7 @@ pub(crate) fn log_wrapper_header(
     }
 
     if let Some(op) = operation {
-        header_parts.push(
-            Prose::new(format!("<green><bold>OP:</bold> {op}</green>")).render(term),
-        );
+        header_parts.push(Prose::new(format!("<green><bold>OP:</bold> {op}</green>")).render(term));
     }
 
     if let Some(package_name) = package_name_display(env_plan) {

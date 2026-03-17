@@ -34,10 +34,7 @@ pub fn normalize_tool_name(tool_name: &str) -> &str {
 
 /// Classify a tool into a coarse activity bucket.
 pub fn classify_tool(tool_name: &str) -> ToolActionClass {
-    match normalize_tool_name(tool_name)
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    match normalize_tool_name(tool_name).to_ascii_lowercase().as_str() {
         "read" | "grep" | "glob" | "websearch" | "webfetch" | "ls" | "cat" | "find" | "skill" => {
             ToolActionClass::Research
         }

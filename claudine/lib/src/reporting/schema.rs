@@ -220,12 +220,7 @@ fn migrate_to_v3(conn: &Connection) -> Result<()> {
 
     // Add token/cost accumulators to sessions
     ensure_column(conn, "sessions", "total_input_tokens", "INTEGER DEFAULT 0")?;
-    ensure_column(
-        conn,
-        "sessions",
-        "total_output_tokens",
-        "INTEGER DEFAULT 0",
-    )?;
+    ensure_column(conn, "sessions", "total_output_tokens", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "sessions", "total_tokens", "INTEGER DEFAULT 0")?;
     ensure_column(
         conn,

@@ -208,8 +208,7 @@ pub fn lex_tags(prompt: &str) -> (String, Vec<String>) {
 
         cursor = end_index;
         while cursor < len && chars[cursor].1.is_whitespace() {
-            let previous_was_whitespace =
-                cleaned.chars().last().is_some_and(char::is_whitespace);
+            let previous_was_whitespace = cleaned.chars().last().is_some_and(char::is_whitespace);
             if !previous_was_whitespace {
                 cleaned.push(chars[cursor].1);
             }
@@ -340,8 +339,7 @@ mod tests {
     fn session_set_keeps_ambiguous_tags_when_not_selected() {
         let catalog = make_catalog_with_servers(&["calendar", "calendar-beta"]);
         let session =
-            compute_session_set(&catalog, None, &[], &["cal".into()], |_, _, _| None)
-                .unwrap();
+            compute_session_set(&catalog, None, &[], &["cal".into()], |_, _, _| None).unwrap();
         assert_eq!(session.ambiguous_tags.len(), 1);
         assert_eq!(session.ambiguous_tags[0].candidates.len(), 2);
     }

@@ -65,12 +65,7 @@ impl ProviderAdapter for CodexAdapter {
             env: EnvironmentContext::default(),
         };
 
-        for key in [
-            "thread_id",
-            "thread-id",
-            "session_id",
-            "triggered_at",
-        ] {
+        for key in ["thread_id", "thread-id", "session_id", "triggered_at"] {
             if let Some(value) = raw.get(key) {
                 meta.extra.insert(key.to_string(), value.clone());
             }

@@ -97,12 +97,27 @@ impl ProviderAdapter for OpenCodeAdapter {
         // Capture all remaining raw keys into extra so we never lose data
         // from fields we don't explicitly extract.
         let extracted_keys: &[&str] = &[
-            "event_type", "eventType", "type", "event",
-            "session_id", "sessionId", "sessionID",
-            "cwd", "tool_name", "toolName", "tool",
-            "tool_input", "args", "tool_response", "output",
-            "error", "prompt", "message", "agent_type",
-            "properties", "path",
+            "event_type",
+            "eventType",
+            "type",
+            "event",
+            "session_id",
+            "sessionId",
+            "sessionID",
+            "cwd",
+            "tool_name",
+            "toolName",
+            "tool",
+            "tool_input",
+            "args",
+            "tool_response",
+            "output",
+            "error",
+            "prompt",
+            "message",
+            "agent_type",
+            "properties",
+            "path",
         ];
         if let Some(obj) = raw.as_object() {
             for (key, value) in obj {
@@ -266,10 +281,9 @@ fn value_path_string(raw: &Value, path: &[&str]) -> Option<String> {
 }
 
 fn capture_usage_fields(extra: &mut HashMap<String, Value>, value: &Value) {
-    if let (Some(provider_id), Some(model_id)) = (
-        str_field(value, "providerID"),
-        str_field(value, "modelID"),
-    ) {
+    if let (Some(provider_id), Some(model_id)) =
+        (str_field(value, "providerID"), str_field(value, "modelID"))
+    {
         extra.insert(
             "model".to_string(),
             Value::String(format!("{provider_id}/{model_id}")),
@@ -440,7 +454,10 @@ mod tests {
         let (event, meta) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::TurnError);
         assert_eq!(meta.session_id.as_deref(), Some("ses_err_789"));
-        assert_eq!(meta.error.as_deref(), Some("UnknownError: something went wrong"));
+        assert_eq!(
+            meta.error.as_deref(),
+            Some("UnknownError: something went wrong")
+        );
     }
 
     #[test]
@@ -501,7 +518,10 @@ mod tests {
 
         let (event, meta) = adapter.parse_event(&raw).unwrap();
         assert_eq!(event, AgenticEvent::TurnError);
-        assert_eq!(meta.error.as_deref(), Some("ProviderAuthError: invalid API key"));
+        assert_eq!(
+            meta.error.as_deref(),
+            Some("ProviderAuthError: invalid API key")
+        );
     }
 
     #[test]

@@ -174,7 +174,9 @@ pub fn run(args: McpArgs) -> Result<()> {
         }
         Some(McpCommand::Default(default_args)) => run_default(default_args, json_output),
         Some(McpCommand::Alias(alias_args)) => run_alias(alias_args, json_output),
-        Some(McpCommand::Remove(remove_args)) => run_remove(remove_args.query.as_deref(), json_output),
+        Some(McpCommand::Remove(remove_args)) => {
+            run_remove(remove_args.query.as_deref(), json_output)
+        }
         Some(McpCommand::Check) => run_check(json_output),
         Some(McpCommand::Sync(sync_args)) => run_sync(sync_args, json_output),
         Some(McpCommand::Export(export_args)) => run_export(export_args, json_output),
@@ -279,7 +281,10 @@ fn run_init(json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    if user_defaults_exists && !repo_defaults_exists && let Some(repo_root) = repo_root {
+    if user_defaults_exists
+        && !repo_defaults_exists
+        && let Some(repo_root) = repo_root
+    {
         let catalog = McpCatalogStore::load()?;
         let user_defaults = load_user_defaults()?;
 
@@ -302,7 +307,12 @@ fn run_init(json_output: bool) -> Result<()> {
                 defaults: selected.clone(),
             },
         )?;
-        render_init_summary(&catalog, &selected, load_user_defaults()?.defaults.as_slice(), repo_root.as_path());
+        render_init_summary(
+            &catalog,
+            &selected,
+            load_user_defaults()?.defaults.as_slice(),
+            repo_root.as_path(),
+        );
         return Ok(());
     }
 
@@ -332,7 +342,12 @@ fn run_init(json_output: bool) -> Result<()> {
         Vec::new()
     };
 
-    render_init_summary(&catalog, &repo_defaults, &user_defaults, repo_root.as_deref().unwrap_or(Path::new(".")));
+    render_init_summary(
+        &catalog,
+        &repo_defaults,
+        &user_defaults,
+        repo_root.as_deref().unwrap_or(Path::new(".")),
+    );
     Ok(())
 }
 
@@ -847,7 +862,9 @@ fn prompt_for_remote_server() -> Result<McpServer> {
 }
 
 fn prompt_for_env_map() -> Result<HashMap<String, String>> {
-    let add_env = Confirm::new("Add environment variables?").with_default(false).prompt()?;
+    let add_env = Confirm::new("Add environment variables?")
+        .with_default(false)
+        .prompt()?;
     if !add_env {
         return Ok(HashMap::new());
     }
@@ -1065,10 +1082,7 @@ fn server_label(server: &McpServer) -> String {
 }
 
 fn split_args(value: &str) -> Vec<String> {
-    value
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
+    value.split_whitespace().map(str::to_string).collect()
 }
 
 fn current_repo_root() -> Result<Option<PathBuf>> {
@@ -1077,7 +1091,10 @@ fn current_repo_root() -> Result<Option<PathBuf>> {
         .ok()
         .flatten()
         .is_some()
-        || sniff::filesystem::detect_repo(&cwd).ok().flatten().is_some()
+        || sniff::filesystem::detect_repo(&cwd)
+            .ok()
+            .flatten()
+            .is_some()
     {
         Ok(Some(resolve_repo_root(&cwd)))
     } else {

@@ -332,10 +332,7 @@ pub(crate) fn run_child_capture(
         let mut captured = String::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
-            if stdout_noise
-                .iter()
-                .any(|p| line.starts_with(p.as_str()))
-            {
+            if stdout_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
             if !captured.is_empty() {
@@ -358,10 +355,7 @@ pub(crate) fn run_child_capture(
         let mut captured = String::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
-            if stderr_noise
-                .iter()
-                .any(|p| line.starts_with(p.as_str()))
-            {
+            if stderr_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
             if !captured.is_empty() {
@@ -434,9 +428,10 @@ pub(crate) fn run_child_stream(
 
     // Write stdin seed and close the pipe so the child sees EOF.
     if let Some(seed) = stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take() {
-            stdin_pipe.write_all(seed.as_bytes())?;
-        }
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
 
     // Pipe stdout through the stream parser
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
@@ -482,7 +477,10 @@ pub(crate) fn run_child_stream(
     // Stderr noise filtering thread
     let stderr_handle = if filter_stderr {
         let pipe = child.stderr.take().expect("stderr was set to piped");
-        let prefixes: Vec<String> = stderr_noise_prefixes.iter().map(|s| s.to_string()).collect();
+        let prefixes: Vec<String> = stderr_noise_prefixes
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut err = std::io::stderr().lock();
@@ -526,6 +524,7 @@ pub(crate) fn run_child_stream_capture(
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    stderr_noise_prefixes: &[&str],
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
 ) -> Result<StreamExecutionSummary> {
@@ -551,9 +550,10 @@ pub(crate) fn run_child_stream_capture(
     let mut child = command.spawn()?;
 
     if let Some(seed) = stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take() {
-            stdin_pipe.write_all(seed.as_bytes())?;
-        }
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
 
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
     let stdout_handle = thread::spawn(move || {
@@ -569,17 +569,51 @@ pub(crate) fn run_child_stream_capture(
         parser
     });
 
+    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_noise: Vec<String> = stderr_noise_prefixes
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let stderr_handle = thread::spawn(move || {
+        let reader = BufReader::new(stderr_pipe);
+        let mut captured = String::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if stderr_noise
+                .iter()
+                .any(|prefix| line.starts_with(prefix.as_str()))
+            {
+                continue;
+            }
+            if !captured.is_empty() {
+                captured.push('\n');
+            }
+            captured.push_str(&line);
+        }
+        captured
+    });
+
     let exit_code = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
     };
 
-    let parser = stdout_handle.join().unwrap_or_else(|_| {
-        Box::new(ErrorParser { exit_code })
-    });
+    let parser = stdout_handle
+        .join()
+        .unwrap_or_else(|_| Box::new(ErrorParser { exit_code }));
+    let stderr_text = stderr_handle.join().unwrap_or_default();
 
-    Ok(parser.finish(exit_code))
+    let mut summary = parser.finish(exit_code);
+    if !stderr_text.trim().is_empty() {
+        if summary.error_message.is_none() && exit_code != 0 {
+            summary.error_message = Some(stderr_text.lines().next().unwrap_or("").to_string());
+            summary.is_error = true;
+        }
+        summary.stderr_text = Some(stderr_text);
+    }
+
+    Ok(summary)
 }
 
 /// Minimal fallback parser used when the real parser thread panics.
@@ -617,4 +651,60 @@ fn exit_code_from_status(status: ExitStatus) -> i32 {
     }
 
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn current_env() -> HashMap<OsString, OsString> {
+        std::env::vars_os().collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn structured_capture_drains_stderr_and_preserves_diagnostics() {
+        let env = current_env();
+        let cwd = std::env::current_dir().unwrap();
+        let parser = claudine::stream::create_parser(
+            claudine::events::Provider::Claude,
+            claudine::stream::parser::NullSink,
+            claudine::stream::ParserConfig::default(),
+        );
+        let script = r#"
+i=0
+while [ "$i" -lt 20000 ]; do
+  echo "provider stderr line $i" >&2
+  i=$((i + 1))
+done
+printf '%s\n' '{"type":"init","session_id":"sess-1","model":"claude-sonnet"}'
+printf '%s\n' '{"type":"assistant","content":[{"type":"text","text":"hello"}]}'
+printf '%s\n' '{"type":"result","duration_ms":25}'
+"#;
+        let args = vec!["-c".to_string(), script.to_string()];
+
+        let summary = run_child_stream_capture(
+            Path::new("/bin/sh"),
+            &args,
+            &env,
+            &cwd,
+            Some(5),
+            &[],
+            None,
+            parser,
+        )
+        .unwrap();
+
+        assert_eq!(summary.exit_code, 0);
+        assert_eq!(summary.assistant_text, "hello");
+        assert!(summary.stderr_text.is_some());
+        assert!(
+            summary
+                .stderr_text
+                .as_deref()
+                .unwrap()
+                .contains("provider stderr line")
+        );
+    }
 }

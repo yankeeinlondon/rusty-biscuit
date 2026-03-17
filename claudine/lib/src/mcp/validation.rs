@@ -234,9 +234,9 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::mcp::types::{McpServerMetadata, McpTransport, ProviderStateEntry};
-    use crate::mcp::state::Scope;
     use crate::events::Provider;
+    use crate::mcp::state::Scope;
+    use crate::mcp::types::{McpServerMetadata, McpTransport, ProviderStateEntry};
 
     fn make_server(id: &str) -> McpServer {
         McpServer {
@@ -278,7 +278,12 @@ mod tests {
         let state = McpProviderStateStore::load_from(Path::new("/nonexistent")).unwrap();
         let report = validate_state(&catalog, &state, None).unwrap();
         assert!(!report.is_valid());
-        assert!(report.issues.iter().any(|issue| issue.code == "duplicate-alias"));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.code == "duplicate-alias")
+        );
         assert!(
             report
                 .issues

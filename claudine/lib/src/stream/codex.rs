@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
@@ -28,17 +30,17 @@ pub struct CodexStreamParser<S: StreamEventSink> {
     error_kind: Option<String>,
     error_message: Option<String>,
     raw_summary: Option<Value>,
-    /// External assistant text set by the caller after reading the output-last-message file.
-    pub assistant_text: String,
+    assistant_text: String,
+    tool_items: HashMap<String, Value>,
 }
 
 impl<S: StreamEventSink> CodexStreamParser<S> {
-    pub fn new(sink: S) -> Self {
+    pub fn new(sink: S, model: Option<String>) -> Self {
         Self {
             sink,
             line_num: 0,
             session_id: None,
-            model: None,
+            model,
             token_usage: None,
             cost_usd: None,
             duration_ms: None,
@@ -50,23 +52,37 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             error_message: None,
             raw_summary: None,
             assistant_text: String::new(),
+            tool_items: HashMap::new(),
         }
     }
 
-    fn handle_thread_created(&mut self, obj: &Value) {
+    fn session_meta(&self) -> EventMeta {
+        let mut meta = EventMeta::default();
+        if let Some(session_id) = &self.session_id {
+            meta.extra
+                .insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(model) = &self.model {
+            meta.extra
+                .insert("model".into(), Value::String(model.clone()));
+        }
+        meta
+    }
+
+    fn handle_thread_started(&mut self, obj: &Value) {
         self.session_id = obj
             .get("thread_id")
             .or_else(|| obj.get("id"))
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        let meta = EventMeta::default();
+        let meta = self.session_meta();
         self.sink.on_session_start(&meta);
     }
 
     fn handle_turn_started(&mut self) {
         self.num_turns += 1;
-        let meta = EventMeta::default();
+        let meta = self.session_meta();
         self.sink.on_turn_start(&meta);
     }
 
@@ -75,6 +91,10 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         if let Some(usage) = obj.get("usage") {
             let input = usage.get("input_tokens").and_then(|v| v.as_u64());
             let output = usage.get("output_tokens").and_then(|v| v.as_u64());
+            let cache_read = usage
+                .get("cached_input_tokens")
+                .or_else(|| usage.get("cache_read_input_tokens"))
+                .and_then(|v| v.as_u64());
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
                 _ => usage.get("total_tokens").and_then(|v| v.as_u64()),
@@ -83,7 +103,7 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
                 input,
                 output,
                 total,
-                cache_read: None,
+                cache_read,
             };
             // Merge (last snapshot wins for Codex)
             match &mut self.token_usage {
@@ -103,7 +123,11 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
 
         self.raw_summary = Some(obj.clone());
 
-        let meta = EventMeta::default();
+        let mut meta = self.session_meta();
+        if let Some(status) = &self.provider_status {
+            meta.extra
+                .insert("provider_status".into(), Value::String(status.clone()));
+        }
         self.sink.on_turn_complete(&meta);
     }
 
@@ -121,8 +145,134 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             .and_then(|m| m.as_str())
             .map(String::from);
 
-        let meta = EventMeta::default();
+        let mut meta = self.session_meta();
+        if let Some(kind) = &self.error_kind {
+            meta.extra
+                .insert("error_kind".into(), Value::String(kind.clone()));
+        }
+        if let Some(message) = &self.error_message {
+            meta.extra
+                .insert("error_message".into(), Value::String(message.clone()));
+        }
         self.sink.on_turn_error(&meta);
+    }
+
+    fn handle_agent_message_item(&mut self, item: &Value) {
+        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+            self.assistant_text.push_str(text);
+            return;
+        }
+
+        if let Some(parts) = item.get("content").and_then(|v| v.as_array()) {
+            let text = parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
+                .collect::<String>();
+            if !text.is_empty() {
+                self.assistant_text.push_str(&text);
+            }
+        }
+    }
+
+    fn tool_meta_from_item(&self, item: &Value) -> EventMeta {
+        let mut meta = self.session_meta();
+        if let Some(tool_name) = item
+            .get("tool_name")
+            .or_else(|| item.get("name"))
+            .and_then(|v| v.as_str())
+        {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name.to_string()));
+        }
+        if let Some(tool_id) = item.get("id").and_then(|v| v.as_str()) {
+            meta.extra
+                .insert("tool_id".into(), Value::String(tool_id.to_string()));
+        }
+        if let Some(input) = item
+            .get("input")
+            .or_else(|| item.get("arguments"))
+            .or_else(|| item.get("parameters"))
+        {
+            meta.extra.insert("tool_input".into(), input.clone());
+        }
+        if let Some(output) = item
+            .get("output")
+            .or_else(|| item.get("result"))
+            .or_else(|| item.get("content"))
+        {
+            meta.extra.insert("tool_response".into(), output.clone());
+        }
+        meta
+    }
+
+    fn is_tool_item_type(item_type: &str) -> bool {
+        matches!(
+            item_type,
+            "tool_use"
+                | "tool_call"
+                | "mcp_tool_call"
+                | "web_search"
+                | "command_exec"
+                | "patch_apply"
+                | "image_generation"
+                | "view_image"
+        )
+    }
+
+    fn handle_item_started(&mut self, obj: &Value) {
+        let Some(item) = obj.get("item") else {
+            return;
+        };
+        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if matches!(
+            item_type,
+            "permission_request" | "approval_request" | "user_input_request"
+        ) {
+            self.sink
+                .on_permission_request(&self.tool_meta_from_item(item));
+            return;
+        }
+
+        if Self::is_tool_item_type(item_type) {
+            self.tool_calls += 1;
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                self.tool_items.insert(id.to_string(), item.clone());
+            }
+            self.sink.on_before_tool(&self.tool_meta_from_item(item));
+        }
+    }
+
+    fn handle_item_completed(&mut self, obj: &Value) {
+        let Some(item) = obj.get("item") else {
+            return;
+        };
+        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if item_type == "agent_message" {
+            self.handle_agent_message_item(item);
+            return;
+        }
+
+        if Self::is_tool_item_type(item_type) {
+            let merged_item = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .and_then(|id| self.tool_items.remove(id))
+                .map(|mut started| {
+                    if let (Some(started_map), Some(completed_map)) =
+                        (started.as_object_mut(), item.as_object())
+                    {
+                        for (key, value) in completed_map {
+                            started_map.insert(key.clone(), value.clone());
+                        }
+                    }
+                    started
+                })
+                .unwrap_or_else(|| item.clone());
+            self.sink
+                .on_after_tool(&self.tool_meta_from_item(&merged_item));
+        }
     }
 }
 
@@ -137,17 +287,14 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
-            StreamParseError::MalformedLine {
-                line_num: self.line_num,
-                message: e.to_string(),
-            }
+            StreamParseError::Fatal(format!("Malformed JSON on line {}: {e}", self.line_num))
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         match event_type {
-            "thread.created" => {
-                self.handle_thread_created(&obj);
+            "thread.created" | "thread.started" => {
+                self.handle_thread_started(&obj);
                 Ok(None)
             }
             "turn.started" => {
@@ -158,23 +305,32 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
                 self.handle_turn_completed(&obj);
                 Ok(None)
             }
-            "error" | "turn.error" => {
+            "error" | "turn.error" | "turn.failed" | "stream.error" => {
                 self.handle_error(&obj);
+                Ok(None)
+            }
+            "item.started" => {
+                self.handle_item_started(&obj);
+                Ok(None)
+            }
+            "item.completed" => {
+                self.handle_item_completed(&obj);
                 Ok(None)
             }
             "item.tool_use" | "tool_use" => {
                 self.tool_calls += 1;
-                let meta = EventMeta::default();
+                let meta = self.tool_meta_from_item(&obj);
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
             "item.tool_result" | "tool_result" => {
-                let meta = EventMeta::default();
+                let meta = self.tool_meta_from_item(&obj);
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
             _ => {
-                // Codex stream is metadata-only; never returns text
+                // Codex stream is control-plane oriented; assistant text is
+                // accumulated for fallback use but never emitted live.
                 Ok(None)
             }
         }
@@ -208,6 +364,7 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
             rate_limit: None,
             context_usage: None,
             raw_summary: self.raw_summary,
+            stderr_text: None,
         }
     }
 }
@@ -218,7 +375,7 @@ mod tests {
     use crate::stream::parser::NullSink;
 
     fn make_parser() -> Box<CodexStreamParser<NullSink>> {
-        Box::new(CodexStreamParser::new(NullSink))
+        Box::new(CodexStreamParser::new(NullSink, Some("codex-mini".into())))
     }
 
     #[test]
@@ -226,25 +383,28 @@ mod tests {
         let mut parser = make_parser();
 
         // Thread created
-        let tc = r#"{"type":"thread.created","thread_id":"thrd-abc"}"#;
+        let tc = r#"{"type":"thread.started","thread_id":"thrd-abc"}"#;
         assert_eq!(parser.feed_line(tc).unwrap(), None);
 
         // Turn started
-        parser
-            .feed_line(r#"{"type":"turn.started"}"#)
-            .unwrap();
+        parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
 
         // Turn completed with usage
         let tc = r#"{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":100},"duration_ms":5000,"status":"completed"}"#;
         assert_eq!(parser.feed_line(tc).unwrap(), None);
 
-        // Set external text (simulates reading output-last-message file)
-        parser.assistant_text = "Text from file".into();
+        // Stream fallback text is accumulated but never emitted live.
+        parser
+            .feed_line(
+                r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Text from stream"}}"#,
+            )
+            .unwrap();
 
         let summary = parser.finish(0);
         assert_eq!(summary.provider, Provider::Codex);
         assert_eq!(summary.session_id.as_deref(), Some("thrd-abc"));
-        assert_eq!(summary.assistant_text, "Text from file");
+        assert_eq!(summary.assistant_text, "Text from stream");
+        assert_eq!(summary.model.as_deref(), Some("codex-mini"));
         assert_eq!(summary.num_turns, Some(1));
         assert_eq!(summary.duration_ms, Some(5000));
 
@@ -259,7 +419,9 @@ mod tests {
         let mut parser = make_parser();
         // Even message-like events don't return text for Codex
         let result = parser
-            .feed_line(r#"{"type":"item.message","content":"should not appear"}"#)
+            .feed_line(
+                r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"should not appear"}}"#,
+            )
             .unwrap();
         assert_eq!(result, None);
     }
@@ -268,16 +430,15 @@ mod tests {
     fn error_handling() {
         let mut parser = make_parser();
         parser
-            .feed_line(r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#)
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+            )
             .unwrap();
 
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
-        assert_eq!(
-            summary.error_message.as_deref(),
-            Some("Too many requests")
-        );
+        assert_eq!(summary.error_message.as_deref(), Some("Too many requests"));
     }
 
     #[test]

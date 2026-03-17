@@ -146,7 +146,9 @@ mod tests {
         );
         // Verify guardrails are appended
         assert!(
-            prepared.prompt.contains("Never change the `prompt` frontmatter property"),
+            prepared
+                .prompt
+                .contains("Never change the `prompt` frontmatter property"),
             "expected inline prompt guardrails to be appended"
         );
         assert!(prepared.source_agent_hint.is_none());
@@ -204,11 +206,7 @@ mod tests {
     #[test]
     fn chained_prompt_preserves_agent_hint() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("agent", json!(true))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("agent", json!(true))], "Content");
 
         let prepared = prepare_chained_prompt(&source).unwrap();
         assert_eq!(prepared.source_agent_hint, Some(json!(true)));

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
@@ -26,6 +28,7 @@ pub struct GeminiStreamParser<S: StreamEventSink> {
     error_kind: Option<String>,
     error_message: Option<String>,
     raw_summary: Option<Value>,
+    tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
 }
 
 impl<S: StreamEventSink> GeminiStreamParser<S> {
@@ -46,6 +49,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             error_kind: None,
             error_message: None,
             raw_summary: None,
+            tool_uses: HashMap::new(),
         }
     }
 
@@ -56,7 +60,15 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
 
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(session_id) = &self.session_id {
+            meta.extra
+                .insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(model) = &self.model {
+            meta.extra
+                .insert("model".into(), Value::String(model.clone()));
+        }
         self.sink.on_session_start(&meta);
     }
 
@@ -93,17 +105,17 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
 
     fn handle_result(&mut self, obj: &Value) {
         // Result status: "success" or "error"
-        self.provider_status = obj
-            .get("status")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        self.provider_status = obj.get("status").and_then(|v| v.as_str()).map(String::from);
 
         // Handle result-level errors
         if obj.get("status").and_then(|v| v.as_str()) == Some("error") {
             self.is_error = true;
             if let Some(err) = obj.get("error") {
                 self.error_kind = err.get("type").and_then(|v| v.as_str()).map(String::from);
-                self.error_message = err.get("message").and_then(|v| v.as_str()).map(String::from);
+                self.error_message = err
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
             }
         }
 
@@ -139,7 +151,6 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
     }
 
     fn handle_error(&mut self, obj: &Value) {
-        self.is_error = true;
         // Real format: {"type":"error","severity":"warning","message":"Loop detected"}
         self.error_kind = obj
             .get("severity")
@@ -149,8 +160,91 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             .get("message")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(message) = &self.error_message {
+            meta.extra
+                .insert("error_message".into(), Value::String(message.clone()));
+        }
+        if let Some(kind) = &self.error_kind {
+            meta.extra
+                .insert("error_kind".into(), Value::String(kind.clone()));
+        }
+        if self.error_kind.as_deref() == Some("warning") {
+            if let Some(message) = &self.error_message {
+                self.sink.on_warning(message);
+            }
+            return;
+        }
+
+        self.is_error = true;
         self.sink.on_turn_error(&meta);
+    }
+
+    fn handle_tool_use(&mut self, obj: &Value) {
+        self.tool_calls += 1;
+
+        let tool_id = obj
+            .get("tool_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let tool_name = obj
+            .get("tool_name")
+            .or_else(|| obj.get("name"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let parameters = obj.get("parameters").or_else(|| obj.get("input")).cloned();
+
+        if let Some(tool_id) = &tool_id {
+            self.tool_uses
+                .insert(tool_id.clone(), (tool_name.clone(), parameters.clone()));
+        }
+
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = tool_id {
+            meta.extra.insert("tool_id".into(), Value::String(tool_id));
+        }
+        if let Some(tool_name) = tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name));
+        }
+        if let Some(parameters) = parameters {
+            meta.extra.insert("tool_input".into(), parameters);
+        }
+        self.sink.on_before_tool(&meta);
+    }
+
+    fn handle_tool_result(&mut self, obj: &Value) {
+        let tool_id = obj
+            .get("tool_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let (tool_name, tool_input) = tool_id
+            .as_ref()
+            .and_then(|id| self.tool_uses.get(id).cloned())
+            .unwrap_or((None, None));
+
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = tool_id {
+            meta.extra.insert("tool_id".into(), Value::String(tool_id));
+        }
+        if let Some(tool_name) = tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name));
+        }
+        if let Some(tool_input) = tool_input {
+            meta.extra.insert("tool_input".into(), tool_input);
+        }
+        if let Some(output) = obj.get("output").or_else(|| obj.get("result")) {
+            meta.extra.insert("tool_response".into(), output.clone());
+        }
+        if let Some(error) = obj.get("error") {
+            meta.extra.insert("error".into(), error.clone());
+        }
+        if let Some(status) = obj.get("status").and_then(|v| v.as_str()) {
+            meta.extra
+                .insert("status".into(), Value::String(status.to_string()));
+        }
+        self.sink.on_after_tool(&meta);
     }
 }
 
@@ -188,14 +282,11 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
                 Ok(None)
             }
             "tool_use" => {
-                self.tool_calls += 1;
-                let meta = EventMeta::default();
-                self.sink.on_before_tool(&meta);
+                self.handle_tool_use(&obj);
                 Ok(None)
             }
             "tool_result" => {
-                let meta = EventMeta::default();
-                self.sink.on_after_tool(&meta);
+                self.handle_tool_result(&obj);
                 Ok(None)
             }
             _ => Ok(None),
@@ -226,6 +317,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
             rate_limit: None,
             context_usage: None,
             raw_summary: self.raw_summary,
+            stderr_text: None,
         }
     }
 }
@@ -285,9 +377,7 @@ mod tests {
     fn user_messages_ignored() {
         let mut parser = make_parser();
         let text = parser
-            .feed_line(
-                r#"{"type":"message","role":"user","content":"User message"}"#,
-            )
+            .feed_line(r#"{"type":"message","role":"user","content":"User message"}"#)
             .unwrap();
         assert_eq!(text, None);
     }
@@ -301,7 +391,8 @@ mod tests {
             .unwrap();
 
         let summary = parser.finish(0);
-        assert!(summary.is_error);
+        assert!(!summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("warning"));
         assert_eq!(summary.error_message.as_deref(), Some("Loop detected"));
     }
 
@@ -330,6 +421,46 @@ mod tests {
 
         let summary = parser.finish(0);
         assert_eq!(summary.tool_calls, Some(1));
+    }
+
+    #[test]
+    fn tool_result_correlates_back_to_tool_use() {
+        use std::sync::Mutex;
+
+        struct RecordingSink {
+            tools: Mutex<Vec<EventMeta>>,
+        }
+
+        impl StreamEventSink for RecordingSink {
+            fn on_after_tool(&mut self, meta: &EventMeta) {
+                self.tools.lock().unwrap().push(meta.clone());
+            }
+        }
+
+        let mut parser = Box::new(GeminiStreamParser::new(RecordingSink {
+            tools: Mutex::new(Vec::new()),
+        }));
+
+        parser
+            .feed_line(r#"{"type":"tool_use","tool_name":"search","tool_id":"tool-1","parameters":{"query":"rust"}}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_result","tool_id":"tool-1","status":"success","output":{"hits":3}}"#)
+            .unwrap();
+
+        let after_tool = parser.sink.tools.lock().unwrap().clone();
+        assert_eq!(
+            after_tool[0].extra["tool_name"],
+            Value::String("search".into())
+        );
+        assert_eq!(
+            after_tool[0].extra["tool_input"]["query"],
+            Value::String("rust".into())
+        );
+        assert_eq!(
+            after_tool[0].extra["tool_response"]["hits"],
+            Value::Number(3.into())
+        );
     }
 
     #[test]

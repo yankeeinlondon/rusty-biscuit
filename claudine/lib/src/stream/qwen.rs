@@ -55,13 +55,22 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
 
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(session_id) = &self.session_id {
+            meta.extra
+                .insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(model) = &self.model {
+            meta.extra
+                .insert("model".into(), Value::String(model.clone()));
+        }
         self.sink.on_session_start(&meta);
     }
 
     fn handle_message(&mut self, obj: &Value) -> Option<String> {
         let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        if role != "assistant" {
+        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if role != "assistant" && event_type != "assistant" {
             return None;
         }
 
@@ -81,10 +90,11 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
 
         // Try content as string (Qwen-specific)
         if let Some(text) = obj.get("content").and_then(|c| c.as_str())
-            && !text.is_empty() {
-                self.assistant_text.push_str(text);
-                return Some(text.to_string());
-            }
+            && !text.is_empty()
+        {
+            self.assistant_text.push_str(text);
+            return Some(text.to_string());
+        }
 
         None
     }
@@ -138,7 +148,15 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             .and_then(|e| e.get("message"))
             .and_then(|m| m.as_str())
             .map(String::from);
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(message) = &self.error_message {
+            meta.extra
+                .insert("error_message".into(), Value::String(message.clone()));
+        }
+        if let Some(kind) = &self.error_kind {
+            meta.extra
+                .insert("error_kind".into(), Value::String(kind.clone()));
+        }
         self.sink.on_turn_error(&meta);
     }
 }
@@ -161,13 +179,18 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let subtype = obj.get("subtype").and_then(|t| t.as_str()).unwrap_or("");
 
         match event_type {
-            "init" | "system" => {
+            "init" => {
                 self.handle_init(&obj);
                 Ok(None)
             }
-            "message" | "assistant_message" => Ok(self.handle_message(&obj)),
+            "system" if subtype == "session_start" => {
+                self.handle_init(&obj);
+                Ok(None)
+            }
+            "message" | "assistant_message" | "assistant" => Ok(self.handle_message(&obj)),
             "error" => {
                 self.handle_error(&obj);
                 Ok(None)
@@ -215,6 +238,7 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             rate_limit: None,
             context_usage: None,
             raw_summary: self.raw_summary,
+            stderr_text: None,
         }
     }
 }
@@ -293,12 +317,28 @@ mod tests {
     }
 
     #[test]
+    fn qwen_hook_design_session_and_assistant_events_are_supported() {
+        let mut parser = make_parser();
+
+        parser
+            .feed_line(r#"{"type":"system","subtype":"session_start","session_id":"qw-2","model":"qwen3-coder"}"#)
+            .unwrap();
+        let text = parser
+            .feed_line(r#"{"type":"assistant","content":[{"text":"Hook design assistant event"}]}"#)
+            .unwrap();
+
+        assert_eq!(text, Some("Hook design assistant event".into()));
+
+        let summary = parser.finish(0);
+        assert_eq!(summary.session_id.as_deref(), Some("qw-2"));
+        assert_eq!(summary.model.as_deref(), Some("qwen3-coder"));
+    }
+
+    #[test]
     fn content_as_string() {
         let mut parser = make_parser();
         let text = parser
-            .feed_line(
-                r#"{"type":"message","role":"assistant","content":"Plain string content"}"#,
-            )
+            .feed_line(r#"{"type":"message","role":"assistant","content":"Plain string content"}"#)
             .unwrap();
         assert_eq!(text, Some("Plain string content".into()));
     }

@@ -240,7 +240,11 @@ fn mcp_check_json_reports_invalid_servers() {
         .success();
 
     let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
-    assert!(value["issues"].as_array().is_some_and(|issues| !issues.is_empty()));
+    assert!(
+        value["issues"]
+            .as_array()
+            .is_some_and(|issues| !issues.is_empty())
+    );
     assert_eq!(value["issues"][0]["code"], "stdio-missing-command");
 }
 
@@ -532,9 +536,11 @@ fn mcp_remove_cascades_to_user_defaults() {
 
     let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
     assert_eq!(value["removed_server"], "calendar");
-    assert!(value["defaults_cleaned"]
-        .as_array()
-        .is_some_and(|a| a.iter().any(|v| v == "user")));
+    assert!(
+        value["defaults_cleaned"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|v| v == "user"))
+    );
 
     // Verify calendar was removed from defaults
     let defaults: McpDefaults = serde_json::from_str(
@@ -578,15 +584,16 @@ fn mcp_remove_cascades_to_repo_defaults() {
         .success();
 
     let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
-    assert!(value["defaults_cleaned"]
-        .as_array()
-        .is_some_and(|a| a.iter().any(|v| v == "repo")));
+    assert!(
+        value["defaults_cleaned"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|v| v == "repo"))
+    );
 
     // Verify calendar removed from repo defaults
-    let repo_defaults: McpDefaults = serde_json::from_str(
-        &fs::read_to_string(repo_root.join(".claudine/mcp.json")).unwrap(),
-    )
-    .unwrap();
+    let repo_defaults: McpDefaults =
+        serde_json::from_str(&fs::read_to_string(repo_root.join(".claudine/mcp.json")).unwrap())
+            .unwrap();
     assert!(!repo_defaults.defaults.contains(&"calendar".to_string()));
 }
 
@@ -700,7 +707,10 @@ fn strict_mode_errors_on_ambiguous_tag() {
     fs::create_dir_all(&path_dir).unwrap();
     write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
 
-    seed_catalog(&home, &[make_server("calendar"), make_server("calendar-beta")]);
+    seed_catalog(
+        &home,
+        &[make_server("calendar"), make_server("calendar-beta")],
+    );
     seed_defaults(&home, &[]);
 
     cargo_bin_cmd!("claudine")
@@ -745,7 +755,9 @@ fn mcp_remove_alias_reports_owner_and_remaining() {
     let value: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
     assert_eq!(value["removed_alias"], "gcal");
     assert_eq!(value["owner"], "calendar");
-    assert!(value["remaining_aliases"]
-        .as_array()
-        .is_some_and(|a| a.iter().any(|v| v == "cal")));
+    assert!(
+        value["remaining_aliases"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|v| v == "cal"))
+    );
 }

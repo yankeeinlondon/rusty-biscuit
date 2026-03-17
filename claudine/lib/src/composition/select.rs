@@ -22,7 +22,13 @@ pub fn select_provider(
     preference: &[Provider],
 ) -> Result<SelectedProvider, CompositionError> {
     let agent_env = std::env::var("AGENT").ok();
-    select_provider_with_env(request, prepared, installed, preference, agent_env.as_deref())
+    select_provider_with_env(
+        request,
+        prepared,
+        installed,
+        preference,
+        agent_env.as_deref(),
+    )
 }
 
 /// Core selection logic with the AGENT env value passed explicitly (for testability).
@@ -94,10 +100,7 @@ pub fn select_provider_with_env(
 /// Build the set of candidate providers by filtering installed providers.
 ///
 /// Removes excluded providers and returns only those that have a wrapper profile.
-pub fn build_candidate_set(
-    installed: &[Provider],
-    excluded: &BTreeSet<Provider>,
-) -> Vec<Provider> {
+pub fn build_candidate_set(installed: &[Provider], excluded: &BTreeSet<Provider>) -> Vec<Provider> {
     installed
         .iter()
         .copied()
@@ -142,9 +145,7 @@ fn resolve_agent_hint(
                 }),
             }
         }
-        serde_json::Value::Bool(true) => {
-            Err(CompositionError::InteractiveSelectionRequired)
-        }
+        serde_json::Value::Bool(true) => Err(CompositionError::InteractiveSelectionRequired),
         other => Err(CompositionError::AgentHintInvalid(format!(
             "unexpected type: {}",
             json_type_name(other)
@@ -282,10 +283,8 @@ mod tests {
 
     #[test]
     fn roocode_excluded_from_candidates() {
-        let candidates = build_candidate_set(
-            &[Provider::Claude, Provider::RooCode],
-            &BTreeSet::new(),
-        );
+        let candidates =
+            build_candidate_set(&[Provider::Claude, Provider::RooCode], &BTreeSet::new());
         assert_eq!(candidates, vec![Provider::Claude]);
     }
 

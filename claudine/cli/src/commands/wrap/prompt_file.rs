@@ -123,7 +123,10 @@ pub(crate) fn resolve_prompt_file(
         return Err(eyre!("prompt file not found: {}", path.display()));
     }
     if !path.is_file() {
-        return Err(eyre!("prompt file is not a regular file: {}", path.display()));
+        return Err(eyre!(
+            "prompt file is not a regular file: {}",
+            path.display()
+        ));
     }
 
     Ok(ResolvedPromptFile {
@@ -191,12 +194,7 @@ fn resolve_bare_filename(filename: &str, ctx: &PromptResolutionContext) -> Resul
                 if ctx.interactive {
                     let options: Vec<String> = matches
                         .iter()
-                        .map(|p| {
-                            p.strip_prefix(repo_root)
-                                .unwrap_or(p)
-                                .display()
-                                .to_string()
-                        })
+                        .map(|p| p.strip_prefix(repo_root).unwrap_or(p).display().to_string())
                         .collect();
                     let selection = inquire::Select::new(
                         &format!("Multiple matches for '{filename}'. Choose one:"),
@@ -209,12 +207,7 @@ fn resolve_bare_filename(filename: &str, ctx: &PromptResolutionContext) -> Resul
                 } else {
                     let candidates: Vec<String> = matches
                         .iter()
-                        .map(|p| {
-                            p.strip_prefix(repo_root)
-                                .unwrap_or(p)
-                                .display()
-                                .to_string()
-                        })
+                        .map(|p| p.strip_prefix(repo_root).unwrap_or(p).display().to_string())
                         .collect();
                     Err(eyre!(
                         "prompt file '{filename}' matched multiple files in the repository:\n  {}\n\
@@ -241,7 +234,8 @@ fn search_repo_for_filename(repo_root: &Path, filename: &str) -> Result<Vec<Path
 }
 
 fn walk_dir_recursive(dir: &Path, filename: &str, matches: &mut Vec<PathBuf>) -> Result<()> {
-    let entries = std::fs::read_dir(dir).map_err(|e| eyre!("failed to read '{}': {e}", dir.display()))?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| eyre!("failed to read '{}': {e}", dir.display()))?;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
@@ -419,10 +413,7 @@ pub(crate) fn detect_existing_prompt_source(
                 || has_flag(child_args, "-p")
                 || super::find_prompt_location(provider, child_args).is_some()
         }
-        Provider::QwenCode => {
-            has_flag(child_args, "--prompt")
-                || has_flag(child_args, "-p")
-        }
+        Provider::QwenCode => has_flag(child_args, "--prompt") || has_flag(child_args, "-p"),
         Provider::Codex | Provider::OpenCode => {
             super::find_prompt_location(provider, child_args).is_some()
         }

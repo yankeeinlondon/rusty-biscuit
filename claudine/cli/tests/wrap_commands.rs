@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use chrono::Local;
 use predicates::str::contains;
 use tempfile::tempdir;
 
@@ -56,6 +57,12 @@ fn strip_ansi(input: &str) -> String {
     }
 
     out
+}
+
+fn today_log_path(home: &Path) -> std::path::PathBuf {
+    home.join(".claudine")
+        .join("logs")
+        .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
 }
 
 #[test]
@@ -937,4 +944,347 @@ exit 0
     assert!(env_lines.contains("task"));
     // Redacted markers should be present
     assert!(env_lines.contains("****"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_structured_mode_reconstructs_stdout_and_writes_summary_event() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+LAST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      LAST="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-123"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"fallback from stream"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5},"duration_ms":1000,"status":"completed"}'
+printf '%s' 'Final assistant response' > "$LAST"
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "--ni", "--model", "codex-mini", "summarize repo"])
+        .assert()
+        .success()
+        .stdout("Final assistant response");
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("codex session thread-123"));
+    assert!(stderr.contains("codex-mini"));
+    assert!(stderr.contains("✓ 1.0s"));
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(args.lines().any(|line| line == "--json"));
+    assert!(args.lines().any(|line| line == "--output-last-message"));
+
+    let log_path = today_log_path(&fake_home);
+    let log_contents = fs::read_to_string(log_path).unwrap();
+    assert_eq!(
+        log_contents
+            .lines()
+            .filter(|line| line.contains("\"synthetic_kind\":\"stream_wrapper_summary\""))
+            .count(),
+        1
+    );
+    assert!(log_contents.contains("\"provider_summary\":{\"raw_summary\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_verbosity_controls_stream_stderr_lines() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("gemini"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"init","session_id":"gem-1","model":"gemini-2.5-pro"}'
+printf '%s\n' 'not-json'
+printf '%s\n' '{"type":"message","role":"assistant","content":"Hello"}'
+printf '%s\n' '{"type":"error","severity":"warning","message":"Loop detected"}'
+printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"input_tokens":20,"output_tokens":10,"cached":5,"input":15,"duration_ms":1500,"tool_calls":0}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "say hi"])
+        .assert()
+        .success()
+        .stdout("Hello");
+    let default_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(default_stderr.contains("gemini session gem-1"));
+    assert!(!default_stderr.contains("Malformed JSON"));
+    assert!(default_stderr.contains("Loop detected"));
+    assert!(default_stderr.contains("\n\n✓ 1.5s"));
+    assert!(default_stderr.contains("✓ 1.5s"));
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .assert()
+        .success()
+        .stdout("Hello");
+    let quiet_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!quiet_stderr.contains("gemini session gem-1"));
+    assert!(!quiet_stderr.contains("Malformed JSON"));
+    assert!(quiet_stderr.contains("Loop detected"));
+    assert!(quiet_stderr.contains("\n\n✓ 1.5s"));
+    assert!(quiet_stderr.contains("✓ 1.5s"));
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "--silent", "say hi"])
+        .assert()
+        .success()
+        .stdout("Hello");
+    let silent_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!silent_stderr.contains("gemini session gem-1"));
+    assert!(!silent_stderr.contains("Malformed JSON"));
+    assert!(!silent_stderr.contains("Loop detected"));
+    assert!(!silent_stderr.contains("✓ 1.5s"));
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_completion_summary_is_separated_on_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("gemini"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"init","session_id":"gem-2","model":"gemini-2.5-pro"}'
+printf '%s\n' '{"type":"message","role":"assistant","content":"Hello without newline"}'
+printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"input_tokens":20,"output_tokens":10,"cached":5,"input":15,"duration_ms":1500,"tool_calls":0}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .assert()
+        .success()
+        .stdout("Hello without newline");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr_plain.contains("\n\n✓ 1.5s"));
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_verbose_summary_restores_rich_prose_fields() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("gemini"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"init","session_id":"gem-3","model":"gemini-2.5-pro"}'
+printf '%s\n' '{"type":"message","role":"assistant","content":"Verbose summary"}'
+printf '%s\n' '{"type":"tool_use","tool_name":"search","tool_id":"tool-1","parameters":{"query":"sky"}}'
+printf '%s\n' '{"type":"tool_result","tool_id":"tool-1","status":"success","output":{"hits":1}}'
+printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"total_tokens":63,"input_tokens":3,"output_tokens":60,"cached":11,"input":3,"duration_ms":4600,"tool_calls":1}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["gemini", "--ni", "-v", "say hi"])
+        .assert()
+        .success()
+        .stdout("Verbose summary");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr_plain.contains("4.6s"));
+    assert!(stderr_plain.contains("3 input tokens"));
+    assert!(stderr_plain.contains("60 output tokens"));
+    assert!(stderr_plain.contains("11 cached tokens"));
+    assert!(stderr_plain.contains("$0.02 cost basis"));
+    assert!(stderr_plain.contains("1 tool call"));
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_quiet_verbose_uses_old_verbose_summary_renderer() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-1","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Quiet verbose summary"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","duration_ms":4600,"usage":{"input_tokens":3,"output_tokens":60,"cache_read_input_tokens":11},"total_cost_usd":0.02}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["claude", "--ni", "--quiet", "-v", "say hi"])
+        .assert()
+        .success()
+        .stdout("Quiet verbose summary");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!stderr_plain.contains("claude session claude-1"));
+    assert!(stderr_plain.contains("4.6s"));
+    assert!(stderr_plain.contains("3 input tokens"));
+    assert!(stderr_plain.contains("60 output tokens"));
+    assert!(stderr_plain.contains("11 cached tokens"));
+    assert!(stderr_plain.contains("$0.02 cost basis"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_frontmatter_prompt_updates_body_from_structured_capture() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let doc_path = workspace.path().join("note.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(&doc_path, "---\nprompt: Write a haiku\n---\nOld body\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+LAST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      LAST="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+echo "provider stderr noise" >&2
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-compose"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":8,"output_tokens":6},"duration_ms":900,"status":"completed"}'
+printf '%s' 'Fresh assistant body' > "$LAST"
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--ni",
+            "--frontmatter-prompt",
+            doc_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let updated = fs::read_to_string(&doc_path).unwrap();
+    assert!(updated.contains("last_updated:"));
+    assert!(updated.contains("Fresh assistant body"));
+    assert!(!updated.contains("Old body"));
+    assert!(!updated.contains("provider stderr noise"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_frontmatter_prompt_does_not_overwrite_file_on_failure() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let doc_path = workspace.path().join("note.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(&doc_path, "---\nprompt: Write a haiku\n---\nOld body\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+LAST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      LAST="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-compose"}'
+printf '%s\n' '{"type":"error","error_type":"test_failure","error_message":"structured failure"}'
+printf '%s' 'Should not be applied' > "$LAST"
+exit 9
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--ni",
+            "--frontmatter-prompt",
+            doc_path.to_str().unwrap(),
+        ])
+        .assert()
+        .code(9)
+        .stderr(contains("structured failure"));
+
+    let updated = fs::read_to_string(&doc_path).unwrap();
+    assert!(updated.contains("Old body"));
+    assert!(!updated.contains("Should not be applied"));
 }

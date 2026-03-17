@@ -168,11 +168,8 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
             .and_then(|m| m.as_str())
             .map(String::from);
 
-        self.sink.on_warning(
-            self.error_message
-                .as_deref()
-                .unwrap_or("Step failure"),
-        );
+        self.sink
+            .on_warning(self.error_message.as_deref().unwrap_or("Step failure"));
 
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
@@ -272,6 +269,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             rate_limit: None,
             context_usage: None,
             raw_summary: None,
+            stderr_text: None,
         }
     }
 }
@@ -282,10 +280,7 @@ mod tests {
     use crate::stream::parser::NullSink;
 
     fn make_parser() -> Box<OpenCodeStreamParser<NullSink>> {
-        Box::new(OpenCodeStreamParser::new(
-            NullSink,
-            Some("gpt-4o".into()),
-        ))
+        Box::new(OpenCodeStreamParser::new(NullSink, Some("gpt-4o".into())))
     }
 
     #[test]
@@ -380,9 +375,7 @@ mod tests {
     fn step_failure_warning() {
         let mut parser = make_parser();
         parser
-            .feed_line(
-                r#"{"type":"error","error_message":"API timeout"}"#,
-            )
+            .feed_line(r#"{"type":"error","error_message":"API timeout"}"#)
             .unwrap();
 
         let summary = parser.finish(1);

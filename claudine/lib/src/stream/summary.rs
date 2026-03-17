@@ -67,6 +67,8 @@ pub struct StreamExecutionSummary {
     pub context_usage: Option<ContextUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_summary: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_text: Option<String>,
 }
 
 impl Default for StreamExecutionSummary {
@@ -90,6 +92,7 @@ impl Default for StreamExecutionSummary {
             rate_limit: None,
             context_usage: None,
             raw_summary: None,
+            stderr_text: None,
         }
     }
 }
@@ -137,6 +140,7 @@ mod tests {
             rate_limit: None,
             context_usage: None,
             raw_summary: Some(serde_json::json!({"stop_reason": "end_turn"})),
+            stderr_text: Some("stderr text".into()),
         };
         let json = serde_json::to_string(&summary).unwrap();
         let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
@@ -162,6 +166,7 @@ mod tests {
         assert!(!json.contains("rate_limit"));
         assert!(!json.contains("context_usage"));
         assert!(!json.contains("raw_summary"));
+        assert!(!json.contains("stderr_text"));
     }
 
     #[test]

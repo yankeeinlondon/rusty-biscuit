@@ -273,8 +273,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     }
                 } else {
                     // Get current state before sync
-                    let was_registered =
-                        configurator.is_registered(None).unwrap_or(false);
+                    let was_registered = configurator.is_registered(None).unwrap_or(false);
                     let before_events = configurator.registered_events(None).unwrap_or_default();
 
                     match configurator.register(cfg, None) {

@@ -64,7 +64,10 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
     }
 
     fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj.get("session_id").and_then(|v| v.as_str()).map(String::from);
+        self.session_id = obj
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
 
         let mut meta = EventMeta::default();
@@ -91,9 +94,10 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         let mut text_parts = String::new();
         for part in content {
             if part.get("type").and_then(|t| t.as_str()) == Some("text")
-                && let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                    text_parts.push_str(text);
-                }
+                && let Some(text) = part.get("text").and_then(|t| t.as_str())
+            {
+                text_parts.push_str(text);
+            }
         }
         if text_parts.is_empty() {
             return None;
@@ -131,12 +135,8 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
 
     fn handle_result(&mut self, obj: &Value) {
         // Duration
-        self.duration_ms = obj
-            .get("duration_ms")
-            .and_then(|v| v.as_u64());
-        self.duration_api_ms = obj
-            .get("duration_api_ms")
-            .and_then(|v| v.as_u64());
+        self.duration_ms = obj.get("duration_ms").and_then(|v| v.as_u64());
+        self.duration_api_ms = obj.get("duration_api_ms").and_then(|v| v.as_u64());
 
         // Turns
         self.num_turns = obj
@@ -190,7 +190,10 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         let info = RateLimitInfo {
             is_throttled: obj.get("is_throttled").and_then(|v| v.as_bool()),
             retry_after_ms: obj.get("retry_after_ms").and_then(|v| v.as_u64()),
-            message: obj.get("message").and_then(|v| v.as_str()).map(String::from),
+            message: obj
+                .get("message")
+                .and_then(|v| v.as_str())
+                .map(String::from),
         };
         if let Some(msg) = &info.message {
             self.sink.on_warning(msg);
@@ -304,6 +307,7 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             rate_limit: self.rate_limit,
             context_usage: None,
             raw_summary: self.raw_summary,
+            stderr_text: None,
         }
     }
 }
@@ -372,10 +376,7 @@ mod tests {
 
         // Assistant message
         let msg = r#"{"type":"assistant","content":[{"type":"text","text":"Hello, world!"}]}"#;
-        assert_eq!(
-            parser.feed_line(msg).unwrap(),
-            Some("Hello, world!".into())
-        );
+        assert_eq!(parser.feed_line(msg).unwrap(), Some("Hello, world!".into()));
 
         // Result
         let result = r#"{"type":"result","duration_ms":12345,"duration_api_ms":11000,"num_turns":1,"stop_reason":"end_turn","cost_usd":0.0042,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}"#;
@@ -408,7 +409,8 @@ mod tests {
         let init = r#"{"type":"init","session_id":"sess-err","model":"claude-sonnet-4-20250514"}"#;
         parser.feed_line(init).unwrap();
 
-        let error = r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#;
+        let error =
+            r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#;
         parser.feed_line(error).unwrap();
 
         let summary = parser.finish(1);
@@ -498,7 +500,8 @@ mod tests {
         let tool = r#"{"type":"tool_use","name":"read_file","input":{"path":"test.rs"}}"#;
         parser.feed_line(tool).unwrap();
 
-        let tool_result = r#"{"type":"tool_result","tool_use_id":"tu-1","content":"file contents"}"#;
+        let tool_result =
+            r#"{"type":"tool_result","tool_use_id":"tu-1","content":"file contents"}"#;
         parser.feed_line(tool_result).unwrap();
 
         let tool2 = r#"{"type":"tool_use","name":"edit_file","input":{"path":"test.rs"}}"#;
@@ -548,13 +551,16 @@ mod tests {
     fn content_block_delta() {
         let mut parser = make_parser();
 
-        let init = r#"{"type":"init","session_id":"sess-delta","model":"claude-sonnet-4-20250514"}"#;
+        let init =
+            r#"{"type":"init","session_id":"sess-delta","model":"claude-sonnet-4-20250514"}"#;
         parser.feed_line(init).unwrap();
 
-        let delta1 = r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#;
+        let delta1 =
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#;
         assert_eq!(parser.feed_line(delta1).unwrap(), Some("Hello".into()));
 
-        let delta2 = r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}"#;
+        let delta2 =
+            r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}"#;
         assert_eq!(parser.feed_line(delta2).unwrap(), Some(" world".into()));
 
         let summary = parser.finish(0);
