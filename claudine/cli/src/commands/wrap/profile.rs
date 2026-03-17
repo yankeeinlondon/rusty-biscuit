@@ -962,14 +962,14 @@ impl WrapperProfile for OpencodeWrapper {
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
         match format {
             OutputFormat::Json => {
-                if !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
+                if !has_flag(args, "--format") {
+                    args.push("--format".to_string());
                     args.push("json".to_string());
                 }
                 None
             }
             _ => Some(format!(
-                "OpenCode only supports --output json; {format} was skipped"
+                "OpenCode only supports --format json; {format} was skipped"
             )),
         }
     }
@@ -1018,7 +1018,7 @@ impl WrapperProfile for OpencodeWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--output-format".to_string());
+        args.push("--format".to_string());
         args.push("json".to_string());
     }
 }

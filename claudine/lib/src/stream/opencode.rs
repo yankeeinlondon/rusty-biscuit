@@ -66,8 +66,12 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
     }
 
     fn handle_text(&mut self, obj: &Value) -> Option<String> {
+        // Real format: {"type":"text","part":{"text":"hello",...}}
+        // Legacy format: {"type":"text","text":"hello"}
         let text = obj
-            .get("text")
+            .get("part")
+            .and_then(|p| p.get("text"))
+            .or_else(|| obj.get("text"))
             .or_else(|| obj.get("content"))
             .and_then(|t| t.as_str())?;
         if text.is_empty() {
@@ -77,10 +81,56 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         Some(text.to_string())
     }
 
+    fn handle_step_start(&mut self, obj: &Value) {
+        // Capture session ID from first step_start
+        if self.session_id.is_none() {
+            self.session_id = obj
+                .get("sessionID")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+        }
+
+        self.num_turns += 1;
+        let meta = EventMeta::default();
+        self.sink.on_turn_start(&meta);
+    }
+
+    fn handle_step_finish(&mut self, obj: &Value) {
+        // Real format: {"type":"step_finish","part":{"cost":0.02,"tokens":{...}}}
+        let part = obj.get("part");
+
+        // Accumulate per-step usage from part.tokens
+        if let Some(tokens) = part.and_then(|p| p.get("tokens")) {
+            let step = NormalizedTokenUsage {
+                input: tokens.get("input").and_then(|v| v.as_u64()),
+                output: tokens.get("output").and_then(|v| v.as_u64()),
+                total: tokens.get("total").and_then(|v| v.as_u64()),
+                cache_read: tokens
+                    .get("cache")
+                    .and_then(|c| c.get("read"))
+                    .and_then(|v| v.as_u64()),
+            };
+            self.token_usage.accumulate(&step);
+        }
+
+        // Accumulate cost from part.cost
+        if let Some(cost) = part.and_then(|p| p.get("cost")).and_then(|v| v.as_f64()) {
+            self.cost_usd += cost;
+        }
+
+        // Stop reason
+        if let Some(reason) = part.and_then(|p| p.get("reason")).and_then(|v| v.as_str()) {
+            self.provider_status = Some(reason.to_string());
+        }
+
+        let meta = EventMeta::default();
+        self.sink.on_turn_complete(&meta);
+    }
+
     fn handle_step_complete(&mut self, obj: &Value) {
         self.num_turns += 1;
 
-        // Accumulate per-step usage
+        // Legacy format: {"type":"step_complete","usage":{...},"cost_usd":...}
         if let Some(usage) = obj.get("usage") {
             let step = NormalizedTokenUsage {
                 input: usage.get("input_tokens").and_then(|v| v.as_u64()),
@@ -91,7 +141,6 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
             self.token_usage.accumulate(&step);
         }
 
-        // Accumulate cost
         if let Some(cost) = obj.get("cost_usd").and_then(|v| v.as_f64()) {
             self.cost_usd += cost;
         }
@@ -154,7 +203,15 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
                 self.handle_init(&obj);
                 Ok(None)
             }
+            "step_start" => {
+                self.handle_step_start(&obj);
+                Ok(None)
+            }
             "text" | "text_delta" | "assistant_text" => Ok(self.handle_text(&obj)),
+            "step_finish" => {
+                self.handle_step_finish(&obj);
+                Ok(None)
+            }
             "step_complete" | "turn_complete" => {
                 self.handle_step_complete(&obj);
                 Ok(None)
@@ -291,6 +348,32 @@ mod tests {
         let summary = parser.finish(0);
         assert!(summary.token_usage.is_none());
         assert!(summary.cost_usd.is_none());
+    }
+
+    #[test]
+    fn real_opencode_ndjson_format() {
+        let mut parser = make_parser();
+
+        let step_start = r#"{"type":"step_start","timestamp":1773725437967,"sessionID":"ses_abc123","part":{"id":"prt_1","sessionID":"ses_abc123","messageID":"msg_1","type":"step-start","snapshot":"abc"}}"#;
+        parser.feed_line(step_start).unwrap();
+
+        let text = r#"{"type":"text","timestamp":1773725438532,"sessionID":"ses_abc123","part":{"id":"prt_2","sessionID":"ses_abc123","messageID":"msg_1","type":"text","text":"hello"}}"#;
+        let result = parser.feed_line(text).unwrap();
+        assert_eq!(result.as_deref(), Some("hello"));
+
+        let step_finish = r#"{"type":"step_finish","timestamp":1773725438789,"sessionID":"ses_abc123","part":{"id":"prt_3","sessionID":"ses_abc123","messageID":"msg_1","type":"step-finish","reason":"stop","cost":0.0205797,"tokens":{"total":54665,"input":150,"output":23,"reasoning":0,"cache":{"read":0,"write":54492}}}}"#;
+        parser.feed_line(step_finish).unwrap();
+
+        let summary = parser.finish(0);
+        assert_eq!(summary.session_id.as_deref(), Some("ses_abc123"));
+        assert_eq!(summary.assistant_text, "hello");
+        assert_eq!(summary.cost_usd, Some(0.0205797));
+        assert_eq!(summary.provider_status.as_deref(), Some("stop"));
+
+        let usage = summary.token_usage.unwrap();
+        assert_eq!(usage.input, Some(150));
+        assert_eq!(usage.output, Some(23));
+        assert_eq!(usage.total, Some(54665));
     }
 
     #[test]

@@ -464,8 +464,9 @@ pub(crate) fn run_child_stream(
                     // Metadata-only line
                 }
                 Err(StreamParseError::MalformedLine { .. }) => {
-                    // Log warning but continue parsing
-                    let _ = writeln!(std::io::stderr(), "warning: malformed stream line");
+                    // Silently skip — providers (especially Gemini) mix
+                    // non-JSON noise (stack traces, hook logs) into stdout.
+                    tracing::debug!("skipping malformed stream line: {line}");
                 }
                 Err(StreamParseError::Fatal(_)) => {
                     // Fall back to raw forwarding
