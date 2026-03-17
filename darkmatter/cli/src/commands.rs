@@ -696,11 +696,11 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
     };
 
     // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .wrap_err_with(|| format!("Failed to create directory: {}", parent.display()))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)
+            .wrap_err_with(|| format!("Failed to create directory: {}", parent.display()))?;
     }
 
     // Create the file if it doesn't exist
