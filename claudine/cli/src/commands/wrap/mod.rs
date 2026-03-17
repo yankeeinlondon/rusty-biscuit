@@ -354,9 +354,9 @@ pub struct WrapperArgs {
     #[arg(long = "include", value_name = "ENV_NAME")]
     pub include: Vec<String>,
 
-    /// Force provider-specific non-interactive mode.
-    #[arg(short = 'n', long = "non-interactive", visible_alias = "ni")]
-    pub non_interactive: bool,
+    /// Force interactive mode even when a prompt string is provided.
+    #[arg(short = 'i', long = "interactive")]
+    pub interactive: bool,
 
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
@@ -370,7 +370,7 @@ pub struct WrapperArgs {
     #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
     pub system_prompt: Option<String>,
 
-    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid with -n.
+    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<u64>,
 
@@ -464,7 +464,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let extracted = extract_wrapper_flags_from_passthrough(&mut child_args);
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
-    let non_interactive_requested = args.non_interactive || extracted.non_interactive;
+    let interactive_requested = args.interactive || extracted.interactive;
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
@@ -473,10 +473,29 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    // Validate: --timeout requires --non-interactive
+    // Determine if a prompt is present (implies non-interactive by default)
+    let has_prompt = has_prompt_source(&args, &child_args, None);
+
+    // Default: interactive when no prompt, non-interactive when prompt present
+    // --interactive/-i overrides the default back to interactive
+    let non_interactive_requested = if interactive_requested {
+        false
+    } else {
+        has_prompt
+    };
+
+    // Early check: --timeout + --interactive is always an error
+    if args.timeout.is_some() && interactive_requested {
+        return Err(eyre!(
+            "--timeout cannot be used with --interactive mode"
+        ));
+    }
+
+    // Early check: --timeout requires non-interactive mode
     if args.timeout.is_some() && !non_interactive_requested {
         return Err(eyre!(
-            "--timeout can only be used with --non-interactive mode"
+            "--timeout can only be used in non-interactive mode \
+             (provide a prompt or use a composition switch)"
         ));
     }
 
@@ -599,11 +618,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &mut child_args,
             &mut stdin_seed,
             &composed.body,
-            true, // always non-interactive for prompt-file composition
+            !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for prompt-file composition
-        if !non_interactive_requested {
+        // Force non-interactive for prompt-file composition (unless --interactive)
+        if !interactive_requested && !non_interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
@@ -646,11 +665,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &mut child_args,
             &mut stdin_seed,
             &prepared.prompt,
-            true, // always non-interactive for inline composition
+            !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for inline composition
-        if !non_interactive_requested {
+        // Force non-interactive for inline composition (unless --interactive)
+        if !interactive_requested && !non_interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
@@ -677,11 +696,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &mut child_args,
             &mut stdin_seed,
             &prepared.prompt,
-            true, // always non-interactive for chained composition
+            !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for chained composition
-        if !non_interactive_requested {
+        // Force non-interactive for chained composition (unless --interactive)
+        if !interactive_requested && !non_interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
@@ -693,11 +712,23 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // All prompt sources (passthrough, --prompt-file, --frontmatter-prompt,
     // --compose) have now been processed. Validate that providers requiring a
     // positional prompt actually have one.
-    let effective_non_interactive = non_interactive_requested
-        || prompt_file_dry_run.is_some()
-        || inline_composition_source.is_some()
-        || chained_composition;
+    let effective_non_interactive = if interactive_requested {
+        false
+    } else {
+        non_interactive_requested
+            || prompt_file_dry_run.is_some()
+            || inline_composition_source.is_some()
+            || chained_composition
+    };
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+
+    // Late --timeout validation: composition may have changed interactivity
+    if args.timeout.is_some() && !effective_non_interactive {
+        return Err(eyre!(
+            "--timeout can only be used in non-interactive mode \
+             (provide a prompt or use a composition switch)"
+        ));
+    }
 
     // If a composition pipeline inferred non-interactive mode, update the
     // INTERACTIVE env var that was set before the pipelines ran.
@@ -889,17 +920,20 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    // For compose modes, the prompt goes to stdin (not child_args), so we need
-    // to extract a summary to display in the header. For regular runs the prompt
-    // is already in child_args.
-    let prompt_summary: Option<String> = if let Some((_, ref prepared)) = inline_composition_source
-    {
-        Some(prepared.prompt.clone())
-    } else if chained_composition {
-        stdin_seed.clone()
+    // Extract the user's prompt for display in the header line.
+    // Composition modes show the file path; regular runs show the prompt text.
+    let prompt_display: Option<String> = if let Some(ref pf) = args.prompt_file {
+        Some(format!("--prompt-file {pf}"))
+    } else if let Some(ref fp) = args.frontmatter_prompt {
+        Some(format!("--frontmatter-prompt {fp}"))
+    } else if let Some(ref c) = args.compose {
+        Some(format!("--compose {c}"))
     } else {
-        None
+        extract_user_prompt(&args.passthrough)
     };
+
+    // Interactive override: user explicitly forced -i with a prompt present
+    let interactive_override = interactive_requested && has_prompt;
 
     // Output verbosity: --silent suppresses everything, --quiet shows header only
     if !silent_requested {
@@ -908,12 +942,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile,
             yolo_enabled,
             effective_non_interactive,
+            interactive_override,
             verbose_requested,
             repo_requested,
             compose_display.as_ref(),
             effective_operation.as_deref(),
-            &child_args,
-            prompt_summary.as_deref(),
+            prompt_display.as_deref(),
             &env_plan,
             &term,
         );
@@ -1489,10 +1523,37 @@ fn takes_value(arg: &str) -> bool {
     )
 }
 
+/// Extract the user's prompt string from the raw passthrough args.
+/// Returns the first non-switch argument, if any.
+fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
+    passthrough
+        .iter()
+        .find(|arg| !arg.starts_with('-'))
+        .cloned()
+}
+
+/// Returns true if a prompt string is present — either as a remaining
+/// non-switch arg in `child_args`, from a composition source, or via stdin.
+fn has_prompt_source(
+    args: &WrapperArgs,
+    child_args: &[String],
+    stdin_seed: Option<&str>,
+) -> bool {
+    // Composition switches provide a prompt
+    if args.prompt_file.is_some() || args.frontmatter_prompt.is_some() || args.compose.is_some() {
+        return true;
+    }
+    if stdin_seed.is_some() {
+        return true;
+    }
+    // Check for a non-switch positional arg in passthrough
+    child_args.iter().any(|arg| !arg.starts_with('-'))
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ExtractedWrapperFlags {
     yolo: bool,
-    non_interactive: bool,
+    interactive: bool,
     repo: bool,
     quiet: bool,
     silent: bool,
@@ -1515,8 +1576,8 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
                 extracted.yolo = true;
                 remove_indices.push(i);
             }
-            "-n" | "--non-interactive" | "--ni" => {
-                extracted.non_interactive = true;
+            "-i" | "--interactive" => {
+                extracted.interactive = true;
                 remove_indices.push(i);
             }
             "--repo" => {
@@ -1642,7 +1703,7 @@ mod tests {
     fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
         let mut args = vec![
             "--json".to_string(),
-            "--ni".to_string(),
+            "-i".to_string(),
             "task".to_string(),
             "-y".to_string(),
         ];
@@ -1650,8 +1711,128 @@ mod tests {
         let extracted = extract_wrapper_flags_from_passthrough(&mut args);
 
         assert!(extracted.yolo);
-        assert!(extracted.non_interactive);
+        assert!(extracted.interactive);
         assert_eq!(args, vec!["--json", "task"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_interactive_long_form() {
+        let mut args = vec!["--interactive".to_string(), "do something".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+
+        assert!(extracted.interactive);
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn old_non_interactive_flags_pass_through_to_provider() {
+        let mut args = vec![
+            "-n".to_string(),
+            "--non-interactive".to_string(),
+            "--ni".to_string(),
+            "task".to_string(),
+        ];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+
+        // Old flags should NOT be consumed by Claudine
+        assert!(!extracted.interactive);
+        assert_eq!(
+            args,
+            vec!["-n", "--non-interactive", "--ni", "task"]
+        );
+    }
+
+    #[test]
+    fn has_prompt_source_detects_positional_arg() {
+        let args = WrapperArgs {
+            yolo: false,
+            interactive: false,
+            model: None,
+            output: None,
+            system_prompt: None,
+            timeout: None,
+            dry_run: false,
+            quiet: false,
+            silent: false,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            prompt_file: None,
+            frontmatter_prompt: None,
+            compose: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            include: Vec::new(),
+            passthrough: Vec::new(),
+        };
+
+        // No prompt, no composition → no prompt source
+        assert!(!has_prompt_source(&args, &[], None));
+
+        // Non-switch arg in child_args → prompt source
+        assert!(has_prompt_source(&args, &["fix the bug".to_string()], None));
+
+        // Switch-only args → no prompt source
+        assert!(!has_prompt_source(&args, &["--json".to_string()], None));
+
+        // stdin_seed → prompt source
+        assert!(has_prompt_source(&args, &[], Some("hello")));
+    }
+
+    #[test]
+    fn has_prompt_source_detects_composition_switches() {
+        let mut args = WrapperArgs {
+            yolo: false,
+            interactive: false,
+            model: None,
+            output: None,
+            system_prompt: None,
+            timeout: None,
+            dry_run: false,
+            quiet: false,
+            silent: false,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            prompt_file: None,
+            frontmatter_prompt: None,
+            compose: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            include: Vec::new(),
+            passthrough: Vec::new(),
+        };
+
+        args.prompt_file = Some("file.md".to_string());
+        assert!(has_prompt_source(&args, &[], None));
+
+        args.prompt_file = None;
+        args.frontmatter_prompt = Some("file.md".to_string());
+        assert!(has_prompt_source(&args, &[], None));
+
+        args.frontmatter_prompt = None;
+        args.compose = Some("file.md".to_string());
+        assert!(has_prompt_source(&args, &[], None));
+    }
+
+    #[test]
+    fn extract_user_prompt_finds_first_non_switch() {
+        assert_eq!(
+            extract_user_prompt(&["--json".to_string(), "fix bug".to_string()]),
+            Some("fix bug".to_string())
+        );
+        assert_eq!(
+            extract_user_prompt(&["--json".to_string(), "--verbose".to_string()]),
+            None
+        );
+        assert_eq!(
+            extract_user_prompt(&["hello world".to_string()]),
+            Some("hello world".to_string())
+        );
     }
 
     #[test]
@@ -1854,7 +2035,7 @@ mod tests {
 
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
-                flags in prop::collection::vec("-y|--yolo|-n|--non-interactive|--ni|-q|--quiet|--silent", 0..5),
+                flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),
                 others in prop::collection::vec("[a-z0-9]+", 0..10)
             ) {
                 let mut args = Vec::new();
@@ -1877,8 +2058,8 @@ mod tests {
                 if flags.iter().any(|f| f == "-y" || f == "--yolo") {
                     assert!(extracted.yolo);
                 }
-                if flags.iter().any(|f| f == "-n" || f == "--non-interactive" || f == "--ni") {
-                    assert!(extracted.non_interactive);
+                if flags.iter().any(|f| f == "-i" || f == "--interactive") {
+                    assert!(extracted.interactive);
                 }
             }
         }

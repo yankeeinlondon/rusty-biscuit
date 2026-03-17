@@ -119,7 +119,6 @@ exit 0
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args([
             "codex",
-            "--non-interactive",
             "--yolo",
             "--",
             "--json",
@@ -270,7 +269,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["codex", "--json", "--ni", "summarize repo"])
+        .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
@@ -321,7 +320,7 @@ exit 0
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["claude", "--dangerously-skip-permissions", "--ni", "hi"])
+        .args(["claude", "--dangerously-skip-permissions", "hi"])
         .assert()
         .code(1)
         .stderr(contains("Error:"))
@@ -384,7 +383,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .args(["opencode", "--ni", "summarize"])
+        .args(["opencode", "summarize"])
         .assert()
         .success()
         .stderr(contains("Opencode requires a model be specified"));
@@ -423,7 +422,7 @@ exit 0
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("MODEL", "from-model")
         .env("OPENCODE_MODEL", "from-opencode")
-        .args(["opencode", "--non-interactive", "summarize"])
+        .args(["opencode", "summarize"])
         .assert()
         .success();
 
@@ -458,7 +457,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .args(["opencode", "--ni", "--model", "cli-selected", "summarize"])
+        .args(["opencode", "--model", "cli-selected", "summarize"])
         .assert()
         .success();
 
@@ -485,7 +484,7 @@ exit 0
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["opencode", "-y", "--ni", "hi"])
+        .args(["opencode", "-y", "hi"])
         .assert()
         .success();
 
@@ -607,7 +606,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .args(["goose", "--yolo", "--ni", "summarize"])
+        .args(["goose", "--yolo", "summarize"])
         .assert()
         .success();
 
@@ -635,7 +634,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["goose", "--ni", "summarize"])
+        .args(["goose", "summarize"])
         .assert()
         .success();
 
@@ -669,7 +668,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["kimi", "--ni", "hi"])
+        .args(["kimi", "hi"])
         .assert()
         .success();
 
@@ -825,7 +824,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["claude", "--model", "claude-sonnet-4-6", "--ni", "hi"])
+        .args(["claude", "--model", "claude-sonnet-4-6", "hi"])
         .assert()
         .success();
 
@@ -876,7 +875,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn wrapper_timeout_rejects_without_non_interactive() {
+fn wrapper_timeout_rejects_in_interactive_mode() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -888,14 +887,26 @@ exit 0
 "#,
     );
 
+    // No prompt → interactive by default → --timeout should fail
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["codex", "--timeout", "30", "--", "hello"])
+        .args(["codex", "--timeout", "30"])
         .assert()
         .code(1)
         .stderr(contains(
-            "--timeout can only be used with --non-interactive",
+            "--timeout can only be used in non-interactive mode",
+        ));
+
+    // --interactive + --timeout → explicit conflict
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["codex", "--timeout", "30", "-i", "--", "hello"])
+        .assert()
+        .code(1)
+        .stderr(contains(
+            "--timeout cannot be used with --interactive mode",
         ));
 }
 
@@ -985,7 +996,7 @@ printf '%s' 'Final assistant response' > "$LAST"
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["codex", "--ni", "--model", "codex-mini", "summarize repo"])
+        .args(["codex", "--model", "codex-mini", "summarize repo"])
         .assert()
         .success()
         .stdout("Final assistant response");
@@ -1035,7 +1046,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "say hi"])
+        .args(["gemini", "say hi"])
         .assert()
         .success()
         .stdout("Hello");
@@ -1053,7 +1064,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
         .stdout("Hello");
@@ -1071,7 +1082,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "--silent", "say hi"])
+        .args(["gemini", "--silent", "say hi"])
         .assert()
         .success()
         .stdout("Hello");
@@ -1108,7 +1119,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
         .stdout("Recovered answer");
@@ -1144,7 +1155,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "--quiet", "say hi"])
+        .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
         .stdout("Hello without newline");
@@ -1181,7 +1192,7 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["gemini", "--ni", "-v", "say hi"])
+        .args(["gemini", "-v", "say hi"])
         .assert()
         .success()
         .stdout("Verbose summary");
@@ -1221,7 +1232,7 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["claude", "--ni", "--quiet", "-v", "say hi"])
+        .args(["claude", "--quiet", "-v", "say hi"])
         .assert()
         .success()
         .stdout("Quiet verbose summary");
@@ -1262,7 +1273,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args(["claude", "--ni", "-v", "say hi"])
+        .args(["claude", "-v", "say hi"])
         .assert()
         .success()
         .stdout("No tools here");
@@ -1312,7 +1323,6 @@ printf '%s' 'Fresh assistant body' > "$LAST"
         .env("PATH", &path_dir)
         .args([
             "codex",
-            "--ni",
             "--frontmatter-prompt",
             doc_path.to_str().unwrap(),
         ])
@@ -1366,7 +1376,6 @@ exit 9
         .env("PATH", &path_dir)
         .args([
             "codex",
-            "--ni",
             "--frontmatter-prompt",
             doc_path.to_str().unwrap(),
         ])

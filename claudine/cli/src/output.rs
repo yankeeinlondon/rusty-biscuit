@@ -4,7 +4,9 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{COMPOSE, INLINE_COMPOSE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
+use claudine::badges::{
+    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
+};
 use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
@@ -21,18 +23,18 @@ pub(crate) enum ComposeDisplay {
     InlineCompose,
 }
 
-/// Print the one-line header: `Claudine ▸ Provider [badges] args`
+/// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn log_wrapper_header(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
-    non_interactive_requested: bool,
+    non_interactive: bool,
+    interactive_override: bool,
     verbose_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
     operation: Option<&str>,
-    child_args: &[String],
-    prompt_summary: Option<&str>,
+    prompt_display: Option<&str>,
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
@@ -48,8 +50,12 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(YOLO.to_string());
     }
 
-    if non_interactive_requested {
+    // Show Non-Interactive badge when session is non-interactive
+    // Show Interactive badge only when user explicitly forced it (prompt + -i)
+    if non_interactive {
         header_parts.push(NON_INTERACTIVE.to_string());
+    } else if interactive_override {
+        header_parts.push(INTERACTIVE.to_string());
     }
 
     if verbose_requested {
@@ -79,31 +85,15 @@ pub(crate) fn log_wrapper_header(
         );
     }
 
-    // Build the trailing args display: passthrough args + optional prompt summary
-    let mut remaining = format_passthrough_args(child_args);
-    if let Some(prompt) = prompt_summary {
+    // Show only the user's prompt text (no provider-specific switches)
+    if let Some(prompt) = prompt_display {
         let escaped = shell_escape(prompt);
-        if remaining.is_empty() {
-            remaining = escaped;
-        } else {
-            remaining = format!("{remaining} {escaped}");
-        }
-    }
-
-    if !remaining.is_empty() {
-        // Measure the prefix (everything before the passthrough args) plus the
-        // joining space so we know how many columns are left for the args.
         let prefix = header_parts.join(" ");
         let prefix_width = visible_width(&prefix) as usize;
-        // +1 for the space between prefix and args
         let used = prefix_width + 1;
-
         let term_width = term.width() as usize;
-        // Allow spilling onto a second line, but no further.
-        let max_width = term_width.saturating_mul(2);
-        let available = max_width.saturating_sub(used);
-
-        let truncated = truncate_args(&remaining, available);
+        let available = term_width.saturating_sub(used);
+        let truncated = truncate_args(&escaped, available);
         header_parts.push(Prose::new(format!("<dim>{truncated}</dim>")).render(term));
     }
 
@@ -486,13 +476,6 @@ fn is_switch_start(byte: u8) -> bool {
 
 fn is_switch_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-'
-}
-
-pub(crate) fn format_passthrough_args(args: &[String]) -> String {
-    args.iter()
-        .map(|arg| shell_escape(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Truncate the passthrough args string to fit within `max_chars` visible columns.

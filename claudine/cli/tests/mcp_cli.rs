@@ -358,7 +358,6 @@ fn codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file() {
             "codex",
             "--mcp",
             "--dry-run",
-            "--non-interactive",
             "--",
             "--json",
             "fix #calendar bugs",
@@ -397,7 +396,6 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
             "--use",
             "linear",
             "--dry-run",
-            "--non-interactive",
             "--",
             "--prompt",
             "fix #linear auth",
@@ -418,7 +416,6 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
             "--use",
             "github",
             "--dry-run",
-            "--non-interactive",
             "--",
             "debug #github sync",
         ])
@@ -450,7 +447,6 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
             "claude",
             "--mcp",
             "--dry-run",
-            "--non-interactive",
             "--",
             "--print",
             "do work",
@@ -688,7 +684,6 @@ fn strict_mode_errors_on_missing_tag() {
             "--mcp",
             "--strict",
             "--dry-run",
-            "--non-interactive",
             "--",
             "fix #nonexistent bugs",
         ])
@@ -722,7 +717,6 @@ fn strict_mode_errors_on_ambiguous_tag() {
             "--mcp",
             "--strict",
             "--dry-run",
-            "--non-interactive",
             "--",
             "fix #cal bugs",
         ])

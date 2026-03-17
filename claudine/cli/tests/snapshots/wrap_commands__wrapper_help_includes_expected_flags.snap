@@ -13,11 +13,11 @@ Options:
   -v, --verbose...                   Increase verbosity (-v for verbose, -vv for debug)
   -y, --yolo                         Enable provider-specific YOLO/auto-approval mode
       --include <ENV_NAME>           Preserve this env var even when it matches sensitive-name filters
-  -n, --non-interactive              Force provider-specific non-interactive mode [aliases: --ni]
+  -i, --interactive                  Force interactive mode even when a prompt string is provided
   -m, --model <MODEL>                Override the model used by the provider
   -o, --output <FORMAT>              Set the output format (json, text, stream)
   -s, --system-prompt <PROMPT|FILE>  Set or append a system prompt (string or file path)
-  -t, --timeout <SECONDS>            Timeout in seconds (sends SIGTERM then SIGKILL). Only valid with -n
+  -t, --timeout <SECONDS>            Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode
       --dry-run                      Show what would be executed without launching the child
   -q, --quiet                        Show only the header line; suppress env details and info messages
       --silent                       Suppress all Claudine preflight output (header, env, info, warnings)
