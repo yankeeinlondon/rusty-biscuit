@@ -1,24 +1,27 @@
 //! Services section output formatting.
 
+use std::fmt::Write;
+
 use sniff::services::{Service, ServiceState, ServicesInfo};
 
-/// Print services information as text.
-pub fn print_services_text(info: &ServicesInfo, verbose: u8, state_filter: ServiceState) {
-    println!("=== Services ===");
-    println!("Init System: {}", info.init_system);
-    println!("Host OS: {}", info.host_os);
+/// Render services information as text.
+pub fn render_services_text(info: &ServicesInfo, verbose: u8, state_filter: ServiceState) -> String {
+    let mut out = String::new();
+    writeln!(out, "=== Services ===").unwrap();
+    writeln!(out, "Init System: {}", info.init_system).unwrap();
+    writeln!(out, "Host OS: {}", info.host_os).unwrap();
 
     // Show evidence at verbose level 1+
     if verbose > 0 && !info.evidence.hints.is_empty() {
-        println!("\nDetection hints:");
+        writeln!(out, "\nDetection hints:").unwrap();
         for hint in &info.evidence.hints {
-            println!("  - {}", hint);
+            writeln!(out, "  - {}", hint).unwrap();
         }
     }
     if verbose > 0 && !info.evidence.notes.is_empty() {
-        println!("\nNotes:");
+        writeln!(out, "\nNotes:").unwrap();
         for note in &info.evidence.notes {
-            println!("  - {}", note);
+            writeln!(out, "  - {}", note).unwrap();
         }
     }
 
@@ -38,29 +41,30 @@ pub fn print_services_text(info: &ServicesInfo, verbose: u8, state_filter: Servi
         })
         .collect();
 
-    println!();
+    writeln!(out).unwrap();
     match state_filter {
         ServiceState::All => {
-            println!(
+            writeln!(
+                out,
                 "Services: {} total ({} running, {} stopped)",
                 info.services.len(),
                 total_running,
                 total_stopped
-            );
+            ).unwrap();
         }
         ServiceState::Running => {
-            println!("Running Services: {}", filtered.len());
+            writeln!(out, "Running Services: {}", filtered.len()).unwrap();
         }
         ServiceState::Stopped => {
-            println!("Stopped Services: {}", filtered.len());
+            writeln!(out, "Stopped Services: {}", filtered.len()).unwrap();
         }
         ServiceState::Initializing => {
-            println!("Services: {}", filtered.len());
+            writeln!(out, "Services: {}", filtered.len()).unwrap();
         }
     }
 
     if filtered.is_empty() {
-        println!("  (none)");
+        writeln!(out, "  (none)").unwrap();
     } else {
         // Show services (limit to 20 at verbose 0, all at verbose 1+)
         let show_count = if verbose > 0 {
@@ -79,21 +83,22 @@ pub fn print_services_text(info: &ServicesInfo, verbose: u8, state_filter: Servi
                 .pid
                 .map(|p| format!(" (PID {})", p))
                 .unwrap_or_default();
-            println!("  {} [{}]{}", service.name, status, pid_str);
+            writeln!(out, "  {} [{}]{}", service.name, status, pid_str).unwrap();
         }
 
         if filtered.len() > show_count {
-            println!("  ... and {} more", filtered.len() - show_count);
+            writeln!(out, "  ... and {} more", filtered.len() - show_count).unwrap();
         }
     }
 
     // When showing running services, also show stopped count
     if state_filter == ServiceState::Running && total_stopped > 0 {
-        println!();
-        println!("Stopped Services: {}", total_stopped);
+        writeln!(out).unwrap();
+        writeln!(out, "Stopped Services: {}", total_stopped).unwrap();
     }
 
-    println!();
+    writeln!(out).unwrap();
+    out
 }
 
 /// Print services information as JSON.

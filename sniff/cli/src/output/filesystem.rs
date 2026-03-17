@@ -1,5 +1,6 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -377,35 +378,36 @@ fn format_commit_line(
     }
 }
 
-/// Print detailed information for a single commit looked up by `hash` subcommand.
+/// Render detailed information for a single commit looked up by `hash` subcommand.
 ///
 /// Shows the commit as a one-liner followed by a list of files changed.
-pub fn print_hash_section(
+pub fn render_hash_section(
     commit: &sniff::filesystem::git::CommitInfo,
     files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
     verbose: u8,
     commit_url: Option<&str>,
-) {
+) -> String {
     use sniff::filesystem::git::DeltaKind;
 
+    let mut out = String::new();
     let terminal = Terminal::default();
 
     // === Commit Section ===
     let status_title = Prose::new("<b><u>Commit</u></b>");
-    println!("\n{}\n", status_title.render(&terminal));
+    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
     let commit_line = format_commit_line(commit, verbose, commit_url);
     let rendered = Prose::new(commit_line.as_str()).render(&terminal);
     let list = UnorderedList::new(vec![rendered]);
-    println!("{}", list.render(&terminal));
+    writeln!(out, "{}", list.render(&terminal)).unwrap();
 
     // === Files Section ===
     if files.is_empty() {
-        return;
+        return out;
     }
 
     let files_title = Prose::new("<b><u>Files changed</u></b>");
-    println!("{}\n", files_title.render(&terminal));
+    writeln!(out, "{}\n", files_title.render(&terminal)).unwrap();
 
     let file_items: Vec<String> = files
         .iter()
@@ -431,7 +433,9 @@ pub fn print_hash_section(
         .map(|item| Prose::new(item.as_str()).render(&terminal))
         .collect();
     let list = UnorderedList::new(rendered_items);
-    println!("{}", list.render(&terminal));
+    writeln!(out, "{}", list.render(&terminal)).unwrap();
+
+    out
 }
 
 /// Print git information with rich terminal formatting.
@@ -456,14 +460,15 @@ fn format_file_line(path: &std::path::Path, verbose: u8, action: &sniff::filesys
     }
 }
 
-/// Print files matching a specific status filter (staged, unstaged, or untracked).
-pub fn print_git_file_list(
+/// Render files matching a specific status filter (staged, unstaged, or untracked).
+pub fn render_git_file_list(
     git: &sniff::filesystem::git::GitInfo,
     status_filter: &sniff::filesystem::git::FileStatus,
     verbose: u8,
-) {
+) -> String {
     use sniff::filesystem::git::FileStatus;
 
+    let mut out = String::new();
     let terminal = Terminal::default();
     let files: Vec<_> = git
         .file_changes
@@ -479,15 +484,18 @@ pub fn print_git_file_list(
 
     for file in &files {
         let line = format_file_line(&file.path, verbose, &file.action);
-        print!("{}", Prose::new(&line).display(&terminal));
+        write!(out, "{}", Prose::new(&line).display(&terminal)).unwrap();
     }
+
+    out
 }
 
 /// ## Arguments
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
-pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize, verbose: u8) {
+pub fn render_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize, verbose: u8) -> String {
+    let mut out = String::new();
     let terminal = Terminal::default();
 
     // Build commit URL base from the preferred remote (usually "origin").
@@ -504,7 +512,7 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
 
     // === Status Section ===
     let status_title = Prose::new("<b><u>Status</u></b>");
-    println!("\n{}\n", status_title.render(&terminal));
+    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
     let mut status_items: Vec<String> = Vec::new();
 
@@ -599,16 +607,16 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
             .map(|item| Prose::new(item.as_str()).render(&terminal))
             .collect();
         let list = UnorderedList::new(rendered_items);
-        println!("{}", list.render(&terminal));
+        writeln!(out, "{}", list.render(&terminal)).unwrap();
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
-        println!("  {}", clean.render(&terminal));
+        writeln!(out, "  {}", clean.render(&terminal)).unwrap();
     }
 
     // === Worktrees Section (only if worktrees exist) ===
     if !git.worktrees.is_empty() {
         let wt_title = Prose::new("<b><u>Worktrees</u></b>");
-        println!("{}\n", wt_title.render(&terminal));
+        writeln!(out, "{}\n", wt_title.render(&terminal)).unwrap();
 
         let mut wt_list = UnorderedList::empty();
         wt_list.add(Prose::new(format!(
@@ -623,12 +631,12 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
                 info.filepath.display()
             )));
         }
-        println!("{}", wt_list.render(&terminal));
+        writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
     }
 
     // === Meta Section ===
     let meta_title = Prose::new("<b><u>Meta</u></b>");
-    println!("{}\n", meta_title.render(&terminal));
+    writeln!(out, "{}\n", meta_title.render(&terminal)).unwrap();
 
     let mut meta_list = UnorderedList::empty();
 
@@ -898,7 +906,8 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
         meta_list.add(config_list);
     }
 
-    println!("{}", meta_list.render(&terminal));
+    writeln!(out, "{}", meta_list.render(&terminal)).unwrap();
+    out
 }
 
 /// Format ahead/behind counts with directional arrows.
@@ -1095,10 +1104,12 @@ fn render_update_summary(
     latest_versions_requested: bool,
     verbose: u8,
     term: &Terminal,
-) {
+) -> String {
     if !latest_versions_requested {
-        return;
+        return String::new();
     }
+
+    let mut out = String::new();
 
     let summary_line = format!(
         "<dim>Registry check:</dim> {} {} checked, {} with updates, {} with major updates",
@@ -1107,7 +1118,7 @@ fn render_update_summary(
         summary.packages_with_updates,
         summary.packages_with_major_updates,
     );
-    println!("{}", Prose::new(&summary_line).render(term));
+    writeln!(out, "{}", Prose::new(&summary_line).render(term)).unwrap();
 
     if verbose > 1 && !summary.sample_transitions.is_empty() {
         let samples = summary
@@ -1116,8 +1127,10 @@ fn render_update_summary(
             .map(|sample| Prose::new(format!("<dim>{}</dim>", sample)).render(term))
             .collect::<Vec<_>>();
         let list = UnorderedList::new(samples);
-        println!("{}", list.render(term));
+        writeln!(out, "{}", list.render(term)).unwrap();
     }
+
+    out
 }
 
 /// Render a single package as a styled list item string.
@@ -1214,10 +1227,10 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
     items
 }
 
-/// Print package names as a comma-separated plain text list.
+/// Render package names as a comma-separated plain text list.
 ///
-/// Writes to stderr and exits if the repo is not a monorepo.
-pub fn print_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) {
+/// Returns an error message if the repo is not a monorepo.
+pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1225,12 +1238,12 @@ pub fn print_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str
             if let Some(ref packages) = repo.packages {
                 let filtered = filter_packages(packages, repo_filter);
                 let names: Vec<&str> = filtered.iter().map(|p| p.name.as_str()).collect();
-                println!("{}", names.join(", "));
+                names.join(", ")
+            } else {
+                String::new()
             }
         }
-        _ => {
-            eprintln!("- the \"--packages\" switch is only intended to be used in a monorepo");
-        }
+        _ => String::from("- the \"--packages\" switch is only intended to be used in a monorepo"),
     }
 }
 
@@ -1295,10 +1308,10 @@ fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
     names
 }
 
-/// Print package names with uncommitted changes as a comma-separated list.
+/// Render package names with uncommitted changes as a comma-separated list.
 ///
-/// Writes to stderr and exits if the repo is not a monorepo.
-pub fn print_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) {
+/// Returns an error message if the repo is not a monorepo.
+pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1320,20 +1333,18 @@ pub fn print_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&st
             } else {
                 names.iter().map(|n| n.as_str()).collect()
             };
-            println!("{}", names.join(", "));
+            names.join(", ")
         }
-        _ => {
-            eprintln!(
-                "- the \"--dirty-packages\" switch is only intended to be used in a monorepo"
-            );
-        }
+        _ => String::from(
+            "- the \"--dirty-packages\" switch is only intended to be used in a monorepo"
+        ),
     }
 }
 
-/// Print package area names with uncommitted changes as a comma-separated list.
+/// Render package area names with uncommitted changes as a comma-separated list.
 ///
-/// Writes to stderr and exits if the repo is not a monorepo.
-pub fn print_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Option<&str>) {
+/// Returns an error message if the repo is not a monorepo.
+pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1351,21 +1362,22 @@ pub fn print_dirty_package_areas(result: &sniff::SniffResult, repo_filter: Optio
                     .collect();
                 areas.sort();
                 areas.dedup();
-                println!("{}", areas.join(", "));
+                areas.join(", ")
+            } else {
+                String::new()
             }
         }
-        _ => {
-            eprintln!(
-                "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo"
-            );
-        }
+        _ => String::from(
+            "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo"
+        ),
     }
 }
 
-/// Print the package name for the given directory, or exit 1 if not in a package.
+/// Render the package name for the given directory.
 ///
 /// With `verbose >= 1`, appends the package root directory on the same line.
-pub fn print_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, verbose: u8) {
+/// Returns empty string if not in a package.
+pub fn render_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, verbose: u8) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1376,67 +1388,68 @@ pub fn print_repo_package(result: &sniff::SniffResult, base_dir: Option<&Path>, 
                 "{} (<i>located in</i> <blue>{}</blue>)",
                 pkg.name, pkg.relative
             );
-            print!("{}", Prose::new(&line).display(&terminal));
+            Prose::new(&line).display(&terminal).to_string()
         } else {
-            println!("{}", pkg.name);
+            pkg.name.clone()
         }
     } else {
-        println!();
-        std::process::exit(1);
+        String::new()
     }
 }
 
-/// Print the package area for the given directory, or exit 1 if not in a package area.
-pub fn print_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+/// Render the package area for the given directory.
+///
+/// Returns empty string if not in a package area.
+pub fn render_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
-    if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
-        println!("{}", area);
-    } else {
-        println!();
-        std::process::exit(1);
-    }
+    repo.and_then(|r| r.package_area_for_dir(&dir))
+        .unwrap_or_default()
+        .to_string()
 }
 
-/// Print the root directory of the package containing the given directory, or exit 1.
-pub fn print_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+/// Render the root directory of the package containing the given directory.
+///
+/// Returns empty string if not in a package.
+pub fn render_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
-    if let Some(pkg) = repo.and_then(|r| r.package_for_dir(&dir)) {
-        println!("{}", pkg.path.display());
-    } else {
-        std::process::exit(1);
-    }
+    repo.and_then(|r| r.package_for_dir(&dir))
+        .map(|pkg| pkg.path.display().to_string())
+        .unwrap_or_default()
 }
 
-/// Print the root directory of the package area containing the given directory, or exit 1.
-pub fn print_repo_package_area_root(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+/// Render the root directory of the package area containing the given directory.
+///
+/// Returns empty string if not in a package area.
+pub fn render_repo_package_area_root(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
         if area == "root" {
             // Root-level packages have the repo root as their area root
-            println!("{}", repo.unwrap().root.display());
+            repo.unwrap().root.display().to_string()
         } else {
-            println!("{}", repo.unwrap().root.join(area).display());
+            repo.unwrap().root.join(area).display().to_string()
         }
     } else {
-        std::process::exit(1);
+        String::new()
     }
 }
 
-/// Print the root directory of the repository, or exit 1.
-pub fn print_repo_root(result: &sniff::SniffResult) {
-    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
-
-    if let Some(repo) = repo {
-        println!("{}", repo.root.display());
-    } else {
-        std::process::exit(1);
-    }
+/// Render the root directory of the repository.
+///
+/// Returns empty string if no repository is found.
+pub fn render_repo_root(result: &sniff::SniffResult) -> String {
+    result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .map(|repo| repo.root.display().to_string())
+        .unwrap_or_default()
 }
 
 /// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise.
@@ -1616,29 +1629,30 @@ fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
-pub fn print_repo_section(
+pub fn render_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
     _repo_root: Option<&Path>,
     repo_filter: Option<&str>,
     latest_versions_requested: bool,
-) {
+) -> String {
+    let mut out = String::new();
     let terminal = Terminal::default();
 
     if !repo.is_monorepo {
         let title = Prose::new("<b><u>Repository</u></b>");
-        println!("\n{}\n", title.render(&terminal));
+        writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
         let items = vec![
             Prose::new("<b>Type:</b> Single-package").render(&terminal),
             Prose::new(format!("<b>Root:</b> {}", repo.root.display())).render(&terminal),
         ];
         let list = UnorderedList::new(items);
-        println!("{}", list.render(&terminal));
+        writeln!(out, "{}", list.render(&terminal)).unwrap();
 
         if let Some(summary) = summarize_repo_updates(repo, None, latest_versions_requested) {
-            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
         }
-        return;
+        return out;
     }
 
     // Monorepo heading
@@ -1664,7 +1678,7 @@ pub fn print_repo_section(
         };
 
         let title = Prose::new(format!("<b><u>Repository</u></b>{}", title_suffix));
-        println!("\n{}\n", title.render(&terminal));
+        writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
 
         let update_summary =
             summarize_repo_updates(repo, Some(filtered.as_slice()), latest_versions_requested);
@@ -1698,10 +1712,10 @@ pub fn print_repo_section(
         }
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-        println!("{}", list.render(&terminal));
+        writeln!(out, "{}", list.render(&terminal)).unwrap();
 
         if let Some(summary) = update_summary {
-            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
         }
 
         // Legend for indicators
@@ -1725,15 +1739,17 @@ pub fn print_repo_section(
                 );
             }
             legend.push_str("</dim>");
-            println!("{}", Prose::new(&legend).render(&terminal));
+            writeln!(out, "{}", Prose::new(&legend).render(&terminal)).unwrap();
         }
     } else {
         let title = Prose::new(format!(
             "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
             tool_name, total_count,
         ));
-        println!("\n{}\n", title.render(&terminal));
+        writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
     }
+
+    out
 }
 
 /// Categorize a language name for display styling.
@@ -1771,21 +1787,23 @@ fn render_framework_summary(frameworks: &[FrameworkStats]) -> String {
         .join(", ")
 }
 
-pub fn print_language_section(
+pub fn render_language_section(
     langs: &sniff::filesystem::languages::LanguageBreakdown,
     verbose: u8,
-) {
+) -> String {
     use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
+    let mut out = String::new();
     let term = Terminal::default();
     let primary = langs.primary;
 
     if let Some(primary) = primary {
-        println!("Primary language: {}", primary);
+        writeln!(out, "Primary language: {}", primary).unwrap();
     }
     if !langs.secondary.is_empty() {
-        println!(
+        writeln!(
+            out,
             "Secondary languages: {}",
             langs
                 .secondary
@@ -1793,7 +1811,7 @@ pub fn print_language_section(
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
-        );
+        ).unwrap();
     }
 
     let mut table = Table::new()
@@ -1820,15 +1838,16 @@ pub fn print_language_section(
         ]);
     }
 
-    println!();
-    print!("{}", table.display(&term));
-    println!();
+    writeln!(out).unwrap();
+    write!(out, "{}", table.display(&term)).unwrap();
+    writeln!(out).unwrap();
 
     if verbose > 0 && !langs.frameworks.is_empty() {
-        println!(
+        writeln!(
+            out,
             "Frameworks: {}",
             render_framework_summary(&langs.frameworks)
-        );
+        ).unwrap();
     }
 
     let footer = Prose::new(format!(
@@ -1837,7 +1856,9 @@ pub fn print_language_section(
         format_number(langs.total_language_files)
     ))
     .render(&term);
-    eprintln!("{}", footer);
+    writeln!(out, "{}", footer).unwrap();
+
+    out
 }
 
 pub(crate) fn filter_file_breakdown(
@@ -1872,10 +1893,11 @@ pub(crate) fn filter_file_breakdown(
     }
 }
 
-pub fn print_files_section(files: &FileAssociationBreakdown, verbose: u8, filter: &FilesFilter) {
+pub fn render_files_section(files: &FileAssociationBreakdown, verbose: u8, filter: &FilesFilter) -> String {
     use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
+    let mut out = String::new();
     let filtered = filter_file_breakdown(files, filter);
     let term = Terminal::default();
 
@@ -1896,18 +1918,20 @@ pub fn print_files_section(files: &FileAssociationBreakdown, verbose: u8, filter
         ]);
     }
 
-    println!();
-    print!("{}", table.display(&term));
-    println!();
+    writeln!(out).unwrap();
+    write!(out, "{}", table.display(&term)).unwrap();
+    writeln!(out).unwrap();
 
     if verbose > 0 && !filtered.by_framework.is_empty() {
-        println!(
+        writeln!(
+            out,
             "Frameworks: {}",
             render_framework_summary(&filtered.by_framework)
-        );
+        ).unwrap();
     }
     if verbose > 0 && !filtered.by_language.is_empty() {
-        println!(
+        writeln!(
+            out,
             "Languages: {}",
             filtered
                 .by_language
@@ -1915,46 +1939,51 @@ pub fn print_files_section(files: &FileAssociationBreakdown, verbose: u8, filter
                 .map(|language| format!("{} ({})", language.language, language.total_file_count))
                 .collect::<Vec<_>>()
                 .join(", ")
-        );
+        ).unwrap();
     }
+
+    out
 }
 
-pub fn print_filesystem_section(
+pub fn render_filesystem_section(
     fs: &sniff::FilesystemInfo,
     verbose: u8,
     repo_root: Option<&Path>,
     latest_versions_requested: bool,
-) {
-    println!("=== Filesystem ===");
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "=== Filesystem ===").unwrap();
 
     // Print EditorConfig formatting info at verbose level 2+
     if verbose > 1
         && let Some(ref formatting) = fs.formatting
     {
-        println!("EditorConfig: {}", formatting.config_path.display());
+        writeln!(out, "EditorConfig: {}", formatting.config_path.display()).unwrap();
         for section in &formatting.sections {
-            println!("  [{}]", section.pattern);
+            writeln!(out, "  [{}]", section.pattern).unwrap();
             if let Some(style) = &section.indent_style {
-                println!("    indent_style: {}", style);
+                writeln!(out, "    indent_style: {}", style).unwrap();
             }
             if let Some(size) = section.indent_size {
-                println!("    indent_size: {}", size);
+                writeln!(out, "    indent_size: {}", size).unwrap();
             }
         }
-        println!();
+        writeln!(out).unwrap();
     }
 
     if let Some(ref langs) = fs.languages {
-        println!(
+        writeln!(
+            out,
             "Languages ({} contributing files out of {} scanned):",
             format_number(langs.total_language_files),
             format_number(langs.total_files_scanned)
-        );
+        ).unwrap();
         if let Some(ref primary) = langs.primary {
-            println!("  Primary: {}", primary);
+            writeln!(out, "  Primary: {}", primary).unwrap();
         }
         if !langs.secondary.is_empty() {
-            println!(
+            writeln!(
+                out,
                 "  Secondary: {}",
                 langs
                     .secondary
@@ -1962,81 +1991,86 @@ pub fn print_filesystem_section(
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ")
-            );
+            ).unwrap();
         }
         let show_count = if verbose > 0 { 10 } else { 5 };
         for lang in langs.languages.iter().take(show_count) {
-            println!(
+            writeln!(
+                out,
                 "  {}: {} direct, {} framework ({:.1}%)",
                 lang.language,
                 format_number(lang.direct_file_count),
                 format_number(lang.framework_file_count),
                 lang.percentage
-            );
+            ).unwrap();
             if verbose > 1 && !lang.direct_files.is_empty() {
                 let file_show_count = 3.min(lang.direct_files.len());
                 for file in lang.direct_files.iter().take(file_show_count) {
-                    println!("    - {}", file.display());
+                    writeln!(out, "    - {}", file.display()).unwrap();
                 }
                 if lang.direct_files.len() > file_show_count {
-                    println!(
+                    writeln!(
+                        out,
                         "    ... and {} more files",
                         lang.direct_files.len() - file_show_count
-                    );
+                    ).unwrap();
                 }
             }
         }
         if langs.languages.len() > show_count {
-            println!("  ... and {} more", langs.languages.len() - show_count);
+            writeln!(out, "  ... and {} more", langs.languages.len() - show_count).unwrap();
         }
         if verbose > 0 && !langs.frameworks.is_empty() {
-            println!(
+            writeln!(
+                out,
                 "  Frameworks: {}",
                 render_framework_summary(&langs.frameworks)
-            );
+            ).unwrap();
         }
     }
     if let Some(ref files) = fs.files {
-        println!("Files ({} scanned):", format_number(files.total_files));
+        writeln!(out, "Files ({} scanned):", format_number(files.total_files)).unwrap();
         let show_count = if verbose > 0 { 10 } else { 6 };
         for stats in files.by_association.iter().take(show_count) {
-            println!(
+            writeln!(
+                out,
                 "  {}: {} files ({:.1}%)",
                 stats.association,
                 format_number(stats.file_count),
                 stats.percentage
-            );
+            ).unwrap();
         }
     }
-    println!();
+    writeln!(out).unwrap();
 
     if let Some(ref git) = fs.git {
-        println!("Git Repository:");
+        writeln!(out, "Git Repository:").unwrap();
         let root_str = relative_path(&git.repo_root, repo_root);
-        println!(
+        writeln!(
+            out,
             "  Root: {}",
             if root_str.is_empty() {
                 ".".to_string()
             } else {
                 root_str
             }
-        );
+        ).unwrap();
         if let Some(ref branch) = git.current_branch {
-            println!("  Branch: {}", branch);
+            writeln!(out, "  Branch: {}", branch).unwrap();
         }
 
         // Show in_worktree indicator when true
         if git.in_worktree {
-            println!("  In Worktree: yes");
+            writeln!(out, "  In Worktree: yes").unwrap();
         }
 
         // Show HEAD commit (first recent commit)
         if let Some(commit) = git.recent.first() {
-            println!("  HEAD: {} ({})", &commit.sha[..8], commit.author);
-            println!("  Message: {}", commit.message.lines().next().unwrap_or(""));
+            writeln!(out, "  HEAD: {} ({})", &commit.sha[..8], commit.author).unwrap();
+            writeln!(out, "  Message: {}", commit.message.lines().next().unwrap_or("")).unwrap();
             // Show which remotes have this commit (deep mode)
             if let Some(ref remotes) = commit.remotes {
-                println!("    Synced to: {}", remotes.join(", "));
+                writeln!(out, "    Synced to: {}", remotes.join(", ")).unwrap();
             }
         }
 
@@ -2045,24 +2079,25 @@ pub fn print_filesystem_section(
         } else {
             "clean"
         };
-        println!(
+        writeln!(
+            out,
             "  Status: {} ({} staged, {} unstaged, {} untracked)",
             dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
-        );
+        ).unwrap();
 
         // Show is_behind status (deep mode only)
         if let Some(ref behind) = git.status.is_behind {
             match behind {
-                BehindStatus::NotBehind => println!("  Behind: no"),
+                BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
                 BehindStatus::Behind(remotes) => {
-                    println!("  Behind: {}", remotes.join(", "));
+                    writeln!(out, "  Behind: {}", remotes.join(", ")).unwrap();
                 }
             }
         }
 
         // Show more recent commits at verbose level 1+
         if verbose > 0 && git.recent.len() > 1 {
-            println!("  Recent commits:");
+            writeln!(out, "  Recent commits:").unwrap();
             for commit in git.recent.iter().skip(1).take(5) {
                 let short_msg = commit.message.lines().next().unwrap_or("");
                 let truncated = if short_msg.len() > 50 {
@@ -2070,33 +2105,33 @@ pub fn print_filesystem_section(
                 } else {
                     short_msg.to_string()
                 };
-                print!("    {} - {}", &commit.sha[..8], truncated);
+                write!(out, "    {} - {}", &commit.sha[..8], truncated).unwrap();
                 // Show commit remotes at verbose level 2+ with deep
                 if verbose > 1
                     && let Some(ref remotes) = commit.remotes
                 {
-                    print!(" [{}]", remotes.join(", "));
+                    write!(out, " [{}]", remotes.join(", ")).unwrap();
                 }
-                println!();
+                writeln!(out).unwrap();
             }
             if git.recent.len() > 6 {
-                println!("    ... and {} more", git.recent.len() - 6);
+                writeln!(out, "    ... and {} more", git.recent.len() - 6).unwrap();
             }
         }
 
         // Show dirty file details at verbose level 1+
         if verbose > 0 && !git.status.dirty.is_empty() {
-            println!("  Dirty files:");
+            writeln!(out, "  Dirty files:").unwrap();
             for dirty_file in &git.status.dirty {
-                println!("    - {}", dirty_file.filepath.display());
+                writeln!(out, "    - {}", dirty_file.filepath.display()).unwrap();
                 // Show diff at verbose level 2+
                 if verbose > 1 && !dirty_file.diff.is_empty() {
                     for line in dirty_file.diff.lines().take(5) {
-                        println!("      {}", line);
+                        writeln!(out, "      {}", line).unwrap();
                     }
                     let line_count = dirty_file.diff.lines().count();
                     if line_count > 5 {
-                        println!("      ... ({} more lines)", line_count - 5);
+                        writeln!(out, "      ... ({} more lines)", line_count - 5).unwrap();
                     }
                 }
             }
@@ -2104,57 +2139,58 @@ pub fn print_filesystem_section(
 
         // Show untracked files at verbose level 1+
         if verbose > 0 && !git.status.untracked.is_empty() {
-            println!("  Untracked files:");
+            writeln!(out, "  Untracked files:").unwrap();
             let show_count = 5.min(git.status.untracked.len());
             for untracked in git.status.untracked.iter().take(show_count) {
-                println!("    - {}", untracked.filepath.display());
+                writeln!(out, "    - {}", untracked.filepath.display()).unwrap();
             }
             if git.status.untracked.len() > show_count {
-                println!(
+                writeln!(
+                    out,
                     "    ... and {} more",
                     git.status.untracked.len() - show_count
-                );
+                ).unwrap();
             }
         }
 
         // Show worktrees at verbose level 1+
         if verbose > 0 && !git.worktrees.is_empty() {
-            println!("  Worktrees:");
+            writeln!(out, "  Worktrees:").unwrap();
             for (branch, info) in &git.worktrees {
                 let dirty_indicator = if info.dirty { " (dirty)" } else { "" };
-                println!("    {} @ {}{}", branch, &info.sha[..8], dirty_indicator);
+                writeln!(out, "    {} @ {}{}", branch, &info.sha[..8], dirty_indicator).unwrap();
                 if verbose > 1 {
-                    println!("      Path: {}", info.filepath.display());
+                    writeln!(out, "      Path: {}", info.filepath.display()).unwrap();
                 }
             }
         }
 
         // Show remotes with enhanced branch info
         for remote in &git.remotes {
-            print!("  Remote {}: {:?}", remote.name, remote.provider);
+            write!(out, "  Remote {}: {:?}", remote.name, remote.provider).unwrap();
             if let Some(ref default_branch) = remote.default_branch {
-                print!(" (default: {})", default_branch);
+                write!(out, " (default: {})", default_branch).unwrap();
             }
             // Show branch count in deep mode
             if let Some(ref branches) = remote.branches {
-                print!(" ({} branches)", branches.len());
+                write!(out, " ({} branches)", branches.len()).unwrap();
             }
-            println!();
+            writeln!(out).unwrap();
             // Show branches at verbose level 2+ with deep
             if verbose > 1
                 && let Some(ref branches) = remote.branches
             {
                 let show_count = 5.min(branches.len());
                 for branch in branches.iter().take(show_count) {
-                    println!("    - {}", branch);
+                    writeln!(out, "    - {}", branch).unwrap();
                 }
                 if branches.len() > show_count {
-                    println!("    ... and {} more", branches.len() - show_count);
+                    writeln!(out, "    ... and {} more", branches.len() - show_count).unwrap();
                 }
             }
         }
     }
-    println!();
+    writeln!(out).unwrap();
 
     if let Some(ref repo) = fs.repo {
         let filtered_packages_storage = repo
@@ -2168,14 +2204,14 @@ pub fn print_filesystem_section(
         );
 
         if !repo.is_monorepo {
-            println!("Repository:");
-            println!("  Type: Single-package");
-            println!("  Root: {}", relative_path(&repo.root, repo_root));
+            writeln!(out, "Repository:").unwrap();
+            writeln!(out, "  Type: Single-package").unwrap();
+            writeln!(out, "  Root: {}", relative_path(&repo.root, repo_root)).unwrap();
             if let Some(summary) = update_summary {
                 let terminal = Terminal::default();
-                render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+                write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
             }
-            return;
+            return out;
         }
 
         let tool_name = repo
@@ -2189,7 +2225,7 @@ pub fn print_filesystem_section(
             "<b>Packages:</b> <dim>({} / {} packages)</dim>",
             tool_name, pkg_count,
         ));
-        println!("{}", header.render_optimistic(None));
+        writeln!(out, "{}", header.render_optimistic(None)).unwrap();
 
         if let Some(ref packages) = repo.packages {
             let mut items: Vec<RenderableContent> = Vec::new();
@@ -2209,12 +2245,12 @@ pub fn print_filesystem_section(
             }
 
             let list = UnorderedList::from(items);
-            println!("{}", list.render_optimistic(None));
+            writeln!(out, "{}", list.render_optimistic(None)).unwrap();
         }
 
         if let Some(summary) = update_summary {
             let terminal = Terminal::default();
-            render_update_summary(&summary, latest_versions_requested, verbose, &terminal);
+            write!(out, "{}", render_update_summary(&summary, latest_versions_requested, verbose, &terminal)).unwrap();
         }
 
         let has_updatable = repo
@@ -2222,19 +2258,23 @@ pub fn print_filesystem_section(
             .as_ref()
             .is_some_and(|packages| packages.iter().any(|pkg| pkg.is_updatable == Some(true)));
         if has_updatable {
-            println!(
+            writeln!(
+                out,
                 "{}",
                 Prose::new(
                     "<dim><yellow>*</yellow> dependency updates available  <red>*</red> major version update available</dim>"
                 )
                 .render_optimistic(None)
-            );
+            ).unwrap();
         }
     }
+
+    out
 }
 
-/// Print markdown documents section.
-pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
+/// Render markdown documents section.
+pub(crate) fn render_docs_section(docs: &[MarkdownMeta], verbose: u8) -> String {
+    let mut out = String::new();
     let terminal = Terminal::default();
     let prompt_count = docs.iter().filter(|d| d.prompt.is_some()).count();
 
@@ -2247,7 +2287,7 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
     } else {
         format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
     };
-    eprintln!("\n{}\n", Prose::new(&header).render(&terminal));
+    writeln!(out, "\n{}\n", Prose::new(&header).render(&terminal)).unwrap();
 
     let items: Vec<String> = docs
         .iter()
@@ -2270,17 +2310,20 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta], verbose: u8) {
         .collect();
 
     let list = UnorderedList::new(items);
-    println!("{}", list.render(&terminal));
+    writeln!(out, "{}", list.render(&terminal)).unwrap();
 
     if verbose == 0 {
-        eprintln!(
+        writeln!(
+            out,
             "{}",
             Prose::new(
                 "<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>"
             )
             .render(&terminal)
-        );
+        ).unwrap();
     }
+
+    out
 }
 
 /// Format a document filepath with dim directory and bold filename,
@@ -2367,17 +2410,15 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
 /// Builds a Mermaid flowchart from package dependency data and renders it
 /// inline using `MermaidRenderer`. Falls back to a code block if the
 /// terminal cannot display images or mmdc is not available.
-pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
+pub fn render_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) -> String {
     if !repo.is_monorepo {
-        eprintln!("deps requires a monorepo (no workspace packages found)");
-        return;
+        return String::from("deps requires a monorepo (no workspace packages found)");
     }
 
     let packages = match repo.packages {
         Some(ref pkgs) => pkgs,
         None => {
-            eprintln!("No packages found in workspace");
-            return;
+            return String::from("No packages found in workspace");
         }
     };
 
@@ -2389,16 +2430,16 @@ pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_fil
     let mermaid = match build_deps_mermaid(&filtered) {
         Some(m) => m,
         None => {
-            eprintln!("No internal dependencies found between workspace packages");
-            return;
+            return String::from("No internal dependencies found between workspace packages");
         }
     };
 
     let renderer = MermaidRenderer::for_terminal(&mermaid);
     match renderer.render_for_terminal() {
-        Ok(()) => {}
+        Ok(()) => String::new(),
         Err(_) => {
-            renderer.print_fallback();
+            // Return fallback text representation
+            renderer.fallback_code_block()
         }
     }
 }
@@ -2408,17 +2449,17 @@ pub fn print_repo_deps_visual(repo: &sniff::filesystem::repo::RepoInfo, repo_fil
 /// Each package with dependencies or dependents is shown as a top-level item
 /// with `depends-on` and `used-by` sub-items. Isolates (packages with neither)
 /// are omitted unless an explicit filter is set.
-pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) {
+pub fn render_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filter: Option<&str>) -> String {
+    let mut out = String::new();
+
     if !repo.is_monorepo {
-        eprintln!("deps requires a monorepo (no workspace packages found)");
-        return;
+        return String::from("deps requires a monorepo (no workspace packages found)");
     }
 
     let packages = match repo.packages {
         Some(ref pkgs) => pkgs,
         None => {
-            eprintln!("No packages found in workspace");
-            return;
+            return String::from("No packages found in workspace");
         }
     };
 
@@ -2433,8 +2474,7 @@ pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filte
         .collect();
 
     if relevant.is_empty() {
-        eprintln!("No internal dependencies found between workspace packages");
-        return;
+        return String::from("No internal dependencies found between workspace packages");
     }
 
     let title = if has_explicit_filter {
@@ -2450,7 +2490,7 @@ pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filte
         )
     };
     let term = Terminal::default();
-    eprintln!("\n{}\n", Prose::new(&title).render(&term));
+    writeln!(out, "\n{}\n", Prose::new(&title).render(&term)).unwrap();
 
     let mut outer_items: Vec<RenderableContent> = Vec::new();
     for pkg in &relevant {
@@ -2477,15 +2517,18 @@ pub fn print_repo_deps_text(repo: &sniff::filesystem::repo::RepoInfo, repo_filte
     }
 
     let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
-    print!("{}", list.render(&term));
+    write!(out, "{}", list.render(&term)).unwrap();
 
-    eprintln!(
+    writeln!(
+        out,
         "\n{}",
         Prose::new(
             "<dim><i>use the <blue>--ui</blue> flag to show this in a visual format</i></dim>"
         )
         .render(&term)
-    );
+    ).unwrap();
+
+    out
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! Hardware section output formatting.
 
+use std::fmt::Write;
 use std::path::Path;
 
 use super::{format_bytes, relative_path};
@@ -58,88 +59,93 @@ fn format_gpu_caps(caps: &sniff::hardware::GpuCapabilities) -> Option<String> {
     }
 }
 
-pub fn print_hardware_section(
+pub fn render_hardware_section(
     hardware: &sniff::HardwareInfo,
     verbose: u8,
     repo_root: Option<&Path>,
-) {
-    println!("=== Hardware ===");
+) -> String {
+    let mut out = String::new();
 
-    println!(
+    writeln!(out, "=== Hardware ===").unwrap();
+
+    writeln!(
+        out,
         "CPU: {} ({} logical cores)",
         hardware.cpu.brand, hardware.cpu.logical_cores
-    );
-    println!("Architecture: {}", hardware.cpu.arch);
+    ).unwrap();
+    writeln!(out, "Architecture: {}", hardware.cpu.arch).unwrap();
     if let Some(physical) = hardware.cpu.physical_cores {
-        println!("Physical cores: {}", physical);
+        writeln!(out, "Physical cores: {}", physical).unwrap();
     }
 
     // Print SIMD capabilities at verbose level 1+
     if verbose > 0
         && let Some(simd_str) = format_simd_caps(&hardware.cpu.simd)
     {
-        println!("SIMD: {}", simd_str);
+        writeln!(out, "SIMD: {}", simd_str).unwrap();
     }
-    println!();
+    writeln!(out).unwrap();
 
-    println!("Memory:");
-    println!("  Total: {}", format_bytes(hardware.memory.total_bytes));
-    println!(
+    writeln!(out, "Memory:").unwrap();
+    writeln!(out, "  Total: {}", format_bytes(hardware.memory.total_bytes)).unwrap();
+    writeln!(
+        out,
         "  Available: {}",
         format_bytes(hardware.memory.available_bytes)
-    );
-    println!("  Used: {}", format_bytes(hardware.memory.used_bytes));
+    ).unwrap();
+    writeln!(out, "  Used: {}", format_bytes(hardware.memory.used_bytes)).unwrap();
     if hardware.memory.total_swap > 0 {
-        println!(
+        writeln!(
+            out,
             "  Swap: {} total, {} used",
             format_bytes(hardware.memory.total_swap),
             format_bytes(hardware.memory.used_swap)
-        );
+        ).unwrap();
     }
-    println!();
+    writeln!(out).unwrap();
 
     // Print GPU info if available
     if !hardware.gpu.is_empty() {
-        println!("GPUs:");
+        writeln!(out, "GPUs:").unwrap();
         for gpu in &hardware.gpu {
             let vendor_str = gpu.vendor.as_deref().unwrap_or("Unknown");
-            println!("  {} ({}, {})", gpu.name, vendor_str, gpu.backend);
+            writeln!(out, "  {} ({}, {})", gpu.name, vendor_str, gpu.backend).unwrap();
             if verbose > 0 {
                 if let Some(mem) = gpu.memory_bytes {
-                    println!("    Memory: {}", format_bytes(mem));
+                    writeln!(out, "    Memory: {}", format_bytes(mem)).unwrap();
                 }
-                println!("    Type: {:?}", gpu.device_type);
+                writeln!(out, "    Type: {:?}", gpu.device_type).unwrap();
                 if let Some(ref family) = gpu.metal_family {
-                    println!("    Metal Family: {}", family);
+                    writeln!(out, "    Metal Family: {}", family).unwrap();
                 }
                 if gpu.is_headless {
-                    println!("    Headless: yes");
+                    writeln!(out, "    Headless: yes").unwrap();
                 }
                 if gpu.is_removable {
-                    println!("    Removable: yes (eGPU)");
+                    writeln!(out, "    Removable: yes (eGPU)").unwrap();
                 }
             }
             if verbose > 1 {
                 // Show capabilities at -vv
                 if let Some(caps_str) = format_gpu_caps(&gpu.capabilities) {
-                    println!("    Capabilities: {}", caps_str);
+                    writeln!(out, "    Capabilities: {}", caps_str).unwrap();
                 }
                 if let Some(max_buf) = gpu.max_buffer_bytes {
-                    println!("    Max Buffer: {}", format_bytes(max_buf));
+                    writeln!(out, "    Max Buffer: {}", format_bytes(max_buf)).unwrap();
                 }
             }
         }
-        println!();
+        writeln!(out).unwrap();
     }
 
     // Print audio devices if available
     if !hardware.audio_devices.is_empty() {
-        println!("Audio Devices:");
-        print_audio_device_list(&hardware.audio_devices, verbose);
-        println!();
+        writeln!(out, "Audio Devices:").unwrap();
+        out.push_str(&render_audio_device_list(&hardware.audio_devices, verbose));
+        writeln!(out).unwrap();
     }
 
-    println!("Storage:");
+    writeln!(out, "Storage:").unwrap();
     for disk in &hardware.storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
         let kind_str = match disk.kind {
@@ -148,107 +154,123 @@ pub fn print_hardware_section(
             sniff::hardware::StorageKind::Unknown => "",
         };
         if kind_str.is_empty() {
-            println!("  {} ({})", mount_str, disk.file_system);
+            writeln!(out, "  {} ({})", mount_str, disk.file_system).unwrap();
         } else {
-            println!("  {} ({}, {})", mount_str, disk.file_system, kind_str);
+            writeln!(out, "  {} ({}, {})", mount_str, disk.file_system, kind_str).unwrap();
         }
         if verbose > 0 {
-            println!("    Total: {}", format_bytes(disk.total_bytes));
-            println!("    Available: {}", format_bytes(disk.available_bytes));
+            writeln!(out, "    Total: {}", format_bytes(disk.total_bytes)).unwrap();
+            writeln!(out, "    Available: {}", format_bytes(disk.available_bytes)).unwrap();
             if disk.is_removable {
-                println!("    Removable: yes");
+                writeln!(out, "    Removable: yes").unwrap();
             }
         }
     }
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }
 
 // ============================================================================
 // Subsection print functions (for --cpu, --gpu, --memory, --storage filters)
 // ============================================================================
 
-pub fn print_cpu_section(cpu: &sniff::hardware::CpuInfo, verbose: u8) {
-    println!("=== CPU ===");
-    println!("Brand: {}", cpu.brand);
-    println!("Architecture: {}", cpu.arch);
-    println!("Logical cores: {}", cpu.logical_cores);
+pub fn render_cpu_section(cpu: &sniff::hardware::CpuInfo, verbose: u8) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== CPU ===").unwrap();
+    writeln!(out, "Brand: {}", cpu.brand).unwrap();
+    writeln!(out, "Architecture: {}", cpu.arch).unwrap();
+    writeln!(out, "Logical cores: {}", cpu.logical_cores).unwrap();
     if let Some(physical) = cpu.physical_cores {
-        println!("Physical cores: {}", physical);
+        writeln!(out, "Physical cores: {}", physical).unwrap();
     }
 
     // Print SIMD capabilities at verbose level 1+
     if verbose > 0
         && let Some(simd_str) = format_simd_caps(&cpu.simd)
     {
-        println!("SIMD: {}", simd_str);
+        writeln!(out, "SIMD: {}", simd_str).unwrap();
     }
 
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }
 
-pub fn print_gpu_section(gpus: &[sniff::hardware::GpuInfo], verbose: u8) {
-    println!("=== GPU ===");
+pub fn render_gpu_section(gpus: &[sniff::hardware::GpuInfo], verbose: u8) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== GPU ===").unwrap();
     if gpus.is_empty() {
-        println!("No GPUs detected");
+        writeln!(out, "No GPUs detected").unwrap();
     } else {
         for gpu in gpus {
             let vendor_str = gpu.vendor.as_deref().unwrap_or("Unknown");
-            println!("{} ({}, {})", gpu.name, vendor_str, gpu.backend);
+            writeln!(out, "{} ({}, {})", gpu.name, vendor_str, gpu.backend).unwrap();
             if verbose > 0 {
                 if let Some(mem) = gpu.memory_bytes {
-                    println!("  Memory: {}", format_bytes(mem));
+                    writeln!(out, "  Memory: {}", format_bytes(mem)).unwrap();
                 }
-                println!("  Type: {:?}", gpu.device_type);
+                writeln!(out, "  Type: {:?}", gpu.device_type).unwrap();
                 if let Some(ref family) = gpu.metal_family {
-                    println!("  Metal Family: {}", family);
+                    writeln!(out, "  Metal Family: {}", family).unwrap();
                 }
                 if gpu.is_headless {
-                    println!("  Headless: yes");
+                    writeln!(out, "  Headless: yes").unwrap();
                 }
                 if gpu.is_removable {
-                    println!("  Removable: yes (eGPU)");
+                    writeln!(out, "  Removable: yes (eGPU)").unwrap();
                 }
             }
             if verbose > 1 {
                 if let Some(caps_str) = format_gpu_caps(&gpu.capabilities) {
-                    println!("  Capabilities: {}", caps_str);
+                    writeln!(out, "  Capabilities: {}", caps_str).unwrap();
                 }
                 if let Some(max_buf) = gpu.max_buffer_bytes {
-                    println!("  Max Buffer: {}", format_bytes(max_buf));
+                    writeln!(out, "  Max Buffer: {}", format_bytes(max_buf)).unwrap();
                 }
             }
         }
     }
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }
 
-pub fn print_memory_section(memory: &sniff::hardware::MemoryInfo) {
-    println!("=== Memory ===");
-    println!("Total: {}", format_bytes(memory.total_bytes));
-    println!("Available: {}", format_bytes(memory.available_bytes));
-    println!("Used: {}", format_bytes(memory.used_bytes));
+pub fn render_memory_section(memory: &sniff::hardware::MemoryInfo) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Memory ===").unwrap();
+    writeln!(out, "Total: {}", format_bytes(memory.total_bytes)).unwrap();
+    writeln!(out, "Available: {}", format_bytes(memory.available_bytes)).unwrap();
+    writeln!(out, "Used: {}", format_bytes(memory.used_bytes)).unwrap();
     let usage_percent = (memory.used_bytes as f64 / memory.total_bytes as f64) * 100.0;
-    println!("Usage: {:.1}%", usage_percent);
+    writeln!(out, "Usage: {:.1}%", usage_percent).unwrap();
 
     // Show swap information if swap is available
     if memory.total_swap > 0 {
-        println!();
-        println!("Swap:");
-        println!("  Total: {}", format_bytes(memory.total_swap));
-        println!("  Free: {}", format_bytes(memory.free_swap));
-        println!("  Used: {}", format_bytes(memory.used_swap));
+        writeln!(out).unwrap();
+        writeln!(out, "Swap:").unwrap();
+        writeln!(out, "  Total: {}", format_bytes(memory.total_swap)).unwrap();
+        writeln!(out, "  Free: {}", format_bytes(memory.free_swap)).unwrap();
+        writeln!(out, "  Used: {}", format_bytes(memory.used_swap)).unwrap();
         let swap_usage_percent = (memory.used_swap as f64 / memory.total_swap as f64) * 100.0;
-        println!("  Usage: {:.1}%", swap_usage_percent);
+        writeln!(out, "  Usage: {:.1}%", swap_usage_percent).unwrap();
     }
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }
 
-pub fn print_storage_section(
+pub fn render_storage_section(
     storage: &[sniff::hardware::StorageInfo],
     verbose: u8,
     repo_root: Option<&Path>,
-) {
-    println!("=== Storage ===");
+) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Storage ===").unwrap();
     for disk in storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
         let kind_str = match disk.kind {
@@ -257,19 +279,21 @@ pub fn print_storage_section(
             sniff::hardware::StorageKind::Unknown => "",
         };
         if kind_str.is_empty() {
-            println!("{} ({})", mount_str, disk.file_system);
+            writeln!(out, "{} ({})", mount_str, disk.file_system).unwrap();
         } else {
-            println!("{} ({}, {})", mount_str, disk.file_system, kind_str);
+            writeln!(out, "{} ({}, {})", mount_str, disk.file_system, kind_str).unwrap();
         }
         if verbose > 0 {
-            println!("  Total: {}", format_bytes(disk.total_bytes));
-            println!("  Available: {}", format_bytes(disk.available_bytes));
+            writeln!(out, "  Total: {}", format_bytes(disk.total_bytes)).unwrap();
+            writeln!(out, "  Available: {}", format_bytes(disk.available_bytes)).unwrap();
             if disk.is_removable {
-                println!("  Removable: yes");
+                writeln!(out, "  Removable: yes").unwrap();
             }
         }
     }
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }
 
 // ============================================================================
@@ -288,12 +312,14 @@ fn format_sample_rate(rate: f64) -> String {
     }
 }
 
-/// Print a list of audio devices with verbosity levels.
+/// Render a list of audio devices with verbosity levels.
 ///
 /// - Default: name, kind, direction, default markers
 /// - `-v`: adds sample rate + channel counts
 /// - `-vv`: adds available sample rates + UID
-fn print_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) {
+fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) -> String {
+    let mut out = String::new();
+
     for dev in devices {
         let mut markers = Vec::new();
         if dev.is_default_output {
@@ -309,23 +335,25 @@ fn print_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose
             format!(" [{}]", markers.join(", "))
         };
 
-        println!(
+        writeln!(
+            out,
             "  {} ({}, {}){}",
             dev.name, dev.kind, dev.direction, marker_str
-        );
+        ).unwrap();
 
         if verbose > 0 {
             if dev.sample_rate > 0.0 {
-                println!(
+                writeln!(
+                    out,
                     "    Sample rate: {} Hz",
                     format_sample_rate(dev.sample_rate)
-                );
+                ).unwrap();
             }
             if dev.output_channels > 0 {
-                println!("    Output channels: {}", dev.output_channels);
+                writeln!(out, "    Output channels: {}", dev.output_channels).unwrap();
             }
             if dev.input_channels > 0 {
-                println!("    Input channels: {}", dev.input_channels);
+                writeln!(out, "    Input channels: {}", dev.input_channels).unwrap();
             }
         }
 
@@ -336,22 +364,28 @@ fn print_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose
                     .iter()
                     .map(|r| format_sample_rate(*r))
                     .collect();
-                println!("    Available rates: {} Hz", rates.join(", "));
+                writeln!(out, "    Available rates: {} Hz", rates.join(", ")).unwrap();
             }
             if !dev.uid.is_empty() {
-                println!("    UID: {}", dev.uid);
+                writeln!(out, "    UID: {}", dev.uid).unwrap();
             }
         }
     }
+
+    out
 }
 
-/// Print standalone audio devices section (for `sniff audio-devices`).
-pub fn print_audio_devices_section(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) {
-    println!("=== Audio Devices ===");
+/// Render standalone audio devices section (for `sniff audio-devices`).
+pub fn render_audio_devices_section(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) -> String {
+    let mut out = String::new();
+
+    writeln!(out, "=== Audio Devices ===").unwrap();
     if devices.is_empty() {
-        println!("No audio devices detected");
+        writeln!(out, "No audio devices detected").unwrap();
     } else {
-        print_audio_device_list(devices, verbose);
+        out.push_str(&render_audio_device_list(devices, verbose));
     }
-    println!();
+    writeln!(out).unwrap();
+
+    out
 }

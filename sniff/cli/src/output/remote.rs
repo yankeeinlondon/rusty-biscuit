@@ -4,6 +4,8 @@
 //! rich terminal rendering with styled headings, structured tables, and
 //! categorized lists.
 
+use std::fmt::Write;
+
 use biscuit_terminal::prelude::*;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, write_terminal};
@@ -14,11 +16,16 @@ use sniff::remote::{
 
 use super::format_number;
 
-/// Print remote report as formatted text using biscuit-terminal components.
+/// Render remote report as formatted text using biscuit-terminal components.
 ///
 /// When `readme_content` is provided, renders it as markdown after the
 /// standard report output using darkmatter's terminal renderer.
-pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
+///
+/// ## Returns
+///
+/// A String containing the complete formatted report.
+pub fn render_remote_text(report: &RemoteReport, readme_content: Option<&str>) -> String {
+    let mut out = String::new();
     let term = Terminal::default();
     let meta = &report.metadata;
 
@@ -28,10 +35,10 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         meta.full_name,
         report.provider.display_name()
     );
-    print!("{}", Prose::new(&header).display(&term));
+    write!(out, "{}", Prose::new(&header).display(&term)).unwrap();
 
     if let Some(ref desc) = meta.description {
-        print!("{}", Prose::new(desc).display(&term));
+        write!(out, "{}", Prose::new(desc).display(&term)).unwrap();
     }
 
     // === Stats line ===
@@ -52,7 +59,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
         ));
     }
     if !stats_parts.is_empty() {
-        print!("{}", Prose::new(stats_parts.join("  ")).display(&term));
+        write!(out, "{}", Prose::new(stats_parts.join("  ")).display(&term)).unwrap();
     }
 
     // === Metadata details ===
@@ -79,7 +86,7 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
             .map(|item| Prose::new(item).render(&term))
             .collect();
         let list = UnorderedList::new(rendered).with_bullet("  ");
-        print!("{}", list.display(&term));
+        write!(out, "{}", list.display(&term)).unwrap();
     }
 
     // === Topics ===
@@ -90,41 +97,44 @@ pub fn print_remote_text(report: &RemoteReport, readme_content: Option<&str>) {
             .map(|t| format!("<cyan>{t}</cyan>"))
             .collect::<Vec<_>>()
             .join("  ");
-        println!();
-        print!("{}", Prose::new(&topics_str).display(&term));
+        writeln!(out).unwrap();
+        write!(out, "{}", Prose::new(&topics_str).display(&term)).unwrap();
     }
 
     // === Documents ===
-    print_documents(&report.documents, &term);
+    out.push_str(&render_documents(&report.documents, &term));
 
     // === CI/CD ===
-    print_cicd(&report.ci_cd, &term);
+    out.push_str(&render_cicd(&report.ci_cd, &term));
 
     // === Pull Requests ===
-    print_pull_requests(&report.pull_requests, &term);
+    out.push_str(&render_pull_requests(&report.pull_requests, &term));
 
     // === Issues ===
-    print_issues(&report.issues, &term);
+    out.push_str(&render_issues(&report.issues, &term));
 
     // === Tags & Releases ===
-    print_tags(&report.tags_and_releases.tags, &term);
+    out.push_str(&render_tags(&report.tags_and_releases.tags, &term));
 
     // === Key URLs ===
-    print_key_urls(report, &term);
+    out.push_str(&render_key_urls(report, &term));
 
     // === README ===
     if let Some(content) = readme_content {
-        println!();
+        writeln!(out).unwrap();
         let md: Markdown = content.into();
-        let mut stdout = std::io::stdout().lock();
-        let _ = write_terminal(&mut stdout, &md, TerminalOptions::default());
+        let mut buffer = Vec::new();
+        let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
+        out.push_str(&String::from_utf8_lossy(&buffer));
     }
+
+    out
 }
 
-/// Print document references as a categorized list.
-fn print_documents(docs: &[DocumentRef], term: &Terminal) {
+/// Render document references as a categorized list.
+fn render_documents(docs: &[DocumentRef], term: &Terminal) -> String {
     if docs.is_empty() {
-        return;
+        return String::new();
     }
 
     let readmes: Vec<_> = docs
@@ -157,20 +167,25 @@ fn print_documents(docs: &[DocumentRef], term: &Terminal) {
     }
 
     if !items.is_empty() {
-        println!();
-        print!("{}", Prose::new("<b><u>Documents</u></b>").display(term));
-        print!("{}", UnorderedList::new(items).display(term));
+        let mut out = String::new();
+        writeln!(out).unwrap();
+        write!(out, "{}", Prose::new("<b><u>Documents</u></b>").display(term)).unwrap();
+        write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+        out
+    } else {
+        String::new()
     }
 }
 
-/// Print CI/CD information.
-fn print_cicd(cicd: &[CiCdInfo], term: &Terminal) {
+/// Render CI/CD information.
+fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
     if cicd.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!();
-    print!("{}", Prose::new("<b><u>CI/CD</u></b>").display(term));
+    let mut out = String::new();
+    writeln!(out).unwrap();
+    write!(out, "{}", Prose::new("<b><u>CI/CD</u></b>").display(term)).unwrap();
 
     let items: Vec<String> = cicd
         .iter()
@@ -184,18 +199,20 @@ fn print_cicd(cicd: &[CiCdInfo], term: &Terminal) {
         })
         .collect();
 
-    print!("{}", UnorderedList::new(items).display(term));
+    write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+    out
 }
 
-/// Print recent pull requests as a table.
-fn print_pull_requests(prs: &[PullRequestInfo], term: &Terminal) {
+/// Render recent pull requests as a table.
+fn render_pull_requests(prs: &[PullRequestInfo], term: &Terminal) -> String {
     if prs.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!();
+    let mut out = String::new();
+    writeln!(out).unwrap();
     let heading = format!("<b><u>Pull Requests</u></b> <dim>({})</dim>", prs.len());
-    print!("{}", Prose::new(&heading).display(term));
+    write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
 
     let columns = vec![
         TableColumn::new("#").with_min_width(4),
@@ -222,18 +239,20 @@ fn print_pull_requests(prs: &[PullRequestInfo], term: &Terminal) {
         ]);
     }
 
-    print!("{}", table.display(term));
+    write!(out, "{}", table.display(term)).unwrap();
+    out
 }
 
-/// Print recent issues as a table.
-fn print_issues(issues: &[IssueInfo], term: &Terminal) {
+/// Render recent issues as a table.
+fn render_issues(issues: &[IssueInfo], term: &Terminal) -> String {
     if issues.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!();
+    let mut out = String::new();
+    writeln!(out).unwrap();
     let heading = format!("<b><u>Issues</u></b> <dim>({})</dim>", issues.len());
-    print!("{}", Prose::new(&heading).display(term));
+    write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
 
     let columns = vec![
         TableColumn::new("#").with_min_width(4),
@@ -253,18 +272,20 @@ fn print_issues(issues: &[IssueInfo], term: &Terminal) {
         ]);
     }
 
-    print!("{}", table.display(term));
+    write!(out, "{}", table.display(term)).unwrap();
+    out
 }
 
-/// Print recent tags.
-fn print_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) {
+/// Render recent tags.
+fn render_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) -> String {
     if tags.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!();
+    let mut out = String::new();
+    writeln!(out).unwrap();
     let heading = format!("<b><u>Tags</u></b> <dim>({})</dim>", tags.len());
-    print!("{}", Prose::new(&heading).display(term));
+    write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
 
     let items: Vec<String> = tags
         .iter()
@@ -279,11 +300,12 @@ fn print_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) {
         })
         .collect();
 
-    print!("{}", UnorderedList::new(items).display(term));
+    write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+    out
 }
 
-/// Print key URLs as a styled list.
-fn print_key_urls(report: &RemoteReport, term: &Terminal) {
+/// Render key URLs as a styled list.
+fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
     let urls = &report.key_urls;
     let mut items = Vec::new();
 
@@ -326,9 +348,13 @@ fn print_key_urls(report: &RemoteReport, term: &Terminal) {
     }
 
     if !items.is_empty() {
-        println!();
-        print!("{}", Prose::new("<b><u>URLs</u></b>").display(term));
-        print!("{}", UnorderedList::new(items).display(term));
+        let mut out = String::new();
+        writeln!(out).unwrap();
+        write!(out, "{}", Prose::new("<b><u>URLs</u></b>").display(term)).unwrap();
+        write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+        out
+    } else {
+        String::new()
     }
 }
 

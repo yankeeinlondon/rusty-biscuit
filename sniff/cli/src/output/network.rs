@@ -11,11 +11,12 @@ use biscuit_terminal::{
     utils::layout::Margin,
 };
 
-pub fn print_network_section(network: &sniff::NetworkInfo, verbose: u8) {
+pub fn render_network_section(network: &sniff::NetworkInfo, verbose: u8) -> String {
     let terminal = Terminal::new();
     let document = build_network_document(network, verbose);
-    print!("{}", document.display(&terminal));
-    println!();
+    let mut out = document.display(&terminal).to_string();
+    out.push('\n');
+    out
 }
 
 fn build_network_document(network: &sniff::NetworkInfo, verbose: u8) -> Compose {

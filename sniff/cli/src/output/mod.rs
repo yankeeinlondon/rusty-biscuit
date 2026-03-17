@@ -17,29 +17,29 @@ use std::path::Path;
 
 use sniff::SniffResult;
 
-use crate::args::{DocsFilter, FilesFilter};
+use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
-pub use filesystem::{print_git_file_list, print_git_section, print_hash_section};
-pub use programs::{print_programs_json, print_programs_markdown};
-pub use remote::{print_remote_json, print_remote_text};
-pub use services::{print_services_json, print_services_text};
-pub use topics::print_topics_table;
+pub use filesystem::{render_git_file_list, render_git_section, render_hash_section};
+pub use programs::{print_programs_json, render_programs_markdown};
+pub use remote::{print_remote_json, render_remote_text};
+pub use services::{print_services_json, render_services_text};
+pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_current_package_area_dirty, print_dirty_package_areas, print_dirty_packages,
-    print_package_area_has_source_code_changes,
-    print_docs_section, print_files_section, print_filesystem_section, print_language_section,
-    print_repo_deps_text, print_repo_deps_visual, print_repo_package, print_repo_package_area,
-    print_repo_package_area_root, print_repo_package_root, print_repo_packages, print_repo_root,
-    print_repo_section,
+    print_current_package_area_dirty, print_package_area_has_source_code_changes,
+    render_dirty_package_areas, render_dirty_packages, render_docs_section, render_files_section,
+    render_filesystem_section, render_language_section, render_repo_deps_text,
+    render_repo_deps_visual, render_repo_package, render_repo_package_area,
+    render_repo_package_area_root, render_repo_package_root, render_repo_packages,
+    render_repo_root, render_repo_section,
 };
 pub(crate) use hardware::{
-    print_audio_devices_section, print_cpu_section, print_gpu_section, print_hardware_section,
-    print_memory_section, print_storage_section,
+    render_audio_devices_section, render_cpu_section, render_gpu_section, render_hardware_section,
+    render_memory_section, render_storage_section,
 };
-pub(crate) use network::print_network_section;
-pub(crate) use os::print_os_section;
+pub(crate) use network::render_network_section;
+pub(crate) use os::render_os_section;
 
 /// Filter mode for output - determines which subsection to display.
 ///
@@ -239,22 +239,37 @@ fn filter_docs(
 }
 
 // ============================================================================
-// Main print functions
+// Main render/emit functions
 // ============================================================================
 
+/// Emit rendered text to stdout, optionally stripping ANSI escape codes.
+pub fn emit_text(text: &str, plain: bool) {
+    if plain {
+        print!("{}", biscuit_terminal::prelude::strip_escape_codes(text));
+    } else {
+        print!("{text}");
+    }
+}
+
+/// Render all text output for a given filter mode into a single String.
+///
+/// This is the central render function that delegates to per-section renderers.
+/// The caller is responsible for emitting the result (via `emit_text`).
+///
+/// Some `RepoAction` variants trigger side effects (e.g., `std::process::exit`)
+/// and cannot be rendered to a string — these are handled inline.
 #[allow(clippy::too_many_arguments)]
-pub fn print_text(
+pub fn render_text(
     result: &SniffResult,
     verbose: u8,
     filter: OutputFilter,
     history_count: usize,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-    repo_subcommand: Option<&crate::args::RepoSubcommand>,
-    repo_filter: Option<&str>,
+    repo_action: Option<&RepoAction>,
     base_dir: Option<&std::path::Path>,
     latest_versions_requested: bool,
-) {
+) -> String {
     // Get repo root for relative paths
     let repo_root = result
         .filesystem
@@ -262,131 +277,174 @@ pub fn print_text(
         .and_then(|fs| fs.git.as_ref())
         .map(|git| git.repo_root.as_path());
 
+    let mut out = String::new();
+
     match filter {
         OutputFilter::All => {
-            // Print all sections that are present
             if let Some(ref os) = result.os {
-                print_os_section(os, verbose);
+                out.push_str(&render_os_section(os, verbose));
             }
             if let Some(ref hardware) = result.hardware {
-                print_hardware_section(hardware, verbose, repo_root);
+                out.push_str(&render_hardware_section(hardware, verbose, repo_root));
             }
             if let Some(ref network) = result.network {
-                print_network_section(network, verbose);
+                out.push_str(&render_network_section(network, verbose));
             }
             if let Some(ref filesystem) = result.filesystem {
-                print_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested);
+                out.push_str(&render_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested));
             }
         }
-        // Top-level section filters (used for single-section requests)
         OutputFilter::Os => {
             if let Some(ref os) = result.os {
-                print_os_section(os, verbose);
+                out.push_str(&render_os_section(os, verbose));
             }
         }
         OutputFilter::Hardware => {
             if let Some(ref hardware) = result.hardware {
-                print_hardware_section(hardware, verbose, repo_root);
+                out.push_str(&render_hardware_section(hardware, verbose, repo_root));
             }
         }
         OutputFilter::Network => {
             if let Some(ref network) = result.network {
-                print_network_section(network, verbose);
+                out.push_str(&render_network_section(network, verbose));
             }
         }
         OutputFilter::Filesystem => {
             if let Some(ref filesystem) = result.filesystem {
-                print_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested);
+                out.push_str(&render_filesystem_section(filesystem, verbose, repo_root, latest_versions_requested));
             }
         }
         OutputFilter::Cpu => {
             if let Some(ref hardware) = result.hardware {
-                print_cpu_section(&hardware.cpu, verbose);
+                out.push_str(&render_cpu_section(&hardware.cpu, verbose));
             }
         }
         OutputFilter::Gpu => {
             if let Some(ref hardware) = result.hardware {
-                print_gpu_section(&hardware.gpu, verbose);
+                out.push_str(&render_gpu_section(&hardware.gpu, verbose));
             }
         }
         OutputFilter::Memory => {
             if let Some(ref hardware) = result.hardware {
-                print_memory_section(&hardware.memory);
+                out.push_str(&render_memory_section(&hardware.memory));
             }
         }
         OutputFilter::Storage => {
             if let Some(ref hardware) = result.hardware {
-                print_storage_section(&hardware.storage, verbose, repo_root);
+                out.push_str(&render_storage_section(&hardware.storage, verbose, repo_root));
             }
         }
         OutputFilter::AudioDevices => {
             if let Some(ref hardware) = result.hardware {
-                print_audio_devices_section(&hardware.audio_devices, verbose);
+                out.push_str(&render_audio_devices_section(&hardware.audio_devices, verbose));
             }
         }
-        OutputFilter::Git => {
-            if let Some(ref filesystem) = result.filesystem
-                && let Some(ref git) = filesystem.git
-            {
-                print_git_section(git, history_count, verbose);
-            }
-        }
-        OutputFilter::Repo => {
-            use crate::args::RepoSubcommand;
-            match repo_subcommand {
-                Some(RepoSubcommand::Package) => {
-                    print_repo_package(result, base_dir, verbose);
+        OutputFilter::Git | OutputFilter::Repo => {
+            match repo_action {
+                Some(RepoAction::Package) => {
+                    let rendered = render_repo_package(result, base_dir, verbose);
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::PackageArea) => {
-                    print_repo_package_area(result, base_dir);
+                Some(RepoAction::PackageArea) => {
+                    let rendered = render_repo_package_area(result, base_dir);
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::Packages { .. }) => {
-                    print_repo_packages(result, repo_filter);
+                Some(RepoAction::Packages { filter }) => {
+                    let rendered = render_repo_packages(result, filter.as_deref());
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::DirtyPackages { .. }) => {
-                    print_dirty_packages(result, repo_filter);
+                Some(RepoAction::DirtyPackages { filter }) => {
+                    let rendered = render_dirty_packages(result, filter.as_deref());
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::DirtyPackageAreas { .. }) => {
-                    print_dirty_package_areas(result, repo_filter);
+                Some(RepoAction::DirtyPackageAreas { filter }) => {
+                    let rendered = render_dirty_package_areas(result, filter.as_deref());
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::Deps { ui, .. }) => {
+                Some(RepoAction::Deps { ui, filter }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
                         if *ui {
-                            print_repo_deps_visual(repo, repo_filter);
+                            out.push_str(&render_repo_deps_visual(repo, filter.as_deref()));
                         } else {
-                            print_repo_deps_text(repo, repo_filter);
+                            out.push_str(&render_repo_deps_text(repo, filter.as_deref()));
                         }
                     }
                 }
-                Some(RepoSubcommand::PackageRoot) => {
-                    print_repo_package_root(result, base_dir);
+                Some(RepoAction::PackageRoot) => {
+                    let rendered = render_repo_package_root(result, base_dir);
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::PackageAreaRoot) => {
-                    print_repo_package_area_root(result, base_dir);
+                Some(RepoAction::PackageAreaRoot) => {
+                    let rendered = render_repo_package_area_root(result, base_dir);
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::RepoRoot) => {
-                    print_repo_root(result);
+                Some(RepoAction::RepoRoot) => {
+                    let rendered = render_repo_root(result);
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
                 }
-                Some(RepoSubcommand::IsCurrentPackageAreaDirty) => {
+                Some(RepoAction::IsCurrentPackageAreaDirty) => {
+                    // Side-effect only: calls std::process::exit
                     print_current_package_area_dirty(result, base_dir);
                 }
-                Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => {
+                Some(RepoAction::PackageAreaHasSourceCodeChanges) => {
+                    // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                None => {
+                Some(RepoAction::GitStatus { .. }) => {
+                    if let Some(ref filesystem) = result.filesystem
+                        && let Some(ref git) = filesystem.git
+                    {
+                        out.push_str(&render_git_section(git, history_count, verbose));
+                    }
+                }
+                Some(RepoAction::Structure { filter, .. }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
-                        print_repo_section(
-                            repo,
-                            verbose,
-                            repo_root,
-                            repo_filter,
-                            latest_versions_requested,
-                        );
+                        out.push_str(&render_repo_section(repo, verbose, repo_root, filter.as_deref(), latest_versions_requested));
                     }
+                }
+                None => {
+                    if filter == OutputFilter::Git {
+                        if let Some(ref filesystem) = result.filesystem
+                            && let Some(ref git) = filesystem.git
+                        {
+                            out.push_str(&render_git_section(git, history_count, verbose));
+                        }
+                    } else if let Some(ref filesystem) = result.filesystem
+                        && let Some(ref repo) = filesystem.repo
+                    {
+                        out.push_str(&render_repo_section(repo, verbose, repo_root, None, latest_versions_requested));
+                    }
+                }
+                _ => {
+                    // Hash, Remote, StagedFiles, UnstagedFiles, UntrackedFiles
+                    // are handled as early returns in commands.rs
                 }
             }
         }
@@ -394,14 +452,14 @@ pub fn print_text(
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref langs) = filesystem.languages
             {
-                print_language_section(langs, verbose);
+                out.push_str(&render_language_section(langs, verbose));
             }
         }
         OutputFilter::Files => {
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref files) = filesystem.files
             {
-                print_files_section(files, verbose, files_filter);
+                out.push_str(&render_files_section(files, verbose, files_filter));
             }
         }
         OutputFilter::Docs => {
@@ -409,10 +467,9 @@ pub fn print_text(
                 && let Some(ref docs) = filesystem.docs
             {
                 let filtered = filter_docs(docs, docs_filter);
-                print_docs_section(&filtered, verbose);
+                out.push_str(&render_docs_section(&filtered, verbose));
             }
         }
-        // Programs and Services filters are handled separately in main.rs
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -423,10 +480,11 @@ pub fn print_text(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services => {
-            // These are handled separately, should not reach here
             unreachable!("Programs, Services, and Remote filters should be handled separately")
         }
     }
+
+    out
 }
 
 /// Apply output filter to create a custom JSON value with only the requested fields.

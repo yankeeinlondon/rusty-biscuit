@@ -24,8 +24,8 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
     ),
 ];
 
-/// Print the topics table for subsection commands.
-pub fn print_topics_table() {
+/// Render the topics table for subsection commands.
+pub fn render_topics_table() -> String {
     let headers: Vec<&str> = TOPIC_COLUMNS.iter().map(|(header, _)| *header).collect();
     let max_rows = TOPIC_COLUMNS
         .iter()
@@ -55,7 +55,7 @@ pub fn print_topics_table() {
 
     let markdown = Markdown::from(lines.join("\n"));
     match for_terminal(&markdown, TerminalOptions::default()) {
-        Ok(rendered) => print!("{}", rendered),
-        Err(_) => println!("{}", markdown.content()),
+        Ok(rendered) => rendered,
+        Err(_) => format!("{}\n", markdown.content()),
     }
 }

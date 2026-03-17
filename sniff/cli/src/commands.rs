@@ -20,6 +20,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Pre-scan for --plain to disable clap ANSI styling before parsing
+    let is_plain = std::env::args().any(|a| a == "--plain");
+    if is_plain {
+        // NO_COLOR is a well-established convention for disabling terminal colors
+        unsafe { std::env::set_var("NO_COLOR", "1") };
+    }
+
     let cli = Cli::parse();
 
     // Handle --completions first (prints setup instructions)
@@ -35,7 +42,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if matches!(cli.command, Some(Commands::Topics)) {
-        output::print_topics_table();
+        output::emit_text(&output::render_topics_table(), cli.plain);
         return Ok(());
     }
 
@@ -61,7 +68,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 output::print_programs_json(&programs, output_filter)?;
             } else {
-                output::print_programs_markdown(&programs, cli.verbose, output_filter);
+                let rendered = output::render_programs_markdown(&programs, cli.verbose, output_filter);
+                output::emit_text(&rendered, cli.plain);
             }
             return Ok(());
         }
@@ -77,7 +85,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 output::print_services_json(&services_info, state_filter)?;
             } else {
-                output::print_services_text(&services_info, cli.verbose, state_filter);
+                output::emit_text(&output::render_services_text(&services_info, cli.verbose, state_filter), cli.plain);
             }
             return Ok(());
         }
@@ -89,103 +97,97 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
-    // Handle `sniff git <remote>` - resolve name/URL/shorthand, then fetch remote info
-    if let Some(ref cmd) = cli.command
-        && let Some(remote_ref) = cmd.git_remote()
-    {
-        if remote_ref.contains("://") || remote_ref.starts_with("git@") {
-            // URL: contains :// or starts with git@
-            return handle_remote_url(remote_ref, cli.json, cli.verbose).await;
-        } else if is_owner_repo_shorthand(remote_ref) {
-            // owner/repo shorthand: exactly one slash with non-empty parts
-            return handle_shorthand(remote_ref, cli.json, cli.verbose).await;
-        } else {
-            // Git remote name (e.g., "origin")
-            let url = resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
-                format!(
-                    "Could not find remote '{}' in the current repository",
-                    remote_ref
-                )
-            })?;
-            return handle_remote_url(&url, cli.json, cli.verbose).await;
-        }
+    // Emit deprecation warning for `sniff git` (text mode only)
+    if matches!(cli.command, Some(Commands::Git { .. })) && !cli.json {
+        eprintln!("note: 'sniff git' is deprecated, use 'sniff repo' subcommands instead");
     }
 
-    // Handle `sniff git hash <sha>` — drill into a single commit (early return)
-    if let Some(ref cmd) = cli.command
-        && let Some(sha) = cmd.git_hash()
-    {
-        let dir = base_dir
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let repo =
-            git2::Repository::discover(dir).map_err(|e| format!("Not a git repository: {}", e))?;
-        let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
-            .ok_or_else(|| format!("Commit not found: {}", sha))?;
-        let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
+    // Normalize to RepoAction for unified dispatch
+    let repo_action = cli.command.as_ref().and_then(|cmd| {
+        cmd.to_repo_action().or_else(|| cmd.git_to_repo_action())
+    });
 
-        if cli.json {
-            let json = serde_json::json!({
-                "commit": commit,
-                "files": files.iter().map(|(p, k)| serde_json::json!({
-                    "path": p,
-                    "kind": k,
-                })).collect::<Vec<_>>(),
-            });
-            println!("{}", serde_json::to_string_pretty(&json)?);
-        } else {
-            let commit_url = commit_url_from_repo(&repo, &commit.sha);
-            output::print_hash_section(&commit, &files, cli.verbose, commit_url.as_deref());
-        }
-        return Ok(());
-    }
-
-    // Handle `sniff git staged|unstaged|untracked` — list files by status (early return)
-    if let Some(ref cmd) = cli.command
-        && let Some(sub) = cmd.git_subcommand()
-    {
-        use crate::args::GitSubcommand;
-        let status_filter = match sub {
-            GitSubcommand::Staged => Some(sniff::filesystem::git::FileStatus::Staged),
-            GitSubcommand::Unstaged => Some(sniff::filesystem::git::FileStatus::Modified),
-            GitSubcommand::Untracked => Some(sniff::filesystem::git::FileStatus::Untracked),
-            _ => None,
-        };
-        if let Some(filter) = status_filter {
-            // Quick detect — only need filesystem/git data
-            let mut config = SniffConfig::new()
-                .skip_os()
-                .skip_hardware()
-                .skip_network();
-            if let Some(ref base) = base_dir {
-                config = config.base_dir(base.clone());
-            }
-            let result = sniff::detect_with_config(config)?;
-            if let Some(ref fs) = result.filesystem
-                && let Some(ref git) = fs.git
-            {
-                if cli.json {
-                    let files: Vec<_> = git
-                        .file_changes
-                        .iter()
-                        .filter(|f| match filter {
-                            sniff::filesystem::git::FileStatus::Staged => {
-                                f.status == sniff::filesystem::git::FileStatus::Staged
-                                    || f.status == sniff::filesystem::git::FileStatus::Both
-                            }
-                            sniff::filesystem::git::FileStatus::Modified => {
-                                f.status == sniff::filesystem::git::FileStatus::Modified
-                                    || f.status == sniff::filesystem::git::FileStatus::Both
-                            }
-                            _ => f.status == filter,
-                        })
-                        .collect();
-                    println!("{}", serde_json::to_string_pretty(&files)?);
+    // Handle RepoAction variants that don't need full detection as early returns
+    if let Some(ref action) = repo_action {
+        match action {
+            crate::args::RepoAction::Remote { remote } => {
+                if remote.contains("://") || remote.starts_with("git@") {
+                    return handle_remote_url(remote, cli.json, cli.plain, cli.verbose).await;
+                } else if is_owner_repo_shorthand(remote) {
+                    return handle_shorthand(remote, cli.json, cli.plain, cli.verbose).await;
                 } else {
-                    output::print_git_file_list(git, &filter, cli.verbose);
+                    let url = resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
+                        format!(
+                            "Could not find remote '{}' in the current repository",
+                            remote
+                        )
+                    })?;
+                    return handle_remote_url(&url, cli.json, cli.plain, cli.verbose).await;
                 }
             }
-            return Ok(());
+            crate::args::RepoAction::Hash { sha } => {
+                let dir = base_dir.as_deref().unwrap_or_else(|| std::path::Path::new("."));
+                let repo = git2::Repository::discover(dir).map_err(|e| format!("Not a git repository: {}", e))?;
+                let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
+                    .ok_or_else(|| format!("Commit not found: {}", sha))?;
+                let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
+
+                if cli.json {
+                    let json = serde_json::json!({
+                        "commit": commit,
+                        "files": files.iter().map(|(p, k)| serde_json::json!({
+                            "path": p,
+                            "kind": k,
+                        })).collect::<Vec<_>>(),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                } else {
+                    let commit_url = commit_url_from_repo(&repo, &commit.sha);
+                    output::emit_text(&output::render_hash_section(&commit, &files, cli.verbose, commit_url.as_deref()), cli.plain);
+                }
+                return Ok(());
+            }
+            crate::args::RepoAction::StagedFiles { package: _ }
+            | crate::args::RepoAction::UnstagedFiles { package: _ }
+            | crate::args::RepoAction::UntrackedFiles { package: _ } => {
+                let status_filter = match action {
+                    crate::args::RepoAction::StagedFiles { .. } => sniff::filesystem::git::FileStatus::Staged,
+                    crate::args::RepoAction::UnstagedFiles { .. } => sniff::filesystem::git::FileStatus::Modified,
+                    crate::args::RepoAction::UntrackedFiles { .. } => sniff::filesystem::git::FileStatus::Untracked,
+                    _ => unreachable!(),
+                };
+                // Use the existing file-list logic
+                let mut config = SniffConfig::new().skip_os().skip_hardware().skip_network();
+                if let Some(ref base) = base_dir {
+                    config = config.base_dir(base.clone());
+                }
+                let result = sniff::detect_with_config(config)?;
+                if let Some(ref fs) = result.filesystem && let Some(ref git) = fs.git {
+                    if cli.json {
+                        let files: Vec<_> = git.file_changes.iter()
+                            .filter(|f| match status_filter {
+                                sniff::filesystem::git::FileStatus::Staged => {
+                                    f.status == sniff::filesystem::git::FileStatus::Staged
+                                        || f.status == sniff::filesystem::git::FileStatus::Both
+                                }
+                                sniff::filesystem::git::FileStatus::Modified => {
+                                    f.status == sniff::filesystem::git::FileStatus::Modified
+                                        || f.status == sniff::filesystem::git::FileStatus::Both
+                                }
+                                _ => f.status == status_filter,
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&files)?);
+                    } else {
+                        output::emit_text(&output::render_git_file_list(git, &status_filter, cli.verbose), cli.plain);
+                    }
+                }
+                return Ok(());
+            }
+            _ => {
+                // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
+                // are handled after full detection below
+            }
         }
     }
 
@@ -195,19 +197,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         config = config.base_dir(base.clone());
     }
 
-    let refresh_remotes_enabled = cli
-        .command
-        .as_ref()
-        .is_some_and(|command| command.refresh_remotes());
+    let refresh_remotes_enabled = match &repo_action {
+        Some(crate::args::RepoAction::GitStatus { refresh_remotes: true, .. }) => true,
+        _ => cli.command.as_ref().is_some_and(|command| command.refresh_remotes()),
+    };
     if refresh_remotes_enabled {
         config = config.deep(true);
     }
 
     // Set commit count from history flag
-    let history_count = cli
-        .command
-        .as_ref()
-        .map_or(DEFAULT_COMMIT_COUNT, |c| c.history());
+    let history_count = match &repo_action {
+        Some(crate::args::RepoAction::GitStatus { history, .. }) => *history,
+        _ => cli.command.as_ref().map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
+    };
     config = config.commit_count(history_count);
 
     // Apply skip logic based on filter mode
@@ -257,10 +259,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut result = detect_with_config(config)?;
 
-    // Handle `sniff git --package <pkg>` — scope git view to a specific package
-    if let Some(ref cmd) = cli.command
-        && let Some(pkg_name) = cmd.git_package()
-    {
+    // Handle package scoping for git actions
+    let package_for_git = match &repo_action {
+        Some(crate::args::RepoAction::GitStatus { package, .. }) => package.clone(),
+        _ => None,
+    };
+    if let Some(pkg_name) = &package_for_git {
         let path_prefix = resolve_package_path(&result, pkg_name)?;
 
         if let Some(ref mut filesystem) = result.filesystem
@@ -319,10 +323,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let latest_versions_enabled = cli
-        .command
-        .as_ref()
-        .is_some_and(|command| command.latest_versions());
+    let latest_versions_enabled = match &repo_action {
+        Some(crate::args::RepoAction::Structure { latest_versions: true, .. }) => true,
+        _ => cli.command.as_ref().is_some_and(|command| command.latest_versions()),
+    };
 
     if latest_versions_enabled {
         result = enrich_result_dependencies(result).await;
@@ -337,9 +341,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map_or(FilesFilter::default(), |c| c.files_filter());
 
-    let repo_subcommand = cli.command.as_ref().and_then(|c| c.repo_subcommand());
-    let repo_filter = cli.command.as_ref().and_then(|c| c.repo_filter());
-
     // Output logic:
     // - No subcommand + --json: full JSON output (help already handled above)
     // - With subcommand: text by default, --json for JSON
@@ -348,18 +349,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if use_json {
         output::print_json(&result, output_filter, &docs_filter, &files_filter)?;
     } else {
-        output::print_text(
+        let text = output::render_text(
             &result,
             cli.verbose,
             output_filter,
             history_count,
             &docs_filter,
             &files_filter,
-            repo_subcommand,
-            repo_filter,
+            repo_action.as_ref(),
             base_dir.as_deref(),
             latest_versions_enabled,
         );
+        output::emit_text(&text, cli.plain);
     }
 
     Ok(())
@@ -414,6 +415,7 @@ fn print_completions_help() {
 async fn handle_shorthand(
     shorthand: &str,
     json: bool,
+    plain: bool,
     verbose: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (owner, repo) = shorthand.split_once('/').expect("already validated");
@@ -424,7 +426,8 @@ async fn handle_shorthand(
         output::print_remote_json(&report)?;
     } else {
         let readme = fetch_readme(&report, &remote, owner, repo, verbose).await;
-        output::print_remote_text(&report, readme.as_deref());
+        let rendered = output::render_remote_text(&report, readme.as_deref());
+        output::emit_text(&rendered, plain);
     }
 
     Ok(())
@@ -436,6 +439,7 @@ async fn handle_shorthand(
 async fn handle_remote_url(
     url: &str,
     json: bool,
+    plain: bool,
     verbose: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let remote = GitRemote::from_url(url)?;
@@ -446,7 +450,8 @@ async fn handle_remote_url(
         output::print_remote_json(&report)?;
     } else {
         let readme = fetch_readme(&report, &remote, &parsed.owner, &parsed.repo, verbose).await;
-        output::print_remote_text(&report, readme.as_deref());
+        let rendered = output::render_remote_text(&report, readme.as_deref());
+        output::emit_text(&rendered, plain);
     }
 
     Ok(())

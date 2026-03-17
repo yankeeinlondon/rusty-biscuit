@@ -977,13 +977,14 @@ fn test_services_state_stopped() {
 
 #[test]
 fn test_enrichment_flags_in_help() {
+    // Top-level help should mention --plain and repo, but not --deep
     cargo_bin_cmd!("sniff")
         .arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains("--deep").not())
-        .stdout(predicate::str::contains("--refresh-remotes"))
-        .stdout(predicate::str::contains("--latest-versions"));
+        .stdout(predicate::str::contains("--plain"))
+        .stdout(predicate::str::contains("sniff repo"));
 }
 
 #[test]
@@ -1093,28 +1094,29 @@ fn test_old_flag_syntax_fails() {
 
 #[test]
 fn test_git_remote_help() {
-    // git subcommand --help should work and mention the REMOTE positional arg
+    // git subcommand --help should still work (hidden alias)
     cargo_bin_cmd!("sniff")
         .args(["git", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[REMOTE]"));
 
-    // Instead, verify via the main help text
+    // Remote is now documented via `sniff repo --help`
     cargo_bin_cmd!("sniff")
-        .arg("--help")
+        .args(["repo", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("sniff git origin"));
+        .stdout(predicate::str::contains("sniff repo remote origin"));
 }
 
 #[test]
-fn test_help_mentions_remote_via_git() {
+fn test_help_mentions_remote_via_repo() {
+    // Remote inspection is now under `sniff repo --help`
     cargo_bin_cmd!("sniff")
-        .arg("--help")
+        .args(["repo", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("sniff git origin"))
+        .stdout(predicate::str::contains("sniff repo remote origin"))
         .stdout(predicate::str::contains("Inspect the 'origin' remote"));
 }
 
@@ -1173,11 +1175,12 @@ fn test_editors_install_help_works() {
 
 #[test]
 fn test_help_mentions_install() {
+    // Top-level help mentions editors with install support
     cargo_bin_cmd!("sniff")
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("sniff editors install"));
+        .stdout(predicate::str::contains("sniff editors"));
 }
 
 #[test]
@@ -1187,4 +1190,80 @@ fn test_editors_json_still_works_with_install_subcommand() {
         .args(["editors", "--json"])
         .assert()
         .success();
+}
+
+// ============================================================================
+// --plain flag tests
+// ============================================================================
+
+#[test]
+fn test_plain_flag_strips_escape_codes() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["os", "--plain"])
+        .output()
+        .expect("failed to run sniff os --plain");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // ANSI escape codes start with \x1b[
+    assert!(
+        !stdout.contains("\x1b["),
+        "Plain output should not contain ANSI escape codes"
+    );
+}
+
+#[test]
+fn test_plain_with_json_ignores_plain() {
+    // --plain --json should produce normal JSON (plain is irrelevant for JSON)
+    cargo_bin_cmd!("sniff")
+        .args(["os", "--plain", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\""));
+}
+
+// ============================================================================
+// Deprecation warning tests
+// ============================================================================
+
+#[test]
+fn test_git_deprecation_warning() {
+    // `sniff git` should emit deprecation notice on stderr
+    cargo_bin_cmd!("sniff")
+        .arg("git")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("deprecated"));
+}
+
+#[test]
+fn test_git_json_no_deprecation() {
+    // `sniff git --json` should NOT emit deprecation notice
+    cargo_bin_cmd!("sniff")
+        .args(["git", "--json"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("deprecated").not());
+}
+
+// ============================================================================
+// Repo subcommand tests (Phase 1 verification)
+// ============================================================================
+
+#[test]
+fn test_repo_git_status_subcommand() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "git-status"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_help_shows_examples() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sniff repo git-status"))
+        .stdout(predicate::str::contains("sniff repo hash"))
+        .stdout(predicate::str::contains("sniff repo staged-files"));
 }

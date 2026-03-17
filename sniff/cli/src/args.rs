@@ -7,6 +7,30 @@ use crate::output::OutputFilter;
 /// Default number of recent commits to display in git output.
 pub const DEFAULT_COMMIT_COUNT: usize = 10;
 
+/// Normalized repo action — decoupled from clap parse shape.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum RepoAction {
+    Structure { filter: Option<String>, latest_versions: bool },
+    GitStatus { history: usize, refresh_remotes: bool, package: Option<String> },
+    Hash { sha: String },
+    StagedFiles { package: Option<String> },
+    UnstagedFiles { package: Option<String> },
+    UntrackedFiles { package: Option<String> },
+    Remote { remote: String },
+    Deps { filter: Option<String>, ui: bool },
+    Packages { filter: Option<String> },
+    Package,
+    PackageArea,
+    DirtyPackages { filter: Option<String> },
+    DirtyPackageAreas { filter: Option<String> },
+    PackageRoot,
+    PackageAreaRoot,
+    RepoRoot,
+    IsCurrentPackageAreaDirty,
+    PackageAreaHasSourceCodeChanges,
+}
+
 /// Detect system and repository information
 #[derive(Parser)]
 #[command(
@@ -14,7 +38,8 @@ pub const DEFAULT_COMMIT_COUNT: usize = 10;
     version,
     about,
     after_help = AFTER_HELP,
-    help_template = HELP_TEMPLATE
+    help_template = HELP_TEMPLATE,
+    disable_help_subcommand = true,
 )]
 pub struct Cli {
     /// Base directory for filesystem analysis
@@ -28,6 +53,10 @@ pub struct Cli {
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Strip terminal escape codes from text output
+    #[arg(long, global = true)]
+    pub plain: bool,
 
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
@@ -179,7 +208,7 @@ pub enum Commands {
     AudioDevices,
 
     /// Show git repository information, or inspect a remote by name/URL
-    #[command(disable_help_flag = true)]
+    #[command(disable_help_flag = true, hide = true)]
     Git {
         /// Number of recent commits to display (default: 10)
         #[arg(short = 'h', long, default_value_t = DEFAULT_COMMIT_COUNT)]
@@ -330,7 +359,62 @@ pub enum GitSubcommand {
 
 /// Repo-specific subcommands.
 #[derive(Subcommand, Debug, Clone)]
+#[command(
+    disable_help_subcommand = true,
+    after_help = REPO_AFTER_HELP,
+)]
 pub enum RepoSubcommand {
+    /// Show repository structure (default when no subcommand given)
+    Structure {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Show git status with commit history
+    #[command(name = "git-status")]
+    GitStatus {
+        /// Number of recent commits to display
+        #[arg(long, default_value_t = DEFAULT_COMMIT_COUNT)]
+        history: usize,
+        /// Fetch remotes to check if branches are out of sync
+        #[arg(long)]
+        refresh_remotes: bool,
+        /// Scope git view to a specific package or package area
+        #[arg(short, long, value_name = "PKG")]
+        package: Option<String>,
+    },
+    /// Show details for a specific commit hash
+    Hash {
+        /// Git commit SHA (full or short)
+        #[arg(value_name = "SHA")]
+        sha: String,
+    },
+    /// List staged files (in index, ready to commit)
+    #[command(name = "staged-files")]
+    StagedFiles {
+        /// Scope to a specific package or package area
+        #[arg(short, long, value_name = "PKG")]
+        package: Option<String>,
+    },
+    /// List unstaged files (modified in working tree)
+    #[command(name = "unstaged-files")]
+    UnstagedFiles {
+        /// Scope to a specific package or package area
+        #[arg(short, long, value_name = "PKG")]
+        package: Option<String>,
+    },
+    /// List untracked files (not under version control)
+    #[command(name = "untracked-files")]
+    UntrackedFiles {
+        /// Scope to a specific package or package area
+        #[arg(short, long, value_name = "PKG")]
+        package: Option<String>,
+    },
+    /// Inspect a remote repository (URL, name, or owner/repo shorthand)
+    Remote {
+        /// Git remote URL, remote name, or owner/repo shorthand
+        #[arg(value_name = "REMOTE")]
+        remote: String,
+    },
     /// Render an internal dependency diagram
     Deps {
         /// Use visual (Mermaid) rendering instead of text
@@ -490,17 +574,8 @@ impl Commands {
     pub fn history(&self) -> usize {
         match self {
             Commands::Git { history, .. } => *history,
+            Commands::Repo { repo_subcommand: Some(RepoSubcommand::GitStatus { history, .. }), .. } => *history,
             _ => DEFAULT_COMMIT_COUNT,
-        }
-    }
-
-    /// Get the repo subcommand if this is a repo command.
-    pub fn repo_subcommand(&self) -> Option<&RepoSubcommand> {
-        match self {
-            Commands::Repo {
-                repo_subcommand, ..
-            } => repo_subcommand.as_ref(),
-            _ => None,
         }
     }
 
@@ -513,6 +588,9 @@ impl Commands {
                 ..
             } | Commands::Git {
                 refresh_remotes: true,
+                ..
+            } | Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::GitStatus { refresh_remotes: true, .. }),
                 ..
             }
         )
@@ -530,67 +608,6 @@ impl Commands {
                 ..
             }
         )
-    }
-
-    /// Get the repo filter string if this is a repo command with a filter arg.
-    ///
-    /// Checks both the top-level filter and subcommand-level filters.
-    pub fn repo_filter(&self) -> Option<&str> {
-        match self {
-            Commands::Repo {
-                filter,
-                repo_subcommand,
-                ..
-            } => {
-                // Subcommand filter takes precedence if present
-                let sub_filter = match repo_subcommand {
-                    Some(RepoSubcommand::Deps { filter, .. }) => filter.as_deref(),
-                    Some(RepoSubcommand::Packages { filter }) => filter.as_deref(),
-                    Some(RepoSubcommand::DirtyPackages { filter }) => filter.as_deref(),
-                    Some(RepoSubcommand::DirtyPackageAreas { filter }) => filter.as_deref(),
-                    _ => None,
-                };
-                sub_filter.or(filter.as_deref())
-            }
-            _ => None,
-        }
-    }
-
-    /// Get remote name/URL if this is a git command with a remote arg.
-    pub fn git_remote(&self) -> Option<&str> {
-        match self {
-            Commands::Git { remote, .. } => remote.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// Get the git subcommand if this is a git command.
-    pub fn git_subcommand(&self) -> Option<&GitSubcommand> {
-        match self {
-            Commands::Git {
-                git_subcommand, ..
-            } => git_subcommand.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// Get commit SHA if this is a `git hash <SHA>` subcommand.
-    pub fn git_hash(&self) -> Option<&str> {
-        match self {
-            Commands::Git {
-                git_subcommand: Some(GitSubcommand::Hash { sha }),
-                ..
-            } => Some(sha.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Get package name if this is a git command with `--package`.
-    pub fn git_package(&self) -> Option<&str> {
-        match self {
-            Commands::Git { package, .. } => package.as_deref(),
-            _ => None,
-        }
     }
 
     /// Get docs filter flags if this is a docs command.
@@ -620,6 +637,98 @@ impl Commands {
                 association: association.map(Into::into),
             },
             _ => FilesFilter::default(),
+        }
+    }
+
+    /// Normalize a Repo command into a RepoAction for dispatch.
+    pub fn to_repo_action(&self) -> Option<RepoAction> {
+        match self {
+            Commands::Repo { latest_versions, filter, repo_subcommand } => {
+                Some(match repo_subcommand {
+                    None => RepoAction::Structure {
+                        filter: filter.clone(),
+                        latest_versions: *latest_versions,
+                    },
+                    Some(RepoSubcommand::Structure { filter: sub_filter }) => {
+                        RepoAction::Structure {
+                            filter: sub_filter.clone().or_else(|| filter.clone()),
+                            latest_versions: *latest_versions,
+                        }
+                    },
+                    Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }) => {
+                        RepoAction::GitStatus {
+                            history: *history,
+                            refresh_remotes: *refresh_remotes,
+                            package: package.clone(),
+                        }
+                    },
+                    Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
+                    Some(RepoSubcommand::StagedFiles { package }) => {
+                        RepoAction::StagedFiles { package: package.clone() }
+                    },
+                    Some(RepoSubcommand::UnstagedFiles { package }) => {
+                        RepoAction::UnstagedFiles { package: package.clone() }
+                    },
+                    Some(RepoSubcommand::UntrackedFiles { package }) => {
+                        RepoAction::UntrackedFiles { package: package.clone() }
+                    },
+                    Some(RepoSubcommand::Remote { remote }) => {
+                        RepoAction::Remote { remote: remote.clone() }
+                    },
+                    Some(RepoSubcommand::Deps { ui, filter: sub_filter }) => {
+                        RepoAction::Deps {
+                            filter: sub_filter.clone().or_else(|| filter.clone()),
+                            ui: *ui,
+                        }
+                    },
+                    Some(RepoSubcommand::Packages { filter: sub_filter }) => {
+                        RepoAction::Packages {
+                            filter: sub_filter.clone().or_else(|| filter.clone()),
+                        }
+                    },
+                    Some(RepoSubcommand::Package) => RepoAction::Package,
+                    Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
+                    Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
+                        RepoAction::DirtyPackages {
+                            filter: sub_filter.clone().or_else(|| filter.clone()),
+                        }
+                    },
+                    Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
+                        RepoAction::DirtyPackageAreas {
+                            filter: sub_filter.clone().or_else(|| filter.clone()),
+                        }
+                    },
+                    Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
+                    Some(RepoSubcommand::PackageAreaRoot) => RepoAction::PackageAreaRoot,
+                    Some(RepoSubcommand::RepoRoot) => RepoAction::RepoRoot,
+                    Some(RepoSubcommand::IsCurrentPackageAreaDirty) => RepoAction::IsCurrentPackageAreaDirty,
+                    Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => RepoAction::PackageAreaHasSourceCodeChanges,
+                })
+            },
+            _ => None,
+        }
+    }
+
+    /// Normalize a legacy Git command into a RepoAction for dispatch.
+    pub fn git_to_repo_action(&self) -> Option<RepoAction> {
+        match self {
+            Commands::Git { history, refresh_remotes, package, remote, git_subcommand, .. } => {
+                if let Some(remote_ref) = remote {
+                    return Some(RepoAction::Remote { remote: remote_ref.clone() });
+                }
+                match git_subcommand {
+                    Some(GitSubcommand::Hash { sha }) => Some(RepoAction::Hash { sha: sha.clone() }),
+                    Some(GitSubcommand::Staged) => Some(RepoAction::StagedFiles { package: package.clone() }),
+                    Some(GitSubcommand::Unstaged) => Some(RepoAction::UnstagedFiles { package: package.clone() }),
+                    Some(GitSubcommand::Untracked) => Some(RepoAction::UntrackedFiles { package: package.clone() }),
+                    None => Some(RepoAction::GitStatus {
+                        history: *history,
+                        refresh_remotes: *refresh_remotes,
+                        package: package.clone(),
+                    }),
+                }
+            },
+            _ => None,
         }
     }
 }
@@ -704,93 +813,64 @@ Usage: {usage}
 
 pub const AFTER_HELP: &str = "\
 Commands:
-  Top-level sections:
-    sniff os          Show only OS information
-    sniff hardware    Show only hardware information
-    sniff network     Show only network information
-    sniff filesystem  Show only filesystem information
-    sniff topics      Show subsection topics as a table
+  System:
+    sniff os              Show OS information
+    sniff hardware        Show hardware information
+    sniff network         Show network information
+    sniff cpu             Show CPU information
+    sniff gpu             Show GPU information
+    sniff memory          Show memory information
+    sniff storage         Show storage/disk information
+    sniff audio-devices   Show audio devices
 
-  Hardware details:
-    sniff cpu             Show only CPU information
-    sniff gpu             Show only GPU information
-    sniff memory          Show only memory information
-    sniff storage         Show only storage/disk information
-    sniff audio-devices   Show only audio devices
-
-  Filesystem details:
-    sniff git                        Show only git repository information
-    sniff git --refresh-remotes      Refresh remotes before reporting sync status
-    sniff git hash HEAD              Show details for the latest commit
-    sniff git hash abc1234           Show details for a specific commit
-    sniff git staged                 List files staged for commit
-    sniff git staged -v              Staged files with action labels
-    sniff git unstaged               List modified but unstaged files
-    sniff git untracked              List untracked files
-    sniff git --package homelab      Scope to commits within a package
-    sniff git origin                 Inspect the 'origin' remote
-    sniff git owner/repo             Inspect by owner/repo shorthand
-    sniff git https://github.com/... Inspect a remote by URL
-    sniff repo                       Show only repository/monorepo structure
-    sniff repo --latest-versions     Check registries for dependency updates
-    sniff repo biscuit               Filter to packages matching \"biscuit\"
-    sniff repo !biscuit              Exclude packages matching \"biscuit\"
-    sniff repo @sniff                Filter to packages in the \"sniff\" area
-    sniff repo deps                  Show internal dependency list (text)
-    sniff repo deps --ui             Show internal dependency diagram (Mermaid)
-    sniff repo deps biscuit          Filtered text dependency list
-    sniff repo packages biscuit      Filtered CSV package names
-    sniff repo package               Package name for current directory
-    sniff repo package-area          Package area for current directory
-    sniff repo dirty-packages        Packages with uncommitted changes
-    sniff repo dirty-package-areas   Package areas with uncommitted changes
-    sniff repo package-root          Root directory of the current package
-    sniff repo package-area-root     Root directory of the current package area
-    sniff repo repo-root             Root directory of the repository
-    sniff repo is-current-package-area-dirty  Exit 0 if CWD's area is dirty, 1 otherwise
-    sniff repo package-area-has-source-code-changes  Exit 0 if CWD's area has source changes
-    sniff language                   Show only language detection results
-    sniff files                      Show broad file associations
-    sniff files --association image  Show only image file statistics
-    sniff docs                       Show markdown documents in the repository
-    sniff docs --readme              Show only README.md files
-    sniff docs --plan                Show only plan-related documents
-    sniff docs --src                 Show only documents under src/ directories
-    sniff docs --has-prompt          Show only documents with a prompt
-    sniff docs homelab               Filter documents matching \"homelab\"
+  Repository & Filesystem:
+    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff filesystem      Show full filesystem report
+    sniff language        Show language detection
+    sniff files           Show file associations
+    sniff docs            Show markdown documents
 
   Programs:
-    sniff programs                   Show all installed programs
-    sniff editors                    Show only installed editors
-    sniff editors install            Interactive install picker for editors
-    sniff editors install vim        Install vim directly
-    sniff utilities                  Show only installed utilities
-    sniff language-package-managers  Show only language package managers
-    sniff os-package-managers        Show only OS package managers
-    sniff tts-clients                Show only TTS clients
-    sniff terminal-apps              Show only terminal apps
-    sniff audio                      Show only headless audio players
-    sniff agents                     Show only AI agent CLI tools
+    sniff programs        Show all installed programs
+    sniff editors         Show editors (supports 'install' subcommand)
+    sniff utilities       Show utilities
+    sniff agents          Show AI agent CLI tools
 
   Services:
-    sniff services              Show running services (default)
-    sniff services --state all  Show all services
+    sniff services        Show running services
+
+  Discovery:
+    sniff topics          Show all subsection topics
 
 Output modes:
-  - No subcommand: Show this help (use --json for full JSON output)
-  - With subcommand: Text output by default, use --json for JSON
+  No subcommand: show this help (use --json for full JSON)
+  With subcommand: text by default, --json for JSON, --plain for unstyled text
+";
 
-Examples:
-  sniff                      # Show this help
-  sniff --json               # Full system info as JSON
-  sniff cpu                  # CPU info as text
-  sniff cpu --json           # CPU info as JSON
-  sniff --json cpu           # Same as above (flag position flexible)
-  sniff programs             # Programs as text
-  sniff programs --json      # Programs as JSON
-  sniff filesystem --refresh-remotes --latest-versions  # Enriched filesystem report
-  sniff editors install      # Interactive editor install picker
-  sniff -b /path/to/repo filesystem  # Analyze specific directory
+pub const REPO_AFTER_HELP: &str = "\
+Structure:
+  sniff repo                          Show repository/monorepo structure
+  sniff repo biscuit                  Filter to packages matching \"biscuit\"
+  sniff repo structure @sniff         Filter to packages in \"sniff\" area
+
+Git:
+  sniff repo git-status               Show git status and recent commits
+  sniff repo git-status --history 20  Show more commits
+  sniff repo hash HEAD                Show latest commit details
+  sniff repo staged-files             List staged files
+  sniff repo unstaged-files           List unstaged files
+  sniff repo untracked-files          List untracked files
+  sniff repo remote origin            Inspect the 'origin' remote
+
+Packages:
+  sniff repo packages                 List all package names
+  sniff repo dirty-packages           Packages with uncommitted changes
+  sniff repo package                  Package name for current directory
+
+Dependencies:
+  sniff repo deps                     Text dependency list
+  sniff repo deps --ui                Mermaid dependency diagram
+  sniff repo --latest-versions        Check registries for updates
 ";
 
 pub const COMPLETIONS_HELP: &str = "\
@@ -1195,7 +1275,13 @@ mod tests {
             };
 
             assert!(cmd.latest_versions());
-            assert_eq!(cmd.repo_filter(), Some("biscuit"));
+            // Normalization captures filter
+            if let Some(RepoAction::Structure { filter, latest_versions }) = cmd.to_repo_action() {
+                assert_eq!(filter.as_deref(), Some("biscuit"));
+                assert!(latest_versions);
+            } else {
+                panic!("Expected Structure action");
+            }
 
             // Subcommand filter takes precedence
             let cmd = Commands::Repo {
@@ -1206,7 +1292,12 @@ mod tests {
                     filter: Some("sub-level".to_string()),
                 }),
             };
-            assert_eq!(cmd.repo_filter(), Some("sub-level"));
+            if let Some(RepoAction::Deps { filter, ui }) = cmd.to_repo_action() {
+                assert_eq!(filter.as_deref(), Some("sub-level"));
+                assert!(ui);
+            } else {
+                panic!("Expected Deps action");
+            }
 
             // Falls back to top-level filter when subcommand has none
             let cmd = Commands::Repo {
@@ -1217,7 +1308,11 @@ mod tests {
                     filter: None,
                 }),
             };
-            assert_eq!(cmd.repo_filter(), Some("top-level"));
+            if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {
+                assert_eq!(filter.as_deref(), Some("top-level"));
+            } else {
+                panic!("Expected Deps action");
+            }
         }
 
         #[test]
@@ -1231,8 +1326,13 @@ mod tests {
                 git_subcommand: None,
             };
             assert_eq!(git.history(), 3);
-            assert_eq!(git.git_remote(), Some("owner/repo"));
             assert!(git.refresh_remotes());
+            // Normalization captures remote
+            if let Some(RepoAction::Remote { remote }) = git.git_to_repo_action() {
+                assert_eq!(remote, "owner/repo");
+            } else {
+                panic!("Expected Remote action");
+            }
 
             let docs = Commands::Docs {
                 readme: true,
@@ -1310,6 +1410,263 @@ mod tests {
         #[test]
         fn unsupported_combinations_fail() {
             assert!(parse_args(&["git", "origin", "--refresh-remotes"]).is_err());
+        }
+    }
+
+    mod new_repo_subcommands {
+        use super::*;
+
+        #[test]
+        fn repo_structure_parses() {
+            let cli = parse_args(&["repo", "structure"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Structure { filter: None }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_structure_with_filter_parses() {
+            let cli = parse_args(&["repo", "structure", "biscuit"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(filter.as_deref(), Some("biscuit"));
+            } else {
+                panic!("Expected repo structure with filter");
+            }
+        }
+
+        #[test]
+        fn repo_git_status_parses() {
+            let cli = parse_args(&["repo", "git-status"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(history, DEFAULT_COMMIT_COUNT);
+                assert!(!refresh_remotes);
+                assert!(package.is_none());
+            } else {
+                panic!("Expected repo git-status");
+            }
+        }
+
+        #[test]
+        fn repo_git_status_with_flags_parses() {
+            let cli = parse_args(&["repo", "git-status", "--history", "20", "--refresh-remotes", "--package", "homelab"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::GitStatus { history, refresh_remotes, package }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(history, 20);
+                assert!(refresh_remotes);
+                assert_eq!(package.as_deref(), Some("homelab"));
+            } else {
+                panic!("Expected repo git-status with flags");
+            }
+        }
+
+        #[test]
+        fn repo_hash_parses() {
+            let cli = parse_args(&["repo", "hash", "HEAD"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Hash { sha }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(sha, "HEAD");
+            } else {
+                panic!("Expected repo hash");
+            }
+        }
+
+        #[test]
+        fn repo_staged_files_parses() {
+            let cli = parse_args(&["repo", "staged-files"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::StagedFiles { package: None }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_unstaged_files_parses() {
+            let cli = parse_args(&["repo", "unstaged-files"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::UnstagedFiles { package: None }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_untracked_files_parses() {
+            let cli = parse_args(&["repo", "untracked-files"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::UntrackedFiles { package: None }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_remote_parses() {
+            let cli = parse_args(&["repo", "remote", "origin"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Remote { remote }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(remote, "origin");
+            } else {
+                panic!("Expected repo remote");
+            }
+        }
+
+        #[test]
+        fn git_command_still_parses_but_hidden() {
+            let cli = parse_args(&["git", "--history", "10", "--refresh-remotes"]).unwrap();
+            if let Some(Commands::Git {
+                history,
+                refresh_remotes,
+                ..
+            }) = cli.command
+            {
+                assert_eq!(history, 10);
+                assert!(refresh_remotes);
+            } else {
+                panic!("Expected Git command (hidden but still functional)");
+            }
+        }
+    }
+
+    mod repo_action_normalization {
+        use super::*;
+
+        #[test]
+        fn to_repo_action_structure_default() {
+            let cmd = Commands::Repo {
+                latest_versions: true,
+                filter: Some("biscuit".to_string()),
+                repo_subcommand: None,
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Structure { filter, latest_versions }) => {
+                    assert_eq!(filter.as_deref(), Some("biscuit"));
+                    assert!(latest_versions);
+                }
+                _ => panic!("Expected Structure action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_git_status() {
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: None,
+                repo_subcommand: Some(RepoSubcommand::GitStatus {
+                    history: 25,
+                    refresh_remotes: true,
+                    package: Some("homelab".to_string()),
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::GitStatus { history, refresh_remotes, package }) => {
+                    assert_eq!(history, 25);
+                    assert!(refresh_remotes);
+                    assert_eq!(package.as_deref(), Some("homelab"));
+                }
+                _ => panic!("Expected GitStatus action"),
+            }
+        }
+
+        #[test]
+        fn git_to_repo_action_default() {
+            let cmd = Commands::Git {
+                history: 15,
+                refresh_remotes: true,
+                package: None,
+                remote: None,
+                help: None,
+                git_subcommand: None,
+            };
+            match cmd.git_to_repo_action() {
+                Some(RepoAction::GitStatus { history, refresh_remotes, package }) => {
+                    assert_eq!(history, 15);
+                    assert!(refresh_remotes);
+                    assert!(package.is_none());
+                }
+                _ => panic!("Expected GitStatus action"),
+            }
+        }
+
+        #[test]
+        fn git_to_repo_action_remote() {
+            let cmd = Commands::Git {
+                history: 10,
+                refresh_remotes: false,
+                package: None,
+                remote: Some("origin".to_string()),
+                help: None,
+                git_subcommand: None,
+            };
+            match cmd.git_to_repo_action() {
+                Some(RepoAction::Remote { remote }) => {
+                    assert_eq!(remote, "origin");
+                }
+                _ => panic!("Expected Remote action"),
+            }
+        }
+
+        #[test]
+        fn git_to_repo_action_hash() {
+            let cmd = Commands::Git {
+                history: 10,
+                refresh_remotes: false,
+                package: None,
+                remote: None,
+                help: None,
+                git_subcommand: Some(GitSubcommand::Hash { sha: "abc123".to_string() }),
+            };
+            match cmd.git_to_repo_action() {
+                Some(RepoAction::Hash { sha }) => {
+                    assert_eq!(sha, "abc123");
+                }
+                _ => panic!("Expected Hash action"),
+            }
+        }
+
+        #[test]
+        fn git_to_repo_action_staged() {
+            let cmd = Commands::Git {
+                history: 10,
+                refresh_remotes: false,
+                package: None,
+                remote: None,
+                help: None,
+                git_subcommand: Some(GitSubcommand::Staged),
+            };
+            match cmd.git_to_repo_action() {
+                Some(RepoAction::StagedFiles { package }) => {
+                    assert!(package.is_none());
+                }
+                _ => panic!("Expected StagedFiles action"),
+            }
         }
     }
 }

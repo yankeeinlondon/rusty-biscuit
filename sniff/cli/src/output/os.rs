@@ -1,26 +1,29 @@
 //! OS section output formatting.
+use std::fmt::Write;
+
 use biscuit_terminal::components::{prose::Prose, renderable::Renderable};
 
 use sniff::hardware::NtpStatus;
 
 use super::format_uptime;
 
-pub fn print_os_section(os: &sniff::OsInfo, verbose: u8) {
+pub fn render_os_section(os: &sniff::OsInfo, verbose: u8) -> String {
+    let mut out = String::new();
     let title = Prose::new("<b><u>Operating System:</u></b>").render_optimistic(None);
-    println!("\n{}\n", title);
+    writeln!(out, "\n{}\n", title).unwrap();
     // Prefer long_version if available, otherwise fall back to name + version
     if let Some(ref long_ver) = os.long_version {
-        println!("Name: {}", long_ver);
+        writeln!(out, "Name: {}", long_ver).unwrap();
     } else {
-        println!("Name: {} {}", os.name, os.version);
+        writeln!(out, "Name: {} {}", os.name, os.version).unwrap();
     }
     if let Some(ref distro) = os.distribution {
-        println!("Distribution: {}", distro);
+        writeln!(out, "Distribution: {}", distro).unwrap();
     }
-    println!("Kernel: {}", os.kernel);
-    println!("Hostname: {}", os.hostname);
-    println!("Uptime: {}", format_uptime(os.uptime_seconds));
-    println!();
+    writeln!(out, "Kernel: {}", os.kernel).unwrap();
+    writeln!(out, "Hostname: {}", os.hostname).unwrap();
+    writeln!(out, "Uptime: {}", format_uptime(os.uptime_seconds)).unwrap();
+    writeln!(out).unwrap();
 
     // Print package managers section if detected
     if let Some(ref pkg_managers) = os.system_package_managers
@@ -33,38 +36,39 @@ pub fn print_os_section(os: &sniff::OsInfo, verbose: u8) {
                 .as_ref()
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "none".to_string());
-            println!(
+            writeln!(
+                out,
                 "Package Managers: Primary: {} ({} detected)",
                 primary_str,
                 pkg_managers.managers.len()
-            );
+            ).unwrap();
         } else {
             // Detailed output at verbose level 1+
-            println!("Package Managers:");
+            writeln!(out, "Package Managers:").unwrap();
             if let Some(ref primary) = pkg_managers.primary {
-                println!("  Primary: {}", primary);
+                writeln!(out, "  Primary: {}", primary).unwrap();
             }
-            println!("  Detected:");
+            writeln!(out, "  Detected:").unwrap();
             for pm in &pkg_managers.managers {
-                println!("    - {} ({})", pm.manager, pm.path);
+                writeln!(out, "    - {} ({})", pm.manager, pm.path).unwrap();
                 // Show commands at verbose level 2+
                 if verbose > 1 {
                     if let Some(ref list_cmd) = pm.commands.list {
-                        println!("      list: {}", list_cmd);
+                        writeln!(out, "      list: {}", list_cmd).unwrap();
                     }
                     if let Some(ref update_cmd) = pm.commands.update {
-                        println!("      update: {}", update_cmd);
+                        writeln!(out, "      update: {}", update_cmd).unwrap();
                     }
                     if let Some(ref upgrade_cmd) = pm.commands.upgrade {
-                        println!("      upgrade: {}", upgrade_cmd);
+                        writeln!(out, "      upgrade: {}", upgrade_cmd).unwrap();
                     }
                     if let Some(ref search_cmd) = pm.commands.search {
-                        println!("      search: {}", search_cmd);
+                        writeln!(out, "      search: {}", search_cmd).unwrap();
                     }
                 }
             }
         }
-        println!();
+        writeln!(out).unwrap();
     }
 
     // Print locale section if detected
@@ -77,8 +81,8 @@ pub fn print_os_section(os: &sniff::OsInfo, verbose: u8) {
                 .as_ref()
                 .map(|e| format!(" ({})", e))
                 .unwrap_or_default();
-            println!("Locale: {}{}", loc, encoding_str);
-            println!();
+            writeln!(out, "Locale: {}{}", loc, encoding_str).unwrap();
+            writeln!(out).unwrap();
         }
     }
 
@@ -108,9 +112,9 @@ pub fn print_os_section(os: &sniff::OsInfo, verbose: u8) {
             .unwrap_or_else(|| format!(" ({})", offset_str));
 
         if verbose == 0 {
-            println!("Timezone: {}{}", tz_name, abbr_str);
+            writeln!(out, "Timezone: {}{}", tz_name, abbr_str).unwrap();
         } else {
-            println!("Timezone: {}{}", tz_name, abbr_str);
+            writeln!(out, "Timezone: {}{}", tz_name, abbr_str).unwrap();
 
             // Show NTP status
             let ntp_str = match time.ntp_status {
@@ -119,12 +123,13 @@ pub fn print_os_section(os: &sniff::OsInfo, verbose: u8) {
                 NtpStatus::Inactive => "inactive",
                 NtpStatus::Unknown => "unknown",
             };
-            println!("  NTP: {}", ntp_str);
+            writeln!(out, "  NTP: {}", ntp_str).unwrap();
 
             // Show DST status
             let dst_str = if time.is_dst { "active" } else { "inactive" };
-            println!("  DST: {}", dst_str);
+            writeln!(out, "  DST: {}", dst_str).unwrap();
         }
-        println!();
+        writeln!(out).unwrap();
     }
+    out
 }
