@@ -2,6 +2,6 @@
 
 ## Greet
 
-::shell echo "hi"
+::shell ls -la ../
 
 

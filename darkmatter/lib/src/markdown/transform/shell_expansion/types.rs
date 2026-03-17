@@ -85,6 +85,8 @@ pub struct ShellApprovalRequest {
     pub normalized_exact: String,
     pub whitelist_path: PathBuf,
     pub blacklist_path: PathBuf,
+    /// If the command was resolved from a shell alias, the original alias name.
+    pub alias_name: Option<String>,
 }
 
 /// Possible decisions from approval handler.
@@ -191,6 +193,12 @@ pub struct ShellExpansionRuntime {
     pub user_blacklist: ShellRuleSet,
     pub policy_paths: Option<ShellPolicyPaths>,
     pub approvals_used: usize,
+}
+
+impl Default for ShellExpansionRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ShellExpansionRuntime {

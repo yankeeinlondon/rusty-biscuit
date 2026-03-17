@@ -61,7 +61,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
             // Single quote: literal string until closing quote
             '\'' => {
                 let mut found_close = false;
-                while let Some(ch) = chars.next() {
+                for ch in chars.by_ref() {
                     if ch == '\'' {
                         found_close = true;
                         break;

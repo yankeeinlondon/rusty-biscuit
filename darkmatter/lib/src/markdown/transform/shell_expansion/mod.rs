@@ -25,6 +25,7 @@
 //! ::shell ls -la
 //! ```
 
+pub mod alias;
 pub mod executor;
 pub mod parser;
 pub mod policy;
@@ -32,6 +33,7 @@ pub mod store;
 pub mod tokenize;
 pub mod types;
 
+pub use alias::{resolve_alias, ResolvedAlias};
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command};
@@ -85,39 +87,42 @@ pub fn execute_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
-    let normalized = normalize_command(&directive.executable, &directive.args);
+    // Resolve alias if the executable is not found on PATH
+    let (effective, alias_name) = resolve_or_passthrough(directive);
 
-    // 1. Check built-in blacklist
-    if let Some(reason) = check_builtin_blacklist(&directive.executable, &directive.args) {
+    let normalized = normalize_command(&effective.executable, &effective.args);
+
+    // 1. Check built-in blacklist (against resolved command)
+    if let Some(reason) = check_builtin_blacklist(&effective.executable, &effective.args) {
         return Err(ShellExpansionError::Blacklisted {
-            command: directive.raw_command.clone(),
+            command: display_command(directive, alias_name.as_deref()),
             reason,
             line: directive.line,
         });
     }
 
-    // 2. Check user blacklist
+    // 2. Check user blacklist (against resolved command)
     if check_user_blacklist(
         &shell_runtime.user_blacklist,
-        &directive.executable,
-        &directive.args,
+        &effective.executable,
+        &effective.args,
         &normalized,
     ) {
         return Err(ShellExpansionError::Blacklisted {
-            command: directive.raw_command.clone(),
+            command: display_command(directive, alias_name.as_deref()),
             reason: "user blacklist".to_string(),
             line: directive.line,
         });
     }
 
-    // 3. Check exact whitelist
-    if check_whitelist(&shell_runtime.whitelist, &directive.executable, &normalized) {
-        return executor::execute_command(directive, &options.shell, &options.transclusion.source);
+    // 3. Check whitelist (against resolved command)
+    if check_whitelist(&shell_runtime.whitelist, &effective.executable, &normalized) {
+        return executor::execute_command(&effective, &options.shell, &options.transclusion.source);
     }
 
     // 4. Check allow-once
     if shell_runtime.allow_once.contains(&normalized) {
-        return executor::execute_command(directive, &options.shell, &options.transclusion.source);
+        return executor::execute_command(&effective, &options.shell, &options.transclusion.source);
     }
 
     // 5. Request approval or fail
@@ -125,33 +130,34 @@ pub fn execute_directive(
         let request = ShellApprovalRequest {
             source: options.transclusion.source.clone(),
             line: directive.line,
-            raw_command: directive.raw_command.clone(),
-            executable: directive.executable.clone(),
-            args: directive.args.clone(),
+            raw_command: effective.raw_command.clone(),
+            executable: effective.executable.clone(),
+            args: effective.args.clone(),
             normalized_exact: normalized.clone(),
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
+            alias_name: alias_name.clone(),
         };
 
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
                 store::append_whitelist_exact(policy_paths, &normalized)?;
                 shell_runtime.whitelist.entries.push(types::ShellRuleEntry::Exact(normalized));
-                executor::execute_command(directive, &options.shell, &options.transclusion.source)
+                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
             ShellApprovalDecision::AllowCommandPersist => {
-                store::append_whitelist_prefix(policy_paths, &directive.executable)?;
-                shell_runtime.whitelist.entries.push(types::ShellRuleEntry::Prefix(directive.executable.clone()));
-                executor::execute_command(directive, &options.shell, &options.transclusion.source)
+                store::append_whitelist_prefix(policy_paths, &effective.executable)?;
+                shell_runtime.whitelist.entries.push(types::ShellRuleEntry::Prefix(effective.executable.clone()));
+                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
             ShellApprovalDecision::AllowOnce => {
                 shell_runtime.allow_once.insert(normalized);
                 shell_runtime.approvals_used += 1;
-                executor::execute_command(directive, &options.shell, &options.transclusion.source)
+                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
             }
             ShellApprovalDecision::Deny => {
                 Err(ShellExpansionError::Denied {
-                    command: directive.raw_command.clone(),
+                    command: display_command(directive, alias_name.as_deref()),
                     line: directive.line,
                 })
             }
@@ -159,7 +165,7 @@ pub fn execute_directive(
                 store::append_blacklist_exact(policy_paths, &normalized)?;
                 shell_runtime.user_blacklist.entries.push(types::ShellRuleEntry::Exact(normalized));
                 Err(ShellExpansionError::Blacklisted {
-                    command: directive.raw_command.clone(),
+                    command: display_command(directive, alias_name.as_deref()),
                     reason: "user blacklisted".to_string(),
                     line: directive.line,
                 })
@@ -167,11 +173,57 @@ pub fn execute_directive(
         }
     } else {
         Err(ShellExpansionError::ApprovalRequired {
-            command: directive.raw_command.clone(),
+            command: display_command(directive, alias_name.as_deref()),
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
             line: directive.line,
         })
+    }
+}
+
+/// Resolves a directive's executable, returning the effective directive and
+/// an optional alias name if resolution occurred.
+///
+/// If the executable is already on PATH, returns the original directive.
+/// If it resolves as a shell alias, returns a new directive with the resolved
+/// command and merged arguments.
+fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option<String>) {
+    // If the executable is on PATH, use as-is
+    if which::which(&directive.executable).is_ok() {
+        return (directive.clone(), None);
+    }
+
+    // Try to resolve as a shell alias
+    if let Some(resolved) = alias::resolve_alias(&directive.executable) {
+        let mut merged_args = resolved.args;
+        merged_args.extend_from_slice(&directive.args);
+
+        let raw = if directive.args.is_empty() {
+            resolved.definition.clone()
+        } else {
+            format!("{} {}", resolved.definition, directive.args.join(" "))
+        };
+
+        let effective = ShellDirective {
+            raw_command: raw,
+            executable: resolved.executable,
+            args: merged_args,
+            span: directive.span.clone(),
+            line: directive.line,
+        };
+
+        return (effective, Some(resolved.alias_name));
+    }
+
+    // Not found and not an alias — will fail later at execute_command
+    (directive.clone(), None)
+}
+
+/// Formats a command for display in error messages, including alias info.
+fn display_command(directive: &ShellDirective, alias_name: Option<&str>) -> String {
+    match alias_name {
+        Some(name) => format!("{} (alias: {})", directive.raw_command, name),
+        None => directive.raw_command.clone(),
     }
 }
 

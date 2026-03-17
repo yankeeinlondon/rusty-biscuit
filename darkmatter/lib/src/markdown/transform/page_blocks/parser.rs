@@ -42,9 +42,8 @@ pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBloc
         if !trimmed.is_empty() {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
-                if trimmed.starts_with("::block") {
+                if let Some(after) = trimmed.strip_prefix("::block") {
                     // Check it's actually `::block` and not `::blockquote` etc.
-                    let after = &trimmed[7..];
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let options = parse_block_options(after.trim(), line_number)?;
                         let body_start = span_end; // body starts after the ::block line
@@ -56,8 +55,7 @@ pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBloc
                             Vec::new(),
                         ));
                     }
-                } else if trimmed.starts_with("::end-block") {
-                    let after = &trimmed[11..];
+                } else if let Some(after) = trimmed.strip_prefix("::end-block") {
                     // Validate no trailing non-whitespace content
                     let trailing = after.trim();
                     if !trailing.is_empty() {

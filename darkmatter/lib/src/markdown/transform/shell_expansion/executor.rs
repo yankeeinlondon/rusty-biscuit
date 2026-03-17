@@ -40,12 +40,11 @@ pub fn resolve_working_directory(
     if let Some(ref wd) = shell_opts.working_directory {
         return wd.clone();
     }
-    if let TransformSource::File(path) = source {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                return parent.to_path_buf();
-            }
-        }
+    if let TransformSource::File(path) = source
+        && let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        return parent.to_path_buf();
     }
     if let Some(ref root) = shell_opts.policy_root {
         return root.clone();
