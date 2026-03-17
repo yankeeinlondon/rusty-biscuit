@@ -4,21 +4,24 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into ten top-level modules plus the shared error type:
+The library is organized into thirteen top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
-├── actions/     → Hook action types and response model
-├── adapters/    → Provider-specific event parsers
-├── agents/      → Agent capability catalog and registry
-├── config/      → Agent detection and hook registration
-├── dispatch/    → Event processing pipeline
-├── events/      → Normalized event model and types
-├── linking/     → Cross-provider skill and command synchronization
-├── mcp/         → MCP catalog, defaults, import/export, session, and injection
-├── reporting/   → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/    → Cross-provider policy services (Protect)
-└── error.rs     → ClaudineError enum
+├── actions/      → Hook action types and response model
+├── adapters/     → Provider-specific event parsers
+├── agents/       → Agent capability catalog and registry
+├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
+├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
+├── config/       → Agent detection and hook registration
+├── dispatch/     → Event processing pipeline
+├── events/       → Normalized event model and types
+├── linking/      → Cross-provider skill and command synchronization
+├── mcp/          → MCP catalog, defaults, import/export, session, and injection
+├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
+├── services/     → Cross-provider policy services (Protect)
+├── stream/       → Structured stream parsing for 6 providers + summary/reporting
+└── error.rs      → ClaudineError enum
 ```
 
 ### Actions (`actions`)
@@ -186,6 +189,43 @@ Provider-agnostic MCP storage and provider-specific import/export/runtime integr
 - `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (shadow-home config files)
 
 Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, Qwen, and Roo do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
+
+### Stream Parsing (`stream`)
+
+Provider-native structured stream parsing for wrapped non-interactive sessions. Each provider's structured output (stream-json, JSONL, or NDJSON) is parsed live, extracting clean assistant text for stdout and metadata for stderr summaries and JSONL reporting.
+
+**Provider parsers** (6):
+
+| Parser | Format | Summary source |
+|--------|--------|----------------|
+| `claude` | stream-json | `result` event with duration, usage, cost, turns |
+| `codex` | JSONL (`exec --json`) | `turn.completed` usage + `--output-last-message` file for text |
+| `gemini` | stream-json | `result.stats` with token counts |
+| `kimi` | stream-json | Latest `StatusUpdate` snapshot (no aggregate result) |
+| `opencode` | NDJSON (`json`) | Accumulated per-step usage/cost |
+| `qwen` | stream-json | Final result/usage event |
+
+**Infrastructure**:
+- `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
+- `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
+- `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields
+- `stderr` — Verbosity-aware stderr formatting (start summary, completion summary, compact line for `--quiet`)
+- `reporting` — Converts `StreamExecutionSummary` to `EventMeta` for synthetic JSONL summary events
+
+**Execution modes** (in CLI `wrap/exec.rs`):
+- `run_child_stream()` — live parsing with assistant text piped to terminal
+- `run_child_stream_capture()` — parsing with captured text for composition flows
+
+### Composition (`composition`)
+
+Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions:
+
+- **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
+- **Chained composition** (`--compose`): composes full document as prompt without file mutation
+
+### Badges (`badges`)
+
+Styled terminal badge constants for the execution line header: `YOLO`, `NON_INTERACTIVE`, `INTERACTIVE`, `VERBOSE`, `COMPOSE`, `INLINE_COMPOSE`, `REPO_FLAG`, and scope badges (`USER_SCOPED`, `REPO_SCOPED`, `MASKED_REPO_SCOPED`).
 
 ### Services (`services`)
 

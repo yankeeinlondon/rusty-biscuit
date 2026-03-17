@@ -1335,6 +1335,10 @@ fn format_verbose_summary_details_prose(
 ) -> Option<String> {
     let mut parts = Vec::new();
 
+    if let Some(sid) = &summary.session_id {
+        parts.push(format!("<i>session</i>: {sid}"));
+    }
+
     if !details.tool_names.is_empty() {
         parts.push(format!(
             "<i>tools used</i>: {}",

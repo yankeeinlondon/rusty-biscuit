@@ -125,18 +125,35 @@ Shared wrapper flags:
 | Flag | Description |
 |------|-------------|
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
+| `-i, --interactive` | Force interactive mode even when a prompt string is provided |
+| `-m, --model <MODEL>` | Override the model used by the provider |
+| `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
+| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
-| `-n, --non-interactive, --ni` | Translate to provider-specific non-interactive execution shape |
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
+| `--sandbox` | Enable provider-specific sandboxing |
+| `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
+| `-p, --prompt-file <FILE>` | Source initial prompt from a Markdown file (composed with Darkmatter) |
+| `--frontmatter-prompt <FILE>` | Inline composition: use frontmatter prompt as input |
+| `--compose <FILE>` | Chained composition: compose full document and use as prompt |
+| `--dry-run` | Show what would be executed without launching the child |
+| `-q, --quiet` | Show only the header line; suppress env details |
+| `--silent` | Suppress all Claudine preflight output |
 | `-- ...` | Force all remaining args to passthrough unchanged |
 
 Wrapper behavior:
 
+- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
+- **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
+- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.
+- **Stderr summaries**: session-start info (session ID, model), completion summary (duration, tokens, cost, tool calls), and verbose details (tools used, turns, stop reason).
+- **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed metadata on the second summary line.
 - Validates provider binary availability before spawn (with provider docs URL in errors).
 - Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
 - Reports removed env variable names to stderr (names only, sorted/unique).
-- Injects `AGENT`, `YOLO`, `AGENT_PARAMS`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `claudine handle` records wrapper-provided `PACKAGE_AREA` / `PACKAGE` values into event logs so they can be used in reporting filters.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
 - Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
@@ -144,6 +161,7 @@ Wrapper behavior:
 - Gemini runtime sessions append `--allowed-mcp-server-names` for the resolved server list.
 - Claude, Goose, Kimi, and Qwen wrappers fail fast with guidance to use `claudine mcp sync <provider>` instead. Roo is import/sync only and has no wrapper command.
 - Runs child process with inherited stdio/cwd and propagates child exit code.
+- Writes a synthetic JSONL summary event per session for reporting completeness.
 
 ## Module Structure
 
@@ -151,6 +169,7 @@ Wrapper behavior:
 cli/src/
 ├── main.rs              → Entry point, clap parser, command dispatch
 ├── log.rs               → Output formatting (message/data/info/warn/error)
+├── output.rs            → Execution line, badges, env details, prompt display
 └── commands/
     ├── about.rs         → Rich help rendering
     ├── completions.rs   → Shell completion generation
@@ -158,15 +177,18 @@ cli/src/
     ├── handle.rs        → Event processing from stdin
     ├── hooks.rs         → Hook inspection and validation
     ├── link.rs          → Skill synchronization management
+    ├── logs.rs          → JSONL log reporting queries
     ├── mcp.rs           → MCP catalog, defaults, aliasing, import, and sync commands
     ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal
     ├── wrap/
-    │   ├── mod.rs       → Shared wrapper pipeline + wrapper args
-    │   ├── profile.rs   → Provider mapping profiles (yolo/non-interactive)
+    │   ├── mod.rs       → Shared wrapper pipeline, args, interactivity logic, stream summary
+    │   ├── profile.rs   → Provider mapping profiles (yolo/non-interactive/model/output)
     │   ├── env.rs       → Env sanitization + injected context vars
-    │   └── exec.rs      → Child process execution + exit propagation
+    │   ├── exec.rs      → Child process execution, structured stream capture, timeout
+    │   ├── prompt_file.rs → Prompt file resolution and Darkmatter composition
+    │   └── repo_home.rs → Shadow HOME for repo-scoped resource isolation
     └── init/
         ├── mod.rs       → Wizard orchestration (interactive + quick modes, default configs)
         └── prompts.rs   → inquire-based interactive prompts

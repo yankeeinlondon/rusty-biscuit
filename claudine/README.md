@@ -18,7 +18,7 @@ Universal event handler, skill linker, and MCP catalog manager for agentic CLIs.
 | Roo Code | - | ✓ | ✓ | Stream-json event emitter |
 
 **Hook** = native hook/plugin system (config-driven).
-**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen/Roo).
+**NonHook** = requires wrapper or stream parsing.
 
 ## Quick Start
 
@@ -62,6 +62,7 @@ claudine logs
 | `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
 | `claudine dry-run <event> [--provider]` | Test event handling without side effects |
 | `claudine about` | Rich help documentation |
+| `claudine claude\|codex\|gemini\|...` | Wrap a provider CLI with preflight checks, env sanitization, and structured streaming |
 | `claudine completions <shell>` | Generate shell completions |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 
@@ -80,8 +81,8 @@ MCP state is stored separately in `~/.claudine/mcp/`:
 
 | Package | Description |
 |---------|-------------|
-| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, skill linking, MCP catalog/sync/runtime support |
-| [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, link management, MCP commands, wrapper runtime composition |
+| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing (6 providers), skill linking, MCP catalog/sync/runtime support |
+| [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, link management, MCP commands, provider wrapper with structured streaming, composition pipelines |
 
 ## Documentation
 
