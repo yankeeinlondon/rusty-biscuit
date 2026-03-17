@@ -1275,22 +1275,22 @@ fn get_file_diff_stats(repo: &Repository, filepath: &Path) -> (usize, usize) {
     if let Ok(head_tree) = repo.head().and_then(|h| h.peel_to_tree()) {
         let mut opts = git2::DiffOptions::new();
         opts.pathspec(filepath);
-        if let Ok(diff) = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts)) {
-            if let Ok(stats) = diff.stats() {
-                added += stats.insertions();
-                removed += stats.deletions();
-            }
+        if let Ok(diff) = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))
+            && let Ok(stats) = diff.stats()
+        {
+            added += stats.insertions();
+            removed += stats.deletions();
         }
     }
 
     // Unstaged changes (index to workdir)
     let mut opts = git2::DiffOptions::new();
     opts.pathspec(filepath);
-    if let Ok(diff) = repo.diff_index_to_workdir(None, Some(&mut opts)) {
-        if let Ok(stats) = diff.stats() {
-            added += stats.insertions();
-            removed += stats.deletions();
-        }
+    if let Ok(diff) = repo.diff_index_to_workdir(None, Some(&mut opts))
+        && let Ok(stats) = diff.stats()
+    {
+        added += stats.insertions();
+        removed += stats.deletions();
     }
 
     (added, removed)
