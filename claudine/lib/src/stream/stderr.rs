@@ -117,11 +117,11 @@ pub fn format_compact_completion(summary: &StreamExecutionSummary) -> Option<Str
         parts.push(format_duration(ms));
     }
 
-    // Compact token usage: input→output
+    // Compact token usage: input→output tokens
     if let Some(usage) = &summary.token_usage
         && let (Some(input), Some(output)) = (usage.input, usage.output) {
             parts.push(format!(
-                "{}\u{2192}{}",
+                "{}\u{2192}{} tokens",
                 format_number(input),
                 format_number(output)
             ));

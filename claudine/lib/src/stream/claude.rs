@@ -80,8 +80,14 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
     }
 
     fn handle_assistant_message(&mut self, obj: &Value) -> Option<String> {
-        // Extract text from content array
-        let content = obj.get("content").and_then(|c| c.as_array())?;
+        // Extract text from content array.
+        // Claude Code wraps it as {"message":{"content":[...]}} while the
+        // simplified test format uses {"content":[...]} at the top level.
+        let content = obj
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| obj.get("content"))
+            .and_then(|c| c.as_array())?;
         let mut text_parts = String::new();
         for part in content {
             if part.get("type").and_then(|t| t.as_str()) == Some("text")
@@ -601,5 +607,27 @@ mod tests {
         let usage = summary.token_usage.unwrap();
         assert_eq!(usage.input, Some(3));
         assert_eq!(usage.output, Some(4));
+    }
+
+    #[test]
+    fn assistant_message_nested_under_message_key() {
+        let mut parser = make_parser();
+
+        let init = r#"{"type":"system","subtype":"init","session_id":"sess-nested","model":"claude-opus-4-6"}"#;
+        parser.feed_line(init).unwrap();
+
+        // Real Claude Code format: content is nested under "message"
+        let msg = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"The sky is blue because of Rayleigh scattering."}],"role":"assistant"}}"#;
+        let result = parser.feed_line(msg).unwrap();
+        assert_eq!(
+            result.as_deref(),
+            Some("The sky is blue because of Rayleigh scattering.")
+        );
+
+        let summary = parser.finish(0);
+        assert_eq!(
+            summary.assistant_text,
+            "The sky is blue because of Rayleigh scattering."
+        );
     }
 }
