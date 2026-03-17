@@ -1002,7 +1002,7 @@ printf '%s' 'Final assistant response' > "$LAST"
         .stdout("Final assistant response");
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(stderr.contains("codex session thread-123"));
+    assert!(stderr.contains("Codex") && stderr.contains("session ID") && stderr.contains("thread-123"));
     assert!(stderr.contains("codex-mini"));
     assert!(stderr.contains("✓ 1.0s"));
 
@@ -1051,7 +1051,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .success()
         .stdout("Hello");
     let default_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(default_stderr.contains("gemini session gem-1"));
+    assert!(default_stderr.contains("session ID gem-1"));
     assert!(!default_stderr.contains("Malformed JSON"));
     assert!(default_stderr.contains("Loop detected"));
     assert!(default_stderr.contains("\n\n✓ 1.5s"));
@@ -1069,7 +1069,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .success()
         .stdout("Hello");
     let quiet_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(!quiet_stderr.contains("gemini session gem-1"));
+    assert!(!quiet_stderr.contains("session ID gem-1"));
     assert!(!quiet_stderr.contains("Malformed JSON"));
     assert!(quiet_stderr.contains("Loop detected"));
     assert!(quiet_stderr.contains("\n\n✓ 1.5s"));
@@ -1087,7 +1087,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .success()
         .stdout("Hello");
     let silent_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(!silent_stderr.contains("gemini session gem-1"));
+    assert!(!silent_stderr.contains("session ID gem-1"));
     assert!(!silent_stderr.contains("Malformed JSON"));
     assert!(!silent_stderr.contains("Loop detected"));
     assert!(!silent_stderr.contains("✓ 1.5s"));
@@ -1284,7 +1284,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 
 #[cfg(unix)]
 #[test]
-fn codex_frontmatter_prompt_updates_body_from_structured_capture() {
+fn codex_frontmatter_prompt_validates_agent_file_update() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
@@ -1294,10 +1294,14 @@ fn codex_frontmatter_prompt_updates_body_from_structured_capture() {
 
     fs::write(&doc_path, "---\nprompt: Write a haiku\n---\nOld body\n").unwrap();
 
+    // The fake agent writes directly to the target file (as a real agent would)
+    let doc_path_str = doc_path.to_str().unwrap().replace('\'', "'\\''");
     write_executable(
         &path_dir.join("codex"),
-        r#"#!/bin/sh
+        &format!(
+            r#"#!/bin/sh
 LAST=""
+DOC='{doc_path_str}'
 while [ $# -gt 0 ]; do
   case "$1" in
     --output-last-message)
@@ -1310,11 +1314,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 echo "provider stderr noise" >&2
-printf '%s\n' '{"type":"thread.started","thread_id":"thread-compose"}'
-printf '%s\n' '{"type":"turn.started"}'
-printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":8,"output_tokens":6},"duration_ms":900,"status":"completed"}'
-printf '%s' 'Fresh assistant body' > "$LAST"
-"#,
+printf '%s\n' '{{"type":"thread.started","thread_id":"thread-compose"}}'
+printf '%s\n' '{{"type":"turn.started"}}'
+# Agent writes to the target file directly (preserving frontmatter)
+printf '%s\n' '---' > "$DOC"
+printf '%s\n' 'prompt: Write a haiku' >> "$DOC"
+printf '%s\n' '---' >> "$DOC"
+printf '%s' 'Fresh agent body' >> "$DOC"
+printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":8,"output_tokens":6}},"duration_ms":900,"status":"completed"}}'
+printf '%s' 'Summary of work done' > "$LAST"
+"#
+        ),
     );
 
     cargo_bin_cmd!("claudine")
@@ -1331,9 +1341,8 @@ printf '%s' 'Fresh assistant body' > "$LAST"
 
     let updated = fs::read_to_string(&doc_path).unwrap();
     assert!(updated.contains("last_updated:"));
-    assert!(updated.contains("Fresh assistant body"));
+    assert!(updated.contains("Fresh agent body"));
     assert!(!updated.contains("Old body"));
-    assert!(!updated.contains("provider stderr noise"));
 }
 
 #[cfg(unix)]

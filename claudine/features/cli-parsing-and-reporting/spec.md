@@ -60,9 +60,7 @@ The line starting with `Claudine ▸ {agent}` is what we'll refer to as the "exe
 - when the execution line is visible it is printed to STDERR and includes a blank line before and after
 - the format of the execution line is `<b><blue-500>Claudine</blue-500> ▸ {agent} </b>{badges} <dim>{prompt}</dim>`
 - CHANGES:
-    - currently we tend to drop in vendor specific CLI switches like `--print` or `--prompt` or `--dangerously-skip-permissions`
+    - today we tend to drop in vendor specific CLI switches like `--print` or `--prompt` or `--dangerously-skip-permissions`
     - none of those should be written out to the execution line
     - the `{prompt}` is only shown if there IS a prompt and we will truncate it with a trailing ellipsis to keep reporting to one line`
         - to do this effectively we do need to look for `\n` in the prompt text and show them as `\n` and **not** actually render the new line.
-
-

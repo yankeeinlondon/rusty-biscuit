@@ -7,6 +7,7 @@
 //! - Composition-specific error types
 
 mod error;
+mod guardrails;
 mod prepare;
 mod resolve;
 mod select;

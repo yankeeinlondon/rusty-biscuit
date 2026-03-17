@@ -107,7 +107,7 @@ fn run_compose_inner(args: ComposeArgs, _verbose: u8) -> Result<i32> {
     // Prepare prompt
     let prepared = match mode {
         CompositionMode::InlineFrontmatterPrompt => {
-            composition::prepare_inline_prompt(&source).map_err(|e| eyre!("{e}"))?
+            composition::prepare_inline_prompt(&source, None).map_err(|e| eyre!("{e}"))?
         }
         CompositionMode::ChainedDocument => {
             composition::prepare_chained_prompt(&source).map_err(|e| eyre!("{e}"))?

@@ -405,10 +405,11 @@ pub(crate) fn run_child_stream(
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
-    let filter_stderr = !stderr_noise_prefixes.is_empty();
     let needs_stdin_pipe = stdin_seed.is_some();
     let started_at = Instant::now();
 
+    // Always pipe stderr in structured stream mode so we can intercept and
+    // format raw API error JSON into human-readable messages.
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -421,11 +422,7 @@ pub(crate) fn run_child_stream(
             Stdio::inherit()
         })
         .stdout(Stdio::piped())
-        .stderr(if filter_stderr {
-            Stdio::piped()
-        } else {
-            Stdio::inherit()
-        });
+        .stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
 
@@ -477,36 +474,36 @@ pub(crate) fn run_child_stream(
         parser
     });
 
-    // Stderr noise filtering thread
-    let stderr_handle = if filter_stderr {
-        let pipe = child.stderr.take().expect("stderr was set to piped");
-        let prefixes: Vec<String> = stderr_noise_prefixes
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        Some(thread::spawn(move || {
-            let reader = BufReader::new(pipe);
-            let mut captured = String::new();
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
-                    continue;
-                }
-                if suppress_stderr_on_success {
-                    if !captured.is_empty() {
-                        captured.push('\n');
-                    }
-                    captured.push_str(&line);
-                } else {
-                    let mut err = std::io::stderr().lock();
-                    let _ = writeln!(err, "{line}");
-                }
+    // Stderr processing thread: filters noise prefixes and formats raw API errors.
+    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let prefixes: Vec<String> = stderr_noise_prefixes
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let stderr_handle = thread::spawn(move || {
+        let reader = BufReader::new(pipe);
+        let mut captured = String::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+                continue;
             }
-            captured
-        }))
-    } else {
-        None
-    };
+            // Format raw API error JSON into human-readable messages
+            let formatted = crate::output::try_format_api_error(&line);
+            let output_line = formatted.as_deref().unwrap_or(&line);
+
+            if suppress_stderr_on_success {
+                if !captured.is_empty() {
+                    captured.push('\n');
+                }
+                captured.push_str(output_line);
+            } else {
+                let mut err = std::io::stderr().lock();
+                let _ = writeln!(err, "{output_line}");
+            }
+        }
+        captured
+    });
 
     let exit_code = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
@@ -519,11 +516,9 @@ pub(crate) fn run_child_stream(
         Box::new(ErrorParser { exit_code })
     });
 
-    if let Some(handle) = stderr_handle {
-        let captured = handle.join().unwrap_or_default();
-        if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
-            eprintln!("{captured}");
-        }
+    let captured = stderr_handle.join().unwrap_or_default();
+    if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
+        eprintln!("{captured}");
     }
 
     let mut summary = parser.finish(exit_code);
@@ -537,7 +532,8 @@ pub(crate) fn run_child_stream(
 /// Spawn a provider child process with structured stream parsing, capturing output.
 ///
 /// Like `run_child_stream` but captures assistant text instead of printing.
-/// Used by compose and inline-update flows.
+/// Used by compose flows.
+#[allow(dead_code)]
 pub(crate) fn run_child_stream_capture(
     binary: &Path,
     args: &[String],

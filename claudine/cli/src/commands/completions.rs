@@ -29,6 +29,19 @@ pub struct CompletionsArgs {
 pub fn run(args: CompletionsArgs) -> Result<()> {
     use clap::CommandFactory;
     let mut cmd = super::super::Cli::command();
-    clap_complete::generate(args.shell, &mut cmd, "claudine", &mut std::io::stdout());
+
+    if args.shell == clap_complete::Shell::Zsh {
+        // clap_complete generates zsh completions with `--option=[desc]` style,
+        // which completes with `=` glued to the flag. Post-process to remove the
+        // `=` so zsh uses space-separated `--option <value>` style instead.
+        let mut buf = Vec::new();
+        clap_complete::generate(args.shell, &mut cmd, "claudine", &mut buf);
+        let output = String::from_utf8(buf)?;
+        let patched = output.replace("=-[", "-[").replace("=[", "[");
+        print!("{patched}");
+    } else {
+        clap_complete::generate(args.shell, &mut cmd, "claudine", &mut std::io::stdout());
+    }
+
     Ok(())
 }

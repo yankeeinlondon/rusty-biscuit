@@ -1,17 +1,24 @@
 //! Prompt preparation for composition workflows.
 
+use std::path::Path;
+
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::transform::TransformOptions;
 
 use super::error::CompositionError;
+use super::guardrails::load_or_create_guardrails;
 use super::types::{CompositionMode, PreparedPrompt, ResolvedCompositionSource};
 
 /// Prepare an inline prompt from a source document's `prompt` frontmatter.
 ///
 /// Extracts the `prompt` property, builds a temporary `Markdown` with the
 /// original frontmatter context, and transforms it through Darkmatter.
+///
+/// When `repo_root` is provided the guardrails are loaded from (or created
+/// at) `.claudine/frontmatter-prompt.md`; otherwise built-in defaults apply.
 pub fn prepare_inline_prompt(
     source: &ResolvedCompositionSource,
+    repo_root: Option<&Path>,
 ) -> Result<PreparedPrompt, CompositionError> {
     let fm = source.markdown.frontmatter();
 
@@ -43,7 +50,9 @@ pub fn prepare_inline_prompt(
     let mut prompt = transformed.content().to_string();
 
     // Append guardrails so the agent doesn't mangle the source file.
-    prompt.push_str(INLINE_PROMPT_GUARDRAILS);
+    let guardrails = load_or_create_guardrails(repo_root);
+    prompt.push_str("\n\n");
+    prompt.push_str(&guardrails);
 
     Ok(PreparedPrompt {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -52,17 +61,6 @@ pub fn prepare_inline_prompt(
         source_agent_hint: agent_hint,
     })
 }
-
-/// Guardrail instructions appended to every `--frontmatter-prompt` prompt.
-///
-/// Prevents the agent from rewriting the frontmatter, creating separate
-/// documents, or otherwise defeating the inline-composition workflow.
-const INLINE_PROMPT_GUARDRAILS: &str = "\n\n\
-> **IMPORTANT:**\n\
->\n\
-> - Never change the `prompt` frontmatter property, that property is to read and should not be reformatted or changed in any way\n\
-> - Your task is to use the prompt from the `prompt` property to update the body of this document\n\
-> - Do not create another document and have this document link to it unless the frontmatter `prompt` explicitly tells you to\n";
 
 /// Prepare a chained prompt from a full source document.
 ///
@@ -137,7 +135,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline_prompt(&source).unwrap();
+        let prepared = prepare_inline_prompt(&source, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(
             prepared.prompt.contains("List three colors"),
@@ -159,7 +157,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-        let err = prepare_inline_prompt(&source).unwrap_err();
+        let err = prepare_inline_prompt(&source, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyMissing));
     }
 
@@ -168,7 +166,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-        let err = prepare_inline_prompt(&source).unwrap_err();
+        let err = prepare_inline_prompt(&source, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
     }
 
@@ -184,7 +182,7 @@ mod tests {
             "Body",
         );
 
-        let prepared = prepare_inline_prompt(&source).unwrap();
+        let prepared = prepare_inline_prompt(&source, None).unwrap();
         assert_eq!(prepared.source_agent_hint, Some(json!("claude")));
     }
 

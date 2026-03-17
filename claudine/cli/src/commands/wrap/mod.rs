@@ -10,7 +10,7 @@ use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
 use claudine::stream::parser::{EventMeta as StreamEventMeta, StreamEventSink};
-use claudine::stream::stderr::{Verbosity, format_start_summary, format_warning};
+use claudine::stream::stderr::{Verbosity, format_warning};
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
 use profile::{OutputFormat, WrapperProfile};
@@ -152,14 +152,12 @@ impl LiveStreamSink {
             return;
         }
 
-        let summary = claudine::stream::summary::StreamExecutionSummary {
-            provider: self.provider,
-            session_id: self.session_id.clone(),
-            model: self.model.clone(),
-            ..Default::default()
-        };
-
-        if let Some(line) = format_start_summary(&summary) {
+        if let Some(ref session_id) = self.session_id {
+            let line = crate::output::format_session_start(
+                self.provider,
+                session_id,
+                self.model.as_deref(),
+            );
             eprintln!("{line}");
             self.start_emitted = true;
         }
@@ -644,16 +642,22 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     }
 
     // -- Frontmatter-prompt (inline composition) pipeline --------------------
+    // Tuple: (source, prepared_prompt, pre_fm_hash, pre_body_hash)
     let mut inline_composition_source: Option<(
         claudine::composition::ResolvedCompositionSource,
         claudine::composition::PreparedPrompt,
+        u64,
+        u64,
     )> = None;
 
     if let Some(ref fp_input) = args.frontmatter_prompt {
         let source = claudine::composition::resolve_composition_source(fp_input)
             .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
-        let prepared = claudine::composition::prepare_inline_prompt(&source)
-            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+        let prepared = claudine::composition::prepare_inline_prompt(
+            &source,
+            env_plan.repo_root.as_deref(),
+        )
+        .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
 
         // Detect conflict with existing prompt source
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
@@ -674,7 +678,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.apply_non_interactive_defaults(&mut child_args);
         }
 
-        inline_composition_source = Some((source, prepared));
+        // Capture pre-execution hashes for post-run validation
+        let pre_fm_hash = source.markdown.hash_frontmatter(false);
+        let pre_body_hash = source.markdown.hash_body(false);
+
+        inline_composition_source = Some((source, prepared, pre_fm_hash, pre_body_hash));
     }
 
     // -- Chained composition (--compose) pipeline ------------------------------
@@ -921,11 +929,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
 
     // Extract the user's prompt for display in the header line.
-    // Composition modes show the file path; regular runs show the prompt text.
+    // Frontmatter-prompt shows the actual prompt text from the file;
+    // other modes show the file path; regular runs show the prompt text.
     let prompt_display: Option<String> = if let Some(ref pf) = args.prompt_file {
         Some(format!("--prompt-file {pf}"))
-    } else if let Some(ref fp) = args.frontmatter_prompt {
-        Some(format!("--frontmatter-prompt {fp}"))
+    } else if inline_composition_source.is_some() {
+        inline_composition_source
+            .as_ref()
+            .map(|(_, prepared, _, _)| prepared.prompt.clone())
     } else if let Some(ref c) = args.compose {
         Some(format!("--compose {c}"))
     } else {
@@ -976,6 +987,27 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             for message in &deferred_messages {
                 log::message(&crate::output::post_env_message(message, &term));
             }
+
+            // Frontmatter-prompt: show file resolution and prompt blockquote
+            if let Some(ref ics) = inline_composition_source {
+                let (source, prepared, _, _) = ics;
+                let display_path = source
+                    .resolved_path
+                    .strip_prefix(child_cwd)
+                    .unwrap_or(&source.resolved_path);
+                log::message(&crate::output::fm_check_ok(
+                    &format!(
+                        "resolved the file reference to <a href=\"{}\">{}</a>",
+                        source.resolved_path.display(),
+                        display_path.display()
+                    ),
+                    &term,
+                ));
+                crate::output::render_prompt_blockquote(&prepared.prompt, &term);
+            }
+
+            // Blank line to separate preamble from execution output
+            log::message("");
         }
     }
 
@@ -1004,19 +1036,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    // For captured-output paths (inline compose), let the profile inject
-    // structured output flags (e.g. Gemini's --output-format stream-json)
-    // so we can reliably extract the assistant response from noisy stdout.
-    // Chained compose uses run_child (forwards to terminal), so it relies
-    // on prefix-based noise filtering instead.
-    if !use_structured && inline_composition_source.is_some() {
-        profile.prepare_captured_output(&mut child_args);
-    }
-
-    let exit_code = if let Some((source, _prepared)) = inline_composition_source {
-        if use_structured {
+    let exit_code = if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) = inline_composition_source {
+        // Inline composition: the agent is responsible for writing to the file.
+        // We stream output to the terminal normally, then validate the file afterward,
+        // and emit the metadata summary line last.
+        let (agent_exit, deferred_summary) = if use_structured {
             let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-            // Inline composition with structured stream parsing
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
@@ -1030,13 +1055,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 ),
                 parser_config,
             );
-            let mut summary = exec::run_child_stream_capture(
+            let mut summary = exec::run_child_stream(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
                 child_cwd,
                 args.timeout,
                 stderr_noise,
+                profile.suppress_structured_stderr_on_success(),
                 stdin_seed.as_deref(),
                 parser,
             )?;
@@ -1044,50 +1070,17 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 codex_output.apply_to_summary(&mut summary);
             }
 
-            if summary.exit_code == 0 {
-                let mut updated_md = source.markdown.clone();
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                updated_md
-                    .fm_insert("last_updated", &today)
-                    .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                *updated_md.content_mut() = summary.assistant_text.clone();
-
-                let doc_string = updated_md.as_string();
-                claudine::config::atomic::atomic_write(
-                    &source.resolved_path,
-                    doc_string.as_bytes(),
-                )
-                .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
-
-                if !silent_requested && !quiet_requested {
-                    log::message(&format!(
-                        "  \x1b[32m✓\x1b[0m Updated {}",
-                        source.resolved_path.display()
-                    ));
-                }
-            } else if summary.is_error
-                && let Some(msg) = summary
-                    .error_message
-                    .as_deref()
-                    .or(summary.stderr_text.as_deref())
-            {
-                eprintln!("{msg}");
+            // Warn if agent provided no summary text to stdout
+            if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
+                log::warn("the agent did not provide a summarized message on their completed work!");
             }
 
-            // Write synthetic summary event for reporting
-            emit_stream_summary(
-                &summary,
-                profile,
-                &env_context,
-                stream_verbosity,
-                verbose_requested,
-                &summary_details.lock().unwrap().clone(),
-            );
-
-            Ok(summary.exit_code)
+            let exit = summary.exit_code;
+            let details = summary_details.lock().unwrap().clone();
+            (exit, Some((summary, details)))
         } else {
-            // Inline composition: capture output and update file (legacy path)
-            let captured = exec::run_child_capture(
+            // Legacy path: forward I/O to terminal
+            let exit = exec::run_child(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1099,34 +1092,156 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     stdin_seed: stdin_seed.as_deref(),
                 },
             )?;
+            (exit, None)
+        };
 
-            if captured.exit_code == 0 {
-                let mut updated_md = source.markdown.clone();
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                updated_md
-                    .fm_insert("last_updated", &today)
-                    .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                *updated_md.content_mut() = profile.parse_captured_output(&captured.stdout);
+        // Post-execution validation: always check the file, even on agent error.
+        // The agent may have successfully updated the file before an API error occurred.
+        let mut final_exit = agent_exit;
+        let show_checks = !silent_requested && !quiet_requested;
+        let provider_name = crate::output::capitalize_provider(provider);
 
-                let doc_string = updated_md.as_string();
-                claudine::config::atomic::atomic_write(
-                    &source.resolved_path,
-                    doc_string.as_bytes(),
-                )
-                .map_err(|e| eyre!("failed to write inline composition result: {e}"))?;
-
-                if !silent_requested && !quiet_requested {
-                    log::message(&format!(
-                        "  \x1b[32m✓\x1b[0m Updated {}",
-                        source.resolved_path.display()
-                    ));
-                }
-            } else if !captured.stderr.is_empty() {
-                eprintln!("{}", captured.stderr);
-            }
-
-            Ok(captured.exit_code)
+        if agent_exit == 0 && show_checks {
+            log::message(&crate::output::fm_check_ok(
+                &format!("{provider_name} agent completed successfully"),
+                &term,
+            ));
+        } else if agent_exit != 0 && show_checks {
+            log::message(&crate::output::fm_check_fail(
+                &format!("{provider_name} agent exited with error (code {agent_exit})"),
+                &term,
+            ));
         }
+
+        let display_path = source
+            .resolved_path
+            .strip_prefix(child_cwd)
+            .unwrap_or(&source.resolved_path)
+            .display();
+
+        // Read the file from disk to see what the agent did
+        let disk_md = darkmatter::markdown::Markdown::try_from(
+            source.resolved_path.as_path(),
+        );
+
+        match disk_md {
+            Ok(on_disk) => {
+                // Check if the body was updated on disk
+                let disk_body_hash = on_disk.hash_body(false);
+                let body_updated = disk_body_hash != pre_body_hash;
+
+                if body_updated {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Agent updated the target document's body",
+                            &term,
+                        ));
+                    }
+
+                    // Agent updated the file — if it also exited with an error,
+                    // the file update takes precedence (e.g. API error after writing).
+                    if agent_exit != 0 && show_checks {
+                        log::warn(
+                            "agent reported an error but the target file was updated; \
+                             treating as success",
+                        );
+                    }
+                    final_exit = 0;
+
+                    // Only check frontmatter when the agent actually did work
+                    let disk_fm_hash = on_disk.hash_frontmatter(false);
+                    let fm_tampered = disk_fm_hash != pre_fm_hash;
+                    if fm_tampered {
+                        if show_checks {
+                            log::message(&crate::output::fm_check_fail(
+                                "Agent ignored instruction to leave frontmatter untouched \
+                                 (<i>we have reverted their changes</i>)",
+                                &term,
+                            ));
+                        }
+                        // Restore original frontmatter but keep the agent's body content
+                        let mut restored = source.markdown.clone();
+                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                        restored
+                            .fm_insert("last_updated", &today)
+                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+                        *restored.content_mut() = on_disk.content().to_string();
+
+                        let doc_string = restored.as_string();
+                        claudine::config::atomic::atomic_write(
+                            &source.resolved_path,
+                            doc_string.as_bytes(),
+                        )
+                        .map_err(|e| eyre!("failed to write restored frontmatter: {e}"))?;
+                    } else {
+                        if show_checks {
+                            log::message(&crate::output::fm_check_ok(
+                                "Agent left frontmatter untouched (<i>as instructed</i>)",
+                                &term,
+                            ));
+                        }
+                        // Just update last_updated in the on-disk file
+                        let mut updated = on_disk;
+                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                        updated
+                            .fm_insert("last_updated", &today)
+                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+
+                        let doc_string = updated.as_string();
+                        claudine::config::atomic::atomic_write(
+                            &source.resolved_path,
+                            doc_string.as_bytes(),
+                        )
+                        .map_err(|e| eyre!("failed to write last_updated: {e}"))?;
+                    }
+
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Updated <bold>last_updated</bold> property to today's date",
+                            &term,
+                        ));
+                    }
+                } else if agent_exit == 0 {
+                    // Agent reported success but didn't update the file
+                    if show_checks {
+                        log::message(&crate::output::fm_check_fail(
+                            &format!(
+                                "the referenced file -- {display_path} -- did not get \
+                                 updated even though the Agent reported a successful outcome!"
+                            ),
+                            &term,
+                        ));
+                    }
+                    final_exit = 1;
+                }
+                // If agent errored AND body wasn't updated, no further checks —
+                // the agent failed before completing its work.
+            }
+            Err(e) => {
+                log::error(&format!(
+                    "failed to read {display_path} after agent completion: {e}"
+                ));
+                final_exit = 1;
+            }
+        }
+
+        // Emit the metadata summary line last, after validation checks.
+        // Blank line before metadata to visually separate from checks.
+        if let Some((summary, details)) = deferred_summary {
+            if stream_verbosity != Verbosity::Silent {
+                eprintln!();
+            }
+            emit_stream_summary_no_separator(
+                &summary,
+                profile,
+                &env_context,
+                stream_verbosity,
+                verbose_requested,
+                &details,
+            );
+        }
+
+        Ok(final_exit)
     } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         // Normal execution with structured stream parsing
@@ -1267,6 +1382,42 @@ fn emit_stream_summary(
         if let Some(markup) = secondary_markup {
             let rendered = Prose::new(markup).render_optimistic(None);
             eprint!("  {rendered}\n");
+        }
+    }
+
+    // Write synthetic summary event to JSONL (best-effort)
+    if let Some(protocol) = profile.stream_protocol() {
+        let meta =
+            claudine::stream::reporting::summary_to_event_meta(summary, protocol, env_context);
+        if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
+            tracing::warn!("Failed to write stream summary event: {e}");
+        }
+    }
+}
+
+/// Like `emit_stream_summary` but without the automatic separator logic.
+/// Used when the caller manages spacing (e.g. inline composition validation output).
+fn emit_stream_summary_no_separator(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    profile: &dyn WrapperProfile,
+    env_context: &EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    details: &StructuredSummaryDetails,
+) {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+
+    if verbosity != Verbosity::Silent {
+        if let Some(markup) = format_summary_prose(summary) {
+            let rendered = Prose::new(markup).render_optimistic(None);
+            eprintln!("{rendered}");
+        }
+    }
+    if verbosity != Verbosity::Silent && verbose {
+        if let Some(markup) = format_verbose_summary_details_prose(summary, details) {
+            let rendered = Prose::new(markup).render_optimistic(None);
+            eprintln!("  {rendered}");
         }
     }
 

@@ -1,3 +1,4 @@
+use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
@@ -7,6 +8,7 @@ use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{
     COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
 };
+use claudine::events::Provider;
 use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
@@ -97,7 +99,7 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(Prose::new(format!("<dim>{truncated}</dim>")).render(term));
     }
 
-    log::message(&format!("\n{}", header_parts.join(" ")));
+    log::message(&format!("\n{}\n", header_parts.join(" ")));
 }
 
 /// Print environment variable details (removed, included, added).
@@ -533,9 +535,156 @@ pub(crate) fn shell_escape(arg: &str) -> String {
     format!("'{escaped}'")
 }
 
+/// Format the session start line for non-interactive prompts.
+///
+/// Produces: `- *Claude* session ID abc123def4`
+pub(crate) fn format_session_start(
+    provider: Provider,
+    session_id: &str,
+    model: Option<&str>,
+) -> String {
+    let name = capitalize_provider(provider);
+    let short_id = if session_id.len() > 12 {
+        &session_id[..12]
+    } else {
+        session_id
+    };
+    let model_part = if let Some(m) = model {
+        format!(" \u{00b7} {m}")
+    } else {
+        String::new()
+    };
+    Prose::new(format!(
+        "<dim>- <i>{name}</i> session ID </dim>{short_id}<dim>{model_part}</dim>"
+    ))
+    .render_optimistic(None)
+}
+
+/// Render the user prompt as a truncated blockquote for frontmatter-prompt display.
+pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal) {
+    let lines: Vec<&str> = prompt.lines().collect();
+    let (display_text, truncated) = if lines.len() > 10 {
+        let first_10 = lines[..10].join("\n");
+        (first_10, true)
+    } else {
+        (prompt.to_string(), false)
+    };
+
+    log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
+    let mut bq_text = display_text;
+    if truncated {
+        bq_text.push_str(&format!(
+            "\n{}",
+            Prose::new("<dim><i>truncated for brevity</i></dim>").render(term)
+        ));
+    }
+    let rendered = BlockQuote::from(bq_text.as_str()).render(term);
+    log::message(&rendered);
+}
+
+/// Format a frontmatter-prompt validation check line (success).
+pub(crate) fn fm_check_ok(message: &str, term: &Terminal) -> String {
+    Prose::new(format!("<green-500>\u{2713}</green-500> {message}")).render(term)
+}
+
+/// Format a frontmatter-prompt validation check line (failure).
+pub(crate) fn fm_check_fail(message: &str, term: &Terminal) -> String {
+    Prose::new(format!("<red-500>\u{2a2f}</red-500> {message}")).render(term)
+}
+
+pub(crate) fn capitalize_provider(provider: Provider) -> String {
+    let s = format!("{provider}");
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+/// Try to reformat a raw API error line (e.g. `API Error: 529 {"type":"error",...}`)
+/// into a human-readable message. Returns `None` if the line doesn't match.
+pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
+    // Match pattern: "API Error: NNN {json}" or "API Error: NNN ..." at minimum
+    let rest = line.strip_prefix("API Error: ")?;
+
+    // Extract status code
+    let (status_str, json_part) = rest.split_once(' ')?;
+    let status: u16 = status_str.parse().ok()?;
+
+    // Try to parse the JSON for a friendly message
+    let friendly = if let Ok(obj) = serde_json::from_str::<serde_json::Value>(json_part) {
+        let error_type = obj
+            .get("error")
+            .and_then(|e| e.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("unknown");
+        let message = obj
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        let request_id = obj
+            .get("request_id")
+            .and_then(|r| r.as_str());
+
+        let mut parts = vec![format!(
+            "<red><bold>API Error ({status}):</bold></red> {message}"
+        )];
+
+        // Add context for known error types
+        match error_type {
+            "overloaded_error" => {
+                parts.push("<dim>The API is temporarily overloaded. This is usually transient — retrying the command may succeed.</dim>".to_string());
+            }
+            "api_error" if status == 500 => {
+                parts.push("<dim>An internal server error occurred. This is usually transient — retrying the command may succeed.</dim>".to_string());
+            }
+            "rate_limit_error" => {
+                parts.push("<dim>Rate limit exceeded. Wait a moment before retrying.</dim>".to_string());
+            }
+            _ => {}
+        }
+
+        if let Some(rid) = request_id {
+            parts.push(format!("<dim>request: {rid}</dim>"));
+        }
+
+        parts.join("\n")
+    } else {
+        // Not valid JSON, just format the raw message
+        format!("<red><bold>API Error ({status}):</bold></red> {}", json_part.trim())
+    };
+
+    Some(Prose::new(friendly).render_optimistic(None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_format_api_error_parses_overloaded() {
+        let line = r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded. https://docs.claude.com/en/api/errors"},"request_id":"req_abc123"}"#;
+        let result = try_format_api_error(line).unwrap();
+        assert!(result.contains("API Error (529)"));
+        assert!(result.contains("Overloaded"));
+        assert!(result.contains("transient"));
+        assert!(result.contains("req_abc123"));
+    }
+
+    #[test]
+    fn try_format_api_error_parses_500() {
+        let line = r#"API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"},"request_id":"req_xyz"}"#;
+        let result = try_format_api_error(line).unwrap();
+        assert!(result.contains("API Error (500)"));
+        assert!(result.contains("Internal server error"));
+    }
+
+    #[test]
+    fn try_format_api_error_returns_none_for_non_match() {
+        assert!(try_format_api_error("some random line").is_none());
+        assert!(try_format_api_error("Error: something").is_none());
+    }
 
     #[test]
     fn truncate_args_no_op_when_fits() {
