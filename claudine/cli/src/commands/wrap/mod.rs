@@ -159,6 +159,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
+    let verbose_requested = verbose > 0 || extracted.verbose;
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
@@ -602,6 +603,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile,
             yolo_enabled,
             effective_non_interactive,
+            verbose_requested,
             repo_requested,
             compose_display.as_ref(),
             effective_operation.as_deref(),
@@ -716,7 +718,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 }
 
             // Write synthetic summary event for reporting
-            emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested);
+            emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested, verbose_requested);
 
             Ok(summary.exit_code)
         } else {
@@ -782,7 +784,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         )?;
 
         // Emit stderr summaries and write synthetic event
-        emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested);
+        emit_stream_summary(&summary, profile, &env_plan, silent_requested, quiet_requested, verbose_requested);
 
         Ok(summary.exit_code)
     } else {
@@ -847,24 +849,20 @@ fn emit_stream_summary(
     profile: &dyn WrapperProfile,
     _env_plan: &env::EnvPlan,
     silent: bool,
-    quiet: bool,
+    _quiet: bool,
+    verbose: bool,
 ) {
-    use claudine::stream::stderr::{Verbosity, format_completion_summary, format_compact_completion};
-
-    let verbosity = match (quiet, silent) {
-        (_, true) => Verbosity::Silent,
-        (true, _) => Verbosity::Quiet,
-        _ => Verbosity::Normal,
-    };
-
-    if verbosity != Verbosity::Silent {
-        let line = match verbosity {
-            Verbosity::Quiet => format_compact_completion(summary),
-            Verbosity::Normal => format_completion_summary(summary),
-            Verbosity::Silent => None,
+    if !silent {
+        let prose_markup = if verbose {
+            format_verbose_summary_prose(summary)
+        } else {
+            format_summary_prose(summary)
         };
-        if let Some(line) = line {
-            eprintln!("{line}");
+        if let Some(markup) = prose_markup {
+            use biscuit_terminal::components::prose::Prose;
+            use biscuit_terminal::components::renderable::Renderable;
+            let rendered = Prose::new(&markup).render_optimistic(None);
+            eprint!("\n\n{rendered}\n");
         }
     }
 
@@ -876,6 +874,110 @@ fn emit_stream_summary(
             tracing::warn!("Failed to write stream summary event: {e}");
         }
     }
+}
+
+/// Builds Prose markup for the stream execution summary.
+/// Default summary: duration, tokens, cost (Prose-styled).
+fn format_summary_prose(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+) -> Option<String> {
+    use claudine::stream::stderr::{format_cost, format_duration, format_number};
+
+    let prefix = if summary.is_error {
+        "\u{2717}"
+    } else {
+        "\u{2713}"
+    };
+
+    let mut parts = Vec::new();
+
+    // Duration
+    if let Some(ms) = summary.duration_ms {
+        parts.push(format_duration(ms));
+    }
+
+    // Token usage
+    if let Some(usage) = &summary.token_usage {
+        if let Some(input) = usage.input {
+            parts.push(format!("{} <i>input tokens</i>", format_number(input)));
+        }
+        if let Some(output) = usage.output {
+            parts.push(format!("{} <i>output tokens</i>", format_number(output)));
+        }
+    }
+
+    // Cost
+    if let Some(cost) = summary.cost_usd {
+        parts.push(format!("{} <i>cost basis</i>", format_cost(cost)));
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
+}
+
+/// Verbose summary: default fields + tool calls, turns, cache tokens (Prose-styled).
+fn format_verbose_summary_prose(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+) -> Option<String> {
+    use claudine::stream::stderr::{format_cost, format_duration, format_number};
+
+    let prefix = if summary.is_error {
+        "\u{2717}"
+    } else {
+        "\u{2713}"
+    };
+
+    let mut parts = Vec::new();
+
+    if let Some(ms) = summary.duration_ms {
+        parts.push(format_duration(ms));
+    }
+
+    if let Some(usage) = &summary.token_usage {
+        if let Some(input) = usage.input {
+            parts.push(format!("{} <i>input tokens</i>", format_number(input)));
+        }
+        if let Some(output) = usage.output {
+            parts.push(format!("{} <i>output tokens</i>", format_number(output)));
+        }
+        if let Some(cache) = usage.cache_read
+            && cache > 0
+        {
+            parts.push(format!("{} <i>cached tokens</i>", format_number(cache)));
+        }
+    }
+
+    if let Some(cost) = summary.cost_usd {
+        parts.push(format!("{} <i>cost basis</i>", format_cost(cost)));
+    }
+
+    if let Some(tc) = summary.tool_calls {
+        parts.push(format!(
+            "{tc} <i>tool call{}</i>",
+            if tc == 1 { "" } else { "s" }
+        ));
+    }
+
+    if let Some(turns) = summary.num_turns
+        && turns > 1
+    {
+        parts.push(format!("{turns} <i>turns</i>"));
+    }
+
+    if summary.is_error {
+        if let Some(msg) = &summary.error_message {
+            parts.push(format!("<red>{msg}</red>"));
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1041,6 +1143,7 @@ struct ExtractedWrapperFlags {
     repo: bool,
     quiet: bool,
     silent: bool,
+    verbose: bool,
     operation: Option<String>,
 }
 
@@ -1073,6 +1176,10 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
             }
             "--silent" => {
                 extracted.silent = true;
+                remove_indices.push(i);
+            }
+            "-v" | "--verbose" => {
+                extracted.verbose = true;
                 remove_indices.push(i);
             }
             "--operation" | "--op" => {

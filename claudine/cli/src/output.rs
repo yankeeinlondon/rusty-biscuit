@@ -4,7 +4,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{COMPOSE, INLINE_COMPOSE, NON_INTERACTIVE, REPO_FLAG, YOLO};
+use claudine::badges::{COMPOSE, INLINE_COMPOSE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
 use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
@@ -27,6 +27,7 @@ pub(crate) fn log_wrapper_header(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive_requested: bool,
+    verbose_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
     operation: Option<&str>,
@@ -49,6 +50,10 @@ pub(crate) fn log_wrapper_header(
 
     if non_interactive_requested {
         header_parts.push(NON_INTERACTIVE.to_string());
+    }
+
+    if verbose_requested {
+        header_parts.push(VERBOSE.to_string());
     }
 
     match compose_display {
