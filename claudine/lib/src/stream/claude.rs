@@ -144,8 +144,11 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        // Cost
-        self.cost_usd = obj.get("cost_usd").and_then(|v| v.as_f64());
+        // Cost (Claude Code uses "total_cost_usd", older versions may use "cost_usd")
+        self.cost_usd = obj
+            .get("total_cost_usd")
+            .or_else(|| obj.get("cost_usd"))
+            .and_then(|v| v.as_f64());
 
         // Token usage
         if let Some(usage) = obj.get("usage") {
@@ -579,5 +582,24 @@ mod tests {
         let parser = make_parser();
         let summary = parser.finish(0);
         assert!(summary.tool_calls.is_none());
+    }
+
+    #[test]
+    fn total_cost_usd_field_name() {
+        let mut parser = make_parser();
+
+        let init = r#"{"type":"init","session_id":"sess-cost","model":"claude-opus-4-6"}"#;
+        parser.feed_line(init).unwrap();
+
+        // Claude Code uses "total_cost_usd" in the result event
+        let result = r#"{"type":"result","duration_ms":5396,"total_cost_usd":0.185,"usage":{"input_tokens":3,"output_tokens":4}}"#;
+        parser.feed_line(result).unwrap();
+
+        let summary = parser.finish(0);
+        assert_eq!(summary.cost_usd, Some(0.185));
+        assert_eq!(summary.duration_ms, Some(5396));
+        let usage = summary.token_usage.unwrap();
+        assert_eq!(usage.input, Some(3));
+        assert_eq!(usage.output, Some(4));
     }
 }
