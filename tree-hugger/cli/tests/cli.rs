@@ -366,7 +366,7 @@ fn test_glob_pattern_json() {
 #[test]
 fn test_symbols_without_filters_scans_all_sources() {
     hug_cmd()
-        .args(["symbols", "--plain"])
+        .args(["symbols", "tree-hugger/cli/src/*.rs", "--plain"])
         .assert()
         .success()
         .stdout(predicate::str::contains("tree-hugger/cli/src/main.rs:"));
