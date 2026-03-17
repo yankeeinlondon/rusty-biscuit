@@ -97,6 +97,22 @@ impl From<FileSymbolIndex> for SymbolSnapshot {
     }
 }
 
+impl From<SymbolSnapshot> for FileSymbolIndex {
+    fn from(snapshot: SymbolSnapshot) -> Self {
+        Self {
+            schema_version: snapshot.key.analyzer_fingerprint.schema_version,
+            file: snapshot.key.file_path,
+            language: snapshot.key.language,
+            file_hash: snapshot.key.file_hash,
+            completed_passes: snapshot.completed_passes,
+            symbols: snapshot.symbols,
+            imports: snapshot.imports,
+            exports: snapshot.exports,
+            diagnostics: snapshot.diagnostics,
+        }
+    }
+}
+
 /// Lightweight in-memory cache for symbol snapshots.
 #[derive(Debug)]
 pub struct InMemorySymbolCache {

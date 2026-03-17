@@ -905,6 +905,147 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
     Ok(())
 }
 
+#[test]
+fn captures_typescript_class_symbol() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter")
+        .expect("should find Greeter");
+    assert_eq!(
+        greeter.kind,
+        tree_hugger::SymbolKind::Class,
+        "Greeter should be captured as a class"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn does_not_report_typescript_class_declaration_as_undefined_symbol() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
+    let symbols = tree_file.symbols()?;
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter" && s.kind == tree_hugger::SymbolKind::Class)
+        .expect("should find Greeter class");
+
+    let has_false_positive = diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule.as_deref() == Some("undefined-symbol")
+            && diagnostic.range.start_byte == greeter.range.start_byte
+            && diagnostic.range.end_byte == greeter.range.end_byte
+    });
+
+    assert!(
+        !has_false_positive,
+        "class declaration should not be reported as an undefined symbol"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn typescript_exports_exclude_class_members() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
+    let exports = tree_file.exported_symbols()?;
+
+    assert!(
+        exports
+            .iter()
+            .any(|symbol| symbol.name == "Greeter" && symbol.kind == tree_hugger::SymbolKind::Class),
+        "exported symbols should include the Greeter class"
+    );
+    assert!(
+        exports
+            .iter()
+            .any(|symbol| symbol.name == "greet" && symbol.kind == tree_hugger::SymbolKind::Function),
+        "exported symbols should include the top-level greet function"
+    );
+    assert!(
+        !exports.iter().any(|symbol| symbol.kind == tree_hugger::SymbolKind::Method),
+        "class methods should not be treated as exported API symbols"
+    );
+    assert!(
+        !exports.iter().any(|symbol| symbol.name == "constructor"),
+        "constructors should not be exported as top-level symbols"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn symbol_index_relations_are_scoped_to_owning_symbol() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
+    let index = tree_file.symbol_index_v2()?;
+
+    let greet = index
+        .symbols
+        .iter()
+        .find(|symbol| symbol.identity.name == "greet" && symbol.kind == tree_hugger::SymbolKindV2::Function)
+        .expect("should find greet function");
+    let greet_many = index
+        .symbols
+        .iter()
+        .find(|symbol| symbol.identity.name == "greetMany")
+        .expect("should find greetMany function");
+
+    assert!(
+        greet
+            .relations
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.name == "readFile"),
+        "greet should depend on readFile"
+    );
+    assert!(
+        greet_many.relations.dependencies.is_empty(),
+        "greetMany should not inherit greet's file-level import dependency"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn stable_ids_ignore_leading_whitespace_changes() -> Result<(), TreeHuggerError> {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "stable.ts", "export function greet(): string { return \"hi\"; }\n");
+
+    let first = TreeFile::new(&path)?
+        .symbol_records()?
+        .into_iter()
+        .find(|symbol| symbol.identity.name == "greet")
+        .expect("should find greet symbol")
+        .id;
+
+    fs::write(&path, "\n\nexport function greet(): string { return \"hi\"; }\n").unwrap();
+
+    let second = TreeFile::new(&path)?
+        .symbol_records()?
+        .into_iter()
+        .find(|symbol| symbol.identity.name == "greet")
+        .expect("should find greet symbol after rewrite")
+        .id;
+
+    assert_eq!(first, second, "stable ids should ignore leading whitespace");
+    Ok(())
+}
+
+#[test]
+fn detects_tsx_as_typescript() {
+    assert_eq!(
+        ProgrammingLanguage::from_extension("tsx"),
+        Some(ProgrammingLanguage::TypeScript)
+    );
+    assert!(
+        ProgrammingLanguage::tree_sitter_language_for_extension("tsx").is_some(),
+        "tsx should resolve to a tree-sitter language"
+    );
+}
+
 // ============================================================================
 // Comprehensive type distinction tests for all typed languages
 // ============================================================================
@@ -1969,8 +2110,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| {
             s.name == "greet"
-                && s.kind == tree_hugger::SymbolKind::Function
-                && s.range.start_line == 32
+                && s.kind == tree_hugger::SymbolKind::Method
         })
         .expect("should find public greet method");
 

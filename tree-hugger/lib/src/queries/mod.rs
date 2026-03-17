@@ -127,8 +127,40 @@ fn resolve_query_text(
         return Ok(source.to_string());
     }
 
+    resolve_locals_query(language.query_name())
+}
+
+fn resolve_locals_query(language_name: &str) -> Result<String, TreeHuggerError> {
     let mut visited = HashSet::new();
-    resolve_vendor_query(language.query_name(), &mut visited)
+    let vendor = resolve_vendor_query(language_name, &mut visited)?;
+
+    let Some(overlay_source) = locals_overlay_by_name(language_name) else {
+        return Ok(vendor);
+    };
+
+    let (inherits, extends, body) = split_query_modelines(overlay_source);
+    let mut combined = String::new();
+
+    if extends {
+        combined.push_str(&vendor);
+        if !vendor.is_empty() && !body.is_empty() {
+            combined.push('\n');
+        }
+    }
+
+    if !inherits.is_empty() {
+        let mut overlay_visited = HashSet::new();
+        for inherit in inherits {
+            let inherited = resolve_vendor_query(&inherit, &mut overlay_visited)?;
+            if !inherited.is_empty() {
+                combined.push_str(&inherited);
+                combined.push('\n');
+            }
+        }
+    }
+
+    combined.push_str(&body);
+    Ok(combined)
 }
 
 fn resolve_vendor_query(
@@ -145,7 +177,7 @@ fn resolve_vendor_query(
         }
     })?;
 
-    let (inherits, body) = split_inherits(source);
+    let (inherits, _, body) = split_query_modelines(source);
     let mut combined = String::new();
 
     for inherit in inherits {
@@ -161,8 +193,9 @@ fn resolve_vendor_query(
     Ok(combined)
 }
 
-fn split_inherits(source: &str) -> (Vec<String>, String) {
+fn split_query_modelines(source: &str) -> (Vec<String>, bool, String) {
     let mut inherits = Vec::new();
+    let mut extends = false;
     let mut body = Vec::new();
 
     for line in source.lines() {
@@ -184,10 +217,15 @@ fn split_inherits(source: &str) -> (Vec<String>, String) {
             continue;
         }
 
+        if trimmed == "extends" || trimmed.starts_with("extends:") {
+            extends = true;
+            continue;
+        }
+
         body.push(line);
     }
 
-    (inherits, body.join("\n"))
+    (inherits, extends, body.join("\n"))
 }
 
 fn vendor_locals_by_name(name: &str) -> Option<&'static str> {
@@ -210,6 +248,14 @@ fn vendor_locals_by_name(name: &str) -> Option<&'static str> {
         "lua" => Some(include_str!("../../queries/vendor/lua/locals.scm")),
         "ecma" => Some(include_str!("../../queries/vendor/ecma/locals.scm")),
         "php_only" => Some(include_str!("../../queries/vendor/php_only/locals.scm")),
+        _ => None,
+    }
+}
+
+fn locals_overlay_by_name(name: &str) -> Option<&'static str> {
+    match name {
+        "javascript" => Some(include_str!("../../queries/javascript/locals.scm")),
+        "typescript" => Some(include_str!("../../queries/typescript/locals.scm")),
         _ => None,
     }
 }
@@ -383,5 +429,39 @@ mod tests {
 (identifier) @diagnostic.test
 "#;
         assert!(!is_query_empty(source));
+    }
+
+    #[test]
+    fn split_query_modelines_supports_inherits_and_extends() {
+        let source = r#"; inherits: ecma, javascript
+; extends
+(class_declaration) @local.definition.class
+"#;
+
+        let (inherits, extends, body) = split_query_modelines(source);
+        assert_eq!(inherits, vec!["ecma".to_string(), "javascript".to_string()]);
+        assert!(extends);
+        assert!(body.contains("@local.definition.class"));
+    }
+
+    #[test]
+    fn compiles_typescript_locals_query_with_overlay() {
+        let query = query_for(ProgrammingLanguage::TypeScript, QueryKind::Locals)
+            .expect("typescript locals query should compile");
+        assert!(query.pattern_count() > 0);
+    }
+
+    #[test]
+    fn compiles_javascript_locals_query_with_overlay() {
+        let query = query_for(ProgrammingLanguage::JavaScript, QueryKind::Locals)
+            .expect("javascript locals query should compile");
+        assert!(query.pattern_count() > 0);
+    }
+
+    #[test]
+    fn compiles_typescript_references_query() {
+        let query = query_for(ProgrammingLanguage::TypeScript, QueryKind::References)
+            .expect("typescript references query should compile");
+        assert!(query.pattern_count() > 0);
     }
 }

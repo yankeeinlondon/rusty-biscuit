@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use biscuit_hash::xx_hash;
@@ -8,8 +9,9 @@ use crate::queries::{QueryKind, format_rule_message, query_for, severity_for_rul
 use crate::shared::{
     AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FieldInfo, FileSymbolIndex,
     FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage,
-    ReferencedSymbol, SourceContext, SymbolInfo, SymbolKind, SymbolRecord, SyntaxDiagnostic,
-    TypeMetadata, VariantInfo, Visibility,
+    ReferencedSymbol, SourceContext, SymbolInfo, SymbolKind, SymbolKindData, SymbolKindV2,
+    SymbolRecord, SyntaxDiagnostic, TextPoint, TextSpan, TypeAliasData, TypeMetadata,
+    VariantInfo, Visibility, stable_symbol_key, symbol_id_from_stable_key,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -173,7 +175,16 @@ impl TreeFile {
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
         let mut references = Vec::new();
-        let mut seen_ranges = std::collections::HashSet::new();
+        let mut seen_ranges = HashSet::new();
+        let mut definition_ranges = HashSet::new();
+
+        for symbol in self.symbols()? {
+            definition_ranges.insert((symbol.range.start_byte, symbol.range.end_byte));
+        }
+
+        for import in self.imported_symbols()? {
+            definition_ranges.insert((import.range.start_byte, import.range.end_byte));
+        }
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
@@ -196,6 +207,12 @@ impl TreeFile {
                 // Deduplicate based on byte range (same node captured multiple times)
                 let range_key = (range.start_byte, range.end_byte);
                 if !seen_ranges.insert(range_key) {
+                    continue;
+                }
+
+                if definition_ranges.contains(&range_key)
+                    || is_definition_like_reference(node, self.language)
+                {
                     continue;
                 }
 
@@ -1058,6 +1075,36 @@ impl TreeFile {
 
         // Walk the entire AST looking for terminal statements
         while let Some(node) = stack.pop() {
+            if is_block_like_dead_code_container(node.kind()) {
+                let mut saw_terminal = false;
+                let child_count = node.named_child_count();
+                for index in 0..child_count {
+                    let Some(child) = node.named_child(index as u32) else {
+                        continue;
+                    };
+
+                    if saw_terminal {
+                        let range = range_for_node(child);
+                        let location = (range.start_byte, range.end_byte);
+                        if seen_dead.insert(location) {
+                            let context = self.build_source_context_from_range(&range);
+                            diagnostics.push(LintDiagnostic {
+                                message: "Unreachable code after unconditional exit".to_string(),
+                                range,
+                                severity: severity_for_rule("dead-code"),
+                                rule: Some("dead-code".to_string()),
+                                context: Some(context),
+                            });
+                        }
+                        continue;
+                    }
+
+                    if is_terminal_statement(child, self.language, &self.source) {
+                        saw_terminal = true;
+                    }
+                }
+            }
+
             if is_terminal_statement(node, self.language, &self.source) {
                 // Find dead code after this terminal
                 for dead_node in find_dead_code_after(node, self.language) {
@@ -1179,6 +1226,10 @@ impl TreeFile {
 
             // Skip symbols starting with underscore (intentionally unused)
             if name.starts_with('_') {
+                continue;
+            }
+
+            if definition.kind == SymbolKind::Function && name == "main" {
                 continue;
             }
 
@@ -1465,17 +1516,53 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
-        let exported_names: std::collections::HashSet<String> = self
-            .exported_symbols()?
-            .into_iter()
-            .map(|symbol| symbol.name)
-            .collect();
-
+        let root = self.tree.root_node();
+        let mut ordinals: HashMap<(SymbolKindV2, Option<String>, String), u32> = HashMap::new();
         let mut records = Vec::new();
-        for symbol in self.symbols()? {
+        for (symbol, declaration_node) in self.symbol_nodes()? {
+            let name_span = text_span_from_code_range(&symbol.range);
+            let is_exported = is_exported_definition(&symbol, declaration_node, root);
             let mut record: SymbolRecord = symbol.into();
-            if exported_names.contains(&record.identity.name) {
-                record.visibility.is_exported = true;
+
+            let v2_kind = symbol_kind_v2_for_node(&record, declaration_node, &self.source);
+            let qualified_or_name = record
+                .identity
+                .qualified_name
+                .clone()
+                .unwrap_or_else(|| record.identity.name.clone());
+            let ordinal_key = (
+                v2_kind,
+                record.identity.module_path.clone(),
+                record.identity.name.clone(),
+            );
+            let sibling_ordinal = *ordinals.entry(ordinal_key).or_insert(0);
+            *ordinals
+                .get_mut(&(v2_kind, record.identity.module_path.clone(), record.identity.name.clone()))
+                .expect("ordinal entry must exist") += 1;
+
+            record.kind = v2_kind;
+            record.source.declaration_span = text_span_for_node(declaration_node);
+            record.source.name_span = Some(name_span);
+            record.source.body_span = body_span_for_declaration(declaration_node);
+            record.visibility.is_exported = is_exported;
+            record.identity.stable_key = stable_symbol_key(
+                record.language,
+                &record.source.file_path,
+                record.kind,
+                &qualified_or_name,
+                sibling_ordinal,
+            );
+            record.id = symbol_id_from_stable_key(&record.identity.stable_key);
+
+            if record.kind == SymbolKindV2::TypeAlias {
+                record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
+                    aliased_type_text: extract_typescript_type_alias_target(
+                        declaration_node,
+                        &self.source,
+                    ),
+                    aliased_type_ast: None,
+                    is_recursive: false,
+                });
             }
             records.push(record);
         }
@@ -1520,10 +1607,8 @@ impl TreeFile {
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut deduped: std::collections::HashMap<
-            (usize, usize, String),
-            (SymbolInfo, Node<'_>, u8),
-        > = std::collections::HashMap::new();
+        let mut deduped: HashMap<(usize, usize, String), (SymbolInfo, Node<'_>, u8)> =
+            HashMap::new();
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
@@ -1559,8 +1644,9 @@ impl TreeFile {
                     None => continue,
                 };
                 let kind = refine_symbol_kind(base_kind, capture.node);
+                let declaration_node = context_node.unwrap_or(capture.node);
                 let (container_name, container_kind) =
-                    find_symbol_container(capture.node, self.language, &self.source)
+                    find_symbol_container(declaration_node, self.language, &self.source)
                         .map(|(name, kind)| (Some(name), Some(kind)))
                         .unwrap_or((None, None));
 
@@ -1577,7 +1663,7 @@ impl TreeFile {
                     } else {
                         None
                     };
-                    let type_meta = if kind.is_type() {
+                    let type_meta = if kind.is_type() || kind == SymbolKind::Class {
                         extract_type_metadata(ctx, self.language, &self.source)
                     } else {
                         None
@@ -1604,9 +1690,10 @@ impl TreeFile {
                 let key = (symbol.range.start_byte, symbol.range.end_byte, name);
                 let priority = symbol_kind_priority(symbol.kind);
 
-                if let Some((existing, _, existing_priority)) = deduped.get_mut(&key) {
+                if let Some((existing, existing_node, existing_priority)) = deduped.get_mut(&key) {
                     if priority > *existing_priority {
                         *existing = symbol;
+                        *existing_node = declaration_node;
                         *existing_priority = priority;
                     } else if priority == *existing_priority {
                         if existing.signature.is_none() {
@@ -1620,7 +1707,7 @@ impl TreeFile {
                         }
                     }
                 } else {
-                    deduped.insert(key, (symbol, capture.node, priority));
+                    deduped.insert(key, (symbol, declaration_node, priority));
                 }
             }
 
@@ -1635,6 +1722,14 @@ impl TreeFile {
 
         Ok(symbols)
     }
+}
+
+fn is_block_like_dead_code_container(kind: &str) -> bool {
+    kind.contains("block")
+        || kind.contains("body")
+        || kind.contains("compound")
+        || kind == "statement_list"
+        || kind == "source_file"
 }
 
 fn symbol_kind_priority(kind: SymbolKind) -> u8 {
@@ -1805,6 +1900,77 @@ fn named_container(
     Some((name, container_kind))
 }
 
+fn is_definition_like_reference(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+
+    if is_named_definition_node(parent, node) {
+        return true;
+    }
+
+    match language {
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => matches!(
+            parent.kind(),
+            "property_signature"
+                | "method_signature"
+                | "required_parameter"
+                | "optional_parameter"
+                | "rest_pattern"
+                | "shorthand_property_identifier_pattern"
+                | "pair_pattern"
+        ),
+        ProgrammingLanguage::Rust => matches!(
+            parent.kind(),
+            "parameter"
+                | "self_parameter"
+                | "field_declaration"
+                | "use_as_clause"
+        ),
+        _ => false,
+    }
+}
+
+fn is_named_definition_node(parent: Node<'_>, node: Node<'_>) -> bool {
+    let parent_kind = parent.kind();
+    if !matches!(
+        parent_kind,
+        "function_declaration"
+            | "class_declaration"
+            | "abstract_class_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration"
+            | "enum_declaration"
+            | "method_definition"
+            | "property_signature"
+            | "method_signature"
+            | "public_field_definition"
+            | "variable_declarator"
+            | "import_specifier"
+            | "namespace_import"
+            | "required_parameter"
+            | "optional_parameter"
+            | "formal_parameter"
+            | "function_item"
+            | "struct_item"
+            | "enum_item"
+            | "trait_item"
+            | "mod_item"
+            | "const_item"
+            | "static_item"
+            | "type_item"
+            | "field_declaration"
+            | "macro_definition"
+    ) {
+        return false;
+    }
+
+    ["name", "alias", "declarator", "value", "parameter", "path"]
+        .iter()
+        .filter_map(|field| parent.child_by_field_name(field))
+        .any(|candidate| candidate.id() == node.id())
+}
+
 fn symbol_kind_from_capture(capture_name: &str) -> Option<SymbolKind> {
     let suffix = if let Some(rest) = capture_name.strip_prefix("local.definition.") {
         rest
@@ -1854,10 +2020,74 @@ fn range_for_node(node: Node<'_>) -> CodeRange {
     }
 }
 
+fn text_span_from_code_range(range: &CodeRange) -> TextSpan {
+    TextSpan {
+        start: TextPoint {
+            line: range.start_line as u32,
+            column: range.start_column as u32,
+        },
+        end: TextPoint {
+            line: range.end_line as u32,
+            column: range.end_column as u32,
+        },
+        start_byte: range.start_byte as u32,
+        end_byte: range.end_byte as u32,
+    }
+}
+
+fn text_span_for_node(node: Node<'_>) -> TextSpan {
+    text_span_from_code_range(&range_for_node(node))
+}
+
+fn body_span_for_declaration(node: Node<'_>) -> Option<TextSpan> {
+    node.child_by_field_name("body")
+        .or_else(|| find_child_by_kind(node, "class_body"))
+        .or_else(|| find_child_by_kind(node, "enum_body"))
+        .or_else(|| find_child_by_kind(node, "interface_body"))
+        .or_else(|| find_child_by_kind(node, "object_type"))
+        .map(text_span_for_node)
+}
+
+fn symbol_kind_v2_for_node(record: &SymbolRecord, node: Node<'_>, source: &str) -> SymbolKindV2 {
+    match node.kind() {
+        "type_alias_declaration" => SymbolKindV2::TypeAlias,
+        "method_definition" => {
+            let is_constructor = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source.as_bytes()).ok())
+                .is_some_and(|name| name == "constructor");
+            if is_constructor {
+                SymbolKindV2::Constructor
+            } else {
+                SymbolKindV2::Method
+            }
+        }
+        "public_field_definition" | "property_definition" | "property_signature" => {
+            SymbolKindV2::Property
+        }
+        _ => record.kind,
+    }
+}
+
+fn extract_typescript_type_alias_target(node: Node<'_>, source: &str) -> Option<String> {
+    if node.kind() != "type_alias_declaration" {
+        return None;
+    }
+
+    node.child_by_field_name("value")
+        .or_else(|| {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "object_type" || child.kind().ends_with("type"))
+        })
+        .and_then(|target| target.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string)
+}
+
 fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: Node<'_>) -> bool {
     if matches!(
         symbol.kind,
-        SymbolKind::Parameter | SymbolKind::Field | SymbolKind::Variable
+        SymbolKind::Parameter | SymbolKind::Field | SymbolKind::Method
     ) {
         return false;
     }
@@ -1866,22 +2096,12 @@ fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: Node<'_>) -
         return is_rust_public_definition(node);
     }
 
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        if parent == root {
-            return true;
-        }
-
-        let parent_kind = parent.kind();
-
-        if is_export_node(parent_kind) {
-            return true;
-        }
-
-        current = parent;
+    if !is_top_level_definition(node, root) {
+        return false;
     }
 
-    false
+    let parent = node.parent();
+    parent.is_some_and(|parent| is_export_node(parent.kind()))
 }
 
 fn is_rust_public_definition(node: Node<'_>) -> bool {
@@ -1922,13 +2142,38 @@ fn is_export_node(kind: &str) -> bool {
         kind,
         "export_statement"
             | "export_declaration"
-            | "export_specifier"
-            | "named_exports"
-            | "export_from_clause"
             | "export_default_declaration"
-            | "public_field_definition"
             | "public_declaration"
     )
+}
+
+fn is_top_level_definition(node: Node<'_>, root: Node<'_>) -> bool {
+    let mut current = Some(node);
+    while let Some(cursor) = current {
+        let Some(parent) = cursor.parent() else {
+            break;
+        };
+
+        if parent == root {
+            return true;
+        }
+
+        if matches!(
+            parent.kind(),
+            "class_body"
+                | "interface_body"
+                | "object_type"
+                | "statement_block"
+                | "field_declaration_list"
+                | "enum_body"
+        ) {
+            return false;
+        }
+
+        current = Some(parent);
+    }
+
+    false
 }
 
 /// Extracts function signature from a function/method node.

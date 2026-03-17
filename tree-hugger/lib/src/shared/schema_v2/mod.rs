@@ -54,6 +54,8 @@ pub struct ImportRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub span: TextSpan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement_span: Option<TextSpan>,
     pub symbol: SymbolRef,
 }
 
@@ -89,7 +91,7 @@ pub fn stable_symbol_key(
     file: &Path,
     kind: SymbolKindV2,
     qualified_or_name: &str,
-    declaration_start_byte: u32,
+    sibling_ordinal: u32,
 ) -> String {
     let file_part = file.to_string_lossy().replace('\\', "/").trim().to_string();
     format!(
@@ -98,7 +100,7 @@ pub fn stable_symbol_key(
         file_part,
         kind,
         qualified_or_name,
-        declaration_start_byte
+        sibling_ordinal
     )
 }
 
@@ -350,7 +352,7 @@ impl From<SymbolInfo> for SymbolRecord {
             &value.file,
             kind,
             qualified_name.as_deref().unwrap_or(&value.name),
-            declaration_span.start_byte,
+            0,
         );
         let now = now_epoch_ms();
 
@@ -550,7 +552,7 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
-            container_name: None,
+            container_name: value.identity.module_path,
             container_kind: None,
             doc_comment: value.docs.raw_doc,
             signature,
@@ -570,7 +572,7 @@ mod tests {
             Path::new("src/lib.rs"),
             SymbolKindV2::Function,
             "hello",
-            42,
+            0,
         );
         let first = symbol_id_from_stable_key(&key);
         let second = symbol_id_from_stable_key(&key);

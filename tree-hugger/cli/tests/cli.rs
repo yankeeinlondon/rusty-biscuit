@@ -732,6 +732,20 @@ fn test_classes_command_csharp() {
         .stdout(predicate::str::contains("\"Greeter\""));
 }
 
+#[test]
+fn test_classes_command_typescript_uses_real_class_symbols() {
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/sample.ts",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"Greeter\""))
+        .stdout(predicate::str::contains("\"GreetFn\"").not());
+}
+
 // ============================================================================
 // Imports command grouping tests
 // ============================================================================

@@ -12,10 +12,11 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
-    FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage,
-    SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile,
-    TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
+    FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
+    ProgrammingLanguage, SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic,
+    TreeFile, TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
 };
+use tree_hugger::cache::{AnalyzerFingerprint, FileCacheKey, InMemorySymbolCache, SymbolSnapshot};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -717,6 +718,8 @@ fn main() -> Result<(), TreeHuggerError> {
         files.sort();
     }
 
+    let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
+
     // Handle classes command separately due to different output structure
     if let CommandKind::Classes {
         name_filter,
@@ -729,8 +732,9 @@ fn main() -> Result<(), TreeHuggerError> {
 
         for file in files {
             let tree_file = TreeFile::with_language(&file, language)?;
+            let index = analyze_tree_file(&tree_file, &analysis_cache)?;
             let mut class_summaries = extract_class_summaries(
-                &tree_file,
+                &index,
                 name_filter.as_deref(),
                 *static_only,
                 *instance_only,
@@ -739,8 +743,7 @@ fn main() -> Result<(), TreeHuggerError> {
             // Apply symbol filter to class summaries
             match &symbol_filter {
                 SymbolFilter::Exported => {
-                    let exported: HashSet<String> = tree_file
-                        .exported_symbols()?
+                    let exported: HashSet<String> = exported_symbol_infos(&index)
                         .into_iter()
                         .map(|s| s.name)
                         .collect();
@@ -802,11 +805,12 @@ fn main() -> Result<(), TreeHuggerError> {
     let mut symbol_indexes = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
+        let index = analyze_tree_file(&tree_file, &analysis_cache)?;
         if matches!(output_format, OutputFormat::Json) {
-            symbol_indexes.push(tree_file.symbol_index_v2()?);
+            symbol_indexes.push(index.clone());
         }
         let summary = summarize_file(
-            &tree_file,
+            &index,
             &command_kind,
             &symbol_filter,
             &scan_filters.symbol_globs,
@@ -1374,39 +1378,45 @@ fn collect_files(
 }
 
 fn summarize_file(
-    tree_file: &TreeFile,
+    index: &FileSymbolIndex,
     command: &CommandKind,
     filter: &SymbolFilter,
     include_symbol_globs: &[String],
     exclude_symbol_globs: &[String],
 ) -> Result<FileSummary, TreeHuggerError> {
+    let all_symbols = symbol_infos_from_records(&index.symbols);
+    let imports = import_symbols_from_index(index);
+    let exports = exported_symbol_infos(index);
+    let locals = local_symbol_infos(index);
+    let (lint, syntax) = diagnostics_from_index(index);
+
     let mut summary = FileSummary {
-        file: tree_file.file.clone(),
-        language: tree_file.language,
-        hash: tree_file.hash.clone(),
+        file: index.file.clone(),
+        language: index.language,
+        hash: index.file_hash.clone(),
         symbols: Vec::new(),
         imports: Vec::new(),
         exports: Vec::new(),
         locals: Vec::new(),
-        lint: tree_file.lint_diagnostics(),
-        syntax: tree_file.syntax_diagnostics(),
+        lint,
+        syntax,
     };
 
     match command {
         CommandKind::Functions => {
             let symbols = match filter {
-                SymbolFilter::Exported => tree_file
-                    .exported_symbols()?
+                SymbolFilter::Exported => exports
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_function())
                     .collect(),
-                SymbolFilter::Prelude(filter) => tree_file
-                    .symbols()?
+                SymbolFilter::Prelude(filter) => all_symbols
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_function() && filter.names.contains(&s.name))
                     .collect(),
-                SymbolFilter::None => tree_file
-                    .symbols()?
+                SymbolFilter::None => all_symbols
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_function())
                     .collect(),
@@ -1416,18 +1426,18 @@ fn summarize_file(
         }
         CommandKind::Types => {
             let symbols = match filter {
-                SymbolFilter::Exported => tree_file
-                    .exported_symbols()?
+                SymbolFilter::Exported => exports
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_type())
                     .collect(),
-                SymbolFilter::Prelude(filter) => tree_file
-                    .symbols()?
+                SymbolFilter::Prelude(filter) => all_symbols
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_type() && filter.names.contains(&s.name))
                     .collect(),
-                SymbolFilter::None => tree_file
-                    .symbols()?
+                SymbolFilter::None => all_symbols
+                    .clone()
                     .into_iter()
                     .filter(|s| s.kind.is_type())
                     .collect(),
@@ -1438,30 +1448,28 @@ fn summarize_file(
         CommandKind::Symbols => {
             match filter {
                 SymbolFilter::Exported => {
-                    summary.symbols = tree_file.exported_symbols()?;
-                    summary.exports = tree_file.exported_symbols()?;
+                    summary.symbols = exports.clone();
+                    summary.exports = exports.clone();
                 }
                 SymbolFilter::Prelude(filter) => {
                     if filter.exports_by_file.is_empty() {
                         // Backwards-compatible fallback for PRELUDE env-only filtering.
-                        summary.symbols = tree_file
-                            .symbols()?
+                        summary.symbols = all_symbols
+                            .clone()
                             .into_iter()
                             .filter(|s| filter.names.contains(&s.name))
                             .collect();
-                        summary.exports = tree_file
-                            .exported_symbols()?
+                        summary.exports = exports
+                            .clone()
                             .into_iter()
                             .filter(|s| filter.names.contains(&s.name))
                             .collect();
-                        summary.locals = tree_file
-                            .local_symbols()?
+                        summary.locals = locals
+                            .clone()
                             .into_iter()
                             .filter(|s| filter.names.contains(&s.name))
                             .collect();
-                    } else if let Some(prelude_exports) =
-                        filter.exports_by_file.get(&tree_file.file)
-                    {
+                    } else if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
                         summary.symbols = prelude_exports.clone();
                         summary.exports = summary.symbols.clone();
                         summary.locals.clear();
@@ -1472,10 +1480,10 @@ fn summarize_file(
                     }
                 }
                 SymbolFilter::None => {
-                    summary.symbols = tree_file.symbols()?;
-                    summary.imports = tree_file.imported_symbols()?;
-                    summary.exports = tree_file.exported_symbols()?;
-                    summary.locals = tree_file.local_symbols()?;
+                    summary.symbols = all_symbols.clone();
+                    summary.imports = imports.clone();
+                    summary.exports = exports.clone();
+                    summary.locals = locals.clone();
                 }
             }
             summary.symbols =
@@ -1486,7 +1494,7 @@ fn summarize_file(
                 apply_symbol_filters(summary.locals, include_symbol_globs, exclude_symbol_globs);
         }
         CommandKind::Imports => {
-            summary.imports = tree_file.imported_symbols()?;
+            summary.imports = imports;
         }
         CommandKind::Lint { .. } => {
             // Lint diagnostics are already populated above
@@ -1497,6 +1505,125 @@ fn summarize_file(
     }
 
     Ok(summary)
+}
+
+fn analyze_tree_file(
+    tree_file: &TreeFile,
+    cache: &InMemorySymbolCache,
+) -> Result<FileSymbolIndex, TreeHuggerError> {
+    let key = FileCacheKey {
+        file_path: tree_file.file.clone(),
+        language: tree_file.language,
+        file_hash: tree_file.hash.clone(),
+        analyzer_fingerprint: AnalyzerFingerprint {
+            schema_version: SchemaVersion::V2_0,
+            tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
+            grammar_fingerprint: tree_file.language.query_name().to_string(),
+            query_fingerprint: "locals+imports+references".to_string(),
+            config_fingerprint: "default".to_string(),
+        },
+    };
+
+    if let Some(snapshot) = cache.get(&key) {
+        return Ok(snapshot.as_ref().clone().into());
+    }
+
+    let index = tree_file.symbol_index_v2()?;
+    cache.put(SymbolSnapshot::from(index.clone()));
+    Ok(index)
+}
+
+fn symbol_infos_from_records(records: &[tree_hugger::SymbolRecord]) -> Vec<SymbolInfo> {
+    records
+        .iter()
+        .filter_map(|record| SymbolInfo::try_from(record.clone()).ok())
+        .collect()
+}
+
+fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
+    index
+        .imports
+        .iter()
+        .map(|import| ImportSymbol {
+            name: import.name.clone(),
+            original_name: import.symbol.qualified_name.clone(),
+            alias: import.alias.clone(),
+            range: CodeRange {
+                start_line: import.span.start.line as usize,
+                start_column: import.span.start.column as usize,
+                end_line: import.span.end.line as usize,
+                end_column: import.span.end.column as usize,
+                start_byte: import.span.start_byte as usize,
+                end_byte: import.span.end_byte as usize,
+            },
+            statement_range: import.statement_span.as_ref().map(|span| CodeRange {
+                start_line: span.start.line as usize,
+                start_column: span.start.column as usize,
+                end_line: span.end.line as usize,
+                end_column: span.end.column as usize,
+                start_byte: span.start_byte as usize,
+                end_byte: span.end_byte as usize,
+            }),
+            language: index.language,
+            file: index.file.clone(),
+            source: import.source.clone(),
+        })
+        .collect()
+}
+
+fn exported_symbol_infos(index: &FileSymbolIndex) -> Vec<SymbolInfo> {
+    let exported_ids: HashSet<_> = index
+        .exports
+        .iter()
+        .filter_map(|export| export.symbol.id.as_ref())
+        .collect();
+
+    index
+        .symbols
+        .iter()
+        .filter(|symbol| exported_ids.contains(&symbol.id))
+        .filter_map(|symbol| SymbolInfo::try_from(symbol.clone()).ok())
+        .collect()
+}
+
+fn local_symbol_infos(index: &FileSymbolIndex) -> Vec<SymbolInfo> {
+    let exported_ids: HashSet<_> = index
+        .exports
+        .iter()
+        .filter_map(|export| export.symbol.id.as_ref())
+        .collect();
+
+    index
+        .symbols
+        .iter()
+        .filter(|symbol| !exported_ids.contains(&symbol.id))
+        .filter_map(|symbol| SymbolInfo::try_from(symbol.clone()).ok())
+        .collect()
+}
+
+fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<SyntaxDiagnostic>) {
+    let mut lint = Vec::new();
+    let mut syntax = Vec::new();
+
+    for diagnostic in &index.diagnostics {
+        match diagnostic.kind {
+            DiagnosticKind::Syntax => syntax.push(SyntaxDiagnostic {
+                message: diagnostic.message.clone(),
+                range: diagnostic.range.clone(),
+                severity: diagnostic.severity,
+                context: diagnostic.context.clone(),
+            }),
+            DiagnosticKind::Lint | DiagnosticKind::Semantic => lint.push(LintDiagnostic {
+                message: diagnostic.message.clone(),
+                range: diagnostic.range.clone(),
+                severity: diagnostic.severity,
+                rule: diagnostic.rule.clone(),
+                context: diagnostic.context.clone(),
+            }),
+        }
+    }
+
+    (lint, syntax)
 }
 
 fn symbol_from_prelude_export(
@@ -2697,64 +2824,63 @@ fn format_generic_import_group(imports: &[&ImportSymbol]) -> String {
 
 /// Extracts class summaries from a file.
 fn extract_class_summaries(
-    tree_file: &TreeFile,
+    index: &FileSymbolIndex,
     name_filter: Option<&str>,
     static_only: bool,
     instance_only: bool,
 ) -> Result<Vec<ClassSummary>, TreeHuggerError> {
-    let all_symbols = tree_file.symbols()?;
-
-    // Find all class-like symbols, sorted by line number
-    let mut classes: Vec<&SymbolInfo> = all_symbols
-        .iter()
-        .filter(|s| s.kind.is_class())
-        .filter(|s| match name_filter {
-            Some(filter) => s.name.contains(filter),
-            None => true,
-        })
-        .collect();
-    classes.sort_by_key(|s| s.range.start_line);
-
-    // Find all methods, sorted by line number
-    let mut methods: Vec<&SymbolInfo> = all_symbols
-        .iter()
-        .filter(|s| s.kind == SymbolKind::Method)
-        .collect();
-    methods.sort_by_key(|s| s.range.start_line);
+    let symbols_by_id: HashMap<_, _> = index.symbols.iter().map(|symbol| (&symbol.id, symbol)).collect();
 
     let mut result = Vec::new();
 
-    for (i, class) in classes.iter().enumerate() {
-        // Determine the range for this class's methods:
-        // From the class declaration line to the next class declaration (or EOF)
-        let class_start = class.range.start_line;
-        let class_end = if i + 1 < classes.len() {
-            classes[i + 1].range.start_line
-        } else {
-            usize::MAX
+    for class_record in index
+        .symbols
+        .iter()
+        .filter(|symbol| {
+            matches!(
+                symbol.kind,
+                tree_hugger::SymbolKindV2::Class | tree_hugger::SymbolKindV2::Type
+            )
+        })
+    {
+        let Ok(class) = SymbolInfo::try_from(class_record.clone()) else {
+            continue;
         };
+        if let Some(filter) = name_filter
+            && !class.name.contains(filter)
+        {
+            continue;
+        }
 
-        // Get methods that belong to this class (between this class and the next)
-        let class_methods: Vec<&SymbolInfo> = methods
-            .iter()
-            .filter(|m| m.range.start_line > class_start && m.range.start_line < class_end)
-            .copied()
-            .collect();
-
-        // Partition methods into static and instance
         let mut static_methods = Vec::new();
         let mut instance_methods = Vec::new();
 
-        for method in class_methods {
+        for member in &class_record.relations.members {
+            let Some(member_id) = member.id.as_ref() else {
+                continue;
+            };
+            let Some(member_record) = symbols_by_id.get(member_id) else {
+                continue;
+            };
+            if !matches!(
+                member_record.kind,
+                tree_hugger::SymbolKindV2::Method | tree_hugger::SymbolKindV2::Constructor
+            ) {
+                continue;
+            }
+
+            let Ok(method) = SymbolInfo::try_from((*member_record).clone()) else {
+                continue;
+            };
             let is_static = method
                 .signature
                 .as_ref()
                 .map(|s| s.is_static)
                 .unwrap_or(false);
             if is_static {
-                static_methods.push(method.clone());
+                static_methods.push(method);
             } else {
-                instance_methods.push(method.clone());
+                instance_methods.push(method);
             }
         }
 
@@ -2783,7 +2909,7 @@ fn extract_class_summaries(
         }
 
         result.push(ClassSummary {
-            class: (*class).clone(),
+            class,
             static_methods,
             instance_methods,
             static_fields,

@@ -75,7 +75,7 @@ impl ProgrammingLanguage {
         match self {
             Self::Rust => &["rs"],
             Self::JavaScript => &["js", "jsx", "mjs", "cjs"],
-            Self::TypeScript => &["ts", "mts", "cts"],
+            Self::TypeScript => &["ts", "tsx", "mts", "cts"],
             Self::Go => &["go"],
             Self::Python => &["py"],
             Self::Java => &["java"],
@@ -157,6 +157,7 @@ impl ProgrammingLanguage {
 
         match ext.as_str() {
             "ts" | "mts" | "cts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
             "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
             _ => Self::from_extension(&ext).map(|language| language.tree_sitter_language()),
         }

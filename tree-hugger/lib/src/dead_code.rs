@@ -281,21 +281,17 @@ pub fn find_dead_code_after<'tree>(
             // Found the block. 'current' is now the direct child of the block
             // (e.g., expression_statement that contains the terminal macro_invocation)
             let mut found_statement = false;
-            let mut cursor = parent.walk();
-
-            for child in parent.children(&mut cursor) {
+            let named_child_count = parent.named_child_count();
+            for index in 0..named_child_count {
+                let Some(child) = parent.named_child(index as u32) else {
+                    continue;
+                };
                 if child.id() == current.id() {
                     found_statement = true;
                     continue;
                 }
 
                 if found_statement {
-                    // Skip comments, braces, and empty nodes
-                    let kind = child.kind();
-                    if kind.contains("comment") || kind.is_empty() || kind == "{" || kind == "}" {
-                        continue;
-                    }
-
                     // This is dead code
                     dead_nodes.push(child);
                 }
@@ -500,5 +496,45 @@ mod tests {
             "let_declaration",
             "Dead code should be the let_declaration"
         );
+    }
+
+    #[test]
+    fn test_find_dead_code_after_javascript_return() {
+        use tree_sitter::Parser;
+
+        let source = r#"function demo() {
+  return;
+  const neverReached = 1;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        fn find_return(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if node.kind() == "return_statement" {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(n) = find_return(child) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let return_node = find_return(tree.root_node()).expect("Should find return_statement");
+        assert!(is_terminal_statement(
+            return_node,
+            ProgrammingLanguage::JavaScript,
+            source
+        ));
+
+        let dead_nodes = find_dead_code_after(return_node, ProgrammingLanguage::JavaScript);
+        assert_eq!(dead_nodes.len(), 1, "Should find dead code after return");
+        assert_eq!(dead_nodes[0].kind(), "lexical_declaration");
     }
 }

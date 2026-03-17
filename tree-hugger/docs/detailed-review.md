@@ -22,10 +22,10 @@ The focus was:
 
 - `just test` passes for the package on 2026-03-16.
 - `just hug symbols lib/tests/fixtures/sample.ts --json` reproduces multiple analysis issues:
-  - `Greeter` is not emitted as a class symbol
-  - `Greeter` is reported as an undefined symbol on its own class declaration
-  - exported symbols include `constructor` and the instance method `greet`
-  - every symbol in the v2 index inherits the same `readFile` dependency edge
+    - `Greeter` is not emitted as a class symbol
+    - `Greeter` is reported as an undefined symbol on its own class declaration
+    - exported symbols include `constructor` and the instance method `greet`
+    - every symbol in the v2 index inherits the same `readFile` dependency edge
 - `just hug classes lib/tests/fixtures/sample.ts --plain` renders only `type GreetFn`, which confirms that the class command is currently operating on the wrong symbol set for TypeScript.
 
 ## Executive Summary
@@ -109,8 +109,8 @@ Recommendation:
 
 - Stop treating a broad `identifier` query as a complete reference system.
 - Either:
-  - derive references from a normalized symbol/occurrence query and subtract definition spans, or
-  - use language-specific reference queries with structural exclusions for declarations, parameter sites, and type declarations.
+    - derive references from a normalized symbol/occurrence query and subtract definition spans, or
+    - use language-specific reference queries with structural exclusions for declarations, parameter sites, and type declarations.
 - Prefer role-aware occurrences such as `value_ref`, `type_ref`, `module_ref`, `call_target`, `member_ref`.
 
 ### 3. TypeScript and JavaScript class coverage is incomplete
@@ -141,10 +141,10 @@ Why this matters:
 Recommendation:
 
 - Add explicit JS/TS captures for:
-  - `@local.definition.class`
-  - `@local.definition.method`
-  - `@local.definition.field` or `@local.definition.property`
-  - constructor definitions
+    - `@local.definition.class`
+    - `@local.definition.method`
+    - `@local.definition.field` or `@local.definition.property`
+    - constructor definitions
 - Narrow `is_class()` so the class command operates on real class-like symbols only.
 - If you want a broader “member-bearing type” view, make that an explicit separate mode instead of overloading `classes`.
 
@@ -179,11 +179,11 @@ Recommendation:
 
 - Make export analysis language-specific.
 - Distinguish:
-  - declaration visibility
-  - top-level module export
-  - re-export
-  - default export
-  - class member visibility
+    - declaration visibility
+    - top-level module export
+    - re-export
+    - default export
+    - class member visibility
 - Match exported symbols by stable symbol identity or qualified path, never by bare name alone.
 
 ### 5. Stable IDs are not actually stable across ordinary edits
@@ -207,12 +207,12 @@ Why this matters:
 Recommendation:
 
 - Use a lexical identity scheme instead:
-  - language
-  - normalized file path
-  - declaration kind
-  - container chain
-  - symbol name
-  - optional sibling ordinal among same-name declarations in the same container
+    - language
+    - normalized file path
+    - declaration kind
+    - container chain
+    - symbol name
+    - optional sibling ordinal among same-name declarations in the same container
 - Treat byte offsets as source location, not identity.
 
 ### 6. Container and qualified-name metadata is contaminated by self-container matches
@@ -232,8 +232,8 @@ What is happening:
 Observed failures:
 
 - The TypeScript JSON output contains identities like:
-  - `GreetingService::GreetingService`
-  - `Status::Status`
+    - `GreetingService::GreetingService`
+    - `Status::Status`
 
 Why this matters:
 
@@ -249,9 +249,9 @@ Recommendation:
 - Build container identity from the declaration context node, not the name node.
 - Skip the owning declaration when searching for an enclosing container.
 - Separate these concepts explicitly:
-  - owning declaration
-  - enclosing lexical scope
-  - module/namespace path
+    - owning declaration
+    - enclosing lexical scope
+    - module/namespace path
 
 ### 7. The v2 schema is much richer than the populated data
 
@@ -393,9 +393,9 @@ Why this matters:
 Recommendation:
 
 - Mirror the Neovim mental model:
-  - vendored upstream query
-  - Tree Hugger overlay query
-  - optional language-family overlay
+    - vendored upstream query
+    - Tree Hugger overlay query
+    - optional language-family overlay
 - Resolve modelines before compile and treat the final string as a build artifact.
 
 ### 12. There are practical codebase-analysis gaps beyond pure correctness
@@ -428,48 +428,48 @@ Recommendation:
 If Tree Hugger is meant to become the repository’s static-analysis backbone, these fields will pay off quickly:
 
 - declaration category:
-  - constructor
-  - property
-  - type alias
-  - enum variant
-  - package/namespace/module
+    - constructor
+    - property
+    - type alias
+    - enum variant
+    - package/namespace/module
 - source layout:
-  - `name_span`
-  - `doc_span`
-  - `body_span`
-  - `signature_text`
-  - optional `declaration_text`
+    - `name_span`
+    - `doc_span`
+    - `body_span`
+    - `signature_text`
+    - optional `declaration_text`
 - relation edges:
-  - parent/container
-  - extends/implements
-  - overrides
-  - re-exports
-  - imports by source path and original name
-  - type references separate from value references
+    - parent/container
+    - extends/implements
+    - overrides
+    - re-exports
+    - imports by source path and original name
+    - type references separate from value references
 - type-system detail:
-  - generic parameter bounds
-  - generic defaults
-  - variance where the language exposes it
-  - receiver/ownership mode
-  - nullability
-  - alias target
+    - generic parameter bounds
+    - generic defaults
+    - variance where the language exposes it
+    - receiver/ownership mode
+    - nullability
+    - alias target
 - modifiers and attributes:
-  - async
-  - static
-  - readonly
-  - abstract
-  - final
-  - sealed
-  - open
-  - partial
-  - unsafe
-  - mut
-  - decorators/annotations/attributes/macros
+    - async
+    - static
+    - readonly
+    - abstract
+    - final
+    - sealed
+    - open
+    - partial
+    - unsafe
+    - mut
+    - decorators/annotations/attributes/macros
 - documentation:
-  - attachment kind
-  - multi-line tag parsing
-  - `@throws`, `@deprecated`, `@see`, `@example`
-  - doc comments on fields, variants, parameters, and properties
+    - attachment kind
+    - multi-line tag parsing
+    - `@throws`, `@deprecated`, `@see`, `@example`
+    - doc comments on fields, variants, parameters, and properties
 
 ## Recommended Architecture Direction
 
