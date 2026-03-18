@@ -6909,6 +6909,7 @@ dependencies = [
  "quote",
  "schematic-define",
  "schematic-definitions",
+ "serde",
  "serde_json",
  "syn 2.0.117",
  "tempfile",
