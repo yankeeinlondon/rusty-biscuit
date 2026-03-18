@@ -18,7 +18,7 @@ fn test_help_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("markdown"))
-        .stdout(predicate::str::contains("read"))
+        .stdout(predicate::str::contains("render"))
         .stdout(predicate::str::contains("clean"))
         .stdout(predicate::str::contains("compose"))
         .stdout(predicate::str::contains("toc"))
@@ -344,9 +344,9 @@ fn test_clean_save_rejects_stdin() {
 // =============================================================================
 
 #[test]
-fn test_read_explicit() {
+fn test_render_explicit() {
     md_cmd()
-        .args(["read", "-"])
+        .args(["render", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
@@ -355,7 +355,7 @@ fn test_read_explicit() {
 }
 
 #[test]
-fn test_read_default_backward_compat() {
+fn test_render_default_backward_compat() {
     // md file.md (no subcommand) still works
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     writeln!(tmp, "# Backward\n\nCompat test.").unwrap();
@@ -368,9 +368,9 @@ fn test_read_default_backward_compat() {
 }
 
 #[test]
-fn test_read_explicit_with_output() {
+fn test_render_explicit_with_output() {
     md_cmd()
-        .args(["read", "--output", "html", "-"])
+        .args(["render", "--output", "html", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()

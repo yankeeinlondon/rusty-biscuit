@@ -6,7 +6,7 @@ use clap_complete::CompleteEnv;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
-use darkmatter_cli::commands::{run_clean, run_read, run_subcommand, validate_subcommand_usage};
+use darkmatter_cli::commands::{run_clean, run_render, run_subcommand, validate_subcommand_usage};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -132,8 +132,8 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    // Run as implicit read using top-level args
-    run_read(cli.input.as_ref(), cli.output, cli.show, &cli)?;
+    // Run as implicit render using top-level args
+    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli)?;
 
     Ok(())
 }

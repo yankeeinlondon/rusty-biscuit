@@ -25,7 +25,7 @@ pub enum OutputFormat {
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     /// Render a markdown document (same as default behavior without a subcommand).
-    Read {
+    Render {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: Option<PathBuf>,
@@ -37,6 +37,15 @@ pub enum Command {
         /// Open output in the default app using a temp file
         #[arg(long)]
         show: bool,
+
+        /// Normalize nested list indentation width (spaces per level)
+        #[arg(
+            long,
+            value_name = "#",
+            value_parser = parse_indent_size,
+            add = ArgValueCompleter::new(complete_indent_values)
+        )]
+        indent: Option<usize>,
     },
 
     /// Clean up markdown formatting.
@@ -100,6 +109,15 @@ pub enum Command {
         /// Add blank lines between all list items
         #[arg(long, conflicts_with = "compact")]
         loose: bool,
+
+        /// Normalize nested list indentation width (spaces per level)
+        #[arg(
+            long,
+            value_name = "#",
+            value_parser = parse_indent_size,
+            add = ArgValueCompleter::new(complete_indent_values)
+        )]
+        indent: Option<usize>,
     },
 
     /// Show markdown table of contents.

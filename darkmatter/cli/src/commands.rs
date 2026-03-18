@@ -44,12 +44,13 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
 
 pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
     match command {
-        CliCommand::Read {
+        CliCommand::Render {
             input,
             output,
             show,
+            indent,
         } => {
-            run_read(input.as_ref(), output, show, cli)?;
+            run_render(input.as_ref(), output, show, indent, cli)?;
         }
         CliCommand::Clean {
             input,
@@ -70,6 +71,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             frontmatter,
             compact,
             loose,
+            indent,
         } => {
             let mode = resolve_list_spacing(compact, loose);
             run_compose(
@@ -80,6 +82,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 show,
                 frontmatter,
                 mode,
+                indent,
                 cli,
             )?;
         }
@@ -206,14 +209,19 @@ fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode
     };
 }
 
-/// Shared read/render logic for both implicit (no subcommand) and explicit `read` subcommand.
-pub fn run_read(
+/// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
+pub fn run_render(
     input: Option<&PathBuf>,
     output: OutputFormat,
     show: bool,
+    indent: Option<usize>,
     cli: &Cli,
 ) -> Result<()> {
-    let md = load_markdown(input)?;
+    let mut md = load_markdown(input)?;
+
+    // Apply cleanup with the specified or default indentation
+    let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
+    md.cleanup_with_indent(indent_size);
 
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
     let code_theme = cli
@@ -258,6 +266,7 @@ pub fn run_compose(
     show: bool,
     include_frontmatter: bool,
     list_spacing: ListSpacingMode,
+    indent: Option<usize>,
     cli: &Cli,
 ) -> Result<()> {
     let md = load_markdown(input)?;
@@ -327,6 +336,9 @@ pub fn run_compose(
 
     options = options.with_shell(shell_opts);
     options = options.with_list_spacing(list_spacing);
+    if let Some(size) = indent {
+        options = options.with_indent_size(size);
+    }
 
     let (transformed, _report) = md.transform_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;

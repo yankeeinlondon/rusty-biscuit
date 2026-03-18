@@ -1,36 +1,39 @@
 ## Overview
 
-The `read` command renders markdown documents for terminal viewing or export formats.
+The `render` command renders markdown documents for terminal viewing or export formats.
 
-`read` is functionally equivalent to running `md` with no subcommand:
+`render` is functionally equivalent to running `md` with no subcommand:
 
-- `md read README.md`
+- `md render README.md`
 - `md README.md`
 
-Use `read` when you want explicit command intent in scripts and docs.
+Use `render` when you want explicit command intent in scripts and docs.
 
 ## Reporting
 
 ### Usage
 
 ```bash
-# Explicit read command
-md read README.md
+# Explicit render command
+md render README.md
 
 # Equivalent implicit form
 md README.md
 
-# Read from stdin
-md read -
-cat README.md | md read
+# Render from stdin
+md render -
+cat README.md | md render
 
 # Select output format
-md read README.md --output markdown
-md read README.md --output html
-md read README.md --output json
+md render README.md --output markdown
+md render README.md --output html
+md render README.md --output json
 
 # Open selected output via temp artifact
-md read README.md --output html --show
+md render README.md --output html --show
+
+# Override list indentation
+md render README.md --indent 2
 ```
 
 ### Arguments
@@ -41,10 +44,11 @@ md read README.md --output html --show
 
 - `--output <auto|markdown|text|html|json|ast>`: Output format (default: `auto`).
 - `--show`: Write output to a temp file and open it with the system default app.
+- `--indent <#>`: Normalize nested list indentation width (2, 4, or 8 spaces per level). Default: 4.
 
-### Global Flags Relevant to `read`
+### Global Flags Relevant to `render`
 
-These are top-level flags (not read-specific) but affect `read` behavior:
+These are top-level flags (not render-specific) but affect `render` behavior:
 
 - `--theme <NAME>`: prose theme
 - `--code-theme <NAME>`: code theme override
@@ -71,10 +75,10 @@ These are top-level flags (not read-specific) but affect `read` behavior:
 ## Lessons Learned
 
 - `auto` mode gives good defaults for both interactive terminals and pipelines.
-- `read` and implicit `md [INPUT]` share the same core path, so behavior remains aligned.
+- `render` and implicit `md [INPUT]` share the same core path, so behavior remains aligned.
 - Theme and rendering controls are intentionally global CLI flags.
 
 ## Issues
 
-- `read` has no command-local theme flags; theming is configured at root CLI level.
+- `render` has no command-local theme flags; theming is configured at root CLI level.
 - `--show` behavior differs slightly in `auto` TTY mode versus explicit format modes.
