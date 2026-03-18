@@ -99,6 +99,8 @@ let fm = md.frontmatter_mut().as_map_mut();
 fm.shift_remove("draft");
 ```
 
+Note that there is **not** a strict semantic reason to preserve the order of the frontmatter properties but for humans (at the very least) preserving order is helpful as people tend to expect the order they've setup to be preserved and they may hold some semantic idea of grouping or ordering that the Markdown standard doesn't strictly care about.
+
 ## Frontmatter Parsing and TOC Reliability
 
 Some Markdown producers emit YAML frontmatter with tab-indented block scalar content. That can be valid in source systems, but strict YAML parsers may reject it.
@@ -150,7 +152,36 @@ assert_eq!(toc.structure[0].title, "macOS Audio");
 assert_eq!(toc.structure[0].children[0].title, "Getting Started");
 ```
 
-### Output Formats
+### Output Formats During Rendering
+
+The `render`  functionality in Darkmatter will render for the **terminal** by default. This means that it will look to leverage the terminal's capabilities to add font weights, colors, and other ornamentations through escape codes.
+
+Though the terminal is the _default_ target for rendering, it is not the **only** target. The full output target list is:
+
+- **Terminal**
+
+    As already discussed, this is the _default_ output target and leverages the terminal's capabilities (_which are dynamically detected_) to render as full fidelity a representation as is possible in the terminal.
+
+- **HTML**
+
+    A big part of the world is rendered in HTML (along with CSS and Javascript). This platform provides a much richer medium for controlled rendering than Markdown alone. It is worth noting, however, that Markdown is -- _strictly speaking_ -- a functional **superset** of HTML not a **subset** as many people imagine. 
+
+    While Markdown _can_ include any amount of inline HTML as part of it's content you will quickly loose the lightweight writing benefits of Markdown (sometimes referred to as "notational velocity") when you do. Still there are occasions where inline HTML makes sense even in the authoring stage and far more cases where we can leverage conventions, directives, and metadata to produce even more refined HTML than was present in the underlying Markdown content.
+
+- **Enriched Markdown**
+
+    Enriched Markdown takes advantage of a _subset_ of the conventions and features that the HTML target leverages but provides a much richer output and interactive character then normal Markdown but at the cost of that Markdown being less "editable" (aka, the "notational velocity" of working this file has been reduced to make it look nicer). 
+
+    Use this output for sharing content which you've authored to other parties, targeting Markdown viewers which support the inline-HTML features that the Markdown standard does allow for.
+
+- **AST**
+
+    Darkmatter can convert Markdown to an JSON based AST called [**MDAST**](https://github.com/syntax-tree/mdast). **MDAST** has grown in its formality as well as the tools which support it in recent years. It's center of gravity is still in the JS/TS ecosystem but it now get's strong support from the `markdown-rs` crate in Rust too (this is what Darkmatter uses internally to produce the AST).
+
+    Having an AST format is helpful in cases where you need to apply advanced transforms of the Markdown or extract aspects of a document where **regex** is not really strong enough to do the job.
+
+> **Note:** the _rendering_ functionality is the default command provided by the [**Darkmatter CLI**](../cli/README.md) and you can specify the output format you want with the `--output <format>` CLI switch
+
 
 #### Terminal Output
 
@@ -194,10 +225,42 @@ let output = md.as_string();  // Includes frontmatter if present
 
 ### Document Cleanup
 
+Cleanup normalizes markdown formatting: blank lines between block elements, table alignment, list marker preservation, and list item spacing.
+
 ```rust
 let mut md: Markdown = content.into();
-md.cleanup();  // Normalize spacing, align tables
-md.cleanup_with_indent(4); // Normalize with 4-space nested list indentation
+md.cleanup();              // Normal mode (default)
+md.cleanup_compact();      // Compact mode
+md.cleanup_loose();        // Loose mode
+md.cleanup_with_indent(4); // Any mode + forced 4-space list indentation
+```
+
+#### List Spacing Modes
+
+The cleanup module provides three list spacing modes via `ListSpacingMode`:
+
+| Mode | Behavior |
+|------|----------|
+| **Normal** (default) | Blank lines only at indentation level transitions — when a list enters or leaves a sub-list. Same-level items remain tight. |
+| **Compact** | No blank lines between any list items. Tightest possible output. |
+| **Loose** | Blank lines between all list items regardless of level changes. |
+
+All three modes preserve the standard markdown rule that a blank line must separate a list from following prose content.
+
+```rust
+use darkmatter::markdown::cleanup::{cleanup_content, cleanup_content_compact, cleanup_content_loose, ListSpacingMode};
+
+// Freestanding functions
+let normal  = cleanup_content(input);
+let compact = cleanup_content_compact(input);
+let loose   = cleanup_content_loose(input);
+
+// Via the transform pipeline
+use darkmatter::markdown::transform::TransformOptions;
+
+let options = TransformOptions::new()
+    .with_list_spacing(ListSpacingMode::Compact);
+let (transformed, report) = md.transform_with(options)?;
 ```
 
 ### Transform Pipeline (Stage 1 + Stage 2)
