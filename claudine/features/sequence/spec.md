@@ -20,15 +20,18 @@ A `sequence` in Claudine is an orchestrated set of steps which:
 A "check" is a bag of properties which allow us to check whether a **Stage** has completed successfully and how to handle a check failure. This check will be represented in Rust as a struct:
 
 ```rust
-pub struct SequenceRecovery {
-    description: String,
+pub struct StageRecovery {
+
+    prompt: Option<String>,
+    commands: Option<vec!<ShellCommand>>,
+    user_message: Option<String>,
 
 }
 
 pub enum SequenceFailureAction {
     /// the `SequenceCheck` failed but the Agent should be able to
     /// recover from this failure
-    RecoverableFailure(SequenceRecovery),
+    RecoverableFailure(StageRecovery),
     /// The failure is too severe to consider trying to continue
     /// with the sequence. The string parameter is a description
     /// which will be conveyed in the log and to STDERR about
