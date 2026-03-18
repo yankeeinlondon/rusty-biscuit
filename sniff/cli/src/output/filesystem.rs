@@ -1385,6 +1385,127 @@ pub fn render_dirty_package_areas(
     }
 }
 
+/// Collect package names that have staged files (in index).
+fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
+    let fs = match result.filesystem.as_ref() {
+        Some(fs) => fs,
+        None => return vec![],
+    };
+
+    let packages = match fs.repo.as_ref().and_then(|r| r.packages.as_ref()) {
+        Some(p) => p,
+        None => return vec![],
+    };
+
+    let git = match fs.git.as_ref() {
+        Some(g) => g,
+        None => return vec![],
+    };
+
+    let staged_paths: Vec<&str> = git
+        .file_changes
+        .iter()
+        .filter(|f| {
+            f.status == sniff::filesystem::git::FileStatus::Staged
+                || f.status == sniff::filesystem::git::FileStatus::Both
+        })
+        .map(|f| f.path.to_str().unwrap_or(""))
+        .collect();
+
+    if staged_paths.is_empty() {
+        return vec![];
+    }
+
+    let mut names: Vec<String> = packages
+        .iter()
+        .filter(|pkg| {
+            let prefix = &pkg.relative;
+            staged_paths.iter().any(|path| {
+                if prefix.is_empty() {
+                    !packages
+                        .iter()
+                        .any(|other| !other.relative.is_empty() && path.starts_with(&other.relative))
+                } else {
+                    path.starts_with(prefix)
+                }
+            })
+        })
+        .map(|pkg| pkg.name.clone())
+        .collect();
+
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Render package names with staged files as a comma-separated list.
+///
+/// Returns an error message if the repo is not a monorepo.
+pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    match repo {
+        Some(repo) if repo.is_monorepo => {
+            let names = staged_package_names(result);
+            let names: Vec<&str> = if let Some(filter_str) = repo_filter {
+                if let Some(ref packages) = repo.packages {
+                    let filtered = filter_packages(packages, Some(filter_str));
+                    let filtered_names: std::collections::HashSet<&str> =
+                        filtered.iter().map(|p| p.name.as_str()).collect();
+                    names
+                        .iter()
+                        .filter(|n| filtered_names.contains(n.as_str()))
+                        .map(|n| n.as_str())
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                names.iter().map(|n| n.as_str()).collect()
+            };
+            names.join(", ")
+        }
+        _ => String::from(
+            "- the \"staged-packages\" subcommand is only intended to be used in a monorepo",
+        ),
+    }
+}
+
+/// Render package area names with staged files as a comma-separated list.
+///
+/// Returns an error message if the repo is not a monorepo.
+pub fn render_staged_package_areas(
+    result: &sniff::SniffResult,
+    repo_filter: Option<&str>,
+) -> String {
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    match repo {
+        Some(repo) if repo.is_monorepo => {
+            if let Some(ref packages) = repo.packages {
+                let staged_names = staged_package_names(result);
+                let staged_set: std::collections::HashSet<&str> =
+                    staged_names.iter().map(|n| n.as_str()).collect();
+
+                let filtered = filter_packages(packages, repo_filter);
+                let mut areas: Vec<&str> = filtered
+                    .iter()
+                    .filter(|p| staged_set.contains(p.name.as_str()))
+                    .map(|p| p.package_area.as_str())
+                    .collect();
+                areas.sort();
+                areas.dedup();
+                areas.join(", ")
+            } else {
+                String::new()
+            }
+        }
+        _ => String::from(
+            "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
+        ),
+    }
+}
+
 /// Render the package name for the given directory.
 ///
 /// With `verbose >= 1`, appends the package root directory on the same line.

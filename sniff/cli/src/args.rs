@@ -50,6 +50,12 @@ pub enum RepoAction {
     DirtyPackageAreas {
         filter: Option<String>,
     },
+    StagedPackages {
+        filter: Option<String>,
+    },
+    StagedPackageAreas {
+        filter: Option<String>,
+    },
     PackageRoot,
     PackageAreaRoot,
     RepoRoot,
@@ -468,6 +474,18 @@ pub enum RepoSubcommand {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Option<String>,
     },
+    /// Output only package names that have staged files
+    #[command(name = "staged-packages")]
+    StagedPackages {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output only package area names that have staged files
+    #[command(name = "staged-package-areas")]
+    StagedPackageAreas {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
     /// Output the root directory of the current package
     PackageRoot,
     /// Output the root directory of the current package area
@@ -729,6 +747,16 @@ impl Commands {
                 }
                 Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
                     RepoAction::DirtyPackageAreas {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::StagedPackages { filter: sub_filter }) => {
+                    RepoAction::StagedPackages {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::StagedPackageAreas { filter: sub_filter }) => {
+                    RepoAction::StagedPackageAreas {
                         filter: sub_filter.clone().or_else(|| filter.clone()),
                     }
                 }
@@ -1148,6 +1176,24 @@ mod tests {
                 cli.command,
                 Some(Commands::Repo {
                     repo_subcommand: Some(RepoSubcommand::DirtyPackageAreas { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "staged-packages"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::StagedPackages { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "staged-package-areas"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::StagedPackageAreas { .. }),
                     ..
                 })
             ));

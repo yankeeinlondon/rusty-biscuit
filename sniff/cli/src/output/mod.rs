@@ -29,6 +29,7 @@ pub use topics::render_topics_table;
 pub(crate) use filesystem::{
     print_current_package_area_dirty, print_package_area_has_source_code_changes,
     render_dirty_package_areas, render_dirty_packages, render_docs_section, render_files_section,
+    render_staged_package_areas, render_staged_packages,
     render_filesystem_section, render_language_section, render_repo_deps_text,
     render_repo_deps_visual, render_repo_package, render_repo_package_area,
     render_repo_package_area_root, render_repo_package_root, render_repo_packages,
@@ -386,6 +387,22 @@ pub fn render_text(
                 }
                 Some(RepoAction::DirtyPackageAreas { filter }) => {
                     let rendered = render_dirty_package_areas(result, filter.as_deref());
+                    out.push_str(&rendered);
+                    out.push('\n');
+                }
+                Some(RepoAction::StagedPackages { filter }) => {
+                    let rendered = render_staged_packages(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
+                }
+                Some(RepoAction::StagedPackageAreas { filter }) => {
+                    let rendered = render_staged_package_areas(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
