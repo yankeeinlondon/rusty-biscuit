@@ -176,7 +176,7 @@ Though the terminal is the _default_ target for rendering, it is not the **only*
 
 - **AST**
 
-    Darkmatter can convert Markdown to an JSON based AST called [**MDAST**](https://github.com/syntax-tree/mdast). **MDAST** has grown in its formality as well as the tools which support it in recent years. It's center of gravity is still in the JS/TS ecosystem but it now get's strong support from the `markdown-rs` crate in Rust too (this is what Darkmatter uses internally to produce the AST).
+    Darkmatter can convert Markdown to a JSON based AST called [**MDAST**](https://github.com/syntax-tree/mdast). **MDAST** has grown in its formality as well as the tools which support it in recent years. It's center of gravity is still in the JS/TS ecosystem but it now get's strong support from the `markdown-rs` crate in Rust too (this is what Darkmatter uses internally to produce the AST).
 
     Having an AST format is helpful in cases where you need to apply advanced transforms of the Markdown or extract aspects of a document where **regex** is not really strong enough to do the job.
 
