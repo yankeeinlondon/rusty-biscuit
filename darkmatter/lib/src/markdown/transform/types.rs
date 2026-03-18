@@ -63,6 +63,9 @@ pub struct TransformOptions {
     /// these values unconditionally overwrite frontmatter properties.
     pub set_overrides: Option<serde_json::Value>,
 
+    /// Controls how blank lines between list items are handled during cleanup.
+    pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
+
     /// If true, the pipeline returns an error on first failure.
     /// If false, failures are recorded as warnings and the pipeline continues.
     pub fail_fast: bool,
@@ -88,6 +91,7 @@ impl std::fmt::Debug for TransformOptions {
             .field("shell", &self.shell)
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
+            .field("list_spacing", &self.list_spacing)
             .field("fail_fast", &self.fail_fast)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
@@ -110,6 +114,7 @@ impl TransformOptions {
             shell: super::shell_expansion::ShellExpansionOptions::default(),
             external_state: None,
             set_overrides: None,
+            list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
             fail_fast: false,
             replace_parent_wins: false,
             one_off_replace: None,
@@ -175,6 +180,13 @@ impl TransformOptions {
     #[must_use]
     pub fn with_set_overrides(mut self, overrides: serde_json::Value) -> Self {
         self.set_overrides = Some(overrides);
+        self
+    }
+
+    /// Sets the list spacing mode for the cleanup stage.
+    #[must_use]
+    pub fn with_list_spacing(mut self, mode: crate::markdown::cleanup::ListSpacingMode) -> Self {
+        self.list_spacing = mode;
         self
     }
 

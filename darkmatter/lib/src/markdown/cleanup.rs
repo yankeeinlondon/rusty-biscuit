@@ -257,7 +257,43 @@ fn unescape_emphasis_chars(output: &mut String) {
 /// assert!(cleaned.contains("\n\n"));
 /// ```
 pub fn cleanup_content(content: &str) -> String {
-    cleanup_content_internal(content, None)
+    cleanup_content_internal(content, None, ListSpacingMode::Normal)
+}
+
+/// Cleans up markdown content in compact mode.
+///
+/// Compact mode removes all blank lines between list items, producing
+/// the tightest possible list output.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::cleanup::cleanup_content_compact;
+///
+/// let content = "1. First\n\n2. Second\n";
+/// let cleaned = cleanup_content_compact(content);
+/// assert!(cleaned.contains("1. First\n2. Second"));
+/// ```
+pub fn cleanup_content_compact(content: &str) -> String {
+    cleanup_content_internal(content, None, ListSpacingMode::Compact)
+}
+
+/// Cleans up markdown content in loose mode.
+///
+/// Loose mode adds blank lines between all list items regardless of
+/// whether there are level changes.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::cleanup::cleanup_content_loose;
+///
+/// let content = "1. First\n2. Second\n";
+/// let cleaned = cleanup_content_loose(content);
+/// assert!(cleaned.contains("1. First\n\n2. Second"));
+/// ```
+pub fn cleanup_content_loose(content: &str) -> String {
+    cleanup_content_internal(content, None, ListSpacingMode::Loose)
 }
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
@@ -275,10 +311,35 @@ pub fn cleanup_content(content: &str) -> String {
 /// assert!(cleaned.contains("\n    - Child"));
 /// ```
 pub fn cleanup_content_with_indent(content: &str, indent_size: usize) -> String {
-    cleanup_content_internal(content, Some(indent_size.max(1)))
+    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Normal)
 }
 
-fn cleanup_content_internal(content: &str, forced_indent: Option<usize>) -> String {
+/// Cleans up markdown content with forced indentation in compact mode.
+pub fn cleanup_content_with_indent_compact(content: &str, indent_size: usize) -> String {
+    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Compact)
+}
+
+/// Cleans up markdown content with forced indentation in loose mode.
+pub fn cleanup_content_with_indent_loose(content: &str, indent_size: usize) -> String {
+    cleanup_content_internal(content, Some(indent_size.max(1)), ListSpacingMode::Loose)
+}
+
+/// Controls how blank lines between list items are handled during cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListSpacingMode {
+    /// Blank lines only at level transitions and before prose after lists.
+    Normal,
+    /// No blank lines between list items (tightest output).
+    Compact,
+    /// Blank lines between all list items (loosest output).
+    Loose,
+}
+
+fn cleanup_content_internal(
+    content: &str,
+    forced_indent: Option<usize>,
+    list_spacing: ListSpacingMode,
+) -> String {
     // Parse with source ranges to preserve list markers and emphasis styles
     // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
     let parser = Parser::new_ext(content, cleanup_parser_options());
@@ -333,6 +394,14 @@ fn cleanup_content_internal(content: &str, forced_indent: Option<usize>) -> Stri
     // Unescape underscores/asterisks that cmark escaped in plain text
     // (e.g., '_' becomes '\_' which should be '_')
     unescape_emphasis_chars(&mut output);
+
+    // Normalize list item spacing according to the chosen mode.
+    // pulldown-cmark-to-cmark doesn't reliably handle blank lines between
+    // list items, so we normalize uniformly:
+    //   Normal:  blank lines at level transitions, none between same-level items
+    //   Compact: no blank lines between any list items
+    //   Loose:   blank lines between all list items
+    normalize_list_spacing(&mut output, list_spacing);
 
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
     fix_blockquote_formatting(&mut output);
@@ -1136,6 +1205,145 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
     }
 
     result
+}
+
+/// Normalizes blank lines between list items according to the spacing mode.
+///
+/// First strips all blank lines between list items (resetting to compact),
+/// then inserts blank lines based on the mode:
+///
+/// - **Compact**: no blank lines between list items
+/// - **Normal**: blank lines at indentation level transitions and after
+///   sub-lists return to prose
+/// - **Loose**: blank lines between all list items
+fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.len() < 2 {
+        return;
+    }
+
+    // Phase 1: strip blank lines between list items to get a clean baseline.
+    // Only strip when both the previous non-blank line and the next non-blank
+    // line are list item starts. Blank lines before continuation prose or
+    // between a list item and non-item content are preserved.
+    let mut stripped: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].trim().is_empty() && i > 0 {
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+
+            // Find the last non-blank line before the gap
+            let prev_is_item = is_list_item_start(lines[i - 1].trim_start())
+                || is_list_continuation(lines[i - 1]);
+            let next_is_item =
+                j < lines.len() && is_list_item_start(lines[j].trim_start());
+
+            // Only strip if both sides are list items (not continuation prose)
+            if prev_is_item && next_is_item {
+                i = j;
+                continue;
+            }
+        }
+        stripped.push(lines[i]);
+        i += 1;
+    }
+
+    // Phase 2: insert blank lines based on mode.
+    // Track indentation level of list items to detect transitions.
+    let mut result = String::with_capacity(output.len() + 64);
+    let mut prev_item_indent: Option<usize> = None;
+    let mut in_list_run = false; // true when previous line(s) were list items
+    let mut prev_was_blank = false;
+
+    for (idx, line) in stripped.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let is_item = is_list_item_start(trimmed);
+        let is_cont = is_list_continuation(line);
+
+        if !prev_was_blank && idx > 0 {
+            if is_item {
+                // List item: check if we need a blank line before it
+                let need_blank = match mode {
+                    ListSpacingMode::Loose => true,
+                    ListSpacingMode::Normal => {
+                        if let Some(prev) = prev_item_indent {
+                            indent != prev
+                        } else {
+                            false
+                        }
+                    }
+                    ListSpacingMode::Compact => false,
+                };
+                if need_blank {
+                    result.push('\n');
+                }
+            } else if is_cont && !trimmed.is_empty() && in_list_run {
+                // Non-item continuation after a run of list items =
+                // prose following a (sub-)list. Needs a blank line.
+                if let Some(prev) = prev_item_indent {
+                    if indent <= prev {
+                        result.push('\n');
+                    }
+                }
+            }
+        }
+
+        if is_item {
+            prev_item_indent = Some(indent);
+            in_list_run = true;
+        } else if !trimmed.is_empty() {
+            if !is_cont {
+                prev_item_indent = None;
+            }
+            in_list_run = false;
+        }
+
+        prev_was_blank = trimmed.is_empty();
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    if !output.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+
+    *output = result;
+}
+
+/// Returns `true` if the line starts a list item (ordered or unordered).
+fn is_list_item_start(trimmed: &str) -> bool {
+    // Unordered: *, -, or + followed by space
+    if trimmed.starts_with("* ")
+        || trimmed.starts_with("- ")
+        || trimmed.starts_with("+ ")
+    {
+        return true;
+    }
+
+    // Ordered: digits followed by . or ) and space
+    let bytes = trimmed.as_bytes();
+    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+        return false;
+    }
+    for (i, &b) in bytes.iter().enumerate().skip(1) {
+        if b == b'.' || b == b')' {
+            return bytes.get(i + 1) == Some(&b' ');
+        }
+        if !b.is_ascii_digit() {
+            return false;
+        }
+    }
+    false
+}
+
+/// Returns `true` if the line is indented continuation content within a list.
+fn is_list_continuation(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    !trimmed.is_empty() && line.len() > trimmed.len() && !is_list_item_start(trimmed)
 }
 
 #[cfg(test)]
@@ -2563,6 +2771,173 @@ mod tests {
         assert!(
             cleaned.contains("+ plus with _em3_"),
             "Plus list with emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== List Spacing Mode Tests ====================
+
+    #[test]
+    fn normal_no_blank_lines_between_same_level_items() {
+        let input = "1. First\n\n2. Second\n\n3. Third\n";
+        let cleaned = cleanup_content(input);
+        assert!(
+            cleaned.contains("1. First\n2. Second\n3. Third"),
+            "Normal mode: no blank lines between same-level items, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn normal_blank_lines_around_level_transition() {
+        let input = "\
+1. read the lessons:
+   - @docs/knowledge/commits.md
+2. evaluate all the _staged_ files
+";
+        let cleaned = cleanup_content(input);
+        // Blank line before the sub-list (level change 0→indented)
+        // Blank line after the sub-list (level change indented→0)
+        assert!(
+            cleaned.contains("lessons:\n\n   - @docs"),
+            "Normal: blank line before entering sub-list, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("commits.md\n\n2."),
+            "Normal: blank line after leaving sub-list, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn normal_no_blank_between_same_level_without_transition() {
+        let input = "\
+0. If no files are staged then exit.
+1. read the lessons
+2. evaluate the files
+3. organize the work
+";
+        let cleaned = cleanup_content(input);
+        assert!(
+            cleaned.contains("exit.\n1.") || cleaned.contains("exit.\n0."),
+            "Normal: no blank lines between same-level items, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn normal_blank_line_after_list_before_prose() {
+        let input = "\
+1. First
+   - sub item
+2. Second
+
+Some prose after the list.
+";
+        let cleaned = cleanup_content(input);
+        assert!(
+            cleaned.contains("2. Second\n\nSome prose"),
+            "Normal: blank line between list end and prose, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn compact_removes_all_blank_lines_between_items() {
+        let input = "1. First\n\n2. Second\n\n3. Third\n";
+        let cleaned = cleanup_content_compact(input);
+        assert!(
+            cleaned.contains("1. First\n2. Second\n3. Third"),
+            "Compact: no blank lines between items, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn compact_with_nested_list() {
+        let input = "\
+1. read the lessons:
+
+   - @docs/knowledge/commits.md
+
+2. evaluate all the _staged_ files
+";
+        let cleaned = cleanup_content_compact(input);
+        assert!(
+            !cleaned.contains("\n\n2."),
+            "Compact: no blank line before item 2, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn compact_preserves_blank_before_non_list() {
+        let input = "Some paragraph.\n\n1. First\n\n2. Second\n";
+        let cleaned = cleanup_content_compact(input);
+        assert!(
+            cleaned.contains("paragraph.\n\n1."),
+            "Compact: preserve blank between paragraph and list, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn loose_adds_blank_lines_between_all_items() {
+        let input = "1. First\n2. Second\n3. Third\n";
+        let cleaned = cleanup_content_loose(input);
+        assert!(
+            cleaned.contains("1. First\n\n2. Second\n\n3. Third"),
+            "Loose: blank lines between all items, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn loose_with_nested_list() {
+        let input = "\
+1. read the lessons:
+   - @docs/knowledge/commits.md
+2. evaluate
+3. organize
+";
+        let cleaned = cleanup_content_loose(input);
+        assert!(
+            cleaned.contains("\n\n2."),
+            "Loose: blank line before item 2, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n\n3."),
+            "Loose: blank line before item 3, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn tight_list_stays_tight_in_normal_mode() {
+        let input = "1. First\n2. Second\n3. Third\n";
+        let cleaned = cleanup_content(input);
+        assert!(
+            cleaned.contains("1. First\n2. Second\n3. Third"),
+            "Normal: tight list stays tight, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn normal_blank_line_between_sublist_and_prose() {
+        let input = "\
+6. review lessons:
+   1. important
+   2. not represented
+
+   If both criteria are met then save.
+";
+        let cleaned = cleanup_content(input);
+        assert!(
+            cleaned.contains("represented\n\n   If both"),
+            "Normal: blank line between sub-list and prose continuation, got:\n{}",
             cleaned
         );
     }

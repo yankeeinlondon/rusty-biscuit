@@ -248,7 +248,17 @@ impl Markdown {
             // Stage 1: Cleanup
             if options.stages.cleanup {
                 let original_content = self.content.clone();
-                self.content = cleanup::cleanup_content(&self.content);
+                self.content = match options.list_spacing {
+                    cleanup::ListSpacingMode::Normal => {
+                        cleanup::cleanup_content(&self.content)
+                    }
+                    cleanup::ListSpacingMode::Compact => {
+                        cleanup::cleanup_content_compact(&self.content)
+                    }
+                    cleanup::ListSpacingMode::Loose => {
+                        cleanup::cleanup_content_loose(&self.content)
+                    }
+                };
                 report.cleanup_changed = self.content != original_content;
             }
 

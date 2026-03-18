@@ -305,6 +305,30 @@ impl Markdown {
         self
     }
 
+    /// Cleans up markdown in compact mode (removes blank lines between list items).
+    pub fn cleanup_compact(&mut self) -> &mut Self {
+        self.content = cleanup::cleanup_content_compact(&self.content);
+        self
+    }
+
+    /// Cleans up markdown in loose mode (blank lines between all list items).
+    pub fn cleanup_loose(&mut self) -> &mut Self {
+        self.content = cleanup::cleanup_content_loose(&self.content);
+        self
+    }
+
+    /// Cleans up markdown with forced indentation in compact mode.
+    pub fn cleanup_with_indent_compact(&mut self, indent_size: usize) -> &mut Self {
+        self.content = cleanup::cleanup_content_with_indent_compact(&self.content, indent_size);
+        self
+    }
+
+    /// Cleans up markdown with forced indentation in loose mode.
+    pub fn cleanup_with_indent_loose(&mut self, indent_size: usize) -> &mut Self {
+        self.content = cleanup::cleanup_content_with_indent_loose(&self.content, indent_size);
+        self
+    }
+
     /// Removes a heading section from the document by pattern.
     ///
     /// A "section" is the heading itself plus all content until the next heading
