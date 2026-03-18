@@ -15,7 +15,7 @@ mod types;
 
 pub use error::CompositionError;
 pub use prepare::{prepare_chained_prompt, prepare_inline_prompt};
-pub use resolve::resolve_composition_source;
+pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{build_candidate_set, select_provider, select_provider_with_env};
 pub use types::{
     CompositionMode, CompositionRequest, PreparedPrompt, ResolvedCompositionSource,

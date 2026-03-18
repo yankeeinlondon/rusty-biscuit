@@ -68,4 +68,8 @@ pub enum CompositionError {
     /// Atomic file write failed during inline composition.
     #[error("atomic write failed: {0}")]
     AtomicWriteFailed(String),
+
+    /// The composition target file lacks required read/write permissions.
+    #[error("insufficient file permissions (need read+write): {0}")]
+    InsufficientFilePermissions(String),
 }

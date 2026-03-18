@@ -653,6 +653,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     if let Some(ref fp_input) = args.frontmatter_prompt {
         let source = claudine::composition::resolve_composition_source(fp_input)
             .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+
+        // Validate file read/write permissions before proceeding
+        match claudine::composition::validate_file_permissions(&source.resolved_path) {
+            Ok(()) => {
+                log::message(&crate::output::fm_check_ok(
+                    "validated that agent has read and write permissions to the referenced file",
+                    &term,
+                ));
+            }
+            Err(e) => {
+                log::message(&crate::output::fm_check_fail(
+                    "the agent does not have read and write permissions required to finish the task",
+                    &term,
+                ));
+                return Err(eyre!("frontmatter-prompt: {e}"));
+            }
+        }
+
         let prepared = claudine::composition::prepare_inline_prompt(
             &source,
             env_plan.repo_root.as_deref(),
