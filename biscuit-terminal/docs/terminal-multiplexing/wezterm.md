@@ -135,6 +135,7 @@ config.ssh_domains = {
 Connect: `wezterm connect my.server`
 
 **Auto-population** (v20230408+): WezTerm automatically creates SSH domains from `~/.ssh/config`:
+
 - Plain SSH: `SSH:hostname`
 - Multiplexed SSH: `SSHMUX:hostname`
 
@@ -169,6 +170,7 @@ Connect: `wezterm connect server.name` — bootstraps via SSH, obtains a certifi
 Workspaces group related windows (analogous to tmux sessions). Each `MuxWindow` belongs to a workspace label. Only windows in the active workspace are displayed; others remain hidden.
 
 Key actions for workspace management:
+
 - `SwitchToWorkspace` — navigate to a named workspace
 - `SwitchWorkspaceRelative` — cycle through workspaces
 - `ShowLauncherArgs { flags = 'FUZZY|WORKSPACES' }` — fuzzy workspace picker
@@ -191,6 +193,7 @@ config.keys = {
 **Modifier names:** `SUPER`/`CMD`/`WIN`, `CTRL`, `SHIFT`, `ALT`/`OPT`/`META`, `LEADER`. Combine with `|`.
 
 **Key formats:**
+
 - Named: `"Enter"`, `"Tab"`, `"Escape"`, `"F1"`–`"F24"`, `"LeftArrow"`, etc.
 - Character: `"a"`, `"|"`, `"%"`
 - Physical: `"phys:A"` (position-based, ignores keyboard layout)
@@ -262,6 +265,7 @@ config.key_tables = {
 ```
 
 `ActivateKeyTable` parameters:
+
 - `name` — key table to activate
 - `one_shot` — deactivate after one keypress
 - `timeout_milliseconds` — auto-deactivate after timeout
@@ -355,6 +359,7 @@ act.SplitPane {
 | `PaneSelect { mode = 'MoveToNewWindow' }` | Move selected pane to a new window |
 
 `PaneSelect` modes:
+
 - `Activate` (default) — focus the selected pane
 - `SwapWithActive` — exchange positions, focus moves
 - `SwapWithActiveKeepFocus` — exchange positions, focus stays
