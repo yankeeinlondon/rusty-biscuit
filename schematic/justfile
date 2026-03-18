@@ -146,6 +146,14 @@ test *args="":
     @echo ""
     @cargo test -p schematic-define -p schematic-definitions -p schematic-gen {{args}}
 
+# check for artifact drift (run after making definition changes)
+check-drift:
+    @echo ""
+    @echo "Checking Artifact Drift"
+    @echo "-----------------------"
+    @echo ""
+    @cargo test -p schematic-gen artifact_drift -- --ignored
+
 # run clippy on schematic packages
 lint:
     @echo ""
@@ -170,7 +178,8 @@ generate:
     @echo "Generating All API Clients"
     @echo "--------------------------"
     @echo ""
-    @cargo run -p schematic-gen -- --api all --output schema/src -v
+    @cargo run -p schematic-gen -- generate --api all --output schema/src \
+        --openapi-out openapi --postman-out postman -v
     @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema"
 
 
@@ -180,7 +189,26 @@ generate-one api:
     @echo "Generating {{api}} API Client"
     @echo "------------------------------"
     @echo ""
-    @cargo run -p schematic-gen -- --api {{api}} --output schema/src -v
+    @cargo run -p schematic-gen -- generate --api {{api}} --output schema/src \
+        --openapi-out openapi --postman-out postman -v
+
+# generate only OpenAPI specs (no Postman)
+generate-openapi:
+    @echo ""
+    @echo "Generating OpenAPI Specs"
+    @echo "------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- generate --api all --output schema/src \
+        --openapi-out openapi --no-postman -v
+
+# generate only Postman collections (no OpenAPI)
+generate-postman:
+    @echo ""
+    @echo "Generating Postman Collections"
+    @echo "------------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- generate --api all --output schema/src \
+        --postman-out postman --no-openapi -v
 
 
 # build, install CLI, generate schemas, and verify

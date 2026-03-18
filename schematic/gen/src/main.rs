@@ -2,6 +2,8 @@
 //!
 //! Generates strongly-typed Rust client code from REST API definitions.
 
+use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -9,6 +11,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
 use schematic_definitions::anthropic::define_anthropic_api;
+use schematic_definitions::apis_by_module;
 use schematic_definitions::bitbucket::define_bitbucket_api;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
@@ -29,6 +32,7 @@ use schematic_gen::errors::GeneratorError;
 use schematic_gen::import_pipeline::{self, ImportOptions};
 use schematic_gen::openapi_output::write_openapi;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
+use schematic_gen::postman_output::{write_postman, write_postman_grouped};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
@@ -127,6 +131,25 @@ enum Commands {
         /// Output format for OpenAPI specification
         #[arg(long, value_enum, default_value = "json")]
         openapi_format: OpenApiFormat,
+
+        /// Override version in OpenAPI specification
+        #[arg(long, value_name = "VERSION")]
+        openapi_version: Option<String>,
+
+        /// Output directory for Postman collection files
+        ///
+        /// When provided, exports the API definition to a Postman v2.1.0 collection
+        /// after generating Rust client code.
+        #[arg(long, value_name = "DIR")]
+        postman_out: Option<String>,
+
+        /// Skip OpenAPI specification generation
+        #[arg(long)]
+        no_openapi: bool,
+
+        /// Skip Postman collection generation
+        #[arg(long)]
+        no_postman: bool,
     },
 
     /// Validate an API definition without generating code
@@ -322,39 +345,100 @@ fn run_validation(api: &schematic_define::RestApi, verbose: u8) -> bool {
     }
 }
 
-/// Runs the generate command.
-fn run_generate(
-    api_name: &str,
-    output: &str,
+/// Options for the generate command.
+struct GenerateOpts<'a> {
+    output: &'a str,
     dry_run: bool,
     verbose: u8,
-    openapi_out: Option<&str>,
+    openapi_out: Option<&'a str>,
     openapi_format: OpenApiFormat,
-) -> Result<(), GeneratorError> {
-    if api_name == "all" {
-        return run_generate_all(output, dry_run, verbose, openapi_out, openapi_format);
+    openapi_version: Option<&'a str>,
+    postman_out: Option<&'a str>,
+    no_openapi: bool,
+    no_postman: bool,
+}
+
+/// Resolves default export directories for OpenAPI and Postman.
+///
+/// If the output path ends with "schema/src" and no explicit output paths are provided,
+/// defaults to sibling directories:
+/// - OpenAPI: `<base>/openapi`
+/// - Postman: `<base>/postman`
+///
+/// where `<base>` is the grandparent directory of the output path.
+///
+/// ## Examples
+///
+/// ```text
+/// resolve_export_defaults("schematic/schema/src", None, None)
+///   -> (Some("schematic/openapi"), Some("schematic/postman"))
+///
+/// resolve_export_defaults("other/path", None, None)
+///   -> (None, None)
+///
+/// resolve_export_defaults("schema/src", Some("custom"), None)
+///   -> (Some("custom"), None)  // explicit values preserved
+/// ```
+fn resolve_export_defaults(
+    output: &str,
+    openapi_out: Option<&str>,
+    postman_out: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    // If explicit values provided, use them
+    if openapi_out.is_some() || postman_out.is_some() {
+        return (openapi_out.map(String::from), postman_out.map(String::from));
     }
+
+    // Auto-detect: if output ends with "schema/src", default to sibling dirs
+    if output.ends_with("schema/src") {
+        let base = output.strip_suffix("schema/src").unwrap_or("");
+        let openapi_default = format!("{}openapi", base);
+        let postman_default = format!("{}postman", base);
+        (Some(openapi_default), Some(postman_default))
+    } else {
+        (None, None)
+    }
+}
+
+/// Runs the generate command.
+fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
+    if api_name == "all" {
+        return run_generate_all(opts);
+    }
+
+    // Resolve export defaults before processing
+    let (openapi_out, postman_out) = resolve_export_defaults(
+        opts.output,
+        opts.openapi_out,
+        opts.postman_out,
+    );
 
     let api = resolve_api(api_name)?;
 
-    if verbose > 0 {
+    if opts.verbose > 0 {
         eprintln!("Generating code for API: {}", api_name);
-        eprintln!("Output directory: {}", output);
-        if dry_run {
+        eprintln!("Output directory: {}", opts.output);
+        if let Some(ref dir) = openapi_out {
+            eprintln!("OpenAPI output: {}", dir);
+        }
+        if let Some(ref dir) = postman_out {
+            eprintln!("Postman output: {}", dir);
+        }
+        if opts.dry_run {
             eprintln!("Dry run mode - no files will be written");
         }
     }
 
     // Run validation first
     println!("{}", "Validating API definition...".dimmed());
-    if !run_validation(&api, verbose) {
+    if !run_validation(&api, opts.verbose) {
         return Err(GeneratorError::ConfigError(
             "Validation failed. Fix the issues above before generating code.".to_string(),
         ));
     }
     println!();
 
-    if verbose > 1 {
+    if opts.verbose > 1 {
         eprintln!("API: {} ({} endpoints)", api.name, api.endpoints.len());
         for endpoint in &api.endpoints {
             eprintln!("  - {} {} {}", endpoint.id, endpoint.method, endpoint.path);
@@ -362,19 +446,19 @@ fn run_generate(
     }
 
     println!("{}", "Generating code...".dimmed());
-    let output_dir = Path::new(output);
-    generate_and_write(&api, output_dir, dry_run)?;
+    let output_dir = Path::new(opts.output);
+    generate_and_write(&api, output_dir, opts.dry_run)?;
 
     // Generate Cargo.toml in the parent directory of src/
     // The output_dir points to src/, so we need to get its parent for Cargo.toml
     let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, dry_run, None)?;
+    write_cargo_toml(schema_dir, opts.dry_run, None)?;
 
-    if !dry_run {
+    if !opts.dry_run {
         println!(
             "{} Generated code to {}/lib.rs",
             "[OK]".green().bold(),
-            output
+            opts.output
         );
         println!(
             "{} Generated {}/Cargo.toml",
@@ -388,16 +472,67 @@ fn run_generate(
         );
     }
 
-    // Export OpenAPI spec if requested
-    if let Some(openapi_dir) = openapi_out {
+    // Export OpenAPI spec if requested (use resolved default if available)
+    if !opts.no_openapi
+        && let Some(openapi_dir) = openapi_out.as_deref()
+    {
         run_openapi_export(
             api_name,
             &api,
             openapi_dir,
-            openapi_format,
-            dry_run,
-            verbose,
+            opts.openapi_format,
+            opts.openapi_version,
+            opts.dry_run,
+            opts.verbose,
         )?;
+    }
+
+    // Export Postman collection if requested (use resolved default if available)
+    if !opts.no_postman
+        && let Some(postman_dir) = postman_out.as_deref()
+    {
+        run_postman_export(&api, postman_dir, opts.dry_run, opts.verbose)?;
+    }
+
+    Ok(())
+}
+
+/// Exports an API definition to Postman collection format.
+fn run_postman_export(
+    api: &schematic_define::RestApi,
+    postman_dir: &str,
+    dry_run: bool,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    if verbose > 0 {
+        println!("{}", "Exporting Postman collection...".dimmed());
+    }
+
+    let postman_path = Path::new(postman_dir);
+
+    // Create the directory if it doesn't exist
+    if !dry_run && !postman_path.exists() {
+        std::fs::create_dir_all(postman_path).map_err(|e| GeneratorError::WriteError {
+            path: postman_dir.to_string(),
+            source: e,
+        })?;
+    }
+
+    if dry_run {
+        let module_name = schematic_gen::export::resolve_module_name(api);
+        println!(
+            "{} Would export Postman collection to {}/{}.postman_collection.json",
+            "[OK]".green().bold(),
+            postman_dir,
+            module_name,
+        );
+    } else {
+        let path = write_postman(api, postman_path, false)?;
+        println!(
+            "{} Exported Postman collection to {}",
+            "[OK]".green().bold(),
+            path.display()
+        );
     }
 
     Ok(())
@@ -409,25 +544,21 @@ fn run_openapi_export(
     api: &schematic_define::RestApi,
     openapi_dir: &str,
     format: OpenApiFormat,
+    version_override: Option<&str>,
     dry_run: bool,
     verbose: u8,
 ) -> Result<(), GeneratorError> {
-    // Get the schema registry for this API
-    let registry = match get_registry(api_name) {
-        Some(r) => r,
-        None => {
-            println!(
-                "{} Skipping OpenAPI export for '{}' - schema registry not available",
-                "[WARN]".yellow().bold(),
-                api_name
-            );
-            println!(
-                "         {} Currently only 'openai' and 'samsung-smart-tv' have complete schema registries.",
-                "Hint:".cyan()
-            );
-            return Ok(());
-        }
-    };
+    // Get the schema registry for this API (strict mode: fail if missing)
+    let registry = get_registry(api_name).ok_or_else(|| {
+        GeneratorError::ConfigError(format!(
+            "Missing schema registry for API \"{}\" (module: {})\n  \
+             → Add `openapi_registry()` to schematic-definitions/src/{}/mod.rs\n  \
+             → Or skip with --no-openapi",
+            api.name,
+            api_name,
+            api_name.replace('-', "_")
+        ))
+    })?;
 
     if verbose > 0 {
         println!("{}", "Exporting OpenAPI specification...".dimmed());
@@ -443,8 +574,13 @@ fn run_openapi_export(
         })?;
     }
 
+    // Version resolution: CLI override > RestApi.version > fallback "0.1.0"
+    let version = version_override
+        .or(api.version.as_deref())
+        .unwrap_or("0.1.0");
+
     let options = ExportOptions::new()
-        .with_version("1.0.0")
+        .with_version(version)
         .with_format(format.into());
 
     if dry_run {
@@ -471,19 +607,26 @@ fn run_openapi_export(
 }
 
 /// Runs the generate command for all APIs at once.
-fn run_generate_all(
-    output: &str,
-    dry_run: bool,
-    verbose: u8,
-    openapi_out: Option<&str>,
-    openapi_format: OpenApiFormat,
-) -> Result<(), GeneratorError> {
+fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
+    // Resolve export defaults before processing
+    let (openapi_out, postman_out) = resolve_export_defaults(
+        opts.output,
+        opts.openapi_out,
+        opts.postman_out,
+    );
+
     let apis = resolve_all_apis();
 
-    if verbose > 0 {
+    if opts.verbose > 0 {
         eprintln!("Generating code for all {} APIs", apis.len());
-        eprintln!("Output directory: {}", output);
-        if dry_run {
+        eprintln!("Output directory: {}", opts.output);
+        if let Some(ref dir) = openapi_out {
+            eprintln!("OpenAPI output: {}", dir);
+        }
+        if let Some(ref dir) = postman_out {
+            eprintln!("Postman output: {}", dir);
+        }
+        if opts.dry_run {
             eprintln!("Dry run mode - no files will be written");
         }
     }
@@ -492,7 +635,7 @@ fn run_generate_all(
     println!("{}", "Validating all API definitions...".dimmed());
     let mut all_valid = true;
     for api in &apis {
-        if !run_validation(api, verbose) {
+        if !run_validation(api, opts.verbose) {
             all_valid = false;
         }
         println!();
@@ -504,7 +647,7 @@ fn run_generate_all(
         ));
     }
 
-    if verbose > 1 {
+    if opts.verbose > 1 {
         for api in &apis {
             eprintln!("API: {} ({} endpoints)", api.name, api.endpoints.len());
             for endpoint in &api.endpoints {
@@ -514,20 +657,20 @@ fn run_generate_all(
     }
 
     println!("{}", "Generating code for all APIs...".dimmed());
-    let output_dir = Path::new(output);
+    let output_dir = Path::new(opts.output);
     let api_refs: Vec<&schematic_define::RestApi> = apis.iter().collect();
-    generate_and_write_all(&api_refs, output_dir, dry_run)?;
+    generate_and_write_all(&api_refs, output_dir, opts.dry_run)?;
 
     // Generate Cargo.toml in the parent directory of src/
     let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, dry_run, None)?;
+    write_cargo_toml(schema_dir, opts.dry_run, None)?;
 
-    if !dry_run {
+    if !opts.dry_run {
         println!(
             "{} Generated code for {} APIs to {}",
             "[OK]".green().bold(),
             apis.len(),
-            output
+            opts.output
         );
         println!(
             "{} Generated {}/Cargo.toml",
@@ -541,8 +684,11 @@ fn run_generate_all(
         );
     }
 
-    // Export OpenAPI specs if requested
-    if let Some(openapi_dir) = openapi_out {
+    // Export OpenAPI specs if requested (use resolved default if available)
+    let mut openapi_files = HashSet::new();
+    if !opts.no_openapi
+        && let Some(openapi_dir) = openapi_out.as_deref()
+    {
         // Map API structs to names for registry lookup
         let api_names = [
             ("Anthropic", "anthropic"),
@@ -570,7 +716,94 @@ fn run_generate_all(
                 .map(|(_, key)| *key)
                 .unwrap_or(&api_name_lower);
 
-            run_openapi_export(api_name, api, openapi_dir, openapi_format, dry_run, verbose)?;
+            // Track expected filename
+            let extension = match opts.openapi_format {
+                OpenApiFormat::Json => "json",
+                OpenApiFormat::Yaml => "yaml",
+            };
+            openapi_files.insert(format!("{}.{}", api.name.to_lowercase(), extension));
+
+            run_openapi_export(
+                api_name,
+                api,
+                openapi_dir,
+                opts.openapi_format,
+                opts.openapi_version,
+                opts.dry_run,
+                opts.verbose,
+            )?;
+        }
+
+        // Clean up stale artifacts
+        if !opts.dry_run {
+            cleanup_stale_artifacts(Path::new(openapi_dir), &openapi_files, opts.verbose)?;
+        }
+    }
+
+    // Export Postman collections if requested (use resolved default if available)
+    let mut postman_files = HashSet::new();
+    if !opts.no_postman
+        && let Some(postman_dir) = postman_out.as_deref()
+    {
+        let grouped = apis_by_module();
+
+        for (module_name, module_apis) in grouped.iter() {
+            if module_apis.len() == 1 {
+                // Single API in module: use regular export
+                // Track expected filename
+                let module_name_resolved = schematic_gen::export::resolve_module_name(&module_apis[0]);
+                postman_files.insert(format!("{}.postman_collection.json", module_name_resolved));
+
+                run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;
+            } else {
+                // Multiple APIs in module: use grouped export
+                // Track expected filename
+                postman_files.insert(format!("{}.postman_collection.json", module_name));
+
+                if opts.verbose > 0 {
+                    println!(
+                        "{} Exporting grouped Postman collection for module '{}' ({} APIs)...",
+                        "...".dimmed(),
+                        module_name,
+                        module_apis.len()
+                    );
+                }
+
+                let api_refs: Vec<&schematic_define::RestApi> = module_apis.iter().collect();
+                let postman_path = Path::new(postman_dir);
+
+                // Create the directory if it doesn't exist
+                if !opts.dry_run && !postman_path.exists() {
+                    std::fs::create_dir_all(postman_path).map_err(|e| {
+                        GeneratorError::WriteError {
+                            path: postman_dir.to_string(),
+                            source: e,
+                        }
+                    })?;
+                }
+
+                if opts.dry_run {
+                    println!(
+                        "{} Would export grouped Postman collection to {}/{}.postman_collection.json",
+                        "[OK]".green().bold(),
+                        postman_dir,
+                        module_name,
+                    );
+                } else {
+                    let path =
+                        write_postman_grouped(&api_refs, module_name, postman_path, false)?;
+                    println!(
+                        "{} Exported grouped Postman collection to {}",
+                        "[OK]".green().bold(),
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        // Clean up stale artifacts
+        if !opts.dry_run {
+            cleanup_stale_artifacts(Path::new(postman_dir), &postman_files, opts.verbose)?;
         }
     }
 
@@ -732,6 +965,57 @@ fn run_import_command(
     Ok(())
 }
 
+/// Cleans up stale artifacts from an output directory.
+///
+/// Removes any files in the directory that are not in the expected files set.
+///
+/// ## Parameters
+///
+/// - `dir` - The directory to clean
+/// - `expected_files` - Set of filenames that should be kept
+/// - `verbose` - Verbosity level for logging
+///
+/// ## Errors
+///
+/// Returns `GeneratorError::WriteError` if directory reading or file removal fails.
+fn cleanup_stale_artifacts(
+    dir: &Path,
+    expected_files: &HashSet<String>,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir).map_err(|e| GeneratorError::WriteError {
+        path: dir.display().to_string(),
+        source: e,
+    })? {
+        let entry = entry.map_err(|e| GeneratorError::WriteError {
+            path: dir.display().to_string(),
+            source: e,
+        })?;
+
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        if !expected_files.contains(&file_name) {
+            if verbose > 0 {
+                println!(
+                    "{} Removing stale artifact: {}",
+                    "[CLEAN]".yellow().bold(),
+                    entry.path().display()
+                );
+            }
+            fs::remove_file(entry.path()).map_err(|e| GeneratorError::WriteError {
+                path: entry.path().display().to_string(),
+                source: e,
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Runs the validate command.
 fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
     let api = resolve_api(api_name)?;
@@ -754,13 +1038,23 @@ fn main() -> ExitCode {
             dry_run,
             openapi_out,
             openapi_format,
+            openapi_version,
+            postman_out,
+            no_openapi,
+            no_postman,
         }) => run_generate(
             &api,
-            &output,
-            dry_run,
-            cli.verbose,
-            openapi_out.as_deref(),
-            openapi_format,
+            &GenerateOpts {
+                output: &output,
+                dry_run,
+                verbose: cli.verbose,
+                openapi_out: openapi_out.as_deref(),
+                openapi_format,
+                openapi_version: openapi_version.as_deref(),
+                postman_out: postman_out.as_deref(),
+                no_openapi,
+                no_postman,
+            },
         ),
         // Explicit subcommand: validate
         Some(Commands::Validate { api }) => run_validate(&api, cli.verbose),
@@ -807,11 +1101,17 @@ fn main() -> ExitCode {
             if let Some(api_name) = cli.api {
                 run_generate(
                     &api_name,
-                    &cli.output,
-                    cli.dry_run,
-                    cli.verbose,
-                    None, // Legacy mode doesn't support OpenAPI export
-                    OpenApiFormat::default(),
+                    &GenerateOpts {
+                        output: &cli.output,
+                        dry_run: cli.dry_run,
+                        verbose: cli.verbose,
+                        openapi_out: None,
+                        openapi_format: OpenApiFormat::default(),
+                        openapi_version: None,
+                        postman_out: None,
+                        no_openapi: false,
+                        no_postman: false,
+                    },
                 )
             } else {
                 eprintln!(
