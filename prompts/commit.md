@@ -27,7 +27,7 @@ This monorepo has the following packages:
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
-::shell sniff repo staged-packages
+::shell sniff repo staged-packages --when-error "No repo packages have files staged for commit! Any staged files must be in the repo's root, or possibly in a 'package area' but not inside an actual package. This almost always means that no source code files have been staged for commit."
 
 ## Orchestration
 
@@ -50,7 +50,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v
+::shell sniff repo staged-files -v --plain
 
 ## Task
 
