@@ -66,6 +66,10 @@ pub struct TransformOptions {
     /// Controls how blank lines between list items are handled during cleanup.
     pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
 
+    /// Indentation width (spaces per nesting level) for list cleanup.
+    /// Defaults to `DEFAULT_INDENT` (4 spaces).
+    pub indent_size: usize,
+
     /// If true, the pipeline returns an error on first failure.
     /// If false, failures are recorded as warnings and the pipeline continues.
     pub fail_fast: bool,
@@ -92,6 +96,7 @@ impl std::fmt::Debug for TransformOptions {
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
             .field("list_spacing", &self.list_spacing)
+            .field("indent_size", &self.indent_size)
             .field("fail_fast", &self.fail_fast)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
@@ -115,6 +120,7 @@ impl TransformOptions {
             external_state: None,
             set_overrides: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
+            indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
             fail_fast: false,
             replace_parent_wins: false,
             one_off_replace: None,
@@ -187,6 +193,13 @@ impl TransformOptions {
     #[must_use]
     pub fn with_list_spacing(mut self, mode: crate::markdown::cleanup::ListSpacingMode) -> Self {
         self.list_spacing = mode;
+        self
+    }
+
+    /// Sets the indentation width for nested list cleanup.
+    #[must_use]
+    pub fn with_indent_size(mut self, size: usize) -> Self {
+        self.indent_size = size.max(1);
         self
     }
 

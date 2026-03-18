@@ -250,13 +250,19 @@ impl Markdown {
                 let original_content = self.content.clone();
                 self.content = match options.list_spacing {
                     cleanup::ListSpacingMode::Normal => {
-                        cleanup::cleanup_content(&self.content)
+                        cleanup::cleanup_content_with_indent(&self.content, options.indent_size)
                     }
                     cleanup::ListSpacingMode::Compact => {
-                        cleanup::cleanup_content_compact(&self.content)
+                        cleanup::cleanup_content_with_indent_compact(
+                            &self.content,
+                            options.indent_size,
+                        )
                     }
                     cleanup::ListSpacingMode::Loose => {
-                        cleanup::cleanup_content_loose(&self.content)
+                        cleanup::cleanup_content_with_indent_loose(
+                            &self.content,
+                            options.indent_size,
+                        )
                     }
                 };
                 report.cleanup_changed = self.content != original_content;

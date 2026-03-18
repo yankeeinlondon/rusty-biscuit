@@ -256,8 +256,11 @@ fn unescape_emphasis_chars(output: &mut String) {
 /// let cleaned = cleanup_content(content);
 /// assert!(cleaned.contains("\n\n"));
 /// ```
+/// Default indentation width (spaces per nesting level) for list cleanup.
+pub const DEFAULT_INDENT: usize = 4;
+
 pub fn cleanup_content(content: &str) -> String {
-    cleanup_content_internal(content, None, ListSpacingMode::Normal)
+    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Normal)
 }
 
 /// Cleans up markdown content in compact mode.
@@ -275,7 +278,7 @@ pub fn cleanup_content(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n2. Second"));
 /// ```
 pub fn cleanup_content_compact(content: &str) -> String {
-    cleanup_content_internal(content, None, ListSpacingMode::Compact)
+    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Compact)
 }
 
 /// Cleans up markdown content in loose mode.
@@ -293,7 +296,7 @@ pub fn cleanup_content_compact(content: &str) -> String {
 /// assert!(cleaned.contains("1. First\n\n2. Second"));
 /// ```
 pub fn cleanup_content_loose(content: &str) -> String {
-    cleanup_content_internal(content, None, ListSpacingMode::Loose)
+    cleanup_content_internal(content, Some(DEFAULT_INDENT), ListSpacingMode::Loose)
 }
 
 /// Cleans up markdown content and enforces a consistent list indentation width.
@@ -2256,15 +2259,27 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_list_preserves_2_space_indentation() {
-        // 2-space indentation should remain as-is
+    fn test_nested_list_normalizes_to_4_space_indentation() {
+        // Default cleanup normalizes to 4-space indentation
         let content = "- Level 1\n  - Level 2\n    - Level 3";
         let cleaned = cleanup_content(content);
 
-        // Should have 2-space indentation
+        assert!(
+            cleaned.contains("\n    - Level 2"),
+            "Default indentation should be 4 spaces, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_nested_list_preserves_2_space_with_explicit_indent() {
+        // Explicit 2-space indent via cleanup_content_with_indent
+        let content = "- Level 1\n  - Level 2\n    - Level 3";
+        let cleaned = cleanup_content_with_indent(content, 2);
+
         assert!(
             cleaned.contains("\n  - Level 2"),
-            "2-space indentation should be preserved, got:\n{}",
+            "2-space indentation should be preserved when explicitly requested, got:\n{}",
             cleaned
         );
     }
@@ -2798,8 +2813,9 @@ mod tests {
         let cleaned = cleanup_content(input);
         // Blank line before the sub-list (level change 0→indented)
         // Blank line after the sub-list (level change indented→0)
+        // Note: default indent is 4 spaces
         assert!(
-            cleaned.contains("lessons:\n\n   - @docs"),
+            cleaned.contains("lessons:\n\n    - @docs"),
             "Normal: blank line before entering sub-list, got:\n{}",
             cleaned
         );
