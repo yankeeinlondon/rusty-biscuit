@@ -8,6 +8,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme,
 };
+use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::transform::TransformOptions;
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
@@ -54,7 +55,12 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             input,
             save,
             indent,
-        } => run_clean(input.as_ref(), save, indent, cli.verbose > 0)?,
+            compact,
+            loose,
+        } => {
+            let mode = resolve_list_spacing(compact, loose);
+            run_clean(input.as_ref(), save, indent, mode, cli.verbose > 0)?;
+        }
         CliCommand::Compose {
             input,
             state,
@@ -62,7 +68,10 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             output,
             show,
             frontmatter,
+            compact,
+            loose,
         } => {
+            let mode = resolve_list_spacing(compact, loose);
             run_compose(
                 input.as_ref(),
                 state.as_deref(),
@@ -70,6 +79,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 output,
                 show,
                 frontmatter,
+                mode,
                 cli,
             )?;
         }
@@ -139,15 +149,25 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
 }
 
 /// Clean markdown formatting, optionally saving in place and printing a delta report.
+/// Converts CLI flags to a `ListSpacingMode`.
+fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
+    match (compact, loose) {
+        (true, _) => ListSpacingMode::Compact,
+        (_, true) => ListSpacingMode::Loose,
+        _ => ListSpacingMode::Normal,
+    }
+}
+
 pub fn run_clean(
     input: Option<&PathBuf>,
     save: bool,
     indent: Option<usize>,
+    list_spacing: ListSpacingMode,
     verbose: bool,
 ) -> Result<()> {
     if !save {
         let mut md = load_markdown(input)?;
-        apply_cleanup(&mut md, indent);
+        apply_cleanup(&mut md, indent, list_spacing);
         println!("{}", md.as_string());
         return Ok(());
     }
@@ -163,7 +183,7 @@ pub fn run_clean(
     let resolved = resolve_file_path(input_path)?;
     let original = load_markdown(Some(input_path))?;
     let mut cleaned = original.clone();
-    apply_cleanup(&mut cleaned, indent);
+    apply_cleanup(&mut cleaned, indent, list_spacing);
 
     let delta = original.delta(&cleaned);
     if !delta.is_unchanged() {
@@ -175,12 +195,15 @@ pub fn run_clean(
     Ok(())
 }
 
-fn apply_cleanup(md: &mut Markdown, indent: Option<usize>) {
-    if let Some(indent_size) = indent {
-        md.cleanup_with_indent(indent_size);
-    } else {
-        md.cleanup();
-    }
+fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode) {
+    match (indent, mode) {
+        (Some(size), ListSpacingMode::Compact) => md.cleanup_with_indent_compact(size),
+        (Some(size), ListSpacingMode::Loose) => md.cleanup_with_indent_loose(size),
+        (Some(size), ListSpacingMode::Normal) => md.cleanup_with_indent(size),
+        (None, ListSpacingMode::Compact) => md.cleanup_compact(),
+        (None, ListSpacingMode::Loose) => md.cleanup_loose(),
+        (None, ListSpacingMode::Normal) => md.cleanup(),
+    };
 }
 
 /// Shared read/render logic for both implicit (no subcommand) and explicit `read` subcommand.
@@ -234,6 +257,7 @@ pub fn run_compose(
     output: OutputFormat,
     show: bool,
     include_frontmatter: bool,
+    list_spacing: ListSpacingMode,
     cli: &Cli,
 ) -> Result<()> {
     let md = load_markdown(input)?;
@@ -302,6 +326,7 @@ pub fn run_compose(
     };
 
     options = options.with_shell(shell_opts);
+    options = options.with_list_spacing(list_spacing);
 
     let (transformed, _report) = md.transform_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;

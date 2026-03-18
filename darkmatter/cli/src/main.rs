@@ -116,7 +116,13 @@ fn run() -> Result<()> {
     }
 
     if cli.save {
-        run_clean(cli.input.as_ref(), true, None, cli.verbose > 0)?;
+        run_clean(
+            cli.input.as_ref(),
+            true,
+            None,
+            darkmatter::markdown::cleanup::ListSpacingMode::Normal,
+            cli.verbose > 0,
+        )?;
         return Ok(());
     }
 

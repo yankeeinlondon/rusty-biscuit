@@ -57,6 +57,14 @@ pub enum Command {
             add = ArgValueCompleter::new(complete_indent_values)
         )]
         indent: Option<usize>,
+
+        /// Remove all blank lines between list items
+        #[arg(long, conflicts_with = "loose")]
+        compact: bool,
+
+        /// Add blank lines between all list items
+        #[arg(long, conflicts_with = "compact")]
+        loose: bool,
     },
 
     /// Compose a document through the transform pipeline.
@@ -84,6 +92,14 @@ pub enum Command {
         /// Include frontmatter in the output (default: body only)
         #[arg(long, visible_alias = "fm")]
         frontmatter: bool,
+
+        /// Remove all blank lines between list items
+        #[arg(long, conflicts_with = "loose")]
+        compact: bool,
+
+        /// Add blank lines between all list items
+        #[arg(long, conflicts_with = "compact")]
+        loose: bool,
     },
 
     /// Show markdown table of contents.
