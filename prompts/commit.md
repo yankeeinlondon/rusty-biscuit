@@ -50,7 +50,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff git staged -v
+::shell sniff repo staged-files -v
 
 ## Task
 
