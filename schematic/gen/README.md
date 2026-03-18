@@ -73,9 +73,15 @@ schematic-gen --api openai --output schematic/schema/src
 | `-a, --api <NAME>` | API definition to generate (e.g., `openai`) |
 | `-o, --output <DIR>` | Output directory for generated code (default: `schematic/schema/src`) |
 | `--dry-run` | Print generated code without writing files |
-| `--openapi-out <DIR>` | Output directory for OpenAPI spec export |
+| `--openapi-out <DIR>` | Output directory for OpenAPI spec export (auto: `openapi/`) |
 | `--openapi-format <FORMAT>` | OpenAPI output format: `json` (default) or `yaml` |
+| `--openapi-version <VER>` | Override version in OpenAPI spec |
+| `--postman-out <DIR>` | Output directory for Postman collections (auto: `postman/`) |
+| `--no-openapi` | Skip OpenAPI specification generation |
+| `--no-postman` | Skip Postman collection generation |
 | `-v, --verbose` | Increase verbosity level |
+
+When the output path ends with `schema/src`, OpenAPI and Postman output directories default to `openapi/` and `postman/` (sibling to `schema/`). Use `--no-openapi` or `--no-postman` to suppress.
 
 ### Import Options
 
@@ -1048,7 +1054,7 @@ schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
 Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint type names) for round-trip fidelity.
 
-> **Note**: OpenAPI export requires a schema registry for the API. Currently only APIs with complete registries (for example, `openai` and `samsung-smart-tv`) produce exports; others print a warning and skip.
+> **Note**: All 16 APIs now have complete schema registries for OpenAPI export. Missing a registry for a new API will produce an error (use `--no-openapi` to skip).
 
 ### Module Reference: `import_pipeline`
 
@@ -1061,6 +1067,26 @@ Exported specs include `x-schematic` extensions preserving Schematic-specific me
 | Function | Description |
 |----------|-------------|
 | `write_openapi(&api, &registry, &options, &dir)` | Export API definition to OpenAPI spec file |
+
+### Module Reference: `postman_output`
+
+| Function | Description |
+|----------|-------------|
+| `build_postman_collection(&api)` | Build Postman collection from a single API |
+| `build_postman_collection_grouped(&apis, &module_name)` | Build grouped collection from multiple APIs |
+| `write_postman(&api, &dir, dry_run)` | Write single-API Postman collection to disk |
+| `write_postman_grouped(&apis, &module_name, &dir, dry_run)` | Write grouped Postman collection to disk |
+
+### Module Reference: `export`
+
+Shared normalized types consumed by both OpenAPI and Postman writers:
+
+| Function | Description |
+|----------|-------------|
+| `export::resolve_module_name(&api)` | Canonical module name from API definition |
+| `export::extract_folder_key(&path)` | Folder key from URL path for Postman grouping |
+| `export::auth::map_auth(&strategy)` | Map `AuthStrategy` to `ExportAuth` |
+| `export::body::map_body(&request)` | Map `ApiRequest` to `ExportBody` |
 
 ## Critical Testing Requirements
 

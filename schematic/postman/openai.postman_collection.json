@@ -1,0 +1,92 @@
+{
+  "info": {
+    "name": "OpenAI",
+    "description": "OpenAI REST API for model management",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.openai.com/v1",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Models",
+      "item": [
+        {
+          "name": "ListModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/models",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models"
+              ]
+            },
+            "description": "Lists the currently available models"
+          }
+        },
+        {
+          "name": "RetrieveModel",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/models/:model",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models",
+                ":model"
+              ],
+              "variable": [
+                {
+                  "key": "model",
+                  "value": "<model>"
+                }
+              ]
+            },
+            "description": "Retrieves a model instance"
+          }
+        },
+        {
+          "name": "DeleteModel",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/models/:model",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models",
+                ":model"
+              ],
+              "variable": [
+                {
+                  "key": "model",
+                  "value": "<model>"
+                }
+              ]
+            },
+            "description": "Delete a fine-tuned model"
+          }
+        }
+      ]
+    }
+  ]
+}

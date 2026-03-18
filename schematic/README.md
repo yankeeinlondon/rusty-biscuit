@@ -274,6 +274,54 @@ let staging = client.variant()
 - **`EndpointSpec`** trait on request structs enables type-safe `mutate_response` registration
 - Hooks are stored in `Arc` and the variant is `Clone`-able
 
+## Artifact Generation
+
+Schematic generates three artifact types from API definitions:
+
+1. **Rust clients** — Strongly-typed API clients in `schema/src/`
+2. **OpenAPI specs** — OpenAPI 3.0.3 documents in `openapi/`
+3. **Postman collections** — Postman v2.1.0 collections in `postman/`
+
+When the output path is `schema/src`, OpenAPI and Postman artifacts are generated automatically to sibling directories. Use `--no-openapi` or `--no-postman` to suppress.
+
+```bash
+# Generate all three artifact types (default behavior)
+just -f schematic/justfile generate
+
+# Generate a single API with all artifacts
+just -f schematic/justfile generate-one openai
+
+# Only OpenAPI specs
+just -f schematic/justfile generate-openapi
+
+# Only Postman collections
+just -f schematic/justfile generate-postman
+
+# Check for artifact drift
+just -f schematic/justfile check-drift
+```
+
+### Output Layout
+
+```
+schematic/
+├── schema/src/       # Generated Rust API clients
+│   ├── lib.rs
+│   ├── openai.rs
+│   ├── ollama.rs     # Grouped: OllamaNative + OllamaOpenAI
+│   └── ...
+├── openapi/          # OpenAPI 3.0.3 specs (JSON)
+│   ├── openai.json
+│   ├── ollama.json   # Grouped
+│   └── ...
+└── postman/          # Postman v2.1.0 collections
+    ├── openai.postman_collection.json
+    ├── ollama.postman_collection.json  # Grouped
+    └── ...
+```
+
+APIs sharing a module (`ollama`, `emqx`) produce grouped artifacts that merge all endpoints.
+
 ## OpenAPI Support
 
 Schematic supports bidirectional OpenAPI 3.x integration: import external specs to generate clients, or export existing definitions to OpenAPI format.
@@ -313,9 +361,14 @@ schematic-gen generate --api openai --openapi-out specs/
 # Export as YAML
 schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
+# Override version
+schematic-gen generate --api openai --openapi-version 2.0.0
+
 # Generate all with OpenAPI export
 schematic-gen generate --api all --openapi-out specs/
 ```
+
+Version resolution: `--openapi-version` > `RestApi.version` > `"0.1.0"` fallback.
 
 Exported specs include `x-schematic` extensions for round-trip fidelity (module path, request suffix, env mapping, per-endpoint type names).
 

@@ -315,8 +315,33 @@ components:
         rust_type: "crate::openai::types::ListModelsResponse"
 ```
 
+## Version Resolution
+
+OpenAPI spec version is resolved with this priority chain:
+
+1. `--openapi-version <VERSION>` CLI flag (highest priority)
+2. `RestApi.version` field on the API definition
+3. Fallback: `"0.1.0"`
+
+## Grouped Export
+
+APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that merge:
+
+- **Paths** — Union of all endpoints from all APIs
+- **Security schemes** — Union keyed by scheme name
+- **Per-operation security** — From the originating API's auth strategy
+- **Servers** — Deduplicated union of base URLs
+- **Info** — Module name as title, concatenated descriptions
+
+## Schema Registries
+
+All 16 REST APIs now have complete schema registries with `#[derive(JsonSchema)]` on response types. Missing a registry for a new API produces an error (use `--no-openapi` to skip).
+
+## Default Artifact Generation
+
+When the output path ends with `schema/src`, OpenAPI specs are generated automatically to `openapi/` without requiring explicit `--openapi-out`. Use `--no-openapi` to suppress.
+
 ## Open Questions / Future Enhancements
 
-- Add an optional `RestApi.version` or CLI override to avoid a default version.
 - Consider an AsyncAPI export path for WebSocket definitions.
 - Provide a `--bundle` flag to emit a single combined spec for `--api all`.
