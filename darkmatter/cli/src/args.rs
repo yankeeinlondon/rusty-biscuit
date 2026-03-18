@@ -248,7 +248,7 @@ pub enum Command {
 ///
 /// Use `md --help` to see all available options.
 #[derive(Parser)]
-#[command(name = "md", about = "Markdown Awesome Tool", version)]
+#[command(name = "md", about = "Darkmatter CLI", version)]
 #[command(subcommand_precedence_over_arg = true, disable_help_subcommand = true)]
 pub struct Cli {
     /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
