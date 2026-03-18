@@ -102,6 +102,28 @@ When a command that does NOT match the Blacklist and is not registered in the Wh
 - blacklist (exits the pipeline with an error and adds this command to `.darkmatter-shell-blacklist`)
 
 
+## Handling Error Exit Codes
+
+Sometimes we'll want to run a shell expansion command that _can_ return an error code. We do that in several distinct ways:
+
+1. Default Error handler(`--when-error <string>`)
+
+    - this manner of handling will ensure all error exit codes will not result in an error but instead with the text in the parameter provided by this switch
+
+2. Handle Specific Error Codes(`--when-exit-code <#> <string>`, `--except-exit-code <#> <string>`)
+
+    - Allows you to respond to only a specific error code `--when-exit-code`, or
+    - Respond to all exit code except one `--except-exit-code`
+
+3. Handle Based on STDERR(`--stderr-contains <string:find> <string:replace>`, `--stderr-lacks <string:find> <string:replace>`)
+
+    - Allows you to to handle errors based on the content found in STDERR
+
+4. Enrich Error Message (`--enrich-error <string>`, `--enrich-error-on <#> <string>`)
+
+    - Allows you to enrich the error message which will be presented to the user if this command fails
+    - The string provided will be passed through the `Prose` struct to allow users to use terminal escape code easily
+
 --- 
 
 > Return to [Darkmatter Pipeline](../darkmatter-pipeline.md)

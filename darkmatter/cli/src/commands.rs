@@ -238,6 +238,16 @@ pub fn run_compose(
 ) -> Result<()> {
     let md = load_markdown(input)?;
 
+    // Resolve the input path through FileReference (handles @-prefixed paths)
+    // so that source_file and policy_root use the real filesystem path.
+    let resolved_input = if let Some(path) = input
+        && path.to_str() != Some("-")
+    {
+        Some(resolve_file_path(path)?)
+    } else {
+        None
+    };
+
     let mut options = TransformOptions::new();
 
     // Parse --state as JSON or JSON5
@@ -267,28 +277,22 @@ pub fn run_compose(
     }
 
     // Set source file for relative transclusion resolution
-    if let Some(path) = input
-        && path.to_str() != Some("-")
-    {
-        options = options.with_source_file(path);
+    if let Some(ref resolved) = resolved_input {
+        options = options.with_source_file(resolved);
     }
 
     // Build shell expansion options
     use darkmatter::markdown::transform::shell_expansion::ShellExpansionOptions;
     use std::sync::Arc;
 
-    let is_file_input = input.is_some() && input.as_ref().unwrap().to_str() != Some("-");
+    let is_file_input = resolved_input.is_some();
 
     let shell_opts = ShellExpansionOptions {
-        policy_root: if is_file_input {
-            input.and_then(|p| {
-                p.parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                    .map(|parent| parent.to_path_buf())
-            })
-        } else {
-            None
-        },
+        policy_root: resolved_input.as_ref().and_then(|p| {
+            p.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .map(|parent| parent.to_path_buf())
+        }),
         approval_handler: if is_file_input && crate::approval::can_prompt_interactively() {
             Some(Arc::new(crate::approval::CliShellApprovalHandler))
         } else {

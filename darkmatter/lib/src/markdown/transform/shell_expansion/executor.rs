@@ -68,7 +68,7 @@ pub fn resolve_working_directory(
 ///
 /// ```no_run
 /// use darkmatter::markdown::transform::shell_expansion::executor::execute_command;
-/// use darkmatter::markdown::transform::shell_expansion::types::{ShellDirective, ShellExpansionOptions};
+/// use darkmatter::markdown::transform::shell_expansion::types::{ErrorHandling, ShellDirective, ShellExpansionOptions};
 /// use darkmatter::markdown::transform::TransformSource;
 ///
 /// let directive = ShellDirective {
@@ -77,6 +77,7 @@ pub fn resolve_working_directory(
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
 ///     line: 1,
+///     error_handling: ErrorHandling::default(),
 /// };
 /// let options = ShellExpansionOptions::default();
 /// let source = TransformSource::Unknown;
@@ -225,19 +226,26 @@ fn join_output_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::transform::shell_expansion::types::ErrorHandling;
     use std::ffi::OsStr;
     use std::time::Duration;
     use tempfile::TempDir;
 
+    /// Helper to build a ShellDirective with default error handling.
+    fn directive(raw: &str, exe: &str, args: &[&str], line: usize) -> ShellDirective {
+        ShellDirective {
+            raw_command: raw.to_string(),
+            executable: exe.to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            span: 0..raw.len(),
+            line,
+            error_handling: ErrorHandling::default(),
+        }
+    }
+
     #[test]
     fn echo_hello_returns_output() {
-        let directive = ShellDirective {
-            raw_command: "echo hello".to_string(),
-            executable: "echo".to_string(),
-            args: vec!["hello".to_string()],
-            span: 0..10,
-            line: 1,
-        };
+        let directive = directive("echo hello", "echo", &["hello"], 1);
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
@@ -247,33 +255,21 @@ mod tests {
 
     #[test]
     fn empty_output_returns_empty_string() {
-        let directive = ShellDirective {
-            raw_command: "true".to_string(),
-            executable: "true".to_string(),
-            args: vec![],
-            span: 0..4,
-            line: 1,
-        };
+        let d = directive("true", "true", &[], 1);
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        let output = execute_command(&directive, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source).unwrap();
         assert_eq!(output, "");
     }
 
     #[test]
     fn non_zero_exit_produces_execution_failed() {
-        let directive = ShellDirective {
-            raw_command: "false".to_string(),
-            executable: "false".to_string(),
-            args: vec![],
-            span: 0..5,
-            line: 1,
-        };
+        let d = directive("false", "false", &[], 1);
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        let result = execute_command(&directive, &options, &source);
+        let result = execute_command(&d, &options, &source);
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::ExecutionFailed { code, .. } => {
@@ -285,17 +281,16 @@ mod tests {
 
     #[test]
     fn command_not_found_for_nonexistent_executable() {
-        let directive = ShellDirective {
-            raw_command: "nonexistent_command_xyz".to_string(),
-            executable: "nonexistent_command_xyz".to_string(),
-            args: vec![],
-            span: 0..23,
-            line: 1,
-        };
+        let d = directive(
+            "nonexistent_command_xyz",
+            "nonexistent_command_xyz",
+            &[],
+            1,
+        );
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        let result = execute_command(&directive, &options, &source);
+        let result = execute_command(&d, &options, &source);
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::CommandNotFound { command, line } => {
@@ -308,20 +303,14 @@ mod tests {
 
     #[test]
     fn timeout_kills_long_running_command() {
-        let directive = ShellDirective {
-            raw_command: "sleep 10".to_string(),
-            executable: "sleep".to_string(),
-            args: vec!["10".to_string()],
-            span: 0..8,
-            line: 1,
-        };
+        let d = directive("sleep 10", "sleep", &["10"], 1);
         let options = ShellExpansionOptions {
             timeout: Duration::from_millis(100),
             ..Default::default()
         };
         let source = TransformSource::Unknown;
 
-        let result = execute_command(&directive, &options, &source);
+        let result = execute_command(&d, &options, &source);
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::Timeout { timeout, .. } => {
@@ -363,37 +352,25 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
         let wd = resolve_working_directory(&options, &source);
-        // Should return current directory (can't test exact value, but should not panic)
         assert!(!wd.as_os_str().is_empty());
     }
 
     #[test]
     fn stdin_is_null_command_does_not_hang() {
-        // Commands that read from stdin should not hang with null stdin
-        let directive = ShellDirective {
-            raw_command: "cat".to_string(),
-            executable: "cat".to_string(),
-            args: vec![],
-            span: 0..3,
-            line: 1,
-        };
+        let d = directive("cat", "cat", &[], 1);
         let options = ShellExpansionOptions {
             timeout: Duration::from_secs(1),
             ..Default::default()
         };
         let source = TransformSource::Unknown;
 
-        // cat with no args and null stdin should exit immediately with empty output
-        let result = execute_command(&directive, &options, &source);
-        // This should either succeed with empty output or fail, but NOT timeout
+        let result = execute_command(&d, &options, &source);
         match result {
             Ok(output) => assert_eq!(output, ""),
             Err(ShellExpansionError::Timeout { .. }) => {
                 panic!("Command should not timeout with null stdin");
             }
-            Err(_) => {
-                // Other errors are acceptable (e.g., platform differences)
-            }
+            Err(_) => {}
         }
     }
 
@@ -403,7 +380,7 @@ mod tests {
             return;
         };
 
-        let directive = ShellDirective {
+        let d = ShellDirective {
             raw_command: format!("{} -c ...", python.display()),
             executable: python.to_string_lossy().to_string(),
             args: vec![
@@ -412,28 +389,23 @@ mod tests {
             ],
             span: 0..10,
             line: 1,
+            error_handling: ErrorHandling::default(),
         };
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        let output = execute_command(&directive, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source).unwrap();
         assert_eq!(output, "ok\noops");
     }
 
     #[test]
     fn join_output_thread_reports_panic() {
-        let directive = ShellDirective {
-            raw_command: "echo hello".to_string(),
-            executable: "echo".to_string(),
-            args: vec!["hello".to_string()],
-            span: 0..10,
-            line: 7,
-        };
+        let d = directive("echo hello", "echo", &["hello"], 7);
         let handle = std::thread::spawn(|| -> Vec<u8> {
             panic!("boom");
         });
 
-        let err = join_output_thread(handle, "stdout", &directive).unwrap_err();
+        let err = join_output_thread(handle, "stdout", &d).unwrap_err();
         match err {
             ShellExpansionError::ExecutionFailed {
                 code, stderr, line, ..
@@ -447,12 +419,9 @@ mod tests {
         }
     }
 
-    /// Regression test: a bare filename like "file.md" has parent "" which
-    /// previously caused Command::current_dir("") to fail with exit -1.
     #[test]
     fn bare_filename_source_falls_through_to_cwd() {
         let options = ShellExpansionOptions::default();
-        // "file.md" has parent "" — must not produce an empty working directory
         let source = TransformSource::File(PathBuf::from("file.md"));
         let wd = resolve_working_directory(&options, &source);
         assert!(
@@ -461,49 +430,40 @@ mod tests {
         );
     }
 
-    /// Regression test: executing a command when the source is a bare filename
-    /// must succeed — the previous bug caused spawn to fail with exit -1.
     #[test]
     fn execute_command_with_bare_filename_source_succeeds() {
-        let directive = ShellDirective {
-            raw_command: "echo works".to_string(),
-            executable: "echo".to_string(),
-            args: vec!["works".to_string()],
-            span: 0..16,
-            line: 5,
-        };
+        let d = directive("echo works", "echo", &["works"], 5);
         let options = ShellExpansionOptions::default();
         let source = TransformSource::File(PathBuf::from("test.md"));
 
-        let output = execute_command(&directive, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source).unwrap();
         assert_eq!(output.trim(), "works");
     }
 
-    /// Execute a command with quoted arguments to verify tokenizer → executor flow.
     #[test]
     fn execute_command_with_quoted_args() {
-        let directive = ShellDirective {
+        let d = ShellDirective {
             raw_command: r#"echo "hello world""#.to_string(),
             executable: "echo".to_string(),
             args: vec!["hello world".to_string()],
             span: 0..18,
             line: 1,
+            error_handling: ErrorHandling::default(),
         };
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        let output = execute_command(&directive, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source).unwrap();
         assert_eq!(output.trim(), "hello world");
     }
 
-    /// Non-zero exit code preserves stdout and stderr in the error.
     #[test]
     fn execution_failed_includes_output_streams() {
         let Some(python) = find_python() else {
             return;
         };
 
-        let directive = ShellDirective {
+        let d = ShellDirective {
             raw_command: format!("{} -c ...", python.display()),
             executable: python.to_string_lossy().to_string(),
             args: vec![
@@ -513,11 +473,12 @@ mod tests {
             ],
             span: 0..10,
             line: 1,
+            error_handling: ErrorHandling::default(),
         };
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 
-        match execute_command(&directive, &options, &source) {
+        match execute_command(&d, &options, &source) {
             Err(ShellExpansionError::ExecutionFailed {
                 code,
                 stdout,

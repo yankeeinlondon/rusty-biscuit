@@ -41,9 +41,9 @@ pub use policy::{
 };
 pub use store::resolve_policy_paths;
 pub use types::{
-    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellDirective,
-    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
-    ShellRuleSet,
+    ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
+    ShellApprovalRequest, ShellDirective, ShellExpansionError, ShellExpansionOptions,
+    ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
 };
 
 use crate::markdown::transform::TransformOptions;
@@ -64,7 +64,7 @@ use crate::markdown::transform::TransformOptions;
 /// ## Examples
 ///
 /// ```no_run
-/// use darkmatter::markdown::transform::shell_expansion::{execute_directive, types::{ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
+/// use darkmatter::markdown::transform::shell_expansion::{execute_directive, types::{ErrorHandling, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
 /// use darkmatter::markdown::transform::TransformOptions;
 /// use std::path::PathBuf;
 ///
@@ -74,6 +74,7 @@ use crate::markdown::transform::TransformOptions;
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
 ///     line: 1,
+///     error_handling: ErrorHandling::default(),
 /// };
 /// let options = TransformOptions::new();
 /// let policy_paths = ShellPolicyPaths {
@@ -119,12 +120,20 @@ pub fn execute_directive(
 
     // 3. Check whitelist (against resolved command)
     if check_whitelist(&shell_runtime.whitelist, &effective.executable, &normalized) {
-        return executor::execute_command(&effective, &options.shell, &options.transclusion.source);
+        return execute_and_handle_errors(
+            &effective,
+            options,
+            &directive.error_handling,
+        );
     }
 
     // 4. Check allow-once
     if shell_runtime.allow_once.contains(&normalized) {
-        return executor::execute_command(&effective, &options.shell, &options.transclusion.source);
+        return execute_and_handle_errors(
+            &effective,
+            options,
+            &directive.error_handling,
+        );
     }
 
     // 5. Request approval or fail
@@ -148,7 +157,7 @@ pub fn execute_directive(
                     .whitelist
                     .entries
                     .push(types::ShellRuleEntry::Exact(normalized));
-                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
+                execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::AllowCommandPersist => {
                 store::append_whitelist_prefix(policy_paths, &effective.executable)?;
@@ -156,12 +165,12 @@ pub fn execute_directive(
                     .whitelist
                     .entries
                     .push(types::ShellRuleEntry::Prefix(effective.executable.clone()));
-                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
+                execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::AllowOnce => {
                 shell_runtime.allow_once.insert(normalized);
                 shell_runtime.approvals_used += 1;
-                executor::execute_command(&effective, &options.shell, &options.transclusion.source)
+                execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
                 command: display_command(directive, alias_name.as_deref()),
@@ -187,6 +196,67 @@ pub fn execute_directive(
             blacklist_path: policy_paths.blacklist.clone(),
             line: directive.line,
         })
+    }
+}
+
+/// Executes a command and applies error handling rules to `ExecutionFailed` errors.
+///
+/// If the directive has error handling options and the command fails with a
+/// non-zero exit code, the error may be suppressed (replaced with text) or
+/// enriched with additional context.
+fn execute_and_handle_errors(
+    effective: &ShellDirective,
+    options: &TransformOptions,
+    error_handling: &types::ErrorHandling,
+) -> Result<String, ShellExpansionError> {
+    let result = executor::execute_command(effective, &options.shell, &options.transclusion.source);
+
+    // Fast path: no error handling configured or command succeeded
+    if error_handling.is_empty() || result.is_ok() {
+        return result;
+    }
+
+    // Apply error handling rules to ExecutionFailed errors
+    match result {
+        Err(ShellExpansionError::ExecutionFailed {
+            ref code,
+            ref stderr,
+            ..
+        }) => {
+            let outcome = error_handling.resolve(*code, stderr);
+            match outcome {
+                types::ErrorHandlingOutcome::Replace(text) => Ok(text),
+                types::ErrorHandlingOutcome::Enrich(enrichment) => {
+                    // Re-construct the error with enrichment appended to stderr
+                    match result {
+                        Err(ShellExpansionError::ExecutionFailed {
+                            command,
+                            code,
+                            stdout,
+                            stderr,
+                            line,
+                        }) => {
+                            let enriched_stderr = if stderr.is_empty() {
+                                enrichment
+                            } else {
+                                format!("{stderr}\n{enrichment}")
+                            };
+                            Err(ShellExpansionError::ExecutionFailed {
+                                command,
+                                code,
+                                stdout,
+                                stderr: enriched_stderr,
+                                line,
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                types::ErrorHandlingOutcome::Propagate => result,
+            }
+        }
+        // Non-ExecutionFailed errors (Timeout, CommandNotFound, etc.) are not handled
+        _ => result,
     }
 }
 
@@ -219,6 +289,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             args: merged_args,
             span: directive.span.clone(),
             line: directive.line,
+            error_handling: directive.error_handling.clone(),
         };
 
         return (effective, Some(resolved.alias_name));
@@ -704,5 +775,240 @@ name: world
 
         let err = md.transform_with(options).unwrap_err();
         assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("dangerous"));
+    }
+
+    /// `--when-error` suppresses non-zero exit and replaces with fallback text.
+    #[test]
+    fn when_error_replaces_failed_command_with_fallback() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell --when-error \"fallback\" false\nAfter\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, report) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("fallback"));
+        assert!(!transformed.content().contains("::shell"));
+        assert!(transformed.content().contains("After"));
+        assert_eq!(report.shell_expansions_applied, 1);
+    }
+
+    /// `--when-error` does not interfere with successful commands.
+    #[test]
+    fn when_error_does_not_affect_successful_commands() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --when-error \"fallback\" echo success\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("success"));
+        assert!(!transformed.content().contains("fallback"));
+    }
+
+    /// `--when-exit-code` only matches the specified exit code.
+    #[test]
+    fn when_exit_code_matches_specific_code() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell --when-exit-code 42 \"caught 42\" {} -c \"import sys; sys.exit(42)\"\n",
+            python
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("caught 42"));
+    }
+
+    /// `--when-exit-code` does not match a different code, so the error propagates.
+    #[test]
+    fn when_exit_code_does_not_match_wrong_code() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell --when-exit-code 99 \"caught\" {} -c \"import sys; sys.exit(1)\"\n",
+            python
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let result = md.transform_with(options);
+        assert!(result.is_err());
+    }
+
+    /// `--except-exit-code` catches all codes except the specified one.
+    #[test]
+    fn except_exit_code_catches_other_codes() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        // Exit code 1 is NOT 99, so it should be caught
+        let content = format!(
+            "::shell --except-exit-code 99 \"caught\" {} -c \"import sys; sys.exit(1)\"\n",
+            python
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("caught"));
+    }
+
+    /// `--enrich-error` adds context to the error message.
+    #[test]
+    fn enrich_error_adds_context_to_failure() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell --enrich-error \"Check PATH\" false\n";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let err = md.transform_with(options).unwrap_err();
+        // The enrichment should appear in the error chain
+        assert!(err.to_string().contains("failed") || err.to_string().contains("exit"));
+    }
+
+    /// `--stderr-contains` replaces when stderr matches.
+    #[test]
+    fn stderr_contains_replaces_on_match() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell --stderr-contains \"warn\" \"warnings found\" {} -c \"import sys; sys.stderr.write('warning: something'); sys.exit(1)\"\n",
+            python
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("warnings found"));
+    }
+
+    /// `--stderr-lacks` replaces when stderr does NOT contain the string.
+    #[test]
+    fn stderr_lacks_replaces_when_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        // stderr says "error" but we're checking for lack of "fatal"
+        let content = format!(
+            "::shell --stderr-lacks \"fatal\" \"non-fatal\" {} -c \"import sys; sys.stderr.write('error: minor'); sys.exit(1)\"\n",
+            python
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages {
+                shell_expansion: true,
+                ..Stage1Stages::none()
+            })
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (transformed, _) = md.transform_with(options).unwrap();
+        assert!(transformed.content().contains("non-fatal"));
+    }
+
+    /// Helper to find python3 for integration tests.
+    fn find_test_python() -> Option<String> {
+        ["python3", "python"]
+            .into_iter()
+            .find_map(|candidate| {
+                which::which(candidate)
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
     }
 }

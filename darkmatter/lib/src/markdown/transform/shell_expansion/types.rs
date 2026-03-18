@@ -16,6 +16,126 @@ pub struct ShellDirective {
     pub args: Vec<String>,
     pub span: std::ops::Range<usize>,
     pub line: usize,
+    pub error_handling: ErrorHandling,
+}
+
+/// Error handling options parsed from `::shell` directive flags.
+///
+/// These options control how non-zero exit codes are handled, allowing
+/// directives to gracefully handle expected failures instead of aborting
+/// the pipeline.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::transform::shell_expansion::types::{ErrorHandling, ErrorHandlingOutcome};
+///
+/// let handling = ErrorHandling {
+///     when_error: Some("fallback text".to_string()),
+///     ..Default::default()
+/// };
+/// let outcome = handling.resolve(1, "");
+/// assert!(matches!(outcome, ErrorHandlingOutcome::Replace(ref s) if s == "fallback text"));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ErrorHandling {
+    /// Catch-all: replace any non-zero exit with this text.
+    pub when_error: Option<String>,
+    /// Replace specific exit codes with text.
+    pub when_exit_code: Vec<(i32, String)>,
+    /// Replace all exit codes except the specified one with text.
+    pub except_exit_code: Vec<(i32, String)>,
+    /// If stderr contains `find`, replace with `replace_with`.
+    pub stderr_contains: Vec<(String, String)>,
+    /// If stderr lacks `find`, replace with `replace_with`.
+    pub stderr_lacks: Vec<(String, String)>,
+    /// Enrich error message for any failure.
+    pub enrich_error: Option<String>,
+    /// Enrich error message for specific exit code.
+    pub enrich_error_on: Vec<(i32, String)>,
+}
+
+/// Outcome of applying error handling rules to a failed command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorHandlingOutcome {
+    /// Replace the directive with this text (error suppressed).
+    Replace(String),
+    /// Propagate the error but add this enrichment context.
+    Enrich(String),
+    /// Propagate the error as-is.
+    Propagate,
+}
+
+impl ErrorHandling {
+    /// Returns `true` if no error handling options are configured.
+    pub fn is_empty(&self) -> bool {
+        self.when_error.is_none()
+            && self.when_exit_code.is_empty()
+            && self.except_exit_code.is_empty()
+            && self.stderr_contains.is_empty()
+            && self.stderr_lacks.is_empty()
+            && self.enrich_error.is_none()
+            && self.enrich_error_on.is_empty()
+    }
+
+    /// Resolves error handling for a failed command.
+    ///
+    /// Checks rules in priority order:
+    /// 1. `--when-exit-code` (specific code match)
+    /// 2. `--except-exit-code` (all codes except one)
+    /// 3. `--stderr-contains` (stderr content match)
+    /// 4. `--stderr-lacks` (stderr content absence)
+    /// 5. `--when-error` (catch-all replacement)
+    /// 6. `--enrich-error-on` (specific code enrichment)
+    /// 7. `--enrich-error` (catch-all enrichment)
+    pub fn resolve(&self, code: i32, stderr: &str) -> ErrorHandlingOutcome {
+        // 1. Specific exit code handlers
+        for (target_code, replacement) in &self.when_exit_code {
+            if code == *target_code {
+                return ErrorHandlingOutcome::Replace(replacement.clone());
+            }
+        }
+
+        // 2. Except-exit-code handlers
+        for (except_code, replacement) in &self.except_exit_code {
+            if code != *except_code {
+                return ErrorHandlingOutcome::Replace(replacement.clone());
+            }
+        }
+
+        // 3. Stderr-contains handlers
+        for (find, replacement) in &self.stderr_contains {
+            if stderr.contains(find.as_str()) {
+                return ErrorHandlingOutcome::Replace(replacement.clone());
+            }
+        }
+
+        // 4. Stderr-lacks handlers
+        for (find, replacement) in &self.stderr_lacks {
+            if !stderr.contains(find.as_str()) {
+                return ErrorHandlingOutcome::Replace(replacement.clone());
+            }
+        }
+
+        // 5. Catch-all replacement
+        if let Some(ref replacement) = self.when_error {
+            return ErrorHandlingOutcome::Replace(replacement.clone());
+        }
+
+        // 6. Specific code enrichment
+        for (target_code, enrichment) in &self.enrich_error_on {
+            if code == *target_code {
+                return ErrorHandlingOutcome::Enrich(enrichment.clone());
+            }
+        }
+
+        // 7. Catch-all enrichment
+        if let Some(ref enrichment) = self.enrich_error {
+            return ErrorHandlingOutcome::Enrich(enrichment.clone());
+        }
+
+        ErrorHandlingOutcome::Propagate
+    }
 }
 
 /// Options for shell expansion behavior.
@@ -266,5 +386,194 @@ impl PipelineRuntime {
             ),
             shell: ShellExpansionRuntime::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_when_exit_code_matches() {
+        let handling = ErrorHandling {
+            when_exit_code: vec![(42, "caught 42".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(42, ""),
+            ErrorHandlingOutcome::Replace("caught 42".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_when_exit_code_no_match() {
+        let handling = ErrorHandling {
+            when_exit_code: vec![(42, "caught".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(handling.resolve(1, ""), ErrorHandlingOutcome::Propagate);
+    }
+
+    #[test]
+    fn resolve_except_exit_code_catches_others() {
+        let handling = ErrorHandling {
+            except_exit_code: vec![(99, "caught".to_string())],
+            ..Default::default()
+        };
+        // Code 1 is not 99, so it should be caught
+        assert_eq!(
+            handling.resolve(1, ""),
+            ErrorHandlingOutcome::Replace("caught".to_string())
+        );
+        // Code 99 is the exception, so it should propagate
+        assert_eq!(handling.resolve(99, ""), ErrorHandlingOutcome::Propagate);
+    }
+
+    #[test]
+    fn resolve_stderr_contains_matches() {
+        let handling = ErrorHandling {
+            stderr_contains: vec![("warning".to_string(), "found warning".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, "warning: something bad"),
+            ErrorHandlingOutcome::Replace("found warning".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_stderr_contains_no_match() {
+        let handling = ErrorHandling {
+            stderr_contains: vec![("fatal".to_string(), "found fatal".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, "warning: minor issue"),
+            ErrorHandlingOutcome::Propagate
+        );
+    }
+
+    #[test]
+    fn resolve_stderr_lacks_matches_when_absent() {
+        let handling = ErrorHandling {
+            stderr_lacks: vec![("fatal".to_string(), "non-fatal".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, "error: minor"),
+            ErrorHandlingOutcome::Replace("non-fatal".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_stderr_lacks_no_match_when_present() {
+        let handling = ErrorHandling {
+            stderr_lacks: vec![("fatal".to_string(), "non-fatal".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, "fatal error occurred"),
+            ErrorHandlingOutcome::Propagate
+        );
+    }
+
+    #[test]
+    fn resolve_when_error_catches_all() {
+        let handling = ErrorHandling {
+            when_error: Some("fallback".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, "anything"),
+            ErrorHandlingOutcome::Replace("fallback".to_string())
+        );
+        assert_eq!(
+            handling.resolve(127, ""),
+            ErrorHandlingOutcome::Replace("fallback".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_enrich_error_on_matches_code() {
+        let handling = ErrorHandling {
+            enrich_error_on: vec![(127, "command not found hint".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(127, ""),
+            ErrorHandlingOutcome::Enrich("command not found hint".to_string())
+        );
+        assert_eq!(handling.resolve(1, ""), ErrorHandlingOutcome::Propagate);
+    }
+
+    #[test]
+    fn resolve_enrich_error_catches_all() {
+        let handling = ErrorHandling {
+            enrich_error: Some("check your setup".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            handling.resolve(1, ""),
+            ErrorHandlingOutcome::Enrich("check your setup".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_priority_exit_code_before_when_error() {
+        let handling = ErrorHandling {
+            when_exit_code: vec![(42, "specific".to_string())],
+            when_error: Some("generic".to_string()),
+            ..Default::default()
+        };
+        // Specific code match takes priority
+        assert_eq!(
+            handling.resolve(42, ""),
+            ErrorHandlingOutcome::Replace("specific".to_string())
+        );
+        // Non-matching code falls through to when_error
+        assert_eq!(
+            handling.resolve(1, ""),
+            ErrorHandlingOutcome::Replace("generic".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_priority_replace_before_enrich() {
+        let handling = ErrorHandling {
+            when_error: Some("replaced".to_string()),
+            enrich_error: Some("enriched".to_string()),
+            ..Default::default()
+        };
+        // Replace takes priority over enrich
+        assert_eq!(
+            handling.resolve(1, ""),
+            ErrorHandlingOutcome::Replace("replaced".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_empty_handling_propagates() {
+        let handling = ErrorHandling::default();
+        assert_eq!(handling.resolve(1, "any stderr"), ErrorHandlingOutcome::Propagate);
+    }
+
+    #[test]
+    fn is_empty_checks_all_fields() {
+        assert!(ErrorHandling::default().is_empty());
+        assert!(!ErrorHandling {
+            when_error: Some("x".to_string()),
+            ..Default::default()
+        }
+        .is_empty());
+        assert!(!ErrorHandling {
+            when_exit_code: vec![(1, "x".to_string())],
+            ..Default::default()
+        }
+        .is_empty());
+        assert!(!ErrorHandling {
+            enrich_error: Some("x".to_string()),
+            ..Default::default()
+        }
+        .is_empty());
     }
 }
