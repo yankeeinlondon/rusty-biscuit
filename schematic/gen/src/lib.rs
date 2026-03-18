@@ -65,12 +65,14 @@ pub mod asyncapi_import;
 pub mod cargo_gen;
 pub mod codegen;
 pub mod errors;
+pub mod export;
 pub mod import_pipeline;
 pub mod inference;
 pub mod model_gen;
 pub mod openapi_output;
 pub mod output;
 pub mod parser;
+pub mod postman_output;
 pub mod validation;
 pub mod ws_codegen;
 
