@@ -227,17 +227,22 @@ impl schematic_define::openapi::SchemaRegistryLike for SchemaRegistry {
 #[must_use]
 pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
     match api_name.to_lowercase().as_str() {
+        "anthropic" => Some(crate::anthropic::openapi_registry()),
+        "bitbucket" => Some(crate::bitbucket::openapi_registry()),
+        "elevenlabs" => Some(crate::elevenlabs::openapi_registry()),
+        "emqx-basic" | "emqx-bearer" => Some(crate::emqx::openapi_registry()),
+        "eversolo" => Some(crate::eversolo::openapi_registry()),
+        "gitea" => Some(crate::gitea::openapi_registry()),
+        "github" => Some(crate::github::openapi_registry()),
+        "gitlab" => Some(crate::gitlab::openapi_registry()),
+        "huggingface" => Some(crate::huggingface::openapi_registry()),
+        "lmstudio" => Some(crate::lmstudio::openapi_registry()),
+        "ollama-native" | "ollama-openai" => Some(crate::ollama::openapi_registry()),
         "openai" => Some(crate::openai::openapi_registry()),
         "samsung-smart-tv" => Some(crate::samsung_smart_tv::openapi_registry()),
-        // Other APIs don't yet have JsonSchema derives on their types
-        // Add them here as they're implemented:
-        // "anthropic" => Some(crate::anthropic::openapi_registry()),
-        // "elevenlabs" => Some(crate::elevenlabs::openapi_registry()),
-        // "huggingface" => Some(crate::huggingface::openapi_registry()),
-        // "ollama-native" => Some(crate::ollama::native_openapi_registry()),
-        // "ollama-openai" => Some(crate::ollama::openai_compat_registry()),
-        // "emqx-basic" => Some(crate::emqx::basic_openapi_registry()),
-        // "emqx-bearer" => Some(crate::emqx::bearer_openapi_registry()),
+        "unfolded-circle-core-rest" => {
+            Some(crate::unfolded_circle::core_rest::openapi_registry())
+        }
         _ => None,
     }
 }
@@ -800,8 +805,7 @@ mod tests {
         use super::get_registry;
 
         assert!(get_registry("unknown-api").is_none());
-        assert!(get_registry("anthropic").is_none()); // Not yet implemented
-        assert!(get_registry("elevenlabs").is_none()); // Not yet implemented
+        assert!(get_registry("nonexistent").is_none());
     }
 
     #[test]

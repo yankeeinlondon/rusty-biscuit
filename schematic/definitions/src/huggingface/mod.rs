@@ -56,9 +56,51 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
 };
+
+/// Creates a schema registry containing all Hugging Face response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Hugging Face Hub API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::huggingface::{openapi_registry, define_huggingface_hub_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_huggingface_hub_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("ModelInfo").is_some());
+/// assert!(registry.get("DatasetInfo").is_some());
+/// assert!(registry.get("SpaceInfo").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<Vec<ModelInfo>>("Vec<ModelInfo>")
+        .register::<ModelInfo>("ModelInfo")
+        .register::<Vec<RepoFile>>("Vec<RepoFile>")
+        .register::<FileMetadata>("FileMetadata")
+        .register::<Vec<CommitInfo>>("Vec<Commit>")
+        .register::<DiscussionList>("DiscussionList")
+        .register::<Vec<DatasetInfo>>("Vec<DatasetInfo>")
+        .register::<DatasetInfo>("DatasetInfo")
+        .register::<Vec<SpaceInfo>>("Vec<SpaceInfo>")
+        .register::<SpaceInfo>("SpaceInfo")
+        .register::<RepoUrl>("RepoUrl")
+        .register::<StatusResponse>("StatusResponse")
+        .register::<UserInfo>("UserInfo")
+        .register::<Vec<RepoInfo>>("Vec<RepoInfo>")
+        .register::<Vec<Collection>>("Vec<Collection>")
+}
 
 /// Creates the Hugging Face Hub API definition.
 ///

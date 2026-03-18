@@ -2,13 +2,14 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Localized text map keyed by language code (for example `en`, `en_US`).
 pub type LanguageText = BTreeMap<String, String>;
 
 /// Login request payload for `/pub/login`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct LoginRequest {
     /// User account name.
     pub username: String,
@@ -17,7 +18,7 @@ pub struct LoginRequest {
 }
 
 /// Generic API response envelope used by many endpoints.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ApiResponseMessage {
     /// Response status text.
     pub status: Option<String>,
@@ -26,7 +27,7 @@ pub struct ApiResponseMessage {
 }
 
 /// System information returned by `/system`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct SystemInfo {
     /// Friendly name of the device model.
     pub model_name: String,
@@ -39,7 +40,7 @@ pub struct SystemInfo {
 }
 
 /// Single uploaded/listed resource item.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ResourceItem {
     /// Resource type.
     ///
@@ -56,7 +57,7 @@ pub struct ResourceItem {
 pub type ResourceItems = Vec<ResourceItem>;
 
 /// Integration driver type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum IntegrationDriverType {
     /// Firmware built-in integration driver.
@@ -68,7 +69,7 @@ pub enum IntegrationDriverType {
 }
 
 /// Integration driver runtime state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DriverState {
     /// Driver exists but requires configuration before activation.
@@ -86,7 +87,7 @@ pub enum DriverState {
 }
 
 /// Installed custom integration summary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct IntegrationDriverInfo {
     /// Driver identifier.
     pub driver_id: String,
@@ -109,7 +110,7 @@ pub struct IntegrationDriverInfo {
 }
 
 /// Result of uploading IR code-set CSV content.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct CodeSetUploadResult {
     /// Total number of processed CSV rows.
     pub processed: u32,
@@ -120,7 +121,7 @@ pub struct CodeSetUploadResult {
 }
 
 /// Backup restore report item type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupRestoreItem {
     /// Database records.
@@ -144,7 +145,7 @@ pub enum BackupRestoreItem {
 }
 
 /// One backup-restore report row.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct BackupRestoreReportItem {
     /// Restored object category.
     pub item: BackupRestoreItem,
@@ -155,7 +156,7 @@ pub struct BackupRestoreReportItem {
 }
 
 /// Type of custom component installation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CustomComponent {
     /// Custom UI replacement.
@@ -165,7 +166,7 @@ pub enum CustomComponent {
 }
 
 /// Installed custom component information.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct CustomInstall {
     /// Component key (`ui` or `web_configurator`).
     pub component: CustomComponent,

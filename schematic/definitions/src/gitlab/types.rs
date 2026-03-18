@@ -10,6 +10,7 @@
 //! - `serde(default)` is used where empty/null values should deserialize cleanly
 //! - GitLab uses `iid` (internal ID) scoped to projects, not global `id`
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -17,7 +18,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// A GitLab user summary (common across many responses).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct User {
     /// The user's unique ID.
     pub id: u64,
@@ -47,7 +48,7 @@ pub struct User {
 // =============================================================================
 
 /// A single entry in a repository tree from `GET /projects/:id/repository/tree`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TreeItem {
     /// Object ID (SHA).
     pub id: String,
@@ -74,7 +75,7 @@ pub struct TreeItem {
 /// File content from `GET /projects/:id/repository/files/:path`.
 ///
 /// Note: The `content` field is Base64 encoded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FileContent {
     /// Filename.
     pub file_name: String,
@@ -115,7 +116,7 @@ pub struct FileContent {
 // =============================================================================
 
 /// Merge request summary from list/get endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MergeRequest {
     /// Global merge request ID.
     pub id: u64,
@@ -257,7 +258,7 @@ pub struct MergeRequest {
 }
 
 /// Merge request with changes/diffs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MergeRequestChanges {
     /// Global merge request ID.
     pub id: u64,
@@ -298,7 +299,7 @@ pub struct MergeRequestChanges {
 }
 
 /// A commit in a merge request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Commit {
     /// Commit SHA.
     pub id: String,
@@ -348,7 +349,7 @@ pub struct Commit {
 }
 
 /// A file diff in a merge request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Diff {
     /// Old file path (before rename).
     pub old_path: String,
@@ -386,7 +387,7 @@ pub struct Diff {
 // =============================================================================
 
 /// Issue summary from list/get endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Issue {
     /// Global issue ID.
     pub id: u64,
@@ -506,7 +507,7 @@ pub struct Issue {
 }
 
 /// A comment/note on an issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     /// Note ID.
     pub id: u64,
@@ -569,7 +570,7 @@ pub struct Note {
 // =============================================================================
 
 /// Time tracking statistics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TimeStats {
     /// Estimated time in seconds.
     #[serde(default)]
@@ -589,7 +590,7 @@ pub struct TimeStats {
 }
 
 /// Task completion status for issues.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TaskCompletionStatus {
     /// Total number of tasks.
     #[serde(default)]
@@ -605,7 +606,7 @@ pub struct TaskCompletionStatus {
 // =============================================================================
 
 /// A project milestone.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Milestone {
     /// Milestone ID.
     pub id: u64,
@@ -653,7 +654,7 @@ pub struct Milestone {
 }
 
 /// Reference information (short, relative, full).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct References {
     /// Short reference (e.g., "#1").
     pub short: String,
@@ -670,7 +671,7 @@ pub struct References {
 // =============================================================================
 
 /// A repository tag from `GET /projects/:id/repository/tags`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Tag {
     /// Tag name.
     pub name: String,
@@ -699,7 +700,7 @@ pub struct Tag {
 }
 
 /// Commit info embedded in a tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagCommit {
     /// Commit SHA.
     pub id: String,
@@ -748,7 +749,7 @@ pub struct TagCommit {
 }
 
 /// Brief release info embedded in a tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagRelease {
     /// Tag name associated with the release.
     pub tag_name: String,
@@ -759,7 +760,7 @@ pub struct TagRelease {
 }
 
 /// A full release from `GET /projects/:id/releases`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Release {
     /// Release name/title.
     pub name: String,
@@ -816,7 +817,7 @@ pub struct Release {
 }
 
 /// Commit info embedded in a release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseCommit {
     /// Commit SHA.
     pub id: String,
@@ -864,7 +865,7 @@ pub struct ReleaseCommit {
 }
 
 /// Release assets (sources and links).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseAssets {
     /// Number of assets.
     #[serde(default)]
@@ -880,7 +881,7 @@ pub struct ReleaseAssets {
 }
 
 /// A source archive for a release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseSource {
     /// Archive format (e.g., "zip", "tar.gz").
     pub format: String,
@@ -890,7 +891,7 @@ pub struct ReleaseSource {
 }
 
 /// A custom asset link in a release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseLink {
     /// Link ID.
     pub id: u64,
@@ -911,7 +912,7 @@ pub struct ReleaseLink {
 }
 
 /// Release evidence for compliance.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseEvidence {
     /// Evidence SHA.
     pub sha: String,
@@ -924,7 +925,7 @@ pub struct ReleaseEvidence {
 }
 
 /// Related links in a release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseLinks {
     /// Self URL.
     #[serde(rename = "self")]
@@ -960,7 +961,7 @@ pub struct ReleaseLinks {
 // =============================================================================
 
 /// A GitLab namespace (group or user).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Namespace {
     /// Namespace ID.
     pub id: u64,
@@ -995,7 +996,7 @@ pub struct Namespace {
 }
 
 /// Project metadata from `GET /projects/{id}`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Project {
     /// Project ID.
     pub id: u64,
@@ -1097,7 +1098,7 @@ pub struct Project {
 // =============================================================================
 
 /// A CI/CD pipeline from `GET /projects/{id}/pipelines`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Pipeline {
     /// Pipeline ID.
     pub id: u64,

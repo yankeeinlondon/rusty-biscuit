@@ -52,10 +52,51 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, Endpoint, EndpointParams, EnvList, EnvMapping, PaginationStyle,
     RestApi, RestMethod,
 };
+
+/// Creates a schema registry containing all Bitbucket response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Bitbucket API.
+/// All response types used by the API endpoints are registered, including
+/// concrete instantiations of the generic `PaginatedResponse<T>` type.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::bitbucket::{openapi_registry, define_bitbucket_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_bitbucket_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("Repository").is_some());
+/// assert!(registry.get("PullRequest").is_some());
+/// assert!(registry.get("Issue").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<Repository>("Repository")
+        .register::<PaginatedResponse<SourceEntry>>("PaginatedResponse<SourceEntry>")
+        .register::<PaginatedResponse<PullRequest>>("PaginatedResponse<PullRequest>")
+        .register::<PullRequest>("PullRequest")
+        .register::<PaginatedResponse<PullRequestComment>>("PaginatedResponse<PullRequestComment>")
+        .register::<PaginatedResponse<Issue>>("PaginatedResponse<Issue>")
+        .register::<Issue>("Issue")
+        .register::<PaginatedResponse<IssueComment>>("PaginatedResponse<IssueComment>")
+        .register::<PaginatedResponse<IssueChange>>("PaginatedResponse<IssueChange>")
+        .register::<PaginatedResponse<Tag>>("PaginatedResponse<Tag>")
+        .register::<Tag>("Tag")
+        .register::<PaginatedResponse<Download>>("PaginatedResponse<Download>")
+        .register::<PaginatedResponse<Repository>>("PaginatedResponse<Repository>")
+}
 
 /// Creates Bitbucket-style pagination parameters.
 fn bitbucket_pagination() -> EndpointParams {
@@ -317,6 +358,48 @@ pub fn define_bitbucket_api() -> RestApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =============================================
+    // openapi_registry() tests
+    // =============================================
+
+    #[test]
+    fn openapi_registry_contains_all_response_types() {
+        let registry = openapi_registry();
+
+        assert!(registry.get("Repository").is_some());
+        assert!(registry.get("PaginatedResponse<SourceEntry>").is_some());
+        assert!(registry.get("PaginatedResponse<PullRequest>").is_some());
+        assert!(registry.get("PullRequest").is_some());
+        assert!(registry.get("Issue").is_some());
+        assert!(registry.get("Tag").is_some());
+        assert_eq!(registry.len(), 13);
+    }
+
+    #[test]
+    fn openapi_registry_validates_against_api() {
+        let registry = openapi_registry();
+        let api = define_bitbucket_api();
+
+        let result = registry.validate_completeness(&api);
+        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+    }
+
+    #[test]
+    fn openapi_registry_converts_to_openapi_schemas() {
+        let registry = openapi_registry();
+        let openapi_schemas = registry.to_openapi_schemas();
+
+        assert_eq!(openapi_schemas.len(), 13);
+        assert!(openapi_schemas.contains_key("Repository"));
+        assert!(openapi_schemas.contains_key("PullRequest"));
+        assert!(openapi_schemas.contains_key("Issue"));
+        assert!(openapi_schemas.contains_key("Tag"));
+    }
+
+    // =============================================
+    // API definition tests
+    // =============================================
 
     #[test]
     fn api_has_correct_metadata() {

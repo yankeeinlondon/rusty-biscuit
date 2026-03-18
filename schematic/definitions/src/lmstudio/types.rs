@@ -4,6 +4,7 @@
 //! (`/api/v1/*` endpoints). LM Studio runs locally and supports optional bearer token
 //! authentication.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -57,7 +58,7 @@ pub struct ChatBody {
 // =============================================================================
 
 /// Quantization information for a model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Quantization {
     /// The quantization format (e.g., "Q4_0", "Q8_0").
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,7 +66,7 @@ pub struct Quantization {
 }
 
 /// Model capabilities.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Capabilities {
     /// Whether the model supports vision/multimodal input.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,7 +78,7 @@ pub struct Capabilities {
 }
 
 /// A loaded model instance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadedInstance {
     /// The instance identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,7 +90,7 @@ pub struct LoadedInstance {
 }
 
 /// Statistics about a model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Stats {
     /// Model size in bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,7 +102,7 @@ pub struct Stats {
 }
 
 /// Information about a model in the list response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
     /// Model identifier (path).
     pub id: String,
@@ -143,7 +144,7 @@ pub struct ModelInfo {
 }
 
 /// Response from the `/api/v1/models` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
     /// Object type (always "list").
     pub object: String,
@@ -191,7 +192,7 @@ pub struct LoadModelBody {
 }
 
 /// Response from the `/api/v1/models/load` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadModelResponse {
     /// The loaded model's identifier.
     pub model: String,
@@ -213,7 +214,7 @@ pub struct UnloadModelBody {
 }
 
 /// Response from the `/api/v1/models/unload` endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UnloadModelResponse {
     /// Unload status message.
     pub status: String,
@@ -250,7 +251,7 @@ pub struct DownloadModelResponse {
 // =============================================================================
 
 /// An output item in the download status response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OutputItem {
     /// Type of output (e.g., "file").
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -273,7 +274,7 @@ pub struct DownloadStatusBody {
 }
 
 /// Response from the `/api/v1/models/download/status` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadStatusResponse {
     /// Current status (e.g., "downloading", "completed", "failed").
     pub status: String,

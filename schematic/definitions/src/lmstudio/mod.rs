@@ -26,9 +26,45 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
 };
+
+/// Creates a schema registry containing all LM Studio response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the LM Studio API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::lmstudio::{openapi_registry, define_lmstudio_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_lmstudio_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("ListModelsResponse").is_some());
+/// assert!(registry.get("LoadModelResponse").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<ListModelsResponse>("ListModelsResponse")
+        .register::<ModelInfo>("ModelInfo")
+        .register::<Quantization>("Quantization")
+        .register::<Capabilities>("Capabilities")
+        .register::<LoadedInstance>("LoadedInstance")
+        .register::<Stats>("Stats")
+        .register::<LoadModelResponse>("LoadModelResponse")
+        .register::<UnloadModelResponse>("UnloadModelResponse")
+        .register::<DownloadStatusResponse>("DownloadStatusResponse")
+        .register::<OutputItem>("OutputItem")
+}
 
 /// Creates the LM Studio v1 native API definition.
 ///

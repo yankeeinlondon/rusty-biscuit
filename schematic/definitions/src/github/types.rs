@@ -9,6 +9,7 @@
 //! - Fields that are frequently omitted or permission-dependent are optional
 //! - `serde(default)` is used where empty/null values should deserialize cleanly
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// A GitHub user summary (common across many responses).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserSummary {
     /// The user's login handle.
     pub login: String,
@@ -47,7 +48,7 @@ pub struct UserSummary {
 // =============================================================================
 
 /// Repository information from `GET /repos/{owner}/{repo}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RepositoryInfo {
     /// Repository ID.
     pub id: u64,
@@ -136,7 +137,7 @@ pub struct RepositoryInfo {
 }
 
 /// License information for a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfo {
     /// SPDX license identifier.
     pub key: String,
@@ -158,7 +159,7 @@ pub struct LicenseInfo {
 // =============================================================================
 
 /// Response from `GET /repos/{owner}/{repo}/git/trees/{tree_sha}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitTreeResponse {
     /// SHA of the tree.
     pub sha: String,
@@ -175,7 +176,7 @@ pub struct GitTreeResponse {
 }
 
 /// A single entry in a Git tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitTreeEntry {
     /// File or directory path.
     pub path: String,
@@ -206,7 +207,7 @@ pub struct GitTreeEntry {
 // =============================================================================
 
 /// Branch reference for PR head/base.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BranchRef {
     /// Branch name.
     #[serde(rename = "ref")]
@@ -221,7 +222,7 @@ pub struct BranchRef {
 }
 
 /// Pull request summary from list endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequestSummary {
     /// PR number.
     pub number: u64,
@@ -291,7 +292,7 @@ pub struct PullRequestSummary {
 }
 
 /// A file changed in a pull request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequestFile {
     /// Filename (full path).
     pub filename: String,
@@ -341,7 +342,7 @@ pub struct PullRequestFile {
 // =============================================================================
 
 /// Issue summary from list/get endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueSummary {
     /// Issue ID.
     pub id: u64,
@@ -417,7 +418,7 @@ impl IssueSummary {
 }
 
 /// A label on an issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueLabel {
     /// Label name.
     pub name: String,
@@ -432,7 +433,7 @@ pub struct IssueLabel {
 }
 
 /// A milestone on an issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Milestone {
     /// Milestone number.
     pub number: u64,
@@ -449,7 +450,7 @@ pub struct Milestone {
 }
 
 /// A comment on an issue.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueComment {
     /// Comment ID.
     pub id: u64,
@@ -476,7 +477,7 @@ pub struct IssueComment {
 }
 
 /// A timeline event on an issue.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TimelineEvent {
     /// Event ID (may be absent for some event types).
     #[serde(default)]
@@ -504,7 +505,7 @@ pub struct TimelineEvent {
 // =============================================================================
 
 /// A repository tag from `GET /repos/{owner}/{repo}/tags`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RepoTag {
     /// Tag name.
     pub name: String,
@@ -524,7 +525,7 @@ pub struct RepoTag {
 }
 
 /// Commit info embedded in a tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagCommit {
     /// Commit SHA.
     pub sha: String,
@@ -534,7 +535,7 @@ pub struct TagCommit {
 }
 
 /// A GitHub release from `GET /repos/{owner}/{repo}/releases`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Release {
     /// Release ID.
     pub id: u64,
@@ -586,7 +587,7 @@ pub struct Release {
 }
 
 /// An asset attached to a release.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseAsset {
     /// Asset ID.
     pub id: u64,
@@ -616,7 +617,7 @@ pub struct ReleaseAsset {
 // =============================================================================
 
 /// A Git reference from `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRef {
     /// Full ref name (e.g., "refs/tags/v1.0.0").
     #[serde(rename = "ref")]
@@ -634,7 +635,7 @@ pub struct GitRef {
 }
 
 /// Object pointed to by a Git reference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRefObject {
     /// Object type: "commit" (lightweight tag) or "tag" (annotated tag).
     #[serde(rename = "type")]
@@ -660,7 +661,7 @@ impl GitRefObject {
 }
 
 /// An annotated tag object from `GET /repos/{owner}/{repo}/git/tags/{sha}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotatedTagObject {
     /// Tag object SHA.
     pub sha: String,
@@ -692,7 +693,7 @@ pub struct AnnotatedTagObject {
 }
 
 /// Object reference from an annotated tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagObjectRef {
     /// Object type (usually "commit").
     #[serde(rename = "type")]
@@ -706,7 +707,7 @@ pub struct TagObjectRef {
 }
 
 /// Tagger information for annotated tags.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotatedTagger {
     /// Tagger's name.
     pub name: String,
@@ -719,7 +720,7 @@ pub struct AnnotatedTagger {
 }
 
 /// GPG signature verification for tags.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagVerification {
     /// Whether the signature is verified.
     pub verified: bool,
@@ -747,7 +748,7 @@ pub struct TagVerification {
 /// Response from `GET /repos/{owner}/{repo}/actions/runs`.
 ///
 /// Contains a total count and a list of workflow runs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowRunsResponse {
     /// Total number of workflow runs matching the query.
     #[serde(default)]
@@ -759,7 +760,7 @@ pub struct WorkflowRunsResponse {
 }
 
 /// A single workflow run from GitHub Actions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowRun {
     /// Workflow run ID.
     pub id: u64,

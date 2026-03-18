@@ -26,9 +26,52 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
 };
+
+/// Creates a schema registry containing all Ollama response types.
+///
+/// This registry can be used to generate OpenAPI schemas for both the native
+/// and OpenAI-compatible Ollama APIs. All response types used by both API
+/// variants are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::ollama::{openapi_registry, define_ollama_native_api, define_ollama_openai_api};
+///
+/// let registry = openapi_registry();
+/// let native_api = define_ollama_native_api();
+/// let openai_api = define_ollama_openai_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("ListModelsResponse").is_some());
+/// assert!(registry.get("OpenAIEmbeddingResponse").is_some());
+///
+/// // Registry is complete for both APIs
+/// assert!(registry.validate_completeness(&native_api).is_ok());
+/// assert!(registry.validate_completeness(&openai_api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        // Native API types
+        .register::<EmbeddingsResponse>("EmbeddingsResponse")
+        .register::<ListModelsResponse>("ListModelsResponse")
+        .register::<ModelInfo>("ModelInfo")
+        .register::<ModelDetails>("ModelDetails")
+        .register::<ShowModelResponse>("ShowModelResponse")
+        .register::<ListRunningModelsResponse>("ListRunningModelsResponse")
+        .register::<RunningModel>("RunningModel")
+        // OpenAI-compatible API types
+        .register::<OpenAIEmbeddingResponse>("OpenAIEmbeddingResponse")
+        .register::<OpenAIEmbeddingData>("OpenAIEmbeddingData")
+        .register::<OpenAIUsage>("OpenAIUsage")
+        .register::<OpenAIListModelsResponse>("OpenAIListModelsResponse")
+        .register::<OpenAIModel>("OpenAIModel")
+}
 
 /// Creates the native Ollama API definition.
 ///

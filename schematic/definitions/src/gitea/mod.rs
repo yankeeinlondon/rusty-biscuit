@@ -50,10 +50,57 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod,
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
+
+/// Creates a schema registry containing all Gitea response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Gitea API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::gitea::{openapi_registry, define_gitea_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_gitea_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("RepositoryInfo").is_some());
+/// assert!(registry.get("PullRequestSummary").is_some());
+/// assert!(registry.get("IssueSummary").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<RepositoryInfo>("RepositoryInfo")
+        .register::<GitTreeResponse>("GitTreeResponse")
+        .register::<PullRequestSummary>("PullRequestSummary")
+        .register::<Vec<PullRequestSummary>>("Vec<PullRequestSummary>")
+        .register::<PullRequestFile>("PullRequestFile")
+        .register::<Vec<PullRequestFile>>("Vec<PullRequestFile>")
+        .register::<IssueSummary>("IssueSummary")
+        .register::<Vec<IssueSummary>>("Vec<IssueSummary>")
+        .register::<IssueComment>("IssueComment")
+        .register::<Vec<IssueComment>>("Vec<IssueComment>")
+        .register::<TimelineEvent>("TimelineEvent")
+        .register::<Vec<TimelineEvent>>("Vec<TimelineEvent>")
+        .register::<RepoTag>("RepoTag")
+        .register::<Vec<RepoTag>>("Vec<RepoTag>")
+        .register::<Release>("Release")
+        .register::<Vec<Release>>("Vec<Release>")
+        .register::<GitRef>("GitRef")
+        .register::<Vec<GitRef>>("Vec<GitRef>")
+        .register::<AnnotatedTagObject>("AnnotatedTagObject")
+        .register::<Vec<RepositoryInfo>>("Vec<RepositoryInfo>")
+}
 
 /// Creates the Gitea REST API definition.
 ///
@@ -384,6 +431,50 @@ pub fn define_gitea_api() -> RestApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =============================================
+    // openapi_registry() tests
+    // =============================================
+
+    #[test]
+    fn openapi_registry_contains_all_response_types() {
+        let registry = openapi_registry();
+
+        assert!(registry.get("RepositoryInfo").is_some());
+        assert!(registry.get("GitTreeResponse").is_some());
+        assert!(registry.get("PullRequestSummary").is_some());
+        assert!(registry.get("Vec<PullRequestSummary>").is_some());
+        assert!(registry.get("IssueSummary").is_some());
+        assert!(registry.get("Vec<IssueSummary>").is_some());
+        assert!(registry.get("RepoTag").is_some());
+        assert!(registry.get("Release").is_some());
+        assert_eq!(registry.len(), 20);
+    }
+
+    #[test]
+    fn openapi_registry_validates_against_api() {
+        let registry = openapi_registry();
+        let api = define_gitea_api();
+
+        let result = registry.validate_completeness(&api);
+        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+    }
+
+    #[test]
+    fn openapi_registry_converts_to_openapi_schemas() {
+        let registry = openapi_registry();
+        let openapi_schemas = registry.to_openapi_schemas();
+
+        assert_eq!(openapi_schemas.len(), 20);
+        assert!(openapi_schemas.contains_key("RepositoryInfo"));
+        assert!(openapi_schemas.contains_key("PullRequestSummary"));
+        assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));
+        assert!(openapi_schemas.contains_key("IssueSummary"));
+    }
+
+    // =============================================
+    // API definition tests
+    // =============================================
 
     #[test]
     fn api_has_correct_metadata() {

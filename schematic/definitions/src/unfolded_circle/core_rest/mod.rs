@@ -28,10 +28,43 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField, RestApi,
     RestMethod,
 };
+
+/// Creates a schema registry containing all Unfolded Circle Core REST response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Unfolded Circle Core REST API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::unfolded_circle::core_rest::{openapi_registry, define_unfolded_circle_core_rest_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_unfolded_circle_core_rest_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("ApiResponseMessage").is_some());
+/// assert!(registry.get("SystemInfo").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<ApiResponseMessage>("ApiResponseMessage")
+        .register::<SystemInfo>("SystemInfo")
+        .register::<BackupRestoreReportItems>("BackupRestoreReportItems")
+        .register::<ResourceItems>("ResourceItems")
+        .register::<IntegrationDriverInfo>("IntegrationDriverInfo")
+        .register::<CodeSetUploadResult>("CodeSetUploadResult")
+        .register::<CustomInstall>("CustomInstall")
+}
 
 /// Build the Unfolded Circle Core REST API definition.
 #[must_use]

@@ -3,6 +3,7 @@
 //! This module contains request and response types for the EMQX Broker REST API
 //! supporting both Basic Auth (API Key) and Bearer Token authentication.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -21,7 +22,7 @@ use serde::{Deserialize, Serialize};
 ///   "hasnext": true
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PaginationMeta {
     /// Total count of items.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,7 +93,7 @@ pub struct LoginBody {
 ///   "license": {"edition": "enterprise", ...}
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoginResponse {
     /// JWT token for subsequent requests.
     pub token: String,
@@ -121,7 +122,7 @@ pub struct LoginResponse {
 ///   "connections": 1000
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NodeInfo {
     /// Node name (e.g., "emqx@127.0.0.1").
     pub node: String,
@@ -160,7 +161,7 @@ pub struct NodeInfo {
 }
 
 /// Response from `/nodes` endpoint - list of cluster nodes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListNodesResponse {
     /// List of nodes in the cluster.
     pub data: Vec<NodeInfo>,
@@ -176,7 +177,7 @@ pub struct ListNodesResponse {
 ///   "stopped": []
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClusterStatus {
     /// Running node names.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,7 +209,7 @@ pub struct ClusterStatus {
 ///   "proto_ver": 5
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ClientInfo {
     /// Client identifier.
     pub clientid: String,
@@ -275,7 +276,7 @@ pub struct ClientInfo {
 }
 
 /// Paginated response for clients list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListClientsResponse {
     /// List of connected clients.
     pub data: Vec<ClientInfo>,
@@ -333,7 +334,7 @@ pub struct SubscribeBody {
 ///   "qos": 1
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SubscriptionInfo {
     /// Node where subscription exists.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -363,7 +364,7 @@ pub struct SubscriptionInfo {
 }
 
 /// Paginated response for subscriptions list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ListSubscriptionsResponse {
     /// List of subscriptions.
     pub data: Vec<SubscriptionInfo>,
@@ -443,7 +444,7 @@ pub struct PublishBatchBody {
 ///   "args": {"topic": "alerts/temp"}
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RuleAction {
     /// Action function name.
     pub function: String,
@@ -465,7 +466,7 @@ pub struct RuleAction {
 ///   "enabled": true
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RuleInfo {
     /// Rule identifier.
     pub id: String,
@@ -521,7 +522,7 @@ pub struct CreateRuleBody {
 }
 
 /// Response for rules list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListRulesResponse {
     /// List of rules.
     pub data: Vec<RuleInfo>,
@@ -539,7 +540,7 @@ pub struct TestRuleBody {
 }
 
 /// Rule test response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TestRuleResponse {
     /// Test result data.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -551,7 +552,7 @@ pub struct TestRuleResponse {
 // =============================================================================
 
 /// Authentication provider configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthenticatorInfo {
     /// Authenticator ID.
     pub id: String,
@@ -574,14 +575,14 @@ pub struct AuthenticatorInfo {
 }
 
 /// Response for authenticators list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListAuthenticatorsResponse {
     /// List of configured authenticators.
     pub data: Vec<AuthenticatorInfo>,
 }
 
 /// User in built-in database authentication.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthUser {
     /// User ID (username).
     pub user_id: String,
@@ -610,7 +611,7 @@ pub struct CreateAuthUserBody {
 // =============================================================================
 
 /// Authorization source configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthzSourceInfo {
     /// Source type (built_in_database, file, http, etc.).
     #[serde(rename = "type")]
@@ -626,7 +627,7 @@ pub struct AuthzSourceInfo {
 }
 
 /// Response for authorization sources list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListAuthzSourcesResponse {
     /// List of authorization sources.
     pub sources: Vec<AuthzSourceInfo>,
@@ -637,7 +638,7 @@ pub struct ListAuthzSourcesResponse {
 // =============================================================================
 
 /// Listener configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListenerInfo {
     /// Listener identifier.
     pub id: String,
@@ -664,7 +665,7 @@ pub struct ListenerInfo {
 }
 
 /// Response for listeners list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListListenersResponse {
     /// List of configured listeners.
     pub data: Vec<ListenerInfo>,
@@ -675,7 +676,7 @@ pub struct ListListenersResponse {
 // =============================================================================
 
 /// Broker metrics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MetricsInfo {
     /// Total bytes received.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -723,7 +724,7 @@ pub struct MetricsInfo {
 }
 
 /// Response for metrics list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListMetricsResponse {
     /// List of per-node metrics.
     pub data: Vec<MetricsInfo>,
@@ -734,7 +735,7 @@ pub struct ListMetricsResponse {
 // =============================================================================
 
 /// Broker statistics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatsInfo {
     /// Current connections.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -762,7 +763,7 @@ pub struct StatsInfo {
 }
 
 /// Response for stats list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListStatsResponse {
     /// List of per-node stats.
     pub data: Vec<StatsInfo>,
@@ -773,7 +774,7 @@ pub struct ListStatsResponse {
 // =============================================================================
 
 /// Topic information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TopicInfo {
     /// Topic name.
     pub topic: String,
@@ -784,7 +785,7 @@ pub struct TopicInfo {
 }
 
 /// Paginated response for topics list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ListTopicsResponse {
     /// List of topics.
     pub data: Vec<TopicInfo>,
@@ -799,7 +800,7 @@ pub struct ListTopicsResponse {
 // =============================================================================
 
 /// Retained message information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RetainedMessage {
     /// Topic of the retained message.
     pub topic: String,
@@ -826,7 +827,7 @@ pub struct RetainedMessage {
 }
 
 /// Paginated response for retained messages list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListRetainedResponse {
     /// List of retained messages.
     pub data: Vec<RetainedMessage>,
@@ -841,7 +842,7 @@ pub struct ListRetainedResponse {
 // =============================================================================
 
 /// Ban record.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BanInfo {
     /// Ban type (clientid, username, peerhost).
     #[serde(rename = "as")]
@@ -883,7 +884,7 @@ pub struct CreateBanBody {
 }
 
 /// Response for banned list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ListBannedResponse {
     /// List of ban records.
     pub data: Vec<BanInfo>,
@@ -898,7 +899,7 @@ pub struct ListBannedResponse {
 // =============================================================================
 
 /// Alarm information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AlarmInfo {
     /// Node where alarm was raised.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -929,7 +930,7 @@ pub struct AlarmInfo {
 }
 
 /// Response for alarms list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListAlarmsResponse {
     /// List of alarms.
     pub data: Vec<AlarmInfo>,

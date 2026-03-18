@@ -12,6 +12,7 @@
 //! - Bitbucket uses cursor-based pagination with a `next` URL field
 //! - Tags + Downloads = "Releases" (no first-class release concept)
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -20,7 +21,7 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// A Bitbucket user summary (common across many responses).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct User {
     /// The user's UUID (e.g., "{abc-123}").
     #[serde(default)]
@@ -55,7 +56,7 @@ impl User {
 }
 
 /// A HATEOAS link with href field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Link {
     /// The URL this link points to.
     pub href: String,
@@ -64,7 +65,7 @@ pub struct Link {
 /// A paginated response wrapper.
 ///
 /// Bitbucket uses cursor-based pagination. Follow the `next` URL to get more results.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PaginatedResponse<T> {
     /// The items in this page.
     #[serde(default)]
@@ -103,7 +104,7 @@ impl<T> PaginatedResponse<T> {
 // =============================================================================
 
 /// Repository information from `GET /repositories/{workspace}/{repo_slug}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Repository {
     /// The repository's UUID.
     #[serde(default)]
@@ -190,7 +191,7 @@ impl Repository {
 }
 
 /// Simple branch information (for mainbranch).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BranchInfo {
     /// Branch name.
     #[serde(default)]
@@ -202,7 +203,7 @@ pub struct BranchInfo {
 }
 
 /// Workspace information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Workspace {
     /// The workspace slug.
     #[serde(default)]
@@ -226,7 +227,7 @@ pub struct Workspace {
 }
 
 /// Project information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Project {
     /// The project key.
     #[serde(default)]
@@ -256,7 +257,7 @@ pub struct Project {
 /// A source entry from directory listing.
 ///
 /// Returned by `GET /repositories/{workspace}/{repo_slug}/src/{commit}/{path}`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceEntry {
     /// Full path from repository root.
     #[serde(default)]
@@ -305,7 +306,7 @@ impl SourceEntry {
 }
 
 /// Simple commit info embedded in other types.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CommitInfo {
     /// Commit hash.
     #[serde(default)]
@@ -325,7 +326,7 @@ pub struct CommitInfo {
 // =============================================================================
 
 /// Pull request from `GET /repositories/{workspace}/{repo_slug}/pullrequests`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequest {
     /// PR ID (unique within the repository).
     #[serde(default)]
@@ -426,7 +427,7 @@ impl PullRequest {
 }
 
 /// Branch reference for PR source/destination.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BranchRef {
     /// Branch information.
     #[serde(default)]
@@ -454,7 +455,7 @@ impl BranchRef {
 }
 
 /// Minimal repository reference (for PRs).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RepositoryRef {
     /// Repository name.
     #[serde(default)]
@@ -478,7 +479,7 @@ pub struct RepositoryRef {
 }
 
 /// A participant in a pull request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Participant {
     /// The participating user.
     #[serde(default)]
@@ -517,7 +518,7 @@ impl Participant {
 }
 
 /// A comment on a pull request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequestComment {
     /// Comment ID.
     #[serde(default)]
@@ -561,7 +562,7 @@ pub struct PullRequestComment {
 }
 
 /// Parent comment reference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CommentParent {
     /// Parent comment ID.
     #[serde(default)]
@@ -569,7 +570,7 @@ pub struct CommentParent {
 }
 
 /// Inline context for code comments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct InlineContext {
     /// File path.
     #[serde(default)]
@@ -589,7 +590,7 @@ pub struct InlineContext {
 // =============================================================================
 
 /// An issue from `GET /repositories/{workspace}/{repo_slug}/issues`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Issue {
     /// Issue ID (unique within the repository).
     #[serde(default)]
@@ -690,7 +691,7 @@ impl Issue {
 }
 
 /// Content with raw, markup, and HTML forms.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Content {
     /// Raw content (markdown or plain text).
     #[serde(default)]
@@ -706,7 +707,7 @@ pub struct Content {
 }
 
 /// Milestone reference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Milestone {
     /// Milestone ID.
     #[serde(default)]
@@ -722,7 +723,7 @@ pub struct Milestone {
 }
 
 /// A comment on an issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueComment {
     /// Comment ID.
     #[serde(default)]
@@ -754,7 +755,7 @@ pub struct IssueComment {
 }
 
 /// An issue change record from the change history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueChange {
     /// Change timestamp (ISO 8601).
     #[serde(default)]
@@ -782,7 +783,7 @@ pub struct IssueChange {
 }
 
 /// Detail of a field change.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChangeDetail {
     /// Old value.
     #[serde(default)]
@@ -798,7 +799,7 @@ pub struct ChangeDetail {
 // =============================================================================
 
 /// A repository tag from `GET /repositories/{workspace}/{repo_slug}/refs/tags`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Tag {
     /// Tag name.
     #[serde(default)]
@@ -837,7 +838,7 @@ impl Tag {
 }
 
 /// Target commit for a tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagTarget {
     /// Commit hash.
     #[serde(default)]
@@ -865,7 +866,7 @@ pub struct TagTarget {
 }
 
 /// Commit author information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CommitAuthor {
     /// Raw author string (e.g., "Name <email>").
     #[serde(default)]
@@ -895,7 +896,7 @@ impl CommitAuthor {
 }
 
 /// Tagger information for annotated tags.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Tagger {
     /// Raw tagger string (e.g., "Name <email>").
     #[serde(default)]
@@ -913,7 +914,7 @@ pub struct Tagger {
 /// A download artifact from `GET /repositories/{workspace}/{repo_slug}/downloads`.
 ///
 /// Downloads serve as release artifacts in Bitbucket (there's no first-class release concept).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Download {
     /// Filename.
     #[serde(default)]

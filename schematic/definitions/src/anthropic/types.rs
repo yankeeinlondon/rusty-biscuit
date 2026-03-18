@@ -12,6 +12,7 @@
 //! 3. Append tool results to messages and continue
 //! 4. Repeat until `stop_reason: "end_turn"`
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// The role of a message in the conversation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
     /// A message from the user.
@@ -31,7 +32,7 @@ pub enum MessageRole {
 /// Cache control settings for prompt caching.
 ///
 /// Prompt caching reduces costs by up to 90% for repeated context.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CacheControl {
     /// Cache type (currently only "ephemeral" is supported).
     #[serde(rename = "type")]
@@ -63,7 +64,7 @@ impl CacheControl {
 }
 
 /// Source for image content.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
     /// Base64-encoded image data.
@@ -81,7 +82,7 @@ pub enum ImageSource {
 }
 
 /// Source for document content.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DocumentSource {
     /// Base64-encoded document data.
@@ -109,7 +110,7 @@ pub enum DocumentSource {
 ///
 /// Messages contain an array of content blocks that can include text,
 /// images, documents, tool use requests, and tool results.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Text content.
@@ -223,7 +224,7 @@ impl ContentBlock {
 /// Content for a tool result.
 ///
 /// Can be a simple string or an array of content blocks for rich results.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ToolResultContent {
     /// Simple text result.
@@ -239,7 +240,7 @@ pub enum ToolResultContent {
 /// A tool definition for the model to use.
 ///
 /// Tools are defined using JSON Schema for the input parameters.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Tool {
     /// Unique name for the tool.
     ///
@@ -296,7 +297,7 @@ impl Tool {
 }
 
 /// How the model should choose which tools to use.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChoice {
     /// Let the model decide whether to use tools.
@@ -317,7 +318,7 @@ pub enum ToolChoice {
 // =============================================================================
 
 /// A message in the conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Message {
     /// The role of the message author.
     pub role: MessageRole,
@@ -364,7 +365,7 @@ impl Message {
 }
 
 /// System prompt content block.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SystemContent {
     /// Text system prompt.
@@ -380,7 +381,7 @@ pub enum SystemContent {
 /// System prompt for the conversation.
 ///
 /// Can be a simple string or an array of content blocks.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum SystemPrompt {
     /// Simple text system prompt.
@@ -412,7 +413,7 @@ impl SystemPrompt {
 ///
 /// Extended thinking allows the model to reason internally before responding,
 /// improving accuracy on complex tasks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkingConfig {
     /// Whether extended thinking is enabled.
     #[serde(rename = "type")]
@@ -426,7 +427,7 @@ pub struct ThinkingConfig {
 }
 
 /// Extended thinking enablement state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ThinkingType {
     /// Extended thinking is enabled.
@@ -460,7 +461,7 @@ impl ThinkingConfig {
 // =============================================================================
 
 /// Request metadata for tracking purposes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Metadata {
     /// External user identifier for abuse detection.
     ///
@@ -470,7 +471,7 @@ pub struct Metadata {
 }
 
 /// Service tier selection for the request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceTier {
     /// Automatically select the appropriate tier.
@@ -647,7 +648,7 @@ impl CountTokensBody {
 // =============================================================================
 
 /// Why the model stopped generating.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
     /// Natural end of the response.
@@ -682,7 +683,7 @@ impl StopReason {
 }
 
 /// Token usage statistics.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Usage {
     /// Number of input tokens.
     pub input_tokens: u32,
@@ -704,7 +705,7 @@ pub struct Usage {
 }
 
 /// Response from the Create Message endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageResponse {
     /// Unique message identifier.
     pub id: String,
@@ -763,7 +764,7 @@ impl MessageResponse {
 }
 
 /// Response from the Count Tokens endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CountTokensResponse {
     /// Number of input tokens.
     pub input_tokens: u32,
@@ -782,7 +783,7 @@ pub struct CountTokensResponse {
 // =============================================================================
 
 /// Information about an available model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
     /// Unique model identifier.
     pub id: String,
@@ -799,7 +800,7 @@ pub struct ModelInfo {
 }
 
 /// Response from the List Models endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
     /// List of available models.
     pub data: Vec<ModelInfo>,

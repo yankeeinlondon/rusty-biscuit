@@ -189,3 +189,57 @@ pub use unfolded_circle::{
     define_unfolded_circle_core_rest_api, define_unfolded_circle_core_ws_api,
     define_unfolded_circle_dock_ws_api, define_unfolded_circle_integration_ws_api,
 };
+
+use indexmap::IndexMap;
+use schematic_define::RestApi;
+
+/// Returns all RestApi definitions grouped by resolved module name.
+///
+/// APIs are grouped by their `module_path` field if set, otherwise by their
+/// lowercased name. This enables grouped export for APIs that share a module.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::apis_by_module;
+///
+/// let grouped = apis_by_module();
+/// assert!(grouped.contains_key("ollama")); // OllamaNative + OllamaOpenAI
+/// assert!(grouped.contains_key("emqx")); // EmqxBasic + EmqxBearer
+/// assert_eq!(grouped["ollama"].len(), 2);
+/// assert_eq!(grouped["emqx"].len(), 2);
+/// ```
+pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
+    let all_apis = vec![
+        define_anthropic_api(),
+        define_bitbucket_api(),
+        define_openai_api(),
+        define_elevenlabs_rest_api(),
+        define_gitea_api(),
+        define_github_api(),
+        define_gitlab_api(),
+        define_huggingface_hub_api(),
+        define_lmstudio_api(),
+        define_ollama_native_api(),
+        define_ollama_openai_api(),
+        define_emqx_basic_api(),
+        define_emqx_bearer_api(),
+        define_eversolo_api(),
+        define_samsung_smart_tv_api(),
+        define_unfolded_circle_core_rest_api(),
+    ];
+
+    let mut grouped: IndexMap<String, Vec<RestApi>> = IndexMap::new();
+
+    for api in all_apis {
+        let module_name = api
+            .module_path
+            .as_deref()
+            .unwrap_or(&api.name.to_lowercase())
+            .to_string();
+
+        grouped.entry(module_name).or_default().push(api);
+    }
+
+    grouped
+}

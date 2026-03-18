@@ -19,10 +19,44 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, Endpoint, EndpointParams, EnvMapping, QueryParamType, RestApi,
     RestMethod,
 };
+
+/// Creates a schema registry containing all Eversolo response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Eversolo API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::eversolo::{openapi_registry, define_eversolo_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_eversolo_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("StatusResponse").is_some());
+/// assert!(registry.get("GetModelResponse").is_some());
+/// assert!(registry.get("GetStateResponse").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<StatusResponse>("StatusResponse")
+        .register::<GetModelResponse>("GetModelResponse")
+        .register::<GetStateResponse>("GetStateResponse")
+        .register::<InputOutputListResponse>("InputOutputListResponse")
+        .register::<PowerOptionsResponse>("PowerOptionsResponse")
+        .register::<BrightnessResponse>("BrightnessResponse")
+        .register::<DisplayModeListResponse>("DisplayModeListResponse")
+}
 
 /// Creates the Eversolo DMP-A8 API definition.
 ///

@@ -32,10 +32,58 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField,
     RestApi, RestMethod, Schema,
 };
+
+/// Creates a schema registry containing all ElevenLabs response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the ElevenLabs API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::elevenlabs::{openapi_registry, define_elevenlabs_rest_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_elevenlabs_rest_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("SpeechWithTimestampsResponse").is_some());
+/// assert!(registry.get("ListVoicesResponse").is_some());
+/// assert!(registry.get("VoiceResponseModel").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<SpeechWithTimestampsResponse>("SpeechWithTimestampsResponse")
+        .register::<ListVoicesResponse>("ListVoicesResponse")
+        .register::<VoiceResponseModel>("VoiceResponseModel")
+        .register::<StatusResponse>("StatusResponse")
+        .register::<VoiceSettings>("VoiceSettings")
+        .register::<AddSampleResponse>("AddSampleResponse")
+        .register::<ListSharedVoicesResponse>("ListSharedVoicesResponse")
+        .register::<AddSharedVoiceResponse>("AddSharedVoiceResponse")
+        .register::<Vec<ModelInfo>>("Vec<ModelInfo>")
+        .register::<SingleUseTokenResponse>("SingleUseTokenResponse")
+        .register::<GetHistoryResponse>("GetHistoryResponse")
+        .register::<SpeechHistoryItemResponseModel>("SpeechHistoryItemResponseModel")
+        .register::<UsageStatsResponse>("UsageStatsResponse")
+        .register::<UserResponse>("UserResponse")
+        .register::<SubscriptionModel>("SubscriptionModel")
+        .register::<ResourceResponse>("ResourceResponse")
+        .register::<ListServiceAccountsResponse>("ListServiceAccountsResponse")
+        .register::<ListApiKeysResponse>("ListApiKeysResponse")
+        .register::<CreateApiKeyResponse>("CreateApiKeyResponse")
+        .register::<ListWebhooksResponse>("ListWebhooksResponse")
+        .register::<CreateWebhookResponse>("CreateWebhookResponse")
+}
 
 /// Creates the ElevenLabs REST API definition.
 ///

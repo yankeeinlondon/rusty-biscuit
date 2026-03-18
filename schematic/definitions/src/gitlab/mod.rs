@@ -44,10 +44,59 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
+
+/// Creates a schema registry containing all GitLab response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the GitLab API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::gitlab::{openapi_registry, define_gitlab_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_gitlab_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("Project").is_some());
+/// assert!(registry.get("MergeRequest").is_some());
+/// assert!(registry.get("Issue").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<TreeItem>("TreeItem")
+        .register::<Vec<TreeItem>>("Vec<TreeItem>")
+        .register::<FileContent>("FileContent")
+        .register::<MergeRequest>("MergeRequest")
+        .register::<Vec<MergeRequest>>("Vec<MergeRequest>")
+        .register::<Commit>("Commit")
+        .register::<Vec<Commit>>("Vec<Commit>")
+        .register::<MergeRequestChanges>("MergeRequestChanges")
+        .register::<Issue>("Issue")
+        .register::<Vec<Issue>>("Vec<Issue>")
+        .register::<Note>("Note")
+        .register::<Vec<Note>>("Vec<Note>")
+        .register::<User>("User")
+        .register::<Vec<User>>("Vec<User>")
+        .register::<Tag>("Tag")
+        .register::<Vec<Tag>>("Vec<Tag>")
+        .register::<Release>("Release")
+        .register::<Vec<Release>>("Vec<Release>")
+        .register::<Project>("Project")
+        .register::<Vec<Project>>("Vec<Project>")
+        .register::<Pipeline>("Pipeline")
+        .register::<Vec<Pipeline>>("Vec<Pipeline>")
+}
 
 /// Creates the GitLab REST API definition.
 ///
@@ -487,6 +536,55 @@ pub fn define_gitlab_api() -> RestApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =============================================
+    // openapi_registry() tests
+    // =============================================
+
+    #[test]
+    fn openapi_registry_contains_all_response_types() {
+        let registry = openapi_registry();
+
+        assert!(registry.get("Project").is_some());
+        assert!(registry.get("Vec<Project>").is_some());
+        assert!(registry.get("TreeItem").is_some());
+        assert!(registry.get("Vec<TreeItem>").is_some());
+        assert!(registry.get("FileContent").is_some());
+        assert!(registry.get("MergeRequest").is_some());
+        assert!(registry.get("Vec<MergeRequest>").is_some());
+        assert!(registry.get("Issue").is_some());
+        assert!(registry.get("Tag").is_some());
+        assert!(registry.get("Release").is_some());
+        assert!(registry.get("Pipeline").is_some());
+        assert_eq!(registry.len(), 22);
+    }
+
+    #[test]
+    fn openapi_registry_validates_against_api() {
+        let registry = openapi_registry();
+        let api = define_gitlab_api();
+
+        let result = registry.validate_completeness(&api);
+        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+    }
+
+    #[test]
+    fn openapi_registry_converts_to_openapi_schemas() {
+        let registry = openapi_registry();
+        let openapi_schemas = registry.to_openapi_schemas();
+
+        assert_eq!(openapi_schemas.len(), 22);
+        assert!(openapi_schemas.contains_key("Project"));
+        assert!(openapi_schemas.contains_key("Vec<Project>"));
+        assert!(openapi_schemas.contains_key("MergeRequest"));
+        assert!(openapi_schemas.contains_key("Vec<MergeRequest>"));
+        assert!(openapi_schemas.contains_key("Issue"));
+        assert!(openapi_schemas.contains_key("Pipeline"));
+    }
+
+    // =============================================
+    // API definition tests
+    // =============================================
 
     #[test]
     fn api_has_correct_metadata() {

@@ -10,6 +10,7 @@
 //! - `serde(default)` is used where empty/null values should deserialize cleanly
 //! - Modeled after GitHub types but adapted for Gitea's API responses
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -17,7 +18,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// A Gitea user summary (common across many responses).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserSummary {
     /// The user's login handle.
     #[serde(default)]
@@ -52,7 +53,7 @@ impl UserSummary {
 // =============================================================================
 
 /// Repository information from `GET /repos/{owner}/{repo}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RepositoryInfo {
     /// Repository ID.
     #[serde(default)]
@@ -140,7 +141,7 @@ pub struct RepositoryInfo {
 // =============================================================================
 
 /// Response from `GET /repos/{owner}/{repo}/git/trees/{sha}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitTreeResponse {
     /// SHA of the tree.
     #[serde(default)]
@@ -168,7 +169,7 @@ pub struct GitTreeResponse {
 }
 
 /// A single entry in a Git tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitTreeEntry {
     /// File or directory path.
     #[serde(default)]
@@ -200,7 +201,7 @@ pub struct GitTreeEntry {
 // =============================================================================
 
 /// Branch reference for PR head/base.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRef {
     /// Branch name.
     #[serde(rename = "ref", default)]
@@ -212,7 +213,7 @@ pub struct PullRef {
 }
 
 /// Pull request summary from list endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequestSummary {
     /// PR ID.
     #[serde(default)]
@@ -280,7 +281,7 @@ pub struct PullRequestSummary {
 }
 
 /// A file changed in a pull request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullRequestFile {
     /// Filename (full path).
     #[serde(default)]
@@ -308,7 +309,7 @@ pub struct PullRequestFile {
 // =============================================================================
 
 /// Issue summary from list/get endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueSummary {
     /// Issue ID.
     #[serde(default)]
@@ -380,7 +381,7 @@ impl IssueSummary {
 }
 
 /// A comment on an issue.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueComment {
     /// Comment ID.
     #[serde(default)]
@@ -404,7 +405,7 @@ pub struct IssueComment {
 }
 
 /// A timeline event on an issue.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TimelineEvent {
     /// Event ID.
     #[serde(default)]
@@ -428,7 +429,7 @@ pub struct TimelineEvent {
 // =============================================================================
 
 /// Commit info embedded in a tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagCommit {
     /// Commit SHA.
     #[serde(default)]
@@ -436,7 +437,7 @@ pub struct TagCommit {
 }
 
 /// A repository tag from `GET /repos/{owner}/{repo}/tags`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RepoTag {
     /// Tag name.
     #[serde(default)]
@@ -464,7 +465,7 @@ pub struct RepoTag {
 }
 
 /// A Gitea release from `GET /repos/{owner}/{repo}/releases`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Release {
     /// Release ID.
     #[serde(default)]
@@ -512,7 +513,7 @@ pub struct Release {
 // =============================================================================
 
 /// Object pointed to by a Git reference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRefObject {
     /// Object type: "commit" (lightweight tag) or "tag" (annotated tag).
     #[serde(rename = "type", default)]
@@ -542,7 +543,7 @@ impl GitRefObject {
 /// A Git reference from `GET /repos/{owner}/{repo}/git/refs/{ref}`.
 ///
 /// Note: Gitea returns an **array** of refs for this endpoint, unlike GitHub.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRef {
     /// Full ref name (e.g., "refs/tags/v1.0.0").
     #[serde(rename = "ref", default)]
@@ -558,7 +559,7 @@ pub struct GitRef {
 }
 
 /// An annotated tag object from `GET /repos/{owner}/{repo}/git/tags/{sha}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotatedTagObject {
     /// Tag object SHA.
     #[serde(default)]

@@ -59,9 +59,85 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
 };
+
+/// Creates a schema registry containing all EMQX response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the EMQX API.
+/// All response types used by both the Basic and Bearer API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::emqx::{openapi_registry, define_emqx_basic_api, define_emqx_bearer_api};
+///
+/// let registry = openapi_registry();
+/// let basic_api = define_emqx_basic_api();
+/// let bearer_api = define_emqx_bearer_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("NodeInfo").is_some());
+/// assert!(registry.get("ListClientsResponse").is_some());
+///
+/// // Registry is complete for both APIs
+/// assert!(registry.validate_completeness(&basic_api).is_ok());
+/// assert!(registry.validate_completeness(&bearer_api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        // Authentication types (Bearer API only)
+        .register::<LoginResponse>("LoginResponse")
+        // Node & Cluster types
+        .register::<NodeInfo>("NodeInfo")
+        .register::<ListNodesResponse>("ListNodesResponse")
+        .register::<ClusterStatus>("ClusterStatus")
+        // Client types
+        .register::<ClientInfo>("ClientInfo")
+        .register::<ListClientsResponse>("ListClientsResponse")
+        // Subscription types
+        .register::<SubscriptionInfo>("SubscriptionInfo")
+        .register::<ListSubscriptionsResponse>("ListSubscriptionsResponse")
+        // Rules types
+        .register::<RuleInfo>("RuleInfo")
+        .register::<RuleAction>("RuleAction")
+        .register::<ListRulesResponse>("ListRulesResponse")
+        .register::<TestRuleResponse>("TestRuleResponse")
+        // Authentication types
+        .register::<AuthUser>("AuthUser")
+        .register::<Vec<AuthUser>>("Vec<AuthUser>")
+        .register::<AuthenticatorInfo>("AuthenticatorInfo")
+        .register::<ListAuthenticatorsResponse>("ListAuthenticatorsResponse")
+        // Authorization types
+        .register::<AuthzSourceInfo>("AuthzSourceInfo")
+        .register::<ListAuthzSourcesResponse>("ListAuthzSourcesResponse")
+        // Listener types
+        .register::<ListenerInfo>("ListenerInfo")
+        .register::<ListListenersResponse>("ListListenersResponse")
+        // Metrics types
+        .register::<MetricsInfo>("MetricsInfo")
+        .register::<ListMetricsResponse>("ListMetricsResponse")
+        // Stats types
+        .register::<StatsInfo>("StatsInfo")
+        .register::<ListStatsResponse>("ListStatsResponse")
+        // Topic types
+        .register::<TopicInfo>("TopicInfo")
+        .register::<ListTopicsResponse>("ListTopicsResponse")
+        // Retained message types
+        .register::<RetainedMessage>("RetainedMessage")
+        .register::<ListRetainedResponse>("ListRetainedResponse")
+        // Alarm types
+        .register::<AlarmInfo>("AlarmInfo")
+        .register::<ListAlarmsResponse>("ListAlarmsResponse")
+        // Banned types
+        .register::<BanInfo>("BanInfo")
+        .register::<ListBannedResponse>("ListBannedResponse")
+        // Common types
+        .register::<PaginationMeta>("PaginationMeta")
+}
 
 /// Creates the EMQX REST API definition with Basic Authentication.
 ///

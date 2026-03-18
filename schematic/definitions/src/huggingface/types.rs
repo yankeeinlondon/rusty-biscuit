@@ -4,6 +4,7 @@
 //! including enums for filtering, request/response models, and shared types
 //! for models, datasets, spaces, and user operations.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// Repository type on Hugging Face Hub.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoType {
     /// Machine learning model repository.
@@ -27,7 +28,7 @@ pub enum RepoType {
 /// ML pipeline task type.
 ///
 /// Represents the intended use case of a model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Pipeline {
     // Text tasks
@@ -141,7 +142,7 @@ pub enum Pipeline {
 }
 
 /// ML library/framework used by a model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Library {
     /// Hugging Face Transformers.
@@ -227,7 +228,7 @@ pub enum Library {
 }
 
 /// Sort field for listing endpoints.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum SortField {
     /// Sort by last modification time.
@@ -244,7 +245,7 @@ pub enum SortField {
 }
 
 /// Sort direction for list queries.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum SortDirection {
     /// Ascending order (oldest/lowest first).
     #[serde(rename = "1")]
@@ -256,7 +257,7 @@ pub enum SortDirection {
 }
 
 /// Repository visibility/privacy setting.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoVisibility {
     /// Publicly visible repository.
@@ -269,7 +270,7 @@ pub enum RepoVisibility {
 /// Gated model access status.
 ///
 /// Controls how access requests are handled.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum GatedStatus {
     /// No gating - open access.
@@ -286,7 +287,7 @@ pub enum GatedStatus {
 }
 
 /// File type in a repository.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
     /// Regular file.
@@ -297,7 +298,7 @@ pub enum FileType {
 }
 
 /// Discussion/pull request status.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum DiscussionStatus {
     /// Open for discussion/review.
@@ -312,7 +313,7 @@ pub enum DiscussionStatus {
 }
 
 /// Discussion type.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum DiscussionType {
     /// General discussion thread.
@@ -324,7 +325,7 @@ pub enum DiscussionType {
 }
 
 /// Space runtime stage.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SpaceStage {
     /// Space is not configured.
@@ -349,7 +350,7 @@ pub enum SpaceStage {
 }
 
 /// Space SDK type.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SpaceSdk {
     /// Gradio interface.
@@ -364,7 +365,7 @@ pub enum SpaceSdk {
 }
 
 /// Space hardware tier.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum SpaceHardware {
     /// Free CPU tier.
     #[default]
@@ -412,7 +413,7 @@ pub enum SpaceHardware {
 }
 
 /// Inference API status for a model.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum InferenceStatus {
     /// Inference is available.
@@ -431,7 +432,7 @@ pub enum InferenceStatus {
 }
 
 /// Inference provider type.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum InferenceProvider {
     /// Hugging Face hosted inference.
@@ -452,7 +453,7 @@ pub enum InferenceProvider {
 /// Repository file/sibling entry.
 ///
 /// Represents a single file within a repository.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RepoFile {
     /// Relative filename within the repository.
     pub rfilename: String,
@@ -471,7 +472,7 @@ pub struct RepoFile {
 }
 
 /// LFS (Large File Storage) information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LfsInfo {
     /// SHA256 hash of the file.
     pub sha256: String,
@@ -485,7 +486,7 @@ pub struct LfsInfo {
 }
 
 /// Git commit information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CommitInfo {
     /// Commit SHA hash.
     pub id: String,
@@ -504,7 +505,7 @@ pub struct CommitInfo {
 }
 
 /// Author/user information for commits and discussions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Author {
     /// Username or full name.
     pub name: String,
@@ -519,7 +520,7 @@ pub struct Author {
 }
 
 /// Tag/label attached to a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Tag {
     /// Tag identifier.
     pub id: String,
@@ -530,7 +531,7 @@ pub struct Tag {
 }
 
 /// Safetensors metadata for a model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SafetensorsInfo {
     /// Total model size in bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -546,7 +547,7 @@ pub struct SafetensorsInfo {
 }
 
 /// GGUF quantization file information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GgufInfo {
     /// Quantization type (e.g., "Q4_K_M").
     #[serde(rename = "quantization", skip_serializing_if = "Option::is_none")]
@@ -562,7 +563,7 @@ pub struct GgufInfo {
 }
 
 /// Model card metadata.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CardData {
     /// License identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -622,7 +623,7 @@ pub struct CardData {
 }
 
 /// Model index entry for evaluation results.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelIndexEntry {
     /// Model name.
     pub name: String,
@@ -633,7 +634,7 @@ pub struct ModelIndexEntry {
 }
 
 /// Evaluation result on a benchmark.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EvaluationResult {
     /// Task type.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -649,7 +650,7 @@ pub struct EvaluationResult {
 }
 
 /// Task information for evaluation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TaskInfo {
     /// Task type name.
     #[serde(rename = "type")]
@@ -661,7 +662,7 @@ pub struct TaskInfo {
 }
 
 /// Dataset reference for evaluation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetRef {
     /// Dataset type/name.
     #[serde(rename = "type")]
@@ -681,7 +682,7 @@ pub struct DatasetRef {
 }
 
 /// Metric result from evaluation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MetricResult {
     /// Metric type/name.
     #[serde(rename = "type")]
@@ -700,7 +701,7 @@ pub struct MetricResult {
 }
 
 /// Widget configuration for model demos.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WidgetConfig {
     /// Example text/input.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -720,7 +721,7 @@ pub struct WidgetConfig {
 }
 
 /// CO2 emissions information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Co2Emissions {
     /// Emissions in grams.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -747,7 +748,7 @@ pub struct Co2Emissions {
 }
 
 /// Transform/processor configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TransformersInfo {
     /// Auto class mappings.
     #[serde(rename = "auto_map", skip_serializing_if = "Option::is_none")]
@@ -767,7 +768,7 @@ pub struct TransformersInfo {
 // =============================================================================
 
 /// Complete model information from the Hub API.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
     /// Model identifier (e.g., "bert-base-uncased" or "org/model").
     #[serde(rename = "modelId", alias = "id")]
@@ -871,7 +872,7 @@ pub struct ModelInfo {
 }
 
 /// Summary model info for list endpoints (fewer fields).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelSummary {
     /// Model identifier.
     #[serde(rename = "modelId", alias = "_id", alias = "id")]
@@ -915,7 +916,7 @@ pub struct ModelSummary {
 // =============================================================================
 
 /// Complete dataset information from the Hub API.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetInfo {
     /// Dataset identifier (e.g., "squad" or "org/dataset").
     #[serde(rename = "id", alias = "datasetId")]
@@ -983,7 +984,7 @@ pub struct DatasetInfo {
 }
 
 /// Dataset-specific card data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCardData {
     /// License identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1031,7 +1032,7 @@ pub struct DatasetCardData {
 }
 
 /// Dataset configuration/split information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetConfig {
     /// Configuration name.
     #[serde(rename = "config_name", skip_serializing_if = "Option::is_none")]
@@ -1047,7 +1048,7 @@ pub struct DatasetConfig {
 }
 
 /// Dataset split information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetSplit {
     /// Split name (train, test, validation).
     pub name: String,
@@ -1062,7 +1063,7 @@ pub struct DatasetSplit {
 }
 
 /// Summary dataset info for list endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetSummary {
     /// Dataset identifier.
     #[serde(rename = "id", alias = "_id")]
@@ -1098,7 +1099,7 @@ pub struct DatasetSummary {
 // =============================================================================
 
 /// Complete Space information from the Hub API.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceInfo {
     /// Space identifier (e.g., "org/space-name").
     #[serde(rename = "id", alias = "spaceId")]
@@ -1186,7 +1187,7 @@ pub struct SpaceInfo {
 }
 
 /// Space runtime status and configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceRuntime {
     /// Current stage/status.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1218,7 +1219,7 @@ pub struct SpaceRuntime {
 }
 
 /// Space-specific card data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceCardData {
     /// Title.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1290,7 +1291,7 @@ pub struct SpaceCardData {
 }
 
 /// Summary Space info for list endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceSummary {
     /// Space identifier.
     #[serde(rename = "id", alias = "_id")]
@@ -1326,7 +1327,7 @@ pub struct SpaceSummary {
 // =============================================================================
 
 /// User information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserInfo {
     /// Username.
     #[serde(rename = "name", alias = "user")]
@@ -1374,7 +1375,7 @@ pub struct UserInfo {
 }
 
 /// Response from the whoami endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WhoAmIResponse {
     /// Account type ("user" or "org").
     #[serde(rename = "type")]
@@ -1424,7 +1425,7 @@ pub struct WhoAmIResponse {
 }
 
 /// Periodical account usage data.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PeriodicalAccountData {
     /// Number of models.
     #[serde(rename = "numModels", skip_serializing_if = "Option::is_none")]
@@ -1452,7 +1453,7 @@ pub struct PeriodicalAccountData {
 }
 
 /// Organization reference (minimal info).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OrganizationRef {
     /// Organization name/slug.
     pub name: String,
@@ -1479,7 +1480,7 @@ pub struct OrganizationRef {
 }
 
 /// Organization information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Organization {
     /// Organization name/slug.
     pub name: String,
@@ -1518,7 +1519,7 @@ pub struct Organization {
 }
 
 /// Token authentication/permission info.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthInfo {
     /// Token type.
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -1530,7 +1531,7 @@ pub struct AuthInfo {
 }
 
 /// Token information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TokenInfo {
     /// Token display name.
     #[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
@@ -1550,7 +1551,7 @@ pub struct TokenInfo {
 // =============================================================================
 
 /// Discussion thread on a repository.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Discussion {
     /// Discussion number.
     pub num: u64,
@@ -1587,7 +1588,7 @@ pub struct Discussion {
 }
 
 /// Discussion comment.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DiscussionComment {
     /// Comment ID.
     pub id: String,
@@ -1613,7 +1614,7 @@ pub struct DiscussionComment {
 }
 
 /// List of discussions response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DiscussionList {
     /// List of discussions.
     pub discussions: Vec<Discussion>,
@@ -1628,7 +1629,7 @@ pub struct DiscussionList {
 // =============================================================================
 
 /// Filter parameters for model search.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelFilter {
     /// Filter by author/organization.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1664,7 +1665,7 @@ pub struct ModelFilter {
 }
 
 /// Filter parameters for dataset search.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetFilter {
     /// Filter by author/organization.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1692,7 +1693,7 @@ pub struct DatasetFilter {
 }
 
 /// Filter parameters for space search.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceFilter {
     /// Filter by author/organization.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1724,7 +1725,7 @@ pub struct SpaceFilter {
 // =============================================================================
 
 /// Request to create a new repository.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateRepoBody {
     /// Repository name (without org prefix).
     pub name: String,
@@ -1767,7 +1768,7 @@ pub struct CreateRepoBody {
 }
 
 /// Space secret configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceSecret {
     /// Secret key name.
     pub key: String,
@@ -1782,7 +1783,7 @@ pub struct SpaceSecret {
 }
 
 /// Space environment variable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceVariable {
     /// Variable key name.
     pub key: String,
@@ -1796,7 +1797,7 @@ pub struct SpaceVariable {
 }
 
 /// Response from create repository endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateRepoResponse {
     /// Full repository URL.
     pub url: String,
@@ -1807,7 +1808,7 @@ pub struct CreateRepoResponse {
 }
 
 /// Request to delete a repository.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteRepoBody {
     /// Repository ID to delete.
     #[serde(rename = "repoId")]
@@ -1823,7 +1824,7 @@ pub struct DeleteRepoBody {
 }
 
 /// Request to move/rename a repository.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MoveRepoBody {
     /// Source repository ID.
     #[serde(rename = "fromRepo")]
@@ -1875,7 +1876,7 @@ pub struct UpdateSpaceSettingsRequest {
 }
 
 /// Request to upload a file.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UploadFileRequest {
     /// Path within the repository.
     pub path: String,
@@ -1898,7 +1899,7 @@ pub struct UploadFileRequest {
 }
 
 /// Response from file upload.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UploadFileResponse {
     /// Commit info.
     #[serde(rename = "commitOid", skip_serializing_if = "Option::is_none")]
@@ -1973,7 +1974,7 @@ pub struct InferenceParameters {
 }
 
 /// Options for inference request.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct InferenceOptions {
     /// Wait for model to load.
     #[serde(rename = "wait_for_model", default)]
@@ -1989,7 +1990,7 @@ fn default_true() -> bool {
 }
 
 /// Generic inference response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum InferenceResponse {
     /// Text generation response.
@@ -2015,7 +2016,7 @@ pub enum InferenceResponse {
 }
 
 /// Text generation result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TextGenerationResult {
     /// Generated text.
     #[serde(rename = "generated_text")]
@@ -2023,7 +2024,7 @@ pub struct TextGenerationResult {
 }
 
 /// Classification result (sentiment, etc.).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ClassificationResult {
     /// Classification label.
     pub label: String,
@@ -2033,7 +2034,7 @@ pub struct ClassificationResult {
 }
 
 /// Token classification result (NER, etc.).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TokenClassificationResult {
     /// Entity type/label.
     #[serde(rename = "entity_group", alias = "entity")]
@@ -2053,7 +2054,7 @@ pub struct TokenClassificationResult {
 }
 
 /// Zero-shot classification result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZeroShotResult {
     /// Input sequence.
     pub sequence: String,
@@ -2066,7 +2067,7 @@ pub struct ZeroShotResult {
 }
 
 /// Question answering result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QuestionAnsweringResult {
     /// Answer text.
     pub answer: String,
@@ -2082,7 +2083,7 @@ pub struct QuestionAnsweringResult {
 }
 
 /// Error response from the API.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApiError {
     /// Error message.
     pub error: String,
@@ -2105,7 +2106,7 @@ pub struct ApiError {
 // =============================================================================
 
 /// Webhook event payload.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookPayload {
     /// Event type.
     pub event: WebhookEvent,
@@ -2127,7 +2128,7 @@ pub struct WebhookPayload {
 }
 
 /// Webhook event types.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookEvent {
     /// Event action.
     pub action: String,
@@ -2137,7 +2138,7 @@ pub struct WebhookEvent {
 }
 
 /// Repository info in webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookRepo {
     /// Repository type.
     #[serde(rename = "type")]
@@ -2158,7 +2159,7 @@ pub struct WebhookRepo {
 }
 
 /// Discussion info in webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookDiscussion {
     /// Discussion number.
     pub num: u64,
@@ -2171,7 +2172,7 @@ pub struct WebhookDiscussion {
 }
 
 /// Comment info in webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookComment {
     /// Comment ID.
     pub id: String,
@@ -2188,7 +2189,7 @@ pub struct WebhookComment {
 }
 
 /// Webhook configuration info.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookConfig {
     /// Webhook ID.
     pub id: String,
@@ -2199,7 +2200,7 @@ pub struct WebhookConfig {
 // =============================================================================
 
 /// Collection (curated list of repos).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Collection {
     /// Collection slug/ID.
     pub slug: String,
@@ -2245,7 +2246,7 @@ pub struct Collection {
 }
 
 /// Item in a collection.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CollectionItem {
     /// Item type.
     #[serde(rename = "type")]
@@ -2268,7 +2269,7 @@ pub struct CollectionItem {
 }
 
 /// Daily download metrics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadMetrics {
     /// Date string (YYYY-MM-DD).
     pub date: String,
@@ -2533,7 +2534,7 @@ mod tests {
 /// Status response for mutation operations.
 ///
 /// TODO: Define proper fields based on HuggingFace API docs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct StatusResponse {
     /// Operation success status.
     pub ok: Option<bool>,
@@ -2549,7 +2550,7 @@ pub type Commit = CommitInfo;
 /// File metadata in a repository.
 ///
 /// TODO: Define proper fields based on HuggingFace API docs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct FileMetadata {
     /// File path.
     pub path: String,
@@ -2565,7 +2566,7 @@ pub struct FileMetadata {
 /// Repository information summary.
 ///
 /// TODO: Define proper fields based on HuggingFace API docs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct RepoInfo {
     /// Repository ID (owner/name).
     pub id: String,
@@ -2579,7 +2580,7 @@ pub struct RepoInfo {
 /// Repository URL after creation/modification.
 ///
 /// TODO: Define proper fields based on HuggingFace API docs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct RepoUrl {
     /// Full URL to the repository.
     pub url: String,

@@ -41,10 +41,42 @@ mod types;
 
 pub use types::*;
 
+use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi,
     RestMethod,
 };
+
+/// Creates a schema registry containing all Anthropic response types.
+///
+/// This registry can be used to generate OpenAPI schemas for the Anthropic API.
+/// All response types used by the API endpoints are registered.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::anthropic::{openapi_registry, define_anthropic_api};
+///
+/// let registry = openapi_registry();
+/// let api = define_anthropic_api();
+///
+/// // Registry contains all response types
+/// assert!(registry.get("MessageResponse").is_some());
+/// assert!(registry.get("CountTokensResponse").is_some());
+/// assert!(registry.get("ListModelsResponse").is_some());
+/// assert!(registry.get("ModelInfo").is_some());
+///
+/// // Registry is complete for the API
+/// assert!(registry.validate_completeness(&api).is_ok());
+/// ```
+#[must_use]
+pub fn openapi_registry() -> SchemaRegistry {
+    SchemaRegistry::new()
+        .register::<MessageResponse>("MessageResponse")
+        .register::<CountTokensResponse>("CountTokensResponse")
+        .register::<ListModelsResponse>("ListModelsResponse")
+        .register::<ModelInfo>("ModelInfo")
+}
 
 /// Creates the Anthropic API definition.
 ///

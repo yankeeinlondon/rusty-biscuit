@@ -3,6 +3,7 @@
 //! This module contains all data types used in the ElevenLabs API,
 //! including enums, request/response models, and shared types.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Audio output format for TTS and sound generation.
 ///
 /// Supports MP3, PCM, Opus, and telephony formats at various quality levels.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFormat {
     /// MP3 at 22.05 kHz, 32 kbps (low quality)
@@ -73,7 +74,7 @@ pub enum OutputFormat {
 }
 
 /// Voice category classification.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceCategory {
     /// ElevenLabs default/premade voices
@@ -91,7 +92,7 @@ pub enum VoiceCategory {
 }
 
 /// Voice type for filtering.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceType {
     /// Personal voices
@@ -109,7 +110,7 @@ pub enum VoiceType {
 }
 
 /// Text normalization mode.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TextNormalization {
     /// Automatic text normalization
@@ -122,7 +123,7 @@ pub enum TextNormalization {
 }
 
 /// Subscription status.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionStatus {
     /// Active trial period
@@ -140,7 +141,7 @@ pub enum SubscriptionStatus {
 }
 
 /// Billing period for subscriptions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum BillingPeriod {
     /// Monthly billing
     #[serde(rename = "monthly")]
@@ -157,7 +158,7 @@ pub enum BillingPeriod {
 }
 
 /// Supported currencies.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum Currency {
     USD,
     EUR,
@@ -165,7 +166,7 @@ pub enum Currency {
 }
 
 /// Resource types for workspace management.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceType {
     #[default]
@@ -185,7 +186,7 @@ pub enum ResourceType {
 }
 
 /// Token type for single-use tokens.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenType {
     /// For real-time transcription
@@ -195,7 +196,7 @@ pub enum TokenType {
 }
 
 /// History item source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum HistorySource {
     /// Text-to-speech
     TTS,
@@ -208,7 +209,7 @@ pub enum HistorySource {
 }
 
 /// Webhook authentication type.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookAuthType {
     /// HMAC authentication
@@ -221,7 +222,7 @@ pub enum WebhookAuthType {
 }
 
 /// Sort direction for list queries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SortDirection {
     /// Ascending order
@@ -231,7 +232,7 @@ pub enum SortDirection {
 }
 
 /// Access level for resource sharing.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessLevel {
     #[default]
@@ -242,7 +243,7 @@ pub enum AccessLevel {
 }
 
 /// Fine-tuning state for PVC voices.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FineTuningState {
     /// Voice has not started fine-tuning.
@@ -260,7 +261,7 @@ pub enum FineTuningState {
 }
 
 /// Speaker separation status for PVC samples.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SpeakerSeparationStatus {
     NotStarted,
@@ -270,7 +271,7 @@ pub enum SpeakerSeparationStatus {
 }
 
 /// Safety control level for voices.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum SafetyControl {
     /// No safety control applied.
     #[serde(rename = "NONE")]
@@ -290,7 +291,7 @@ pub enum SafetyControl {
 }
 
 /// API permissions for service account keys.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiPermission {
     TextToSpeech,
@@ -328,7 +329,7 @@ pub enum ApiPermission {
 // =============================================================================
 
 /// Voice settings for TTS generation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VoiceSettings {
     /// Voice stability/randomness (0-1).
     #[serde(default = "default_stability")]
@@ -376,7 +377,7 @@ impl Default for VoiceSettings {
 }
 
 /// Reference to a pronunciation dictionary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PronunciationDictionaryLocator {
     /// Dictionary identifier.
     pub pronunciation_dictionary_id: String,
@@ -387,7 +388,7 @@ pub struct PronunciationDictionaryLocator {
 /// HTTP alignment object for `/with-timestamps` endpoints.
 ///
 /// Times are in **seconds** (f64).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpAlignment {
     /// Array of individual characters.
@@ -401,7 +402,7 @@ pub struct HttpAlignment {
 /// WebSocket alignment object for streaming TTS.
 ///
 /// Times are in **milliseconds** (i64).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSocketAlignment {
     /// Array of individual characters.
@@ -413,14 +414,14 @@ pub struct WebSocketAlignment {
 }
 
 /// Generic status response for many API operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusResponse {
     /// Status message (typically "ok").
     pub status: String,
 }
 
 /// Generation config for WebSocket TTS.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerationConfig {
     /// Chunk length schedule for buffering.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -440,7 +441,7 @@ impl Default for GenerationConfig {
 // =============================================================================
 
 /// Request body for text-to-speech endpoints.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateSpeechBody {
     /// Text to convert to speech.
     pub text: String,
@@ -491,7 +492,7 @@ pub struct CreateSpeechBody {
 }
 
 /// Response from TTS with timestamps endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechWithTimestampsResponse {
     /// Base64-encoded audio data.
@@ -511,7 +512,7 @@ pub struct SpeechWithTimestampsResponse {
 // =============================================================================
 
 /// Voice sample model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SampleModel {
     /// Sample identifier.
     pub sample_id: String,
@@ -533,7 +534,7 @@ pub struct SampleModel {
 ///
 /// Used in verified_languages array. The API can return different field
 /// combinations depending on context.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LanguageModel {
     /// Language identifier (e.g., "en").
     /// Note: API returns this as "language" in verified_languages.
@@ -566,7 +567,7 @@ pub struct LanguageModel {
 ///
 /// Note: The `state` field is a map from model ID to fine-tuning state,
 /// as each voice can have different fine-tuning status per model.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FineTuningModel {
     /// Fine-tuning state per model. Keys are model IDs like "eleven_multilingual_v2".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -622,7 +623,7 @@ pub struct FineTuningModel {
 }
 
 /// Sharing model for voices.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SharingModel {
     /// Public owner ID.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -638,7 +639,7 @@ pub struct SharingModel {
 }
 
 /// Voice verification model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VoiceVerificationModel {
     /// Whether verification is required.
     pub requires_verification: bool,
@@ -648,7 +649,7 @@ pub struct VoiceVerificationModel {
 }
 
 /// Full voice response model.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VoiceResponseModel {
     /// Voice identifier.
     pub voice_id: String,
@@ -738,7 +739,7 @@ pub struct VoiceResponseModel {
 }
 
 /// Response from list voices endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListVoicesResponse {
     /// List of voices.
     pub voices: Vec<VoiceResponseModel>,
@@ -757,7 +758,7 @@ pub struct ListVoicesResponse {
 }
 
 /// Library voice response model (for shared voices).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LibraryVoiceResponseModel {
     /// Voice identifier.
     pub voice_id: String,
@@ -779,7 +780,7 @@ pub struct LibraryVoiceResponseModel {
 }
 
 /// Response from list shared voices endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListSharedVoicesResponse {
     /// List of shared voices.
     pub voices: Vec<LibraryVoiceResponseModel>,
@@ -793,28 +794,28 @@ pub struct ListSharedVoicesResponse {
 }
 
 /// Request to add a shared voice.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSharedVoiceBody {
     /// New name for the voice.
     pub new_name: String,
 }
 
 /// Response from add shared voice endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSharedVoiceResponse {
     /// The new voice ID in your library.
     pub voice_id: String,
 }
 
 /// Response from adding a voice sample.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AddSampleResponse {
     /// The sample ID.
     pub sample_id: String,
 }
 
 /// Request to create a PVC voice.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreatePvcVoiceBody {
     /// Voice name.
     pub name: String,
@@ -832,7 +833,7 @@ pub struct CreatePvcVoiceBody {
 }
 
 /// Request to train a PVC voice.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TrainPvcVoiceBody {
     /// Model to use for training.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -844,14 +845,14 @@ pub struct TrainPvcVoiceBody {
 // =============================================================================
 
 /// Model rate information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelRates {
     /// Cost multiplier per character.
     pub character_cost_multiplier: f64,
 }
 
 /// Model information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
     /// Model identifier.
     pub model_id: String,
@@ -920,14 +921,14 @@ pub struct ModelInfo {
 }
 
 /// Response containing a single-use token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SingleUseTokenResponse {
     /// The generated token.
     pub token: String,
 }
 
 /// Feedback model for history items.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FeedbackModel {
     /// Thumbs up/down.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -939,7 +940,7 @@ pub struct FeedbackModel {
 }
 
 /// Alignment model for history items.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AlignmentModel {
     /// Character-level alignment.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -955,7 +956,7 @@ pub struct AlignmentModel {
 }
 
 /// Speech history item.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpeechHistoryItemResponseModel {
     /// History item ID.
     pub history_item_id: String,
@@ -1004,7 +1005,7 @@ pub struct SpeechHistoryItemResponseModel {
 }
 
 /// Response from get history endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GetHistoryResponse {
     /// List of history items.
     pub history: Vec<SpeechHistoryItemResponseModel>,
@@ -1022,7 +1023,7 @@ pub struct GetHistoryResponse {
 }
 
 /// Request to download history items.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadHistoryBody {
     /// History item IDs to download.
     pub history_item_ids: Vec<String>,
@@ -1033,7 +1034,7 @@ pub struct DownloadHistoryBody {
 }
 
 /// Request to create a sound effect.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateSoundEffectBody {
     /// Text prompt for the sound effect.
     pub text: String,
@@ -1061,7 +1062,7 @@ pub struct CreateSoundEffectBody {
 // =============================================================================
 
 /// Usage statistics response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UsageStatsResponse {
     /// Time points.
     pub time: Vec<i64>,
@@ -1071,7 +1072,7 @@ pub struct UsageStatsResponse {
 }
 
 /// Invoice model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InvoiceModel {
     /// Invoice amount.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1087,7 +1088,7 @@ pub struct InvoiceModel {
 }
 
 /// Subscription model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubscriptionModel {
     /// Subscription tier.
     pub tier: String,
@@ -1136,7 +1137,7 @@ pub struct SubscriptionModel {
 }
 
 /// User response model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UserResponse {
     /// User identifier.
     pub user_id: String,
@@ -1167,7 +1168,7 @@ pub struct UserResponse {
 }
 
 /// Share option model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShareOptionModel {
     /// User email (if sharing with user).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1182,7 +1183,7 @@ pub struct ShareOptionModel {
 }
 
 /// Resource response model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ResourceResponse {
     /// Resource identifier.
     pub resource_id: String,
@@ -1208,7 +1209,7 @@ pub struct ResourceResponse {
 }
 
 /// Request to share a resource.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShareResourceBody {
     /// Access level to grant.
     pub role: AccessLevel,
@@ -1230,7 +1231,7 @@ pub struct ShareResourceBody {
 }
 
 /// Request to unshare a resource.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UnshareResourceBody {
     /// Resource type.
     pub resource_type: ResourceType,
@@ -1249,7 +1250,7 @@ pub struct UnshareResourceBody {
 }
 
 /// Request to copy resource to workspace.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CopyResourceBody {
     /// Resource type.
     pub resource_type: ResourceType,
@@ -1259,7 +1260,7 @@ pub struct CopyResourceBody {
 }
 
 /// API key model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApiKeyModel {
     /// Key name.
     pub name: String,
@@ -1297,7 +1298,7 @@ pub struct ApiKeyModel {
 }
 
 /// Service account model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ServiceAccountModel {
     /// Service account user ID.
     pub service_account_user_id: String,
@@ -1315,7 +1316,7 @@ pub struct ServiceAccountModel {
 }
 
 /// Response from list service accounts endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListServiceAccountsResponse {
     /// List of service accounts.
     #[serde(rename = "service-accounts")]
@@ -1323,7 +1324,7 @@ pub struct ListServiceAccountsResponse {
 }
 
 /// Response from list API keys endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListApiKeysResponse {
     /// List of API keys.
     #[serde(rename = "api-keys")]
@@ -1331,7 +1332,7 @@ pub struct ListApiKeysResponse {
 }
 
 /// Permission specification for API keys.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum PermissionSpec {
     /// All permissions.
@@ -1347,7 +1348,7 @@ impl Default for PermissionSpec {
 }
 
 /// Request to create an API key.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateApiKeyBody {
     /// Key name.
     pub name: String,
@@ -1361,7 +1362,7 @@ pub struct CreateApiKeyBody {
 }
 
 /// Response from create API key endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct CreateApiKeyResponse {
     /// The full API key (only shown once).
@@ -1372,7 +1373,7 @@ pub struct CreateApiKeyResponse {
 }
 
 /// Request to update an API key.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateApiKeyBody {
     /// Enable/disable the key.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1392,7 +1393,7 @@ pub struct UpdateApiKeyBody {
 }
 
 /// Webhook product model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProductModel {
     /// Product identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1404,7 +1405,7 @@ pub struct ProductModel {
 }
 
 /// Webhook model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookModel {
     /// Webhook name.
     pub name: String,
@@ -1443,14 +1444,14 @@ pub struct WebhookModel {
 }
 
 /// Response from list webhooks endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListWebhooksResponse {
     /// List of webhooks.
     pub webhooks: Vec<WebhookModel>,
 }
 
 /// Webhook settings for creation.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookSettings {
     /// Authentication type.
     pub auth_type: WebhookAuthType,
@@ -1464,14 +1465,14 @@ pub struct WebhookSettings {
 }
 
 /// Request to create a webhook.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateWebhookBody {
     /// Webhook settings.
     pub settings: WebhookSettings,
 }
 
 /// Response from create webhook endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateWebhookResponse {
     /// Webhook identifier.
     pub webhook_id: String,
@@ -1482,7 +1483,7 @@ pub struct CreateWebhookResponse {
 }
 
 /// Request to update a webhook.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateWebhookBody {
     /// Disable/enable the webhook.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1498,7 +1499,7 @@ pub struct UpdateWebhookBody {
 // =============================================================================
 
 /// WebSocket TTS initialization message (BOS).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TtsInitMessage {
     /// Space character to initialize.
     pub text: String,
@@ -1533,7 +1534,7 @@ impl Default for TtsInitMessage {
 }
 
 /// WebSocket TTS text message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TtsTextMessage {
     /// Text to synthesize (should end with space).
     pub text: String,
@@ -1548,14 +1549,14 @@ pub struct TtsTextMessage {
 }
 
 /// WebSocket TTS close message (EOS).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TtsCloseMessage {
     /// Empty string to signal close.
     pub text: String,
 }
 
 /// WebSocket TTS audio response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TtsAudioResponse {
     /// Base64-encoded audio data.
@@ -1576,7 +1577,7 @@ pub struct TtsAudioResponse {
 }
 
 /// Multi-context WebSocket init message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MultiContextInitMessage {
     /// Space character to initialize.
     pub text: String,
@@ -1594,7 +1595,7 @@ pub struct MultiContextInitMessage {
 }
 
 /// Multi-context WebSocket text message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MultiContextTextMessage {
     /// Text to synthesize.
     pub text: String,
@@ -1608,7 +1609,7 @@ pub struct MultiContextTextMessage {
 }
 
 /// Multi-context close context message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MultiContextCloseMessage {
     /// Context identifier.
     pub context_id: String,
@@ -1618,14 +1619,14 @@ pub struct MultiContextCloseMessage {
 }
 
 /// Multi-context close socket message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MultiContextCloseSocketMessage {
     /// Close the entire socket.
     pub close_socket: bool,
 }
 
 /// Multi-context audio response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MultiContextAudioResponse {
     /// Base64-encoded audio data.

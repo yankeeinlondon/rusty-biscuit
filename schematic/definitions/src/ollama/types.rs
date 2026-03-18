@@ -3,6 +3,7 @@
 //! This module contains request and response types for both the native Ollama API
 //! (`/api/*` endpoints) and the OpenAI-compatible API (`/v1/*` endpoints).
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -261,7 +262,7 @@ pub struct EmbeddingsBody {
 }
 
 /// Response from the `/api/embeddings` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EmbeddingsResponse {
     /// The embedding vector.
     pub embedding: Vec<f64>,
@@ -272,7 +273,7 @@ pub struct EmbeddingsResponse {
 // -----------------------------------------------------------------------------
 
 /// Model details in list response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelDetails {
     /// Model families (e.g., ["llama"]).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,7 +301,7 @@ pub struct ModelDetails {
 }
 
 /// A model in the list response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
     /// Model name with tag (e.g., "llama3:latest").
     pub name: String,
@@ -323,7 +324,7 @@ pub struct ModelInfo {
 }
 
 /// Response from the `/api/tags` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
     /// List of available models.
     pub models: Vec<ModelInfo>,
@@ -341,7 +342,7 @@ pub struct ShowModelBody {
 }
 
 /// Response from the `/api/show` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShowModelResponse {
     /// The Modelfile content.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -472,7 +473,7 @@ pub struct CreateModelProgress {
 }
 
 /// A running model in the `/api/ps` response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RunningModel {
     /// Model name.
     pub name: String,
@@ -503,7 +504,7 @@ pub struct RunningModel {
 }
 
 /// Response from the `/api/ps` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListRunningModelsResponse {
     /// List of currently running models.
     pub models: Vec<RunningModel>,
@@ -576,7 +577,7 @@ pub struct OpenAIChatCompletionChoice {
 }
 
 /// Token usage information.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIUsage {
     /// Tokens in the prompt.
     pub prompt_tokens: u32,
@@ -693,7 +694,7 @@ pub struct OpenAIEmbeddingRequest {
 }
 
 /// An embedding object in the response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIEmbeddingData {
     /// Object type, always "embedding".
     pub object: String,
@@ -706,7 +707,7 @@ pub struct OpenAIEmbeddingData {
 }
 
 /// Response from the `/v1/embeddings` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIEmbeddingResponse {
     /// Object type, always "list".
     pub object: String,
@@ -723,7 +724,7 @@ pub struct OpenAIEmbeddingResponse {
 }
 
 /// A model in the OpenAI-compatible list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIModel {
     /// Model identifier.
     pub id: String,
@@ -739,7 +740,7 @@ pub struct OpenAIModel {
 }
 
 /// Response from the `/v1/models` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIListModelsResponse {
     /// Object type, always "list".
     pub object: String,
