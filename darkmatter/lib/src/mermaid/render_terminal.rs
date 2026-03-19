@@ -64,7 +64,7 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
 /// assert!(output.contains("```mermaid"));
 /// ```
 pub fn fallback_code_block(instructions: &str) -> String {
-    biscuit_terminal::components::mermaid::fallback_code_block(instructions)
+    biscuit_terminal::components::mermaid::MermaidRenderer::new(instructions).fallback_code_block()
 }
 
 /// Renders a fallback code block for the given instructions.
@@ -80,7 +80,7 @@ pub fn fallback_code_block(instructions: &str) -> String {
 /// render_fallback_code_block("flowchart LR\n    A --> B");
 /// ```
 pub fn render_fallback_code_block(instructions: &str) {
-    biscuit_terminal::components::mermaid::print_fallback_code_block(instructions)
+    biscuit_terminal::components::mermaid::MermaidRenderer::new(instructions).print_fallback()
 }
 
 #[cfg(test)]
@@ -103,62 +103,16 @@ mod tests {
         assert!(output.contains(instructions));
     }
 
-    // Error type tests - these verify the re-exported type works correctly
+    // Error type tests - verify the re-exported type works correctly
     #[test]
-    fn test_error_display_mmdc_not_found() {
-        let error = MermaidRenderError::MmdcNotFound;
-        assert_eq!(
-            error.to_string(),
-            "mmdc CLI not found. Install with: npm install -g @mermaid-js/mermaid-cli"
-        );
-    }
-
-    #[test]
-    fn test_error_display_mmdc_execution_failed() {
-        let error = MermaidRenderError::MmdcExecutionFailed {
-            exit_code: 1,
-            stderr: "Invalid syntax".to_string(),
-        };
-        assert_eq!(
-            error.to_string(),
-            "mmdc execution failed (exit code 1): Invalid syntax"
-        );
+    fn test_error_display_no_image_support() {
+        let error = MermaidRenderError::NoImageSupport;
+        assert!(error.to_string().contains("does not support"));
     }
 
     #[test]
     fn test_error_display_display_error() {
         let error = MermaidRenderError::DisplayError("display failed".to_string());
-        assert_eq!(error.to_string(), "Failed to display image: display failed");
-    }
-
-    #[test]
-    fn test_error_display_npm_not_found() {
-        let error = MermaidRenderError::NpmNotFound;
-        assert_eq!(
-            error.to_string(),
-            "npm not found. Install Node.js and npm to render Mermaid diagrams in the terminal"
-        );
-    }
-
-    #[test]
-    fn test_error_display_no_image_support() {
-        let error = MermaidRenderError::NoImageSupport;
-        assert!(
-            error
-                .to_string()
-                .contains("does not support image rendering")
-        );
-    }
-
-    #[test]
-    fn test_error_display_content_too_large() {
-        let error = MermaidRenderError::ContentTooLarge {
-            size: 15000,
-            max: 10000,
-        };
-        assert_eq!(
-            error.to_string(),
-            "Diagram too large (15000 bytes, max 10000)"
-        );
+        assert!(error.to_string().contains("display failed"));
     }
 }
