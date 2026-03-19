@@ -8,8 +8,6 @@
 //! The underlying detection logic has been consolidated into biscuit-terminal.
 //! This module re-exports and wraps those functions for API stability.
 
-use termini::{StringCapability, TermInfo};
-
 // Re-export biscuit-terminal's ColorDepth for conversion
 use biscuit_terminal::discovery::detection::ColorDepth as BtColorDepth;
 
@@ -104,12 +102,13 @@ pub fn color_depth() -> u32 {
 
 /// Returns whether the terminal supports setting the foreground color.
 ///
-/// This function checks terminfo for the presence of the SetForeground capability.
+/// Delegates to biscuit-terminal's color depth detection. Any color depth
+/// above `None` indicates foreground color support.
 ///
 /// ## Returns
 ///
 /// - `true` if the terminal supports setting foreground colors
-/// - `false` if the capability is not available or terminfo cannot be queried
+/// - `false` if no color support is detected
 ///
 /// ## Examples
 ///
@@ -123,15 +122,7 @@ pub fn color_depth() -> u32 {
 /// }
 /// ```
 pub fn supports_setting_foreground() -> bool {
-    match TermInfo::from_env() {
-        Ok(term_info) => {
-            // Check for SetForeground capability
-            term_info
-                .utf8_string_cap(StringCapability::SetForeground)
-                .is_some()
-        }
-        Err(_) => false,
-    }
+    biscuit_terminal::discovery::detection::color_depth() != BtColorDepth::None
 }
 
 /// Returns whether the terminal supports italic text rendering.

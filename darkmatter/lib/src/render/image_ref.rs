@@ -10,7 +10,6 @@ use std::fmt;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use serde::{Deserialize, Serialize};
-use supports_hyperlinks::Stream;
 use thiserror::Error;
 
 use crate::render::stylesheet::{CssSizing, CssSizingProp, Stylesheet, StylesheetError};
@@ -575,7 +574,7 @@ impl ImageRef {
             return self.alt.clone();
         };
 
-        if supports_hyperlinks::on(Stream::Stdout) {
+        if biscuit_terminal::discovery::detection::osc8_link_support() {
             format!("{}{}{}{}{}", OSC8_START, target, BEL, self.alt, OSC8_END)
         } else {
             format!("{} [{}]", self.alt, target)

@@ -12,8 +12,7 @@
 use super::VisualDiffOptions;
 use super::diff::{DiffLine, InlineSpan};
 use std::collections::HashSet;
-use textwrap::{Options as WrapOptions, wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ANSI escape codes
 const RESET: &str = "\x1b[0m";
@@ -472,31 +471,66 @@ fn format_content_with_spans(
 
 /// Wrap a string to fit within a visual width, returning multiple lines if needed.
 ///
-/// Uses textwrap for intelligent word breaking. Each returned line is guaranteed
-/// to fit within `max_width` display columns.
+/// Wraps text to fit within `max_width` display columns.
+///
+/// Tries to break at word boundaries (whitespace); falls back to hard
+/// character-level breaks for words longer than `max_width`.
 fn wrap_to_width(s: &str, max_width: usize) -> Vec<String> {
-    if s.is_empty() {
+    if s.is_empty() || max_width == 0 {
         return vec![String::new()];
     }
 
-    // Handle edge case of very narrow width
-    if max_width == 0 {
-        return vec![String::new()];
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_width: usize = 0;
+
+    for word in s.split_whitespace() {
+        let word_width = UnicodeWidthStr::width(word);
+
+        if word_width > max_width {
+            // Flush current line before handling the long word
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                current_width = 0;
+            }
+            // Hard-break the long word using biscuit-terminal
+            let chunks = biscuit_terminal::utils::block_constraint::wrap_lines(
+                vec![word.to_string()],
+                &biscuit_terminal::utils::layout::WordWrap::None,
+                max_width as u32,
+            );
+            let num_chunks = chunks.len();
+            for (i, chunk) in chunks.into_iter().enumerate() {
+                if i < num_chunks - 1 {
+                    lines.push(chunk);
+                } else {
+                    // Last chunk may be partial — carry it as the current line
+                    current_width = UnicodeWidthStr::width(chunk.as_str());
+                    current = chunk;
+                }
+            }
+        } else if current_width == 0 {
+            current = word.to_string();
+            current_width = word_width;
+        } else if current_width + 1 + word_width <= max_width {
+            current.push(' ');
+            current.push_str(word);
+            current_width += 1 + word_width;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current = word.to_string();
+            current_width = word_width;
+        }
     }
 
-    // Configure textwrap options for proper word wrapping
-    let options = WrapOptions::new(max_width).break_words(true); // Break long words if needed
+    if !current.is_empty() {
+        lines.push(current);
+    }
 
-    let wrapped: Vec<String> = wrap(s, options)
-        .into_iter()
-        .map(|cow| cow.into_owned())
-        .collect();
-
-    // Ensure we always return at least one line
-    if wrapped.is_empty() {
+    if lines.is_empty() {
         vec![String::new()]
     } else {
-        wrapped
+        lines
     }
 }
 
@@ -515,6 +549,7 @@ mod tests {
     fn test_wrap_to_width_long_string() {
         // String exceeds width - wraps to multiple lines
         let result = wrap_to_width("Hello World", 5);
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "Hello");
         assert_eq!(result[1], "World");
@@ -537,6 +572,7 @@ mod tests {
         // CJK characters are 2 columns wide
         // "世界你好" (2+2+2+2=8 width) should wrap at width 4
         let result = wrap_to_width("世界你好", 4);
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "世界");
         assert_eq!(result[1], "你好");
@@ -546,6 +582,7 @@ mod tests {
     fn test_wrap_to_width_long_word_breaks() {
         // A single long word should be broken if necessary
         let result = wrap_to_width("abcdefghij", 5);
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "abcde");
         assert_eq!(result[1], "fghij");

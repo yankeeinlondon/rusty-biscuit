@@ -22,7 +22,7 @@
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
 use std::ops::Range;
-use unicode_width::UnicodeWidthStr;
+use biscuit_terminal::utils::UnicodeWidthStr;
 
 /// Returns parser options suitable for cleanup operations.
 ///
@@ -1287,10 +1287,10 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
             } else if is_cont && !trimmed.is_empty() && in_list_run {
                 // Non-item continuation after a run of list items =
                 // prose following a (sub-)list. Needs a blank line.
-                if let Some(prev) = prev_item_indent {
-                    if indent <= prev {
-                        result.push('\n');
-                    }
+                if let Some(prev) = prev_item_indent
+                    && indent <= prev
+                {
+                    result.push('\n');
                 }
             }
         }

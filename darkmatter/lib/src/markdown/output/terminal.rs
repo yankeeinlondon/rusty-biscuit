@@ -52,8 +52,7 @@ use std::path::{Path, PathBuf};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
-use terminal_size::{Width, terminal_size};
-use unicode_width::UnicodeWidthStr;
+use biscuit_terminal::utils::UnicodeWidthStr;
 
 /// Parse image alt text to extract optional width specification.
 ///
@@ -260,14 +259,12 @@ impl HyperlinkMode {
     ///
     /// ## Returns
     ///
-    /// - `Auto`: Result of `supports_hyperlinks::on(Stream::Stdout)` detection
+    /// - `Auto`: Result of biscuit-terminal's OSC 8 link support detection
     /// - `Always`: `true`
     /// - `Never`: `false`
     fn should_emit_osc8(&self) -> bool {
-        use supports_hyperlinks::Stream;
-
         match self {
-            HyperlinkMode::Auto => supports_hyperlinks::on(Stream::Stdout),
+            HyperlinkMode::Auto => biscuit_terminal::discovery::detection::osc8_link_support(),
             HyperlinkMode::Always => true,
             HyperlinkMode::Never => false,
         }
@@ -783,12 +780,9 @@ pub fn write_terminal<W: std::io::Write>(
     let emit_hyperlinks = options.hyperlink_mode.should_emit_osc8();
 
     // Query terminal width once at start (allow override for testing)
-    const DEFAULT_TERMINAL_WIDTH: u16 = 80;
-    let terminal_width = options.max_width.unwrap_or_else(|| {
-        terminal_size()
-            .map(|(Width(w), _)| w)
-            .unwrap_or(DEFAULT_TERMINAL_WIDTH)
-    });
+    let terminal_width = options
+        .max_width
+        .unwrap_or_else(|| biscuit_terminal::discovery::detection::terminal_width() as u16);
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
@@ -5061,9 +5055,9 @@ fn main() {}
             "Table should have header + separator + data rows"
         );
 
-        let first_width = unicode_width::UnicodeWidthStr::width(lines[0]);
+        let first_width = biscuit_terminal::utils::UnicodeWidthStr::width(lines[0]);
         for (i, line) in lines.iter().enumerate() {
-            let w = unicode_width::UnicodeWidthStr::width(*line);
+            let w = biscuit_terminal::utils::UnicodeWidthStr::width(*line);
             assert_eq!(
                 w, first_width,
                 "Line {} has width {} but expected {} (misalignment):\n{}",
@@ -6253,7 +6247,7 @@ fn line6() {}
 
         // No line should exceed the max width
         for line in &lines {
-            let width = unicode_width::UnicodeWidthStr::width(*line);
+            let width = biscuit_terminal::utils::UnicodeWidthStr::width(*line);
             assert!(
                 width <= 20,
                 "Line exceeds max width: '{}' (width: {})",

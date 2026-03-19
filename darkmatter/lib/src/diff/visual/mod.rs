@@ -24,7 +24,6 @@ mod unified;
 pub use diff::{DiffLine, InlineSpan, compute_visual_diff};
 
 use std::path::Path;
-use terminal_size::{Width, terminal_size};
 
 /// Threshold for switching between side-by-side and unified views.
 const SIDE_BY_SIDE_THRESHOLD: u16 = 110;
@@ -58,7 +57,7 @@ pub struct VisualDiffOptions {
 
 impl Default for VisualDiffOptions {
     fn default() -> Self {
-        let width = terminal_size().map(|(Width(w), _)| w).unwrap_or(80);
+        let width = biscuit_terminal::discovery::detection::terminal_width() as u16;
         Self {
             terminal_width: width,
             show_line_numbers: true,

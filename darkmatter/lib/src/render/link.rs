@@ -12,7 +12,6 @@ use std::hash::{Hash, Hasher};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use serde::{Deserialize, Serialize};
-use supports_hyperlinks::Stream;
 use thiserror::Error;
 
 use crate::render::stylesheet::{Stylesheet, StylesheetError};
@@ -369,7 +368,7 @@ impl Link {
 
     /// Renders an OSC 8 hyperlink with capability fallback.
     pub fn to_terminal(&self) -> String {
-        if supports_hyperlinks::on(Stream::Stdout) {
+        if biscuit_terminal::discovery::detection::osc8_link_support() {
             format!(
                 "{}{}{}{}{}",
                 LINK_START, self.link_to, BEL, self.display, LINK_END

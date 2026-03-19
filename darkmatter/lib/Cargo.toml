@@ -51,14 +51,7 @@ pulldown-cmark = "0.13"
 pulldown-cmark-to-cmark = "22"
 markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
 html-escape = "0.2"
-unicode-width = "0.2.2"
-textwrap = "0.16"
-supports-hyperlinks = "3.2.0"
 similar = { version = "2.6", features = ["inline"] }
-
-# Terminal capabilities
-termini = "1.0"
-terminal_size = "0.4"
 
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
