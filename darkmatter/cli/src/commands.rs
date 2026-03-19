@@ -258,6 +258,7 @@ pub fn run_render(
 }
 
 /// Run the compose (transform) pipeline.
+#[allow(clippy::too_many_arguments)]
 pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
