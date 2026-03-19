@@ -3,6 +3,15 @@ use crate::*;
 use biscuit_terminal::components::terminal_image::{TerminalImage, parse_width_spec};
 use biscuit_terminal::components::two_column::ColumnWidth;
 
+/// Returns whether the terminal is in dark mode.
+fn is_dark_mode() -> bool {
+    use biscuit_terminal::discovery::detection::ColorMode;
+    matches!(
+        Terminal::color_mode(),
+        ColorMode::Dark | ColorMode::Unknown
+    )
+}
+
 /// Creates a path completer that filters for image files.
 ///
 /// Formats an axis label for Mermaid quadrant charts.
@@ -235,36 +244,21 @@ const FLOWCHART_EXAMPLE: &[&str] = &[
 ];
 const FLOWCHART_EXAMPLE_CMD: &str = r#"bt flowchart "A[Start] --> B{Decision}" "B -->|Yes| C[Success]" "B -->|No| D[Retry]" "D --> B""#;
 
-/// Display a mermaid diagram and optionally output metadata.
+/// General helper for displaying diagrams (Mermaid or Graph).
 ///
 /// This helper function:
-/// 1. Renders the diagram using the cached renderer
-/// 2. Displays it in the terminal
-/// 3. Optionally outputs metadata to stderr
+/// 1. Displays the cached PNG in the terminal
+/// 2. Optionally outputs metadata to stderr
 ///
-/// Returns the render metadata (path, cache_hit, file_size, render_time) for further use.
-pub fn display_mermaid_diagram(
-    renderer: &MermaidRenderer,
-    instructions: &str,
-    diagram_type: &str,
+/// This is used internally by both `display_mermaid_diagram()` and `display_graph_diagram()`.
+fn display_diagram(
+    png_path: std::path::PathBuf,
+    cache_hit: bool,
+    render_time_ms: u64,
     width: Option<&str>,
     layout: &LayoutArgs,
     meta: bool,
 ) -> color_eyre::Result<()> {
-    use std::time::Instant;
-
-    let start_time = Instant::now();
-
-    // Render the diagram to a cached PNG file
-    let (png_path, cache_hit) = match renderer.render_to_cached_png() {
-        Ok((path, hit)) => (path, hit),
-        Err(e) => {
-            return handle_mermaid_error(e, instructions, diagram_type);
-        }
-    };
-
-    let render_time_ms = start_time.elapsed().as_millis() as u64;
-
     // Parse width specification: default to 50% if not specified
     let image_width = match width {
         Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
@@ -311,6 +305,65 @@ pub fn display_mermaid_diagram(
     settle_terminal();
 
     Ok(())
+}
+
+/// Display a mermaid diagram and optionally output metadata.
+///
+/// This helper function:
+/// 1. Renders the diagram using the cached renderer
+/// 2. Displays it in the terminal
+/// 3. Optionally outputs metadata to stderr
+///
+/// Returns the render metadata (path, cache_hit, file_size, render_time) for further use.
+pub fn display_mermaid_diagram(
+    renderer: &MermaidRenderer,
+    instructions: &str,
+    diagram_type: &str,
+    width: Option<&str>,
+    layout: &LayoutArgs,
+    meta: bool,
+) -> color_eyre::Result<()> {
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+
+    // Render the diagram to a cached PNG file
+    let (png_path, cache_hit) = match renderer.render_to_cached_png() {
+        Ok((path, hit)) => (path, hit),
+        Err(e) => {
+            return handle_mermaid_error(e, instructions, diagram_type);
+        }
+    };
+
+    let render_time_ms = start_time.elapsed().as_millis() as u64;
+
+    display_diagram(png_path, cache_hit, render_time_ms, width, layout, meta)
+}
+
+/// Display a graph diagram and optionally output metadata.
+///
+/// This helper function:
+/// 1. Renders the graph diagram using the cached renderer
+/// 2. Displays it in the terminal
+/// 3. Optionally outputs metadata to stderr
+pub fn display_graph_diagram(
+    renderer: &biscuit_terminal::components::graph_expression::GraphExpressionRenderer,
+    width: Option<&str>,
+    layout: &LayoutArgs,
+    meta: bool,
+) -> color_eyre::Result<()> {
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+
+    // Render the diagram to a cached PNG file
+    let (png_path, cache_hit) = renderer
+        .render_to_cached_png()
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+
+    let render_time_ms = start_time.elapsed().as_millis() as u64;
+
+    display_diagram(png_path, cache_hit, render_time_ms, width, layout, meta)
 }
 
 /// Render a flowchart to the terminal.
@@ -372,7 +425,7 @@ pub fn render_flowchart(
     // Configure renderer based on inverse flag
     let renderer = if inverse {
         // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -526,8 +579,7 @@ pub fn render_quadrant(
         cfg = cfg.with_point_label_font_size(effective_label_size);
 
         // Apply theme preset (sets default quadrant colors based on terminal color mode)
-        let color_mode = Terminal::color_mode();
-        cfg = theme.apply(cfg, color_mode);
+        cfg = theme.apply(cfg, is_dark_mode());
 
         // Apply individual fill overrides (these take precedence over theme)
         if let Some(color) = q1_fill {
@@ -549,7 +601,7 @@ pub fn render_quadrant(
     // Configure renderer based on inverse flag, applying config for point styling
     let renderer = if inverse {
         // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -852,7 +904,7 @@ pub fn render_pie_chart(
     // Configure renderer based on inverse flag
     let renderer = if inverse {
         // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -942,7 +994,7 @@ pub fn render_git_graph(
     // Configure renderer based on inverse flag
     let renderer = if inverse {
         // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -1142,7 +1194,7 @@ pub fn render_xy_chart(
 
     // Configure renderer based on inverse flag
     let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -1315,7 +1367,7 @@ pub fn render_timeline(
 
     // Configure renderer
     let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -1407,7 +1459,7 @@ pub fn render_state_diagram(
 
     // Configure renderer
     let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -1427,6 +1479,89 @@ pub fn render_state_diagram(
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
+/// Example data for graph-expression --example
+const GRAPH_EXPRESSION_EXAMPLE: &str = "Start -> Validate -> Render; Validate -> Retry";
+const GRAPH_EXPRESSION_EXAMPLE_CMD: &str = r#"bt graph-expression "Start -> Validate -> Render; Validate -> Retry""#;
+
+/// Render a graph expression to the terminal.
+///
+/// Creates a graph diagram from expression syntax or DOT format.
+#[allow(clippy::too_many_arguments)]
+pub fn render_graph_expression(
+    example: bool,
+    syntax: args::GraphInputSyntaxArg,
+    title: Option<&str>,
+    width: Option<&str>,
+    inverse: bool,
+    orientation: args::GraphOrientationArg,
+    layout: &LayoutArgs,
+    meta: bool,
+    content: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::graph_expression::GraphExpressionRenderer;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let source = if example {
+        GRAPH_EXPRESSION_EXAMPLE.to_string()
+    } else {
+        content.join(" ")
+    };
+
+    if source.trim().is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No graph expression provided. Use format: \"a -> b -> c\""
+        ));
+    }
+
+    if json {
+        let output = serde_json::json!({
+            "type": "graph-expression",
+            "syntax": format!("{:?}", syntax).to_lowercase(),
+            "orientation": format!("{:?}", orientation),
+            "inverse": inverse,
+            "title": title,
+            "width": width,
+            "source": source,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer based on inverse flag
+    let renderer = if inverse {
+        // Inverse: solid background (no transparent)
+        GraphExpressionRenderer::parse(&source, syntax.into())
+            .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+            .with_transparent_background(false)
+    } else {
+        // Default: transparent background
+        GraphExpressionRenderer::for_terminal(&source, syntax.into())
+            .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+    };
+
+    // Apply title and orientation
+    let renderer = if let Some(t) = title {
+        renderer.with_title(t)
+    } else {
+        renderer
+    };
+    let renderer = renderer.with_orientation(orientation.into());
+
+    // Display the diagram
+    display_graph_diagram(&renderer, width, layout, meta)?;
+
+    // Print command used if example mode
+    if example {
+        print_example_command(GRAPH_EXPRESSION_EXAMPLE_CMD);
     }
 
     Ok(())
@@ -1523,7 +1658,7 @@ pub fn render_erd(
 
     // Configure renderer
     let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
         MermaidRenderer::new(&instructions)
             .with_theme(theme)
             .with_transparent_background(false)
@@ -1542,9 +1677,6 @@ pub fn render_erd(
 }
 
 /// Handle Mermaid rendering errors with user-friendly output.
-///
-/// Parses mmdc errors to extract syntax information and formats
-/// them nicely without JavaScript callstacks.
 pub fn handle_mermaid_error(
     error: biscuit_terminal::components::mermaid::MermaidRenderError,
     instructions: &str,
@@ -1560,57 +1692,26 @@ pub fn handle_mermaid_error(
     let reset = if no_color { "" } else { "\x1b[0m" };
 
     match error {
-        MermaidRenderError::MmdcExecutionFailed { stderr, .. } => {
-            // Check if this is a parse/syntax error
-            if stderr.contains("Parse error") || stderr.contains("Expecting") {
-                // Add breathing room before error
-                eprintln!();
-                eprintln!("{}{}Error:{} Mermaid Syntax Error\n", red, bold, reset);
+        MermaidRenderError::Visualization(ref viz_err) => {
+            // Show the error message
+            eprintln!();
+            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
 
-                // Extract useful lines from stderr (skip JS callstack and useless line numbers)
-                for line in stderr.lines() {
-                    // Include:
-                    // - Context lines showing actual mermaid code (starts with ...)
-                    // - Error pointer lines (contains ^ and dashes)
-                    // - "Expecting" lines describing what was expected
-                    // Skip: "Error: Parse error on line X:", JS callstack lines
-                    let is_context_line = line.starts_with("...");
-                    let is_pointer_line =
-                        line.contains("^") && line.chars().filter(|c| *c == '-').count() > 3;
-                    let is_expecting_line =
-                        line.starts_with("Expecting") || line.contains("Expecting '");
-
-                    if is_context_line || is_pointer_line || is_expecting_line {
-                        eprintln!("{}", line);
-                    }
-                }
-
-                // Show the mermaid block that was defined
-                eprintln!(
-                    "\n{}Mermaid {} was defined as:{}\n",
-                    dim, diagram_type, reset
-                );
-                eprintln!("```mermaid\n{}\n```", instructions);
-            } else {
-                // Non-syntax error, show the full error (with breathing room)
-                eprintln!();
-                eprintln!("{}{}Error:{} {}", red, bold, reset, stderr);
-            }
-        }
-        MermaidRenderError::MmdcNotFound => {
+            // Show the mermaid block that was defined
             eprintln!(
-                "{}{}Error:{} mmdc CLI not found.\n\nInstall with: npm install -g @mermaid-js/mermaid-cli",
+                "\n{}Mermaid {} was defined as:{}\n",
+                dim, diagram_type, reset
+            );
+            eprintln!("```mermaid\n{}\n```", instructions);
+        }
+        MermaidRenderError::NoImageSupport => {
+            eprintln!(
+                "{}{}Error:{} Terminal does not support image rendering.\n\nUse a terminal with image support (Kitty, iTerm2, WezTerm, Ghostty).",
                 red, bold, reset
             );
         }
-        MermaidRenderError::NpmNotFound => {
-            eprintln!(
-                "{}{}Error:{} npm not found.\n\nInstall Node.js and npm to render Mermaid diagrams.",
-                red, bold, reset
-            );
-        }
-        _ => {
-            eprintln!("{}{}Error:{} {}", red, bold, reset, error);
+        MermaidRenderError::DisplayError(ref msg) => {
+            eprintln!("{}{}Error:{} Failed to display image: {}", red, bold, reset, msg);
         }
     }
 

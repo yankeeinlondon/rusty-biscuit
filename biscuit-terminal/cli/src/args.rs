@@ -842,12 +842,96 @@ pub enum Command {
         transitions: Vec<String>,
     },
 
+    /// Render a graph expression as a diagram
+    ///
+    /// Creates a graph diagram from expression syntax or DOT format.
+    /// Expression syntax: "a -> b -> c" or "a -- b -- c"
+    #[command(
+        display_order = 11,
+        after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example graph:
+    bt graph-expression --example
+
+  Basic directed graph (expression syntax):
+    bt graph-expression \"a -> b -> c\"
+
+  Undirected graph (expression syntax):
+    bt graph-expression \"a -- b -- c\"
+
+  With title:
+    bt graph-expression --title \"My Graph\" \"start -> validate -> render\"
+
+  Left-to-right orientation:
+    bt graph-expression --orientation left-to-right \"a -> b -> c\"
+
+  DOT format (explicit):
+    bt graph-expression --syntax dot \"digraph { A -> B; B -> C; }\"
+
+  Custom width:
+    bt graph-expression --width 60% \"a -> b -> c\"
+
+  Inverted colors (solid background):
+    bt graph-expression --inverse \"a -> b -> c\"
+
+  JSON output (for scripting):
+    bt graph-expression --json \"a -> b\"
+
+\x1b[1m\x1b[4mSyntax Formats:\x1b[0m
+  Expression (default):
+    - Directed edge:   a -> b
+    - Undirected edge: a -- b
+    - Chain:           a -> b -> c (creates a->b and b->c)
+    - Separators:      semicolons or newlines
+
+  DOT format:
+    Full Graphviz DOT language support
+    Auto-detected if input contains 'digraph' or 'graph'
+"
+    )]
+    GraphExpression {
+        /// Show an example graph expression
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Input syntax (auto, expression, dot)
+        #[arg(long, default_value = "auto", value_enum)]
+        syntax: GraphInputSyntaxArg,
+
+        /// Diagram title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Graph layout direction
+        #[arg(long, value_enum, default_value = "top-to-bottom")]
+        orientation: GraphOrientationArg,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
+
+        /// Show render metadata
+        #[arg(long)]
+        meta: bool,
+
+        /// Graph expression or DOT input
+        #[arg(value_name = "EXP", required_unless_present = "example")]
+        content: Vec<String>,
+    },
+
     /// Render an entity relationship diagram (ERD)
     ///
     /// Creates a Mermaid ERD showing entities and their relationships.
     #[command(
         name = "erd",
-        display_order = 11,
+        display_order = 12,
         after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example ERD:
@@ -1190,4 +1274,38 @@ pub enum Command {
         #[command(flatten)]
         layout: LayoutArgs,
     },
+}
+
+/// Graph input syntax argument for CLI.
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum GraphInputSyntaxArg {
+    Auto,
+    Expression,
+    Dot,
+}
+
+impl From<GraphInputSyntaxArg> for biscuit_terminal::components::graph_expression::GraphInputSyntax {
+    fn from(arg: GraphInputSyntaxArg) -> Self {
+        match arg {
+            GraphInputSyntaxArg::Auto => Self::Auto,
+            GraphInputSyntaxArg::Expression => Self::Expression,
+            GraphInputSyntaxArg::Dot => Self::Dot,
+        }
+    }
+}
+
+/// Graph orientation argument for CLI.
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum GraphOrientationArg {
+    LeftToRight,
+    TopToBottom,
+}
+
+impl From<GraphOrientationArg> for biscuit_terminal::components::graph_expression::GraphOrientation {
+    fn from(arg: GraphOrientationArg) -> Self {
+        match arg {
+            GraphOrientationArg::LeftToRight => Self::LeftToRight,
+            GraphOrientationArg::TopToBottom => Self::TopToBottom,
+        }
+    }
 }

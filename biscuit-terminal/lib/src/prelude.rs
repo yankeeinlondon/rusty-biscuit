@@ -1,15 +1,15 @@
 pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
+pub use crate::components::graph_expression::{
+    GraphExpressionRenderer, GraphInputSyntax, GraphOrientation, GraphRenderError,
+};
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;
 pub use crate::components::list::{OrderedList, UnorderedList};
 pub use crate::components::mermaid::{
-    MMDC_MIN_VERSION, MermaidConfig, MermaidRenderError, MermaidRenderer, MermaidTheme,
-    MmdcVersion, QuadrantTheme, detect_mmdc_version, fallback_code_block,
-    print_fallback_code_block,
+    MermaidConfig, MermaidRenderError, MermaidRenderer, MermaidTheme, QuadrantTheme,
 };
-pub use crate::components::mermaid_cache::{MermaidCache, MermaidCacheKey};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
 pub use crate::components::renderable::{Renderable, RenderableContent};

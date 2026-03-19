@@ -19,7 +19,7 @@ clap = ["dep:clap"]
 
 [dependencies]
 base64 = "0.22"
-biscuit-hash = { path = "../../biscuit-hash/lib" }
+biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"] }
 ignore = "0.4"
 image = "0.25"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -47,9 +47,6 @@ clap = { version = "4", features = ["derive"], optional = true }
 # Temporary files (for mermaid rendering)
 tempfile = "3"
 chrono = { version = "0.4.43", features = ["serde"] }
-
-# Command detection (for Chromium detection)
-which = "7"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

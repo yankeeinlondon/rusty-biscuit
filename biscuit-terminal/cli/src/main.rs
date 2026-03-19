@@ -331,6 +331,30 @@ fn main() -> color_eyre::Result<()> {
                 args.json,
             );
         }
+        Some(Command::GraphExpression {
+            example,
+            ref syntax,
+            ref title,
+            ref width,
+            inverse,
+            ref orientation,
+            ref layout,
+            meta,
+            ref content,
+        }) => {
+            return render_graph_expression(
+                example,
+                syntax.clone(),
+                title.as_deref(),
+                width.as_deref(),
+                inverse,
+                orientation.clone(),
+                layout,
+                meta,
+                content,
+                args.json,
+            );
+        }
         Some(Command::Erd {
             ref title,
             ref width,

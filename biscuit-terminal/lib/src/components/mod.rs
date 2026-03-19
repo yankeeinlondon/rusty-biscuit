@@ -1,11 +1,11 @@
 pub mod block_quote;
 pub mod compose;
 pub mod filesystem;
+pub mod graph_expression;
 pub mod image_options;
 pub mod inline_content;
 pub mod list;
 pub mod mermaid;
-pub mod mermaid_cache;
 pub mod progress;
 pub mod prose;
 pub mod renderable;
