@@ -18,6 +18,8 @@ The repository is organized into the following package areas and packages:
 • biscuit-terminal
     • biscuit-terminal-cli v0.1.0 (biscuit-terminal/cli) [Rust]
     • biscuit-terminal v0.1.0 (biscuit-terminal/lib) [Rust]
+• biscuit-visualized
+    • biscuit-visualized v0.1.0 (biscuit-visualized) [Rust]
 • claudine
     • claudine-cli v0.1.0 (claudine/cli) [Rust]
     • claudine v0.1.0 (claudine/lib) [Rust]

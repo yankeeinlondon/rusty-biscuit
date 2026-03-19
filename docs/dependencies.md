@@ -87,6 +87,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, terminal_
 
+- [biscuit-visualized](./biscuit-visualized) _v0.1.0_
+
+    _Shared visualization library for Mermaid diagrams and graph rendering. Pure Rust with no external dependencies._
+
+    _Tags: workspace, library, visualization_
+
 - [claudine](./claudine) _v0.1.0_
 
     _Universal hook/event handler for agentic CLIs (Claude, Codex, Gemini, Goose, etc.)._

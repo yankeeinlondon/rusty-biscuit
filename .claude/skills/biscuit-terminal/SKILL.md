@@ -102,7 +102,7 @@ let fg = match Terminal::color_mode() {
 
 \* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
 
-## bt CLI Commands (16 commands)
+## bt CLI Commands (17 commands)
 
 ```bash
 # Terminal inspection
@@ -120,7 +120,7 @@ bt columns --gap 6 --left 40% "Title" "Description"
 bt dir src --depth 2 --filter ".rs"
 bt dir --size --tokens --modified
 
-# Diagrams (10 types)
+# Diagrams (10 Mermaid types + 1 graph type)
 bt flowchart "A --> B --> C"
 bt quadrant "Task: [0.5, 0.5]"
 bt pie-chart "Dogs: 50" "Cats: 30"
@@ -130,10 +130,14 @@ bt line-chart --width 60% --horizontal --show-data-label 1 8 7 5
 bt timeline "2020: Started" "2022: Launch"
 bt state-diagram "[*] --> Idle" "Idle --> Running"
 bt erd "Customer ||--o{ Order : places"
+bt graph-expression "a -> b -> c"          # Arrow syntax (directed)
+bt graph-expression "a -- b -- c"          # Dash syntax (undirected)
+bt graph-expression --syntax dot "digraph { A -> B; }"  # DOT syntax
 ```
 
 Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`, `--meta`
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
+Graph extras: `--syntax` (arrow, dash, dot), `--orientation` (left-to-right, top-to-bottom)
 
 ## Module Structure
 
@@ -184,7 +188,7 @@ biscuit_terminal/
 ## Key Dependencies
 
 - `sniff` - Git/repo/monorepo detection used by `Terminal::new()`
-- `biscuit-hash` - xxHash keys for Mermaid cache entries
+- `biscuit-visualized` - Mermaid and graph rendering (pure Rust, no external dependencies)
 
 ## Resources
 

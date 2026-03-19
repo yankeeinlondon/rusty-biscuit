@@ -30,6 +30,7 @@ just -f biscuit-terminal/justfile install
 | `bt timeline` | Timeline diagrams |
 | `bt state-diagram` | State machine diagrams |
 | `bt erd` | Entity relationship diagrams |
+| `bt graph-expression` | Graph visualization (arrow, dash, DOT syntax) |
 | `bt quote` | Block quote with left border |
 | `bt list` | Bulleted list with hanging indents |
 | `bt columns` | Two-column text layout |
@@ -399,6 +400,37 @@ bt erd --entity "Customer { id int PK, name string }" "Customer ||--o{ Order : p
 
 Relationships: `||--||` (one-to-one), `||--o{` (one-to-many), `}o--o{` (many-to-many)
 
+### Graph Expression Rendering
+
+Render graph structures using layout-rs with multiple syntax options:
+
+```bash
+bt graph-expression "a -> b -> c"                           # Arrow syntax (directed)
+bt graph-expression "a -- b -- c"                           # Dash syntax (undirected)
+bt graph-expression --syntax dot "digraph { A -> B; B -> C; }"  # DOT syntax
+bt graph-expression --title "Data Flow" "start -> validate -> render"
+bt graph-expression --orientation top-to-bottom "a -> b -> c"
+bt graph-expression --width 60% "a -> b -> c"
+bt graph-expression --inverse "a -> b -> c"
+bt graph-expression --json "a -> b"
+```
+
+**Syntax options:**
+- **Arrow (`->`)**: Directed edges, e.g., `a -> b -> c; b -> d`
+- **Dash (`--`)**: Undirected edges, e.g., `a -- b -- c`
+- **DOT**: Full Graphviz DOT language support, e.g., `digraph { A -> B; }`
+
+**Orientation:**
+- `left-to-right` (default)
+- `top-to-bottom`
+
+**Features:**
+- **Pure Rust rendering**: Uses `layout-rs` via `biscuit-visualized` (no external dependencies)
+- **Color mode detection**: Automatically uses light or dark theme
+- **Transparent background**: Blends with terminal (default)
+- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+
 ### Common Diagram Options
 
 All diagram commands support:
@@ -495,6 +527,11 @@ bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
 
 # Render an ERD
 bt erd "Customer ||--o{ Order : places"
+
+# Render a graph visualization
+bt graph-expression "a -> b -> c"
+bt graph-expression "a -- b -- c"
+bt graph-expression --syntax dot "digraph { A -> B; B -> C; }"
 
 # Display a directory tree
 bt dir src --depth 2 --filter ".rs"

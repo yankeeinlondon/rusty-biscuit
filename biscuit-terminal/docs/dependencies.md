@@ -133,11 +133,11 @@
 
 ## Workspace Dependencies
 
-- [biscuit-hash](../../biscuit-hash/lib) _v0.1.0_
+- [biscuit-visualized](../../biscuit-visualized) _v0.1.0_
 
-    _xxHash keys for Mermaid cache entries._
+    _Shared visualization library for Mermaid diagrams and graph rendering. Delegates to mermaid-rs-renderer and layout-rs._
 
-    _Tags: workspace, hashing_
+    _Tags: workspace, visualization_
 
 - [sniff](../../sniff/lib) _v0.1.0_
 

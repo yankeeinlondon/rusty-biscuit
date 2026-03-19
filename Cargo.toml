@@ -33,6 +33,6 @@ members = [
     "tui",
     "unchained-ai/cli",
     "unchained-ai/gen",
-    "unchained-ai/lib", "agent-sandbox/cli", "messenger/cli", "messenger/lib",
+    "unchained-ai/lib", "agent-sandbox/cli", "messenger/cli", "messenger/lib", "biscuit-visualized/src",
 ]
 exclude = ["schematic/schema"]

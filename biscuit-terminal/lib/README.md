@@ -31,7 +31,8 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 
 - **Terminal App Detection**: Recognize 13+ terminal emulators with capability profiles
 - **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
-- **Mermaid Diagrams**: Render diagrams to terminal using mmdc CLI with viuer
+- **Mermaid Diagrams**: Adapter for `biscuit-visualized` Mermaid rendering (pure Rust, no external dependencies)
+- **Graph Visualization**: Adapter for `biscuit-visualized` graph rendering with multiple syntaxes
 - **OS Detection**: Identify operating system and Linux distribution
 - **Repo Detection**: Detect git repo root and monorepo status via `sniff`
 - **Font Detection**: Extract font name and size from terminal config files
@@ -71,8 +72,8 @@ fn main() {
 - `discovery::locale` - Locale detection
 - `discovery::eval` - Escape code analysis utilities
 - `components::terminal_image` - Terminal image rendering (Kitty/iTerm2 with fallbacks)
-- `components::mermaid` - Mermaid diagram rendering via mmdc CLI
-- `components::mermaid_cache` - File-based caching for rendered mermaid diagrams
+- `components::mermaid` - Mermaid diagram adapter (delegates to biscuit-visualized)
+- `components::graph_expression` - Graph visualization adapter (delegates to biscuit-visualized)
 - `components::prose` - Styled prose rendering
 - `components::table` - Table rendering
 - `components::list` - List rendering
@@ -169,7 +170,7 @@ All image rendering is string-based: `render()`, `render_optimistic()`, and `ren
 
 ## Mermaid Diagrams (MermaidRenderer)
 
-`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool. Rendered diagrams are cached to disk via `MermaidCache` using `biscuit-hash` xxHash-based keys derived from all render parameters (source, theme, scale, config, transparency, title, mmdc version). Cached PNGs are stored in the OS temp directory (`/var/folders/.../mermaid-cache/` on macOS, `/tmp/mermaid-cache/` on Linux) and cleaned up by the OS automatically.
+`MermaidRenderer` provides a terminal-aware adapter for rendering Mermaid diagrams via `biscuit-visualized`. The rendering uses pure Rust (`mermaid-rs-renderer`) with no external dependencies like Node.js or mmdc. Rendered diagrams are cached using content-addressed xxHash keys.
 
 ### Basic Usage
 
@@ -300,28 +301,9 @@ let theme = MermaidTheme::for_color_mode(Terminal::color_mode());
 let inverse_theme = theme.inverse();  // For solid background rendering
 ```
 
-### CLI Detection
-
-The module uses a fallback chain:
-
-1. **Direct `mmdc`**: If in PATH, use directly
-2. **npx fallback**: If `npx` is available, use `npx mmdc` with a warning
-3. **Error**: If neither is available, return an error
-
-### Icon Pack Support
-
-Mermaid diagrams support icons via `--iconPacks`:
-
-- `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
-- `@iconify-json/lucide` - Lucide icons
-- `@iconify-json/carbon` - Carbon Design icons
-- `@iconify-json/system-uicons` - System UI icons
-
-Usage: `A[icon:fa7-brands:github]`
-
 ### Security Features
 
-- **Size limit**: Diagrams over 10KB are rejected (prevents CLI abuse)
+- **Size limit**: Diagrams over 10KB are rejected
 - **Terminal check**: Only renders when image protocols are supported
 
 ### Display Notes

@@ -11,7 +11,8 @@
         <li>OSC8 links, OSC52 clipboard, and OSC10/11/12 color queries</li>
         <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
         <li>inline image rendering via Kitty/iTerm2 protocols with graceful fallback</li>
-        <li>Mermaid diagram rendering (10 diagram types) via mmdc CLI</li>
+        <li>Mermaid diagram rendering (10 diagram types) via biscuit-visualized (pure Rust)</li>
+        <li>Graph visualization with arrow, dash, and DOT syntax support</li>
         <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>
         <li>composable rendering components: Prose, Table, List, Section, FileSystem, TwoColumn, and more</li>
       </ul>
@@ -184,6 +185,6 @@ Both list structs are represented by a 1:M _elements_ where the elements are any
 
 ## The `bt` CLI
 
-While this package is mainly about providing terminal capabilities to other libraries, it also includes a CLI (`bt`) for terminal inspection, styled text rendering, directory trees, and Mermaid diagram generation. It supports 16 commands including `image`, `prose`, `quote`, `list`, `columns`, `dir`, `flowchart`, `quadrant`, `pie-chart`, `git-graph`, `bar-chart`, `line-chart`, `timeline`, `state-diagram`, and `erd`.
+While this package is mainly about providing terminal capabilities to other libraries, it also includes a CLI (`bt`) for terminal inspection, styled text rendering, directory trees, and diagram generation. It supports 17 commands including `image`, `prose`, `quote`, `list`, `columns`, `dir`, `flowchart`, `quadrant`, `pie-chart`, `git-graph`, `bar-chart`, `line-chart`, `timeline`, `state-diagram`, `erd`, and `graph-expression`.
 
 See [`cli/README.md`](./cli/README.md) for full documentation.
