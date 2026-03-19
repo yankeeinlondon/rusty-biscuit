@@ -19,8 +19,9 @@ fn render_svg_to_pixmap(
     svg_data: &str,
     scale: u32,
 ) -> Result<resvg::tiny_skia::Pixmap, RasterError> {
-    let opts = usvg::Options::default();
-    let tree = usvg::Tree::from_str(&svg_data, &opts)
+    let mut opts = usvg::Options::default();
+    opts.fontdb_mut().load_system_fonts();
+    let tree = usvg::Tree::from_str(svg_data, &opts)
         .map_err(|e| RasterError::SvgParseFailed(e.to_string()))?;
 
     let scale = scale.max(1);

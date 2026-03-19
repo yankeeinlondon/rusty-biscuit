@@ -7,4 +7,4 @@ pub mod render;
 pub use builder::GraphBuilder;
 pub use error::GraphError;
 pub use expression::{EdgeKind, GraphEdge, GraphExpression};
-pub use render::{GraphDiagram, GraphInputSyntax, GraphOrientation, GraphSource};
+pub use render::{GraphColorTheme, GraphDiagram, GraphInputSyntax, GraphOrientation, GraphSource};
