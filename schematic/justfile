@@ -231,7 +231,7 @@ install:
     @echo ""
     @echo -e "{{BLUE}}{{BOLD}}Schematic installed successfully!{{RESET}}"
     @echo ""
-    @just _play drop-4 --background
+    @playa effect drop-4 2>/dev/null || exit 0
 
 # clean generated schema code
 clean-generated:
