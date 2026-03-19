@@ -910,6 +910,10 @@ pub enum Command {
         #[arg(long)]
         inverse: bool,
 
+        /// Font family for labels (e.g., "Courier", "Georgia, serif")
+        #[arg(long, add = ArgValueCompleter::new(font_completer))]
+        font: Option<String>,
+
         /// Graph layout direction
         #[arg(long, value_enum, default_value = "top-to-bottom")]
         orientation: GraphOrientationArg,

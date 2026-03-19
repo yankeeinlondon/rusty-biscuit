@@ -28,18 +28,35 @@ pub fn format_axis_label(label: &str) -> String {
 
 /// Apply optional margin and alignment overrides to a `TerminalImage`.
 pub fn apply_image_layout(term_image: &mut TerminalImage, layout: &LayoutArgs) {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::Margin;
+
     if let Some(ml) = layout.margin_left {
-        term_image.margin_left = ml;
+        term_image.layout_mut().left_margin = Margin::Chars(ml);
     }
     if let Some(mr) = layout.margin_right {
-        term_image.margin_right = mr;
+        term_image.layout_mut().right_margin = Margin::Chars(mr);
     }
     if let Some(align) = layout.alignment {
-        term_image.alignment = match align {
-            layout::Alignment::Left => std::fmt::Alignment::Left,
-            layout::Alignment::Center => std::fmt::Alignment::Center,
-            layout::Alignment::Right => std::fmt::Alignment::Right,
-        };
+        term_image.layout_mut().alignment = align;
+    }
+}
+
+/// Apply optional margin and alignment overrides to any `Renderable` component.
+pub fn apply_renderable_layout(
+    component: &mut impl biscuit_terminal::components::renderable::Renderable,
+    layout: &LayoutArgs,
+) {
+    use biscuit_terminal::utils::layout::Margin;
+
+    if let Some(ml) = layout.margin_left {
+        component.layout_mut().left_margin = Margin::Chars(ml);
+    }
+    if let Some(mr) = layout.margin_right {
+        component.layout_mut().right_margin = Margin::Chars(mr);
+    }
+    if let Some(align) = layout.alignment {
+        component.layout_mut().alignment = align;
     }
 }
 
@@ -247,7 +264,7 @@ const FLOWCHART_EXAMPLE_CMD: &str = r#"bt flowchart "A[Start] --> B{Decision}" "
 /// 1. Displays the cached PNG in the terminal
 /// 2. Optionally outputs metadata to stderr
 ///
-/// This is used internally by both `display_mermaid_diagram()` and `display_graph_diagram()`.
+/// This is used internally by `display_mermaid_diagram()`.
 fn display_diagram(
     png_path: std::path::PathBuf,
     cache_hit: bool,
@@ -304,18 +321,6 @@ fn display_diagram(
     Ok(())
 }
 
-fn display_fallback_code_block(code_block: &str, layout: &LayoutArgs) {
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
-
-    println!("{code_block}");
-
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
-    }
-}
-
 /// Display a mermaid diagram and optionally output metadata.
 ///
 /// This helper function:
@@ -343,62 +348,6 @@ pub fn display_mermaid_diagram(
             return handle_mermaid_error(e, instructions, diagram_type);
         }
     };
-
-    let render_time_ms = start_time.elapsed().as_millis() as u64;
-
-    display_diagram(png_path, cache_hit, render_time_ms, width, layout, meta)
-}
-
-/// Display a graph diagram and optionally output metadata.
-///
-/// This helper function:
-/// 1. Renders the graph diagram using the cached renderer
-/// 2. Displays it in the terminal
-/// 3. Optionally outputs metadata to stderr
-pub fn display_graph_diagram(
-    renderer: &biscuit_terminal::components::graph_expression::GraphExpressionRenderer,
-    width: Option<&str>,
-    layout: &LayoutArgs,
-    meta: bool,
-) -> color_eyre::Result<()> {
-    use std::time::Instant;
-
-    let start_time = Instant::now();
-
-    if !biscuit_terminal::components::graph_expression::GraphExpressionRenderer::terminal_supports_images()
-    {
-        let rendered = if meta {
-            Some(
-                renderer
-                    .render_to_cached_png()
-                    .map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-            )
-        } else {
-            None
-        };
-
-        display_fallback_code_block(&renderer.fallback_code_block(), layout);
-
-        if let Some((png_path, cache_hit)) = rendered {
-            let render_time_ms = start_time.elapsed().as_millis() as u64;
-            let file_size_bytes = std::fs::metadata(&png_path).map(|m| m.len()).unwrap_or(0);
-            let render_meta = RenderMeta {
-                filename: png_path.to_string_lossy().to_string(),
-                cache_hit,
-                file_size_bytes,
-                render_time_ms,
-            };
-
-            eprintln!("{}", serde_json::to_string(&render_meta)?);
-        }
-
-        return Ok(());
-    }
-
-    // Render the diagram to a cached PNG file
-    let (png_path, cache_hit) = renderer
-        .render_to_cached_png()
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
 
@@ -1538,13 +1487,15 @@ pub fn render_graph_expression(
     title: Option<&str>,
     width: Option<&str>,
     inverse: bool,
+    font: Option<&str>,
     orientation: args::GraphOrientationArg,
     layout: &LayoutArgs,
-    meta: bool,
+    _meta: bool,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::graph_expression::GraphExpressionRenderer;
+    use biscuit_terminal::components::graph_expression::GraphExpression;
+    use biscuit_terminal::components::renderable::Renderable;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1570,34 +1521,46 @@ pub fn render_graph_expression(
             "inverse": inverse,
             "title": title,
             "width": width,
+            "font": font,
             "source": source,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
 
-    // Configure renderer based on inverse flag
-    let renderer = if inverse {
-        // Inverse: solid background (no transparent)
-        GraphExpressionRenderer::parse(&source, syntax.into())
+    // Configure graph based on inverse flag
+    let mut graph = if inverse {
+        GraphExpression::parse(&source, syntax.into())
             .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
             .with_transparent_background(false)
     } else {
-        // Default: transparent background
-        GraphExpressionRenderer::for_terminal(&source, syntax.into())
+        GraphExpression::for_terminal(&source, syntax.into())
             .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
     };
 
-    // Apply title and orientation
-    let renderer = if let Some(t) = title {
-        renderer.with_title(t)
-    } else {
-        renderer
-    };
-    let renderer = renderer.with_orientation(orientation.into());
+    // Apply font override
+    if let Some(f) = font {
+        graph = graph.with_font_family(f);
+    }
 
-    // Display the diagram
-    display_graph_diagram(&renderer, width, layout, meta)?;
+    // Apply title and orientation
+    if let Some(t) = title {
+        graph = graph.with_title(t);
+    }
+    graph = graph.with_orientation(orientation.into());
+
+    // Apply width
+    if let Some(w) = width {
+        let image_width = parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+        graph = graph.with_width(image_width);
+    }
+
+    // Apply layout (margins, alignment) via Renderable trait
+    apply_renderable_layout(&mut graph, layout);
+
+    // Render and display
+    let terminal = Terminal::new();
+    print!("{}", graph.display(&terminal));
 
     // Print command used if example mode
     if example {

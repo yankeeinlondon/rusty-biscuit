@@ -9,6 +9,7 @@
 
 use std::path::Path;
 
+#[allow(unused_imports)] // layout is re-exported via `use crate::*` for args.rs
 use biscuit_terminal::{
     components::{
         mermaid::{MermaidRenderer, QuadrantTheme},
@@ -29,7 +30,7 @@ use output::*;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
-use clap_complete::engine::PathCompleter;
+use clap_complete::engine::{CompletionCandidate, PathCompleter};
 
 /// Brief pause after image rendering.
 ///
@@ -337,6 +338,7 @@ fn main() -> color_eyre::Result<()> {
             ref title,
             ref width,
             inverse,
+            ref font,
             ref orientation,
             ref layout,
             meta,
@@ -348,6 +350,7 @@ fn main() -> color_eyre::Result<()> {
                 title.as_deref(),
                 width.as_deref(),
                 inverse,
+                font.as_deref(),
                 orientation.clone(),
                 layout,
                 meta,
@@ -526,6 +529,25 @@ Setup:
 After setup, restart your shell or source the file to activate completions.
 "#
     );
+}
+
+/// Completes font family names from system fonts available to resvg.
+pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    use std::sync::OnceLock;
+
+    static FONTS: OnceLock<Vec<String>> = OnceLock::new();
+    let fonts = FONTS.get_or_init(
+        biscuit_terminal::components::graph_expression::available_font_families,
+    );
+
+    let prefix = current.to_str().unwrap_or("");
+    let prefix_lower = prefix.to_lowercase();
+
+    fonts
+        .iter()
+        .filter(|name| name.to_lowercase().starts_with(&prefix_lower))
+        .map(|name| CompletionCandidate::new(name.as_str()))
+        .collect()
 }
 
 /// Completes files with extensions: png, jpg, jpeg, gif (case-insensitive).
