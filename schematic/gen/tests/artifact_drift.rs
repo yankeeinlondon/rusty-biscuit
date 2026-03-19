@@ -67,14 +67,10 @@ fn generated_openapi_artifacts_are_up_to_date() {
                 let generated = fs::read_to_string(&generated_path).unwrap();
 
                 // Check against committed file
-                let committed_path =
-                    Path::new("openapi").join(generated_path.file_name().unwrap());
+                let committed_path = Path::new("openapi").join(generated_path.file_name().unwrap());
                 if committed_path.exists() {
                     let committed = fs::read_to_string(&committed_path).unwrap_or_else(|e| {
-                        panic!(
-                            "Failed to read committed OpenAPI for {}: {}",
-                            api.name, e
-                        )
+                        panic!("Failed to read committed OpenAPI for {}: {}", api.name, e)
                     });
 
                     assert_eq!(
@@ -116,13 +112,14 @@ fn generated_postman_artifacts_are_up_to_date() {
             })
         } else {
             let api_refs: Vec<&_> = apis.iter().collect();
-            write_postman_grouped(&api_refs, module_name, temp_dir.path(), false)
-                .unwrap_or_else(|e| {
+            write_postman_grouped(&api_refs, module_name, temp_dir.path(), false).unwrap_or_else(
+                |e| {
                     panic!(
                         "Failed to generate grouped Postman for module {}: {}",
                         module_name, e
                     )
-                })
+                },
+            )
         };
 
         let generated = fs::read_to_string(&generated_path).unwrap();

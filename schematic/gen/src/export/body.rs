@@ -121,8 +121,7 @@ mod tests {
     fn map_body_form_data() {
         let request = ApiRequest::FormData {
             fields: vec![
-                schematic_define::request::FormField::text("name")
-                    .with_description("User name"),
+                schematic_define::request::FormField::text("name").with_description("User name"),
                 schematic_define::request::FormField::file("avatar").optional(),
             ],
         };

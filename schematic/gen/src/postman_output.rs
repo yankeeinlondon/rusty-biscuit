@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
 use schematic_define::{RestApi, RestMethod};
+use serde::Serialize;
 
 use crate::errors::GeneratorError;
-use crate::export::auth::{map_auth, ExportAuth};
-use crate::export::body::{map_body, ExportBody, FormField};
+use crate::export::auth::{ExportAuth, map_auth};
+use crate::export::body::{ExportBody, FormField, map_body};
 use crate::export::naming::resolve_module_name;
 use crate::export::path_params::extract_folder_key;
 use crate::parser::extract_path_params;
@@ -1145,10 +1145,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let path = write_postman(&api, &temp_dir, true).unwrap();
 
-        assert_eq!(
-            path.file_name().unwrap(),
-            "testapi.postman_collection.json"
-        );
+        assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
     }
 
     #[test]
@@ -1160,10 +1157,7 @@ mod tests {
         let path = write_postman(&api, temp_dir.path(), false).unwrap();
 
         assert!(path.exists());
-        assert_eq!(
-            path.file_name().unwrap(),
-            "testapi.postman_collection.json"
-        );
+        assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
 
         // Verify it's valid JSON
         let content = fs::read_to_string(&path).unwrap();

@@ -407,11 +407,8 @@ fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Generator
     }
 
     // Resolve export defaults before processing
-    let (openapi_out, postman_out) = resolve_export_defaults(
-        opts.output,
-        opts.openapi_out,
-        opts.postman_out,
-    );
+    let (openapi_out, postman_out) =
+        resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
 
     let api = resolve_api(api_name)?;
 
@@ -609,11 +606,8 @@ fn run_openapi_export(
 /// Runs the generate command for all APIs at once.
 fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
     // Resolve export defaults before processing
-    let (openapi_out, postman_out) = resolve_export_defaults(
-        opts.output,
-        opts.openapi_out,
-        opts.postman_out,
-    );
+    let (openapi_out, postman_out) =
+        resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
 
     let apis = resolve_all_apis();
 
@@ -751,7 +745,8 @@ fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
             if module_apis.len() == 1 {
                 // Single API in module: use regular export
                 // Track expected filename
-                let module_name_resolved = schematic_gen::export::resolve_module_name(&module_apis[0]);
+                let module_name_resolved =
+                    schematic_gen::export::resolve_module_name(&module_apis[0]);
                 postman_files.insert(format!("{}.postman_collection.json", module_name_resolved));
 
                 run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;
@@ -790,8 +785,7 @@ fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
                         module_name,
                     );
                 } else {
-                    let path =
-                        write_postman_grouped(&api_refs, module_name, postman_path, false)?;
+                    let path = write_postman_grouped(&api_refs, module_name, postman_path, false)?;
                     println!(
                         "{} Exported grouped Postman collection to {}",
                         "[OK]".green().bold(),

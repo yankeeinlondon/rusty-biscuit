@@ -240,9 +240,7 @@ pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
         "ollama-native" | "ollama-openai" => Some(crate::ollama::openapi_registry()),
         "openai" => Some(crate::openai::openapi_registry()),
         "samsung-smart-tv" => Some(crate::samsung_smart_tv::openapi_registry()),
-        "unfolded-circle-core-rest" => {
-            Some(crate::unfolded_circle::core_rest::openapi_registry())
-        }
+        "unfolded-circle-core-rest" => Some(crate::unfolded_circle::core_rest::openapi_registry()),
         _ => None,
     }
 }
