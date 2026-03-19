@@ -5,16 +5,16 @@ description: Expert knowledge for the darkmatter Rust library - markdown parsing
 
 # darkmatter
 
-Markdown parsing, rendering, and transformation library. Part of the dockhand monorepo.
+Markdown parsing, rendering, and composition library. Part of the dockhand monorepo.
 
-**Key principle**: darkmatter handles **markdown parsing and transformation**. Terminal rendering (images, mermaid, detection) is delegated to `biscuit-terminal`.
+**Key principle**: darkmatter handles **markdown parsing and composition**. Terminal rendering (images, mermaid, detection) is delegated to `biscuit-terminal`.
 
 ## Responsibility Split
 
 | Responsibility | Package |
 |----------------|---------|
 | Markdown parsing (CommonMark + GFM) | darkmatter |
-| Transform pipeline (Stage 1 + Stage 2 transclusion) | darkmatter |
+| Compose pipeline (Stage 1 + Stage 2 transclusion) | darkmatter |
 | Syntax highlighting | darkmatter (syntect) |
 | Frontmatter extraction | darkmatter |
 | HTML output | darkmatter |
@@ -32,7 +32,7 @@ let mut stdout = std::io::stdout();
 write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ```
 
-## Transform Pipeline
+## Compose Pipeline
 
 Two-stage pipeline for document preparation:
 
@@ -49,17 +49,17 @@ Two-stage pipeline for document preparation:
 - `when="..."` conditions, cycle detection, depth limits
 
 ```rust
-use darkmatter::markdown::{Markdown, transform::TransformOptions};
+use darkmatter::markdown::{Markdown, compose::ComposeOptions};
 
 // Stage 1 only
 let mut md: Markdown = content.into();
-let report = md.transform_mut()?;
+let report = md.compose_mut()?;
 
 // Stage 1 + Stage 2 (requires source file path)
 let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
-let options = TransformOptions::new()
+let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
-let (transformed, report) = md.transform_with(options)?;
+let (composed, report) = md.compose_with(options)?;
 ```
 
 ### Interpolation Expressions
@@ -83,7 +83,7 @@ let (transformed, report) = md.transform_with(options)?;
 
 ## Detailed Topics
 
-- [Transform Pipeline](./transform.md) - Text replacement, interpolation, cleanup
+- [Compose Pipeline](./compose.md) - Text replacement, interpolation, cleanup
 - [Terminal Output](./terminal.md) - ANSI rendering, themes, options
 - [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
 - [Document Comparison](./comparison.md) - Structural diff, change classification

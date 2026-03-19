@@ -1,6 +1,6 @@
-# Transform Pipeline
+# Compose Pipeline
 
-The darkmatter transform pipeline provides document preparation through two stages.
+The darkmatter compose pipeline provides document preparation through two stages.
 
 ## Pipeline Overview
 
@@ -23,26 +23,26 @@ The darkmatter transform pipeline provides document preparation through two stag
 ## API
 
 ```rust
-use darkmatter::markdown::{Markdown, transform::{TransformOptions, Stage1Stages}};
+use darkmatter::markdown::{Markdown, compose::{ComposeOptions, Stage1Stages}};
 
-// Stage 1 only (transform with defaults)
-let (transformed, report) = md.transform()?;
+// Stage 1 only (compose with defaults)
+let (composed, report) = md.compose()?;
 
 // Stage 1 with options
-let options = TransformOptions::new()
+let options = ComposeOptions::new()
     .with_external_state(json!({"key": "value"}))
     .with_stages(Stage1Stages::only_interpolation())
     .with_fail_fast(true);
-let (transformed, report) = md.transform_with(options)?;
+let (composed, report) = md.compose_with(options)?;
 
 // In-place mutation (no clone)
-let report = md.transform_mut()?;
+let report = md.compose_mut()?;
 
 // Stage 1 + Stage 2 (requires source file path for transclusion)
 let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
-let options = TransformOptions::new()
+let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
-let (transformed, report) = md.transform_with(options)?;
+let (composed, report) = md.compose_with(options)?;
 println!("{}", report.summary());
 ```
 
@@ -150,16 +150,16 @@ Inline: `{{ not_evaluated }}`
 ```
 ```
 
-## TransformReport
+## ComposeReport
 
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     pub replacements_applied: usize,
     pub interpolations_applied: usize,
     pub toc_links_generated: usize,
     pub cleanup_changed: bool,
     pub normalization_report: Option<NormalizationReport>,
-    pub warnings: Vec<TransformWarning>,
+    pub warnings: Vec<ComposeWarning>,
 }
 
 // Check for changes
@@ -218,9 +218,9 @@ epilogue: ./footer.md
 ## Module Structure
 
 ```
-darkmatter/lib/src/markdown/transform/
+darkmatter/lib/src/markdown/compose/
 ├── mod.rs           # Public API, pipeline orchestration
-├── types.rs         # TransformOptions, TransformReport, etc.
+├── types.rs         # ComposeOptions, ComposeReport, etc.
 ├── state.rs         # EffectiveState, merge logic
 ├── replacement.rs   # Text replacement engine
 └── interpolation/
