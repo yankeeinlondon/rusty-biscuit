@@ -654,9 +654,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
         // Validate file read/write permissions before proceeding
         // (success message is deferred to the reporting section below)
-        if let Err(e) =
-            claudine::composition::validate_file_permissions(&source.resolved_path)
-        {
+        if let Err(e) = claudine::composition::validate_file_permissions(&source.resolved_path) {
             log::message(&crate::output::fm_check_fail(
                 "the agent does not have read and write permissions required to finish the task",
                 &term,
