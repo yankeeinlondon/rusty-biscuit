@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::error::GraphError;
 
 /// The type of edge in a graph.
@@ -57,12 +59,11 @@ impl GraphExpression {
     pub fn parse(input: &str) -> Result<Self, GraphError> {
         let input = input.trim();
         if input.is_empty() {
-            return Err(GraphError::ExpressionParseFailed(
-                "Empty input".to_string(),
-            ));
+            return Err(GraphError::ExpressionParseFailed("Empty input".to_string()));
         }
 
         let mut nodes = Vec::new();
+        let mut seen_nodes = HashSet::new();
         let mut edges = Vec::new();
 
         // Split by semicolons and newlines into statements
@@ -76,7 +77,7 @@ impl GraphExpression {
 
             // Add nodes (deduplicated)
             for node in stmt_nodes {
-                if !nodes.contains(&node) {
+                if seen_nodes.insert(node.clone()) {
                     nodes.push(node);
                 }
             }

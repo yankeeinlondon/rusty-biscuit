@@ -1,4 +1,7 @@
-use super::render::GraphDiagram;
+use super::{
+    error::GraphError,
+    render::{GraphDiagram, GraphOrientation},
+};
 
 /// A builder for constructing graphs programmatically.
 ///
@@ -14,12 +17,14 @@ use super::render::GraphDiagram;
 ///     .add_node("app", Some("My App".to_string()))
 ///     .add_node("db", Some("PostgreSQL".to_string()))
 ///     .add_edge("app", "db")
-///     .build();
+///     .build()
+///     .unwrap();
 /// ```
 pub struct GraphBuilder {
     directed: bool,
     nodes: Vec<(String, Option<String>)>,
     edges: Vec<(String, String)>,
+    orientation: GraphOrientation,
 }
 
 impl GraphBuilder {
@@ -37,6 +42,7 @@ impl GraphBuilder {
             directed: true,
             nodes: Vec::new(),
             edges: Vec::new(),
+            orientation: GraphOrientation::TopToBottom,
         }
     }
 
@@ -54,7 +60,14 @@ impl GraphBuilder {
             directed: false,
             nodes: Vec::new(),
             edges: Vec::new(),
+            orientation: GraphOrientation::TopToBottom,
         }
+    }
+
+    /// Sets the graph orientation used when the diagram is rendered.
+    pub fn with_orientation(&mut self, orientation: GraphOrientation) -> &mut Self {
+        self.orientation = orientation;
+        self
     }
 
     /// Adds a node to the graph.
@@ -73,7 +86,7 @@ impl GraphBuilder {
     ///     .add_node("a", None)
     ///     .add_node("b", Some("Node B".to_string()));
     /// ```
-    pub fn add_node(mut self, id: impl Into<String>, label: Option<String>) -> Self {
+    pub fn add_node(&mut self, id: impl Into<String>, label: Option<String>) -> &mut Self {
         self.nodes.push((id.into(), label));
         self
     }
@@ -97,7 +110,7 @@ impl GraphBuilder {
     ///     .add_edge("a", "b")
     ///     .add_edge("b", "c");
     /// ```
-    pub fn add_edge(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
+    pub fn add_edge(&mut self, from: impl Into<String>, to: impl Into<String>) -> &mut Self {
         self.edges.push((from.into(), to.into()));
         self
     }
@@ -114,12 +127,12 @@ impl GraphBuilder {
     /// let graph = GraphBuilder::directed()
     ///     .add_node("a", None)
     ///     .add_edge("a", "b")
-    ///     .build();
+    ///     .build()
+    ///     .unwrap();
     /// ```
-    pub fn build(self) -> GraphDiagram {
+    pub fn build(&self) -> Result<GraphDiagram, GraphError> {
         let dot_source = self.to_dot();
-        // Safe to unwrap because we're generating valid DOT
-        GraphDiagram::from_dot(dot_source).expect("Generated DOT should be valid")
+        GraphDiagram::from_dot(dot_source).map(|diagram| diagram.with_orientation(self.orientation))
     }
 
     fn to_dot(&self) -> String {

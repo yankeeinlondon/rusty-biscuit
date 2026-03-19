@@ -1221,36 +1221,102 @@ fn test_erd_requires_relationships_without_example() {
         .stderr(predicate::str::contains("required"));
 }
 
-// ============================================================================
-// Mermaid Rendering Tests (require mmdc installed)
-// ============================================================================
-//
-// These tests validate that generated mermaid syntax is actually parseable
-// by the mermaid CLI (mmdc). They are skipped if mmdc is not installed.
-
-/// Check if mmdc (mermaid CLI) is available
-fn mmdc_available() -> bool {
-    std::process::Command::new("mmdc")
-        .arg("--version")
+#[test]
+fn test_graph_expression_json_example() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("graph-expression")
+        .arg("--json")
+        .arg("--example")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+        .expect("Failed to execute command");
 
-/// Helper macro to skip test if mmdc is not available
-macro_rules! require_mmdc {
-    () => {
-        if !mmdc_available() {
-            eprintln!("Skipping test: mmdc not installed");
-            return;
-        }
-    };
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("type").unwrap(), "graph-expression");
+    assert_eq!(parsed.get("syntax").unwrap(), "auto");
+    assert_eq!(parsed.get("orientation").unwrap(), "top-to-bottom");
+    assert!(
+        parsed
+            .get("source")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("Validate")
+    );
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+fn test_graph_expression_json_dot_mode() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("graph-expression")
+        .arg("--json")
+        .arg("--syntax")
+        .arg("dot")
+        .arg("--orientation")
+        .arg("left-to-right")
+        .arg("digraph { A -> B; B -> C; }")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("syntax").unwrap(), "dot");
+    assert_eq!(parsed.get("orientation").unwrap(), "left-to-right");
+    assert_eq!(
+        parsed.get("source").unwrap().as_str().unwrap(),
+        "digraph { A -> B; B -> C; }"
+    );
+}
+
+#[test]
+fn test_graph_expression_falls_back_to_code_block_on_non_tty() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("graph-expression")
+        .arg("a -> b -> c")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("```graph-expression"));
+    assert!(stdout.contains("a -> b -> c"));
+}
+
+#[test]
+fn test_graph_expression_dot_fallback_uses_dot_info_string() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("graph-expression")
+        .arg("--syntax")
+        .arg("dot")
+        .arg("digraph { A -> B; }")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("```dot"));
+    assert!(stdout.contains("digraph { A -> B; }"));
+}
+
+// ============================================================================
+// Visualization Rendering Smoke Tests
+// ============================================================================
+//
+// These tests exercise the native Rust rendering path used by the CLI.
+
+#[test]
+#[serial_test::serial(visualization)]
 fn test_bar_chart_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("bar-chart")
         .arg("--example")
@@ -1259,9 +1325,8 @@ fn test_bar_chart_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_bar_chart_renders_json_input() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("bar-chart")
         .arg("[10, 20, 30, 40]")
@@ -1270,9 +1335,8 @@ fn test_bar_chart_renders_json_input() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_bar_chart_renders_with_all_options() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("bar-chart")
         .arg("[10, 20, 30]")
@@ -1287,9 +1351,8 @@ fn test_bar_chart_renders_with_all_options() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_line_chart_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("line-chart")
         .arg("--example")
@@ -1298,9 +1361,8 @@ fn test_line_chart_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_line_chart_renders_with_options() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("line-chart")
         .arg("[5, 15, 10, 25]")
@@ -1311,9 +1373,8 @@ fn test_line_chart_renders_with_options() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_timeline_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("timeline")
         .arg("--example")
@@ -1322,9 +1383,8 @@ fn test_timeline_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_timeline_renders_with_events() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("timeline")
         .arg("2020 : Project started")
@@ -1335,9 +1395,8 @@ fn test_timeline_renders_with_events() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_state_diagram_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("state-diagram")
         .arg("--example")
@@ -1346,9 +1405,8 @@ fn test_state_diagram_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_state_diagram_renders_with_transitions() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("state-diagram")
         .arg("Idle --> Running : start")
@@ -1358,9 +1416,8 @@ fn test_state_diagram_renders_with_transitions() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_erd_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("erd")
         .arg("--example")
@@ -1369,9 +1426,8 @@ fn test_erd_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_erd_renders_with_entities() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("erd")
         .arg("--entity")
@@ -1384,9 +1440,8 @@ fn test_erd_renders_with_entities() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_flowchart_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("flowchart")
         .arg("--example")
@@ -1395,9 +1450,8 @@ fn test_flowchart_example_renders() {
 }
 
 #[test]
-#[serial_test::serial(mmdc)]
+#[serial_test::serial(visualization)]
 fn test_git_graph_example_renders() {
-    require_mmdc!();
     cargo_bin_cmd!("bt")
         .arg("git-graph")
         .arg("--example")
@@ -1436,13 +1490,22 @@ fn test_columns_snapshot() {
 
 #[test]
 fn test_actual_terminal_query_integration() {
-    use expectrl::{Expect, spawn};
+    use expectrl::{Expect, Session};
+    use std::process::Command;
 
     // We get the path to the 'bt' binary
     let bin_path = assert_cmd::cargo::cargo_bin!("bt");
 
-    // spawn a process in a PTY so that is_tty() is true
-    let mut p = spawn(bin_path.to_str().unwrap()).expect("Failed to spawn bt in PTY");
+    // Spawn in a PTY so `is_tty()` is true, but force a non-probing path.
+    // Pseudo-terminals used in tests do not implement real terminal query
+    // responses, so inheriting host env vars can cause capability probes to
+    // hang waiting for replies that never arrive.
+    let mut cmd = Command::new(bin_path);
+    cmd.env("CI", "1");
+    cmd.env("NO_COLOR", "1");
+    cmd.env("TERM_PROGRAM", "Ghostty");
+
+    let mut p = Session::spawn(cmd).expect("Failed to spawn bt in PTY");
 
     // Check that we can read some terminal output (it implies the program ran successfully in a PTY)
     // We expect it to print "Terminal Metadata"

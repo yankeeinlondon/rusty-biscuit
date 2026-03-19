@@ -1284,7 +1284,19 @@ pub enum GraphInputSyntaxArg {
     Dot,
 }
 
-impl From<GraphInputSyntaxArg> for biscuit_terminal::components::graph_expression::GraphInputSyntax {
+impl GraphInputSyntaxArg {
+    pub fn as_cli_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Expression => "expression",
+            Self::Dot => "dot",
+        }
+    }
+}
+
+impl From<GraphInputSyntaxArg>
+    for biscuit_terminal::components::graph_expression::GraphInputSyntax
+{
     fn from(arg: GraphInputSyntaxArg) -> Self {
         match arg {
             GraphInputSyntaxArg::Auto => Self::Auto,
@@ -1301,7 +1313,18 @@ pub enum GraphOrientationArg {
     TopToBottom,
 }
 
-impl From<GraphOrientationArg> for biscuit_terminal::components::graph_expression::GraphOrientation {
+impl GraphOrientationArg {
+    pub fn as_cli_str(&self) -> &'static str {
+        match self {
+            Self::LeftToRight => "left-to-right",
+            Self::TopToBottom => "top-to-bottom",
+        }
+    }
+}
+
+impl From<GraphOrientationArg>
+    for biscuit_terminal::components::graph_expression::GraphOrientation
+{
     fn from(arg: GraphOrientationArg) -> Self {
         match arg {
             GraphOrientationArg::LeftToRight => Self::LeftToRight,

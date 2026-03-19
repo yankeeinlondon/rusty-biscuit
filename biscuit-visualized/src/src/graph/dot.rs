@@ -1,4 +1,14 @@
 use super::{error::GraphError, expression::GraphExpression};
+use std::collections::BTreeSet;
+
+use layout::gv::parser::ast;
+
+fn parse_dot_ast(dot_source: &str) -> Result<ast::Graph, GraphError> {
+    let mut parser = layout::gv::DotParser::new(dot_source);
+    parser
+        .process()
+        .map_err(|e| GraphError::DotParseFailed(e.to_string()))
+}
 
 /// Renders a DOT graph source to SVG format.
 ///
@@ -38,11 +48,7 @@ use super::{error::GraphError, expression::GraphExpression};
 pub fn render_dot_to_svg(dot_source: &str) -> Result<String, GraphError> {
     use layout::backends::svg::SVGWriter;
 
-    // Parse DOT format
-    let mut parser = layout::gv::DotParser::new(dot_source);
-    let graph = parser
-        .process()
-        .map_err(|e| GraphError::DotParseFailed(e.to_string()))?;
+    let graph = parse_dot_ast(dot_source)?;
 
     // Build visual graph - GraphBuilder handles parsing and creating the VisualGraph
     let mut builder = layout::gv::GraphBuilder::new();
@@ -96,7 +102,51 @@ pub fn validate_dot(source: &str) -> Result<(), GraphError> {
         ));
     }
 
+    let graph = parse_dot_ast(source)?;
+    validate_subgraphs(&graph, false)?;
+
     Ok(())
+}
+
+fn validate_subgraphs(graph: &ast::Graph, inside_subgraph: bool) -> Result<(), GraphError> {
+    for stmt in &graph.list.list {
+        if let ast::Stmt::SubGraph(subgraph) = stmt {
+            if inside_subgraph {
+                return Err(GraphError::UnsupportedDotFeature(
+                    "Nested subgraphs/clusters are not supported".to_string(),
+                ));
+            }
+
+            validate_subgraphs(subgraph, true)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn dot_node_count(source: &str) -> Result<usize, GraphError> {
+    let graph = parse_dot_ast(source)?;
+    let mut names = BTreeSet::new();
+    collect_node_names(&graph, &mut names);
+    Ok(names.len())
+}
+
+fn collect_node_names(graph: &ast::Graph, names: &mut BTreeSet<String>) {
+    for stmt in &graph.list.list {
+        match stmt {
+            ast::Stmt::Node(node) => {
+                names.insert(node.id.name.clone());
+            }
+            ast::Stmt::Edge(edge) => {
+                names.insert(edge.from.name.clone());
+                for (node, _) in &edge.to {
+                    names.insert(node.name.clone());
+                }
+            }
+            ast::Stmt::SubGraph(subgraph) => collect_node_names(subgraph, names),
+            ast::Stmt::Attribute(_) => {}
+        }
+    }
 }
 
 /// Converts a graph expression to DOT format.

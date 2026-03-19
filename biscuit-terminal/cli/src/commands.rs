@@ -6,10 +6,7 @@ use biscuit_terminal::components::two_column::ColumnWidth;
 /// Returns whether the terminal is in dark mode.
 fn is_dark_mode() -> bool {
     use biscuit_terminal::discovery::detection::ColorMode;
-    matches!(
-        Terminal::color_mode(),
-        ColorMode::Dark | ColorMode::Unknown
-    )
+    matches!(Terminal::color_mode(), ColorMode::Dark | ColorMode::Unknown)
 }
 
 /// Creates a path completer that filters for image files.
@@ -307,6 +304,18 @@ fn display_diagram(
     Ok(())
 }
 
+fn display_fallback_code_block(code_block: &str, layout: &LayoutArgs) {
+    for _ in 0..layout.margin_top.unwrap_or(0) {
+        println!();
+    }
+
+    println!("{code_block}");
+
+    for _ in 0..layout.margin_bottom.unwrap_or(0) {
+        println!();
+    }
+}
+
 /// Display a mermaid diagram and optionally output metadata.
 ///
 /// This helper function:
@@ -355,6 +364,36 @@ pub fn display_graph_diagram(
     use std::time::Instant;
 
     let start_time = Instant::now();
+
+    if !biscuit_terminal::components::graph_expression::GraphExpressionRenderer::terminal_supports_images()
+    {
+        let rendered = if meta {
+            Some(
+                renderer
+                    .render_to_cached_png()
+                    .map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+            )
+        } else {
+            None
+        };
+
+        display_fallback_code_block(&renderer.fallback_code_block(), layout);
+
+        if let Some((png_path, cache_hit)) = rendered {
+            let render_time_ms = start_time.elapsed().as_millis() as u64;
+            let file_size_bytes = std::fs::metadata(&png_path).map(|m| m.len()).unwrap_or(0);
+            let render_meta = RenderMeta {
+                filename: png_path.to_string_lossy().to_string(),
+                cache_hit,
+                file_size_bytes,
+                render_time_ms,
+            };
+
+            eprintln!("{}", serde_json::to_string(&render_meta)?);
+        }
+
+        return Ok(());
+    }
 
     // Render the diagram to a cached PNG file
     let (png_path, cache_hit) = renderer
@@ -1486,7 +1525,8 @@ pub fn render_state_diagram(
 
 /// Example data for graph-expression --example
 const GRAPH_EXPRESSION_EXAMPLE: &str = "Start -> Validate -> Render; Validate -> Retry";
-const GRAPH_EXPRESSION_EXAMPLE_CMD: &str = r#"bt graph-expression "Start -> Validate -> Render; Validate -> Retry""#;
+const GRAPH_EXPRESSION_EXAMPLE_CMD: &str =
+    r#"bt graph-expression "Start -> Validate -> Render; Validate -> Retry""#;
 
 /// Render a graph expression to the terminal.
 ///
@@ -1525,8 +1565,8 @@ pub fn render_graph_expression(
     if json {
         let output = serde_json::json!({
             "type": "graph-expression",
-            "syntax": format!("{:?}", syntax).to_lowercase(),
-            "orientation": format!("{:?}", orientation),
+            "syntax": syntax.as_cli_str(),
+            "orientation": orientation.as_cli_str(),
             "inverse": inverse,
             "title": title,
             "width": width,
@@ -1711,7 +1751,10 @@ pub fn handle_mermaid_error(
             );
         }
         MermaidRenderError::DisplayError(ref msg) => {
-            eprintln!("{}{}Error:{} Failed to display image: {}", red, bold, reset, msg);
+            eprintln!(
+                "{}{}Error:{} Failed to display image: {}",
+                red, bold, reset, msg
+            );
         }
     }
 

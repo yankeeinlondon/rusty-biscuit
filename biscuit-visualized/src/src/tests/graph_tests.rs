@@ -1,7 +1,11 @@
 use crate::{
     artifact::{OutputFormat, RenderRequest},
-    graph::{EdgeKind, GraphBuilder, GraphDiagram, GraphExpression, GraphInputSyntax},
+    cache::FileCache,
+    graph::{
+        EdgeKind, GraphBuilder, GraphDiagram, GraphExpression, GraphInputSyntax, GraphOrientation,
+    },
 };
+use serial_test::serial;
 
 #[test]
 fn expression_parse_simple_chain() {
@@ -110,6 +114,28 @@ fn dot_validate_accepts_simple_dot() {
 }
 
 #[test]
+fn dot_validate_rejects_nested_subgraphs() {
+    use crate::graph::dot::validate_dot;
+
+    let dot = r#"
+        digraph G {
+            subgraph cluster_a {
+                A -> B;
+                subgraph cluster_b {
+                    B -> C;
+                }
+            }
+        }
+    "#;
+
+    let result = validate_dot(dot);
+    assert!(matches!(
+        result,
+        Err(crate::graph::GraphError::UnsupportedDotFeature(_))
+    ));
+}
+
+#[test]
 fn graph_diagram_parse_auto_detects_expression() {
     let result = GraphDiagram::parse("a -> b", GraphInputSyntax::Auto);
     assert!(result.is_ok());
@@ -152,8 +178,11 @@ fn graph_diagram_with_title_includes_label() {
 }
 
 #[test]
-#[ignore = "requires file I/O and may fail if layout-rs has issues"]
+#[serial]
 fn graph_diagram_render_produces_file() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
     let graph = GraphDiagram::from_expression("a -> b").expect("Should parse");
 
     let request = RenderRequest {
@@ -163,21 +192,17 @@ fn graph_diagram_render_produces_file() {
     };
 
     let result = graph.render(&request);
-
-    match result {
-        Ok(artifact) => {
-            assert!(artifact.path.exists());
-            assert_eq!(artifact.format, OutputFormat::Svg);
-        }
-        Err(e) => {
-            eprintln!("Render failed (may be expected if layout-rs has issues): {}", e);
-        }
-    }
+    let artifact = result.expect("Graph render should succeed");
+    assert!(artifact.path.exists());
+    assert_eq!(artifact.format, OutputFormat::Svg);
 }
 
 #[test]
-#[ignore = "requires file I/O and may fail if layout-rs has issues"]
+#[serial]
 fn graph_diagram_render_cache_hit_on_second_call() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
     let graph = GraphDiagram::from_expression("a -> b").expect("Should parse");
 
     let request = RenderRequest {
@@ -187,13 +212,7 @@ fn graph_diagram_render_cache_hit_on_second_call() {
     };
 
     // First render
-    let result1 = graph.render(&request);
-    if result1.is_err() {
-        eprintln!("Skipping cache test due to render failure");
-        return;
-    }
-
-    let artifact1 = result1.unwrap();
+    let artifact1 = graph.render(&request).expect("Should render");
     assert!(!artifact1.cache_hit);
 
     // Second render should hit cache
@@ -207,7 +226,8 @@ fn graph_builder_directed_creates_valid_diagram() {
     let graph = GraphBuilder::directed()
         .add_node("a", None)
         .add_edge("a", "b")
-        .build();
+        .build()
+        .unwrap();
 
     let dot = graph.source_as_dot();
     assert!(dot.contains("digraph"));
@@ -220,7 +240,8 @@ fn graph_builder_undirected_creates_valid_diagram() {
         .add_node("a", None)
         .add_node("b", None)
         .add_edge("a", "b")
-        .build();
+        .build()
+        .unwrap();
 
     let dot = graph.source_as_dot();
     assert!(dot.contains("graph"));
@@ -233,9 +254,76 @@ fn graph_builder_with_labels() {
         .add_node("a", Some("Node A".to_string()))
         .add_node("b", Some("Node B".to_string()))
         .add_edge("a", "b")
-        .build();
+        .build()
+        .unwrap();
 
     let dot = graph.source_as_dot();
     assert!(dot.contains("Node A"));
     assert!(dot.contains("Node B"));
+}
+
+#[test]
+fn graph_builder_with_orientation_applies_rankdir() {
+    let graph = GraphBuilder::directed()
+        .with_orientation(GraphOrientation::LeftToRight)
+        .add_edge("a", "b")
+        .build()
+        .unwrap();
+
+    assert!(graph.source_as_dot().contains("rankdir=LR"));
+}
+
+#[test]
+#[serial]
+fn graph_render_cache_separates_scale() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let graph = GraphDiagram::from_expression("a -> b").unwrap();
+    let small = graph
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let large = graph
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 3,
+            transparent_background: false,
+        })
+        .unwrap();
+
+    assert_ne!(small.path, large.path);
+}
+
+#[test]
+#[serial]
+fn graph_render_cache_separates_transparency() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let graph = GraphDiagram::from_expression("a -> b").unwrap();
+    let opaque = graph
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let transparent = graph
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: true,
+        })
+        .unwrap();
+
+    assert_ne!(opaque.path, transparent.path);
+
+    let opaque_svg = std::fs::read_to_string(opaque.path).unwrap();
+    let transparent_svg = std::fs::read_to_string(transparent.path).unwrap();
+    assert!(opaque_svg.contains("fill=\"#ffffff\""));
+    assert!(!transparent_svg.contains("fill=\"#ffffff\""));
 }

@@ -349,7 +349,7 @@ impl GraphExpressionRenderer {
     /// Returns a fallback code block string for the diagram.
     ///
     /// This is used when terminal rendering fails or is not supported.
-    /// Returns the DOT source formatted as a fenced code block.
+    /// Returns the original graph input formatted as a fenced code block.
     ///
     /// ## Examples
     ///
@@ -359,13 +359,12 @@ impl GraphExpressionRenderer {
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?;
     /// let fallback = renderer.fallback_code_block();
-    /// assert!(fallback.contains("```dot"));
+    /// assert!(fallback.contains("```graph-expression"));
     /// # Ok(())
     /// # }
     /// ```
     pub fn fallback_code_block(&self) -> String {
-        let dot_source = self.diagram.source_as_dot();
-        format!("```dot\n{}\n```", dot_source)
+        self.diagram.fallback_code_block()
     }
 
     /// Prints the fallback code block to stdout.
@@ -376,17 +375,19 @@ impl GraphExpressionRenderer {
     }
 }
 
-impl From<String> for GraphExpressionRenderer {
-    fn from(source: String) -> Self {
-        // Use auto-detect and unwrap since this is a convenience method
-        Self::parse(source, GraphInputSyntax::Auto).expect("Failed to parse graph expression")
+impl TryFrom<String> for GraphExpressionRenderer {
+    type Error = GraphRenderError;
+
+    fn try_from(source: String) -> Result<Self, Self::Error> {
+        Self::parse(source, GraphInputSyntax::Auto)
     }
 }
 
-impl From<&str> for GraphExpressionRenderer {
-    fn from(source: &str) -> Self {
-        // Use auto-detect and unwrap since this is a convenience method
-        Self::parse(source, GraphInputSyntax::Auto).expect("Failed to parse graph expression")
+impl TryFrom<&str> for GraphExpressionRenderer {
+    type Error = GraphRenderError;
+
+    fn try_from(source: &str) -> Result<Self, Self::Error> {
+        Self::parse(source, GraphInputSyntax::Auto)
     }
 }
 
@@ -413,14 +414,14 @@ mod tests {
     #[test]
     fn test_graph_expression_renderer_from_string() {
         let source = String::from("a -> b -> c");
-        let renderer = GraphExpressionRenderer::from(source);
+        let renderer = GraphExpressionRenderer::try_from(source).unwrap();
         let dot = renderer.diagram.source_as_dot();
         assert!(dot.contains("digraph"));
     }
 
     #[test]
     fn test_graph_expression_renderer_from_str() {
-        let renderer = GraphExpressionRenderer::from("a -> b -> c");
+        let renderer = GraphExpressionRenderer::try_from("a -> b -> c").unwrap();
         let dot = renderer.diagram.source_as_dot();
         assert!(dot.contains("digraph"));
     }
@@ -429,8 +430,17 @@ mod tests {
     fn test_fallback_code_block() {
         let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto).unwrap();
         let output = renderer.fallback_code_block();
-        assert!(output.starts_with("```dot\n"));
+        assert!(output.starts_with("```graph-expression\n"));
         assert!(output.ends_with("\n```"));
-        assert!(output.contains("digraph"));
+        assert!(output.contains("a -> b"));
+    }
+
+    #[test]
+    fn test_fallback_code_block_uses_dot_info_string_for_dot_input() {
+        let renderer =
+            GraphExpressionRenderer::parse("digraph { A -> B; }", GraphInputSyntax::Dot).unwrap();
+        let output = renderer.fallback_code_block();
+        assert!(output.starts_with("```dot\n"));
+        assert!(output.contains("digraph { A -> B; }"));
     }
 }

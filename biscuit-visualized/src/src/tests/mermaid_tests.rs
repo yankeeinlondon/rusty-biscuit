@@ -125,6 +125,135 @@ fn mermaid_renders_to_svg() {
 }
 
 #[test]
+#[serial]
+fn mermaid_theme_changes_svg_output() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        scale: 1,
+        transparent_background: false,
+    };
+
+    let light = MermaidDiagram::new("graph LR; A-->B")
+        .with_theme(MermaidTheme::Default)
+        .render(&request)
+        .unwrap();
+    let dark = MermaidDiagram::new("graph LR; A-->B")
+        .with_theme(MermaidTheme::Dark)
+        .render(&request)
+        .unwrap();
+
+    assert_ne!(light.path, dark.path);
+
+    let light_svg = std::fs::read_to_string(light.path).unwrap();
+    let dark_svg = std::fs::read_to_string(dark.path).unwrap();
+    assert_ne!(light_svg, dark_svg);
+    assert!(dark_svg.contains("#020617"));
+}
+
+#[test]
+#[serial]
+fn mermaid_transparent_background_changes_svg_output() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let diagram = MermaidDiagram::new("graph LR; A-->B").with_theme(MermaidTheme::Default);
+    let opaque = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let transparent = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: true,
+        })
+        .unwrap();
+
+    assert_ne!(opaque.path, transparent.path);
+
+    let opaque_svg = std::fs::read_to_string(opaque.path).unwrap();
+    let transparent_svg = std::fs::read_to_string(transparent.path).unwrap();
+    assert_ne!(opaque_svg, transparent_svg);
+    assert!(transparent_svg.contains("fill=\"none\"") || transparent_svg.contains(">none<"));
+}
+
+#[test]
+#[serial]
+fn mermaid_quadrant_config_changes_svg_output() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let instructions = "quadrantChart\n    title Sample\n    A: [0.2, 0.8]\n    B: [0.7, 0.3]";
+    let diagram = MermaidDiagram::new(instructions)
+        .with_config(
+            MermaidConfig::new()
+                .with_quadrant_fill(1, "#112233")
+                .with_point_radius(9)
+                .with_point_label_font_size(18),
+        )
+        .with_theme(MermaidTheme::Neutral);
+    let artifact = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+    assert!(svg.contains("#112233"));
+    assert!(svg.contains(" r=\"9\""));
+}
+
+#[test]
+#[serial]
+fn mermaid_cache_separates_scale_theme_and_transparency() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let base = MermaidDiagram::new("graph LR; A-->B");
+    let scaled = base
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let scaled_again = base
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 3,
+            transparent_background: false,
+        })
+        .unwrap();
+    let light = MermaidDiagram::new("graph LR; A-->B")
+        .with_theme(MermaidTheme::Default)
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let transparent = MermaidDiagram::new("graph LR; A-->B")
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 1,
+            transparent_background: true,
+        })
+        .unwrap();
+
+    assert_ne!(scaled.path, scaled_again.path);
+    assert_ne!(scaled.path, light.path);
+    assert_ne!(scaled.path, transparent.path);
+}
+
+#[test]
 fn mermaid_theme_as_str() {
     assert_eq!(MermaidTheme::Dark.as_str(), "dark");
     assert_eq!(MermaidTheme::Default.as_str(), "default");

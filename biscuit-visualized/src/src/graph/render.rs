@@ -1,5 +1,5 @@
 use super::{
-    dot::{expression_to_dot, render_dot_to_svg, validate_dot},
+    dot::{dot_node_count, expression_to_dot, render_dot_to_svg, validate_dot},
     error::GraphError,
     expression::GraphExpression,
 };
@@ -12,30 +12,49 @@ use crate::{
 /// Syntax mode for parsing graph source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphInputSyntax {
-    /// Auto-detect syntax from content
+    /// Auto-detect syntax from content.
     Auto,
-    /// Parse as expression syntax
+    /// Parse as expression syntax.
     Expression,
-    /// Parse as DOT format
+    /// Parse as DOT format.
     Dot,
+}
+
+impl GraphInputSyntax {
+    /// Returns the CLI-friendly spelling for this syntax.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Expression => "expression",
+            Self::Dot => "dot",
+        }
+    }
 }
 
 /// Graph layout orientation.
 ///
-/// Note: layout-rs only supports TopToBottom and LeftToRight orientations.
+/// `layout-rs` currently supports left-to-right and top-to-bottom layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphOrientation {
-    /// Left to right layout
+    /// Left to right layout.
     LeftToRight,
-    /// Top to bottom layout (default)
+    /// Top to bottom layout (default).
     TopToBottom,
 }
 
 impl GraphOrientation {
-    fn to_rankdir(&self) -> &'static str {
+    fn to_rankdir(self) -> &'static str {
         match self {
             Self::LeftToRight => "LR",
             Self::TopToBottom => "TB",
+        }
+    }
+
+    /// Returns the CLI-friendly spelling for this orientation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LeftToRight => "left-to-right",
+            Self::TopToBottom => "top-to-bottom",
         }
     }
 }
@@ -55,8 +74,8 @@ pub enum GraphSource {
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
 /// use biscuit_visualized::artifact::RenderRequest;
+/// use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
 ///
 /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Expression syntax
@@ -70,14 +89,15 @@ pub enum GraphSource {
 ///         B -> C;
 ///     }
 /// "#;
-/// let graph = GraphDiagram::from_dot(dot)?
-///     .with_title("My Graph".to_string());
+/// let graph = GraphDiagram::from_dot(dot)?.with_title("My Graph".to_string());
 /// let artifact = graph.render(&RenderRequest::default())?;
 /// # Ok(())
 /// # }
 /// ```
 pub struct GraphDiagram {
     source: GraphSource,
+    source_text: String,
+    syntax: GraphInputSyntax,
     title: Option<String>,
     orientation: GraphOrientation,
 }
@@ -92,18 +112,6 @@ impl GraphDiagram {
     /// - Chain support: `a -> b -> c`
     /// - Statement separators: `;` or newline
     ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::GraphDiagram;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::from_expression("a -> b -> c")?;
-    /// let graph = GraphDiagram::from_expression(r#""My App" -- Database"#)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
     /// ## Errors
     ///
     /// Returns `GraphError::ExpressionParseFailed` if the syntax is invalid.
@@ -113,6 +121,8 @@ impl GraphDiagram {
 
         Ok(Self {
             source: GraphSource::Expression(expr),
+            source_text: source,
+            syntax: GraphInputSyntax::Expression,
             title: None,
             orientation: GraphOrientation::TopToBottom,
         })
@@ -121,34 +131,14 @@ impl GraphDiagram {
     /// Creates a graph from DOT format.
     ///
     /// Validates the DOT source for unsupported features before storing.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::GraphDiagram;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let dot = r#"
-    ///     digraph G {
-    ///         A -> B;
-    ///         B -> C;
-    ///     }
-    /// "#;
-    /// let graph = GraphDiagram::from_dot(dot)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Errors
-    ///
-    /// Returns `GraphError::UnsupportedDotFeature` if unsupported constructs
-    /// are detected (e.g., HTML table labels).
     pub fn from_dot(source: impl Into<String>) -> Result<Self, GraphError> {
         let source = source.into();
         validate_dot(&source)?;
 
         Ok(Self {
-            source: GraphSource::Dot(source),
+            source: GraphSource::Dot(source.clone()),
+            source_text: source,
+            syntax: GraphInputSyntax::Dot,
             title: None,
             orientation: GraphOrientation::TopToBottom,
         })
@@ -158,29 +148,10 @@ impl GraphDiagram {
     ///
     /// ## Auto-detection Rules
     ///
-    /// 1. If first non-whitespace token is `graph` or `digraph` → DOT
-    /// 2. If content contains `{` and `}` → DOT
-    /// 3. Otherwise → expression syntax
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::parse("a -> b", GraphInputSyntax::Auto)?;
-    /// let graph = GraphDiagram::parse("digraph { A -> B }", GraphInputSyntax::Auto)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if parsing fails for the detected or specified syntax.
-    pub fn parse(
-        source: impl Into<String>,
-        syntax: GraphInputSyntax,
-    ) -> Result<Self, GraphError> {
+    /// 1. If first non-whitespace token is `graph` or `digraph` -> DOT
+    /// 2. If content contains `{` and `}` -> DOT
+    /// 3. Otherwise -> expression syntax
+    pub fn parse(source: impl Into<String>, syntax: GraphInputSyntax) -> Result<Self, GraphError> {
         let source = source.into();
 
         let detected_syntax = match syntax {
@@ -202,41 +173,27 @@ impl GraphDiagram {
         match detected_syntax {
             GraphInputSyntax::Expression => Self::from_expression(source),
             GraphInputSyntax::Dot => Self::from_dot(source),
-            GraphInputSyntax::Auto => unreachable!("Auto should be resolved by now"),
+            GraphInputSyntax::Auto => unreachable!("Auto should be resolved before parsing"),
         }
     }
 
+    /// Returns the original graph source text.
+    pub fn source(&self) -> &str {
+        &self.source_text
+    }
+
+    /// Returns the resolved syntax for this diagram.
+    pub fn syntax(&self) -> GraphInputSyntax {
+        self.syntax
+    }
+
     /// Sets the diagram title.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::GraphDiagram;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::from_expression("a -> b")?
-    ///     .with_title("My Graph".to_string());
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
     /// Sets the graph orientation.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::{GraphDiagram, GraphOrientation};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::from_expression("a -> b")?
-    ///     .with_orientation(GraphOrientation::LeftToRight);
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_orientation(mut self, orientation: GraphOrientation) -> Self {
         self.orientation = orientation;
         self
@@ -246,37 +203,21 @@ impl GraphDiagram {
     ///
     /// If the source is expression syntax, converts it to DOT.
     /// Applies orientation settings.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_visualized::graph::GraphDiagram;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::from_expression("a -> b")?;
-    /// let dot = graph.source_as_dot();
-    /// assert!(dot.contains("digraph"));
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn source_as_dot(&self) -> String {
         let mut dot = match &self.source {
             GraphSource::Expression(expr) => {
-                // Determine if directed based on edges
                 let directed = expr
                     .edges
                     .first()
-                    .map(|e| matches!(e.kind, super::expression::EdgeKind::Directed))
+                    .map(|edge| matches!(edge.kind, super::expression::EdgeKind::Directed))
                     .unwrap_or(true);
                 expression_to_dot(expr, directed)
             }
             GraphSource::Dot(dot_source) => dot_source.clone(),
         };
 
-        // Apply orientation by injecting rankdir attribute
         dot = self.apply_orientation_to_dot(&dot);
 
-        // Apply title if present
         if let Some(title) = &self.title {
             dot = self.apply_title_to_dot(&dot, title);
         }
@@ -284,14 +225,40 @@ impl GraphDiagram {
         dot
     }
 
+    /// Returns a fenced code block using the original source syntax.
+    pub fn fallback_code_block(&self) -> String {
+        let info_string = match self.syntax {
+            GraphInputSyntax::Dot => "dot",
+            GraphInputSyntax::Expression | GraphInputSyntax::Auto => "graph-expression",
+        };
+
+        format!("```{info_string}\n{}\n```", self.source_text)
+    }
+
     fn apply_orientation_to_dot(&self, dot: &str) -> String {
         let rankdir = self.orientation.to_rankdir();
 
-        // Find the opening brace and insert rankdir attribute
+        if let Some(existing_rankdir) = dot.find("rankdir=") {
+            let mut end = existing_rankdir;
+            while end < dot.len() {
+                let ch = dot.as_bytes()[end] as char;
+                if ch == ';' || ch == '\n' {
+                    break;
+                }
+                end += 1;
+            }
+
+            let mut result = String::new();
+            result.push_str(&dot[..existing_rankdir]);
+            result.push_str(&format!("rankdir={rankdir}"));
+            result.push_str(&dot[end..]);
+            return result;
+        }
+
         if let Some(brace_pos) = dot.find('{') {
             let mut result = String::new();
             result.push_str(&dot[..=brace_pos]);
-            result.push_str(&format!("\n    rankdir={};\n", rankdir));
+            result.push_str(&format!("\n    rankdir={rankdir};\n"));
             result.push_str(&dot[brace_pos + 1..]);
             result
         } else {
@@ -302,11 +269,10 @@ impl GraphDiagram {
     fn apply_title_to_dot(&self, dot: &str, title: &str) -> String {
         let escaped_title = title.replace('"', "\\\"");
 
-        // Find the opening brace and insert label attribute
         if let Some(brace_pos) = dot.find('{') {
             let mut result = String::new();
             result.push_str(&dot[..=brace_pos]);
-            result.push_str(&format!("\n    label=\"{}\";\n", escaped_title));
+            result.push_str(&format!("\n    label=\"{escaped_title}\";\n"));
             result.push_str(&dot[brace_pos + 1..]);
             result
         } else {
@@ -315,62 +281,10 @@ impl GraphDiagram {
     }
 
     /// Renders the graph to the requested output format.
-    ///
-    /// Uses caching to avoid re-rendering identical graphs. If the rendered
-    /// artifact exists in cache, returns it immediately. Otherwise, renders
-    /// to SVG, optionally rasterizes to PNG, and stores in cache.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust,no_run
-    /// use biscuit_visualized::graph::GraphDiagram;
-    /// use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let graph = GraphDiagram::from_expression("a -> b")?;
-    ///
-    /// let request = RenderRequest {
-    ///     format: OutputFormat::Png,
-    ///     scale: 2,
-    ///     transparent_background: false,
-    /// };
-    ///
-    /// let artifact = graph.render(&request)?;
-    /// println!("Rendered to: {:?}", artifact.path);
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - DOT parsing fails
-    /// - SVG rendering fails
-    /// - PNG rasterization fails (when format is PNG)
-    /// - Cache storage fails
     pub fn render(&self, request: &RenderRequest) -> Result<RenderedArtifact, GraphError> {
         let cache = FileCache::new();
+        let cache_key = self.cache_key(request);
 
-        // Convert to DOT
-        let dot_source = self.source_as_dot();
-
-        // Build options JSON
-        let options = serde_json::json!({
-            "orientation": self.orientation.to_rankdir(),
-            "title": self.title,
-        });
-        let options_json = serde_json::to_string(&options).unwrap_or_default();
-
-        // Build cache key
-        let cache_key = FileCache::cache_key(
-            VisualizationKind::Graph,
-            &dot_source,
-            &options_json,
-            GRAPH_BACKEND,
-            request.format,
-        );
-
-        // Check cache
         if let Some(path) = cache.get(VisualizationKind::Graph, &cache_key, request.format) {
             return Ok(RenderedArtifact {
                 path,
@@ -380,30 +294,20 @@ impl GraphDiagram {
             });
         }
 
-        // Render DOT to SVG
-        let svg_content = render_dot_to_svg(&dot_source)?;
+        let dot_source = self.source_as_dot();
+        let svg_content = apply_graph_background(
+            &render_dot_to_svg(&dot_source)?,
+            request.transparent_background,
+        );
 
-        // Handle output format
         let (final_content, final_format) = match request.format {
-            OutputFormat::Svg => (svg_content.as_bytes().to_vec(), OutputFormat::Svg),
-            OutputFormat::Png => {
-                // Create temporary SVG file
-                let temp_svg = tempfile::NamedTempFile::new()?;
-                std::fs::write(temp_svg.path(), &svg_content)?;
-
-                // Create temporary PNG file
-                let temp_png = tempfile::NamedTempFile::new()?;
-
-                // Rasterize
-                raster::rasterize_svg(temp_svg.path(), temp_png.path(), request.scale)?;
-
-                // Read PNG content
-                let png_content = std::fs::read(temp_png.path())?;
-                (png_content, OutputFormat::Png)
-            }
+            OutputFormat::Svg => (svg_content.into_bytes(), OutputFormat::Svg),
+            OutputFormat::Png => (
+                raster::rasterize_svg_to_png_bytes(&svg_content, request.scale)?,
+                OutputFormat::Png,
+            ),
         };
 
-        // Store in cache
         let path = cache.store(
             VisualizationKind::Graph,
             &cache_key,
@@ -419,19 +323,55 @@ impl GraphDiagram {
         })
     }
 
+    fn cache_key(&self, request: &RenderRequest) -> String {
+        let options_json = serde_json::to_string(&serde_json::json!({
+            "syntax": self.syntax.as_str(),
+            "orientation": self.orientation.as_str(),
+            "title": self.title,
+            "scale": request.scale.max(1),
+            "transparent_background": request.transparent_background,
+        }))
+        .unwrap_or_else(|_| "{}".to_string());
+
+        FileCache::cache_key(
+            VisualizationKind::Graph,
+            &self.source_text,
+            &options_json,
+            GRAPH_BACKEND,
+            request.format,
+        )
+    }
+
     fn generate_alt_text(&self) -> String {
         let node_count = match &self.source {
             GraphSource::Expression(expr) => expr.nodes.len(),
-            GraphSource::Dot(dot) => {
-                // Rough estimate from DOT source
-                dot.lines().filter(|l| l.contains("->") || l.contains("--")).count()
-            }
+            GraphSource::Dot(dot) => dot_node_count(dot).unwrap_or(0),
         };
 
         if let Some(title) = &self.title {
-            format!("{} (graph with {} nodes)", title, node_count)
+            format!("{title} (graph with {node_count} nodes)")
         } else {
-            format!("Graph with {} nodes", node_count)
+            format!("Graph with {node_count} nodes")
         }
     }
+}
+
+fn apply_graph_background(svg: &str, transparent_background: bool) -> String {
+    if transparent_background {
+        return svg.to_string();
+    }
+
+    let Some(svg_start) = svg.find("<svg") else {
+        return svg.to_string();
+    };
+    let Some(open_end) = svg[svg_start..].find('>') else {
+        return svg.to_string();
+    };
+
+    let insert_pos = svg_start + open_end + 1;
+    let mut output = String::with_capacity(svg.len() + 48);
+    output.push_str(&svg[..insert_pos]);
+    output.push_str(r##"<rect width="100%" height="100%" fill="#ffffff"/>"##);
+    output.push_str(&svg[insert_pos..]);
+    output
 }

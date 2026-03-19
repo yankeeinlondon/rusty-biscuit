@@ -565,7 +565,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::discovery::detection::{Connection, MultiplexSupport};
+    use biscuit_terminal::discovery::detection::MultiplexSupport;
 
     #[test]
     fn test_analyze_content() {
