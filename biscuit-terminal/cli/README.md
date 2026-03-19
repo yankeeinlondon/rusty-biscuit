@@ -222,9 +222,9 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
 - **Aspect ratio preservation**: Images always maintain correct proportions via viuer
 
-**Requirements:**
-- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
-- Falls back to `npx` if mmdc is not installed
+**Rendering backend:**
+- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- No Node.js, npm, Chromium, or `mmdc` dependency is required
 - Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
 **Error handling:**
@@ -292,9 +292,9 @@ Available inline properties: `color`, `radius`, `stroke-color`, `stroke-width`
 
 > **Note:** Multiple properties must be comma-separated. Space-only separation causes parsing errors.
 
-**Requirements:**
-- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
-- Falls back to `npx` if mmdc is not installed
+**Rendering backend:**
+- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- No external Mermaid CLI is required
 
 ### Git Graph Rendering
 
@@ -326,9 +326,9 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
 - **Aspect ratio preservation**: Images always maintain correct proportions via viuer
 
-**Requirements:**
-- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
-- Falls back to `npx` if mmdc is not installed
+**Rendering backend:**
+- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- No external Mermaid CLI is required
 
 ### Pie Chart Rendering
 
@@ -421,8 +421,10 @@ bt graph-expression --json "a -> b"
 - **DOT**: Full Graphviz DOT language support, e.g., `digraph { A -> B; }`
 
 **Orientation:**
-- `left-to-right` (default)
-- `top-to-bottom`
+- `top-to-bottom` (default)
+- `left-to-right`
+
+> `layout-rs` currently supports these two layout directions in `bt graph-expression`.
 
 **Features:**
 - **Pure Rust rendering**: Uses `layout-rs` via `biscuit-visualized` (no external dependencies)

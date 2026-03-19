@@ -284,9 +284,10 @@ pub struct GraphBuilder { /* ... */ }
 impl GraphBuilder {
     pub fn directed() -> Self;
     pub fn undirected() -> Self;
+    pub fn with_orientation(&mut self, orientation: GraphOrientation) -> &mut Self;
     pub fn add_node(&mut self, id: impl Into<String>, label: Option<String>) -> &mut Self;
     pub fn add_edge(&mut self, from: impl Into<String>, to: impl Into<String>) -> &mut Self;
-    pub fn build(self) -> GraphDiagram;
+    pub fn build(&self) -> Result<GraphDiagram, GraphError>;
 }
 ```
 
@@ -296,7 +297,8 @@ The builder generates DOT internally and delegates to the DOT rendering path.
 
 ```rust
 pub enum GraphInputSyntax { Auto, Expression, Dot }
-pub enum GraphOrientation { LeftRight, TopBottom, BottomTop, RightLeft }
+// `layout-rs` currently supports these two graph directions.
+pub enum GraphOrientation { LeftToRight, TopToBottom }
 
 pub enum GraphSource {
     Expression(GraphExpression),
@@ -534,7 +536,7 @@ GraphExpression {
     #[arg(long)]
     inverse: bool,
 
-    #[arg(long, value_enum, default_value = "left-right")]
+    #[arg(long, value_enum, default_value = "top-to-bottom")]
     orientation: GraphOrientationArg,
 
     #[command(flatten)]

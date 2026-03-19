@@ -1,137 +1,90 @@
 # Biscuit Visualized
 
-A pure Rust library for creating high-quality data visualizations. This library provides:
+`biscuit-visualized` is the visualization backend for the terminal and markdown tooling in this monorepo. It renders diagrams in pure Rust and caches generated artifacts in the OS temp directory.
 
-1. **Mermaid Diagrams**
+## Capabilities
 
-    Convert [MermaidJS](https://mermaid.js.org/) code blocks into scalar images (`.png`) using the `mermaid-rs-renderer` crate. This pure Rust implementation is anywhere between 100% to 1600% faster than using the Mermaid CLI (with JavaScript). No external dependencies required.
+1. Mermaid diagram rendering via `mermaid-rs-renderer`
+2. Graph rendering via `layout-rs`
+3. SVG and PNG artifact generation
+4. Content-addressed file caching via `biscuit-hash`
 
-2. **Graph Visualizations**
+This crate is library-only. For terminal display, use the `bt` CLI from [`biscuit-terminal`](../biscuit-terminal/).
 
-    Visualize graph structures using `layout-rs` with support for both programmatic creation and string-based descriptions. Supports multiple syntaxes:
-    - **Arrow syntax**: `a -> b -> c` (directed edges)
-    - **Dash syntax**: `a -- b -- c` (undirected edges)
-    - **DOT syntax**: Full [Graphviz DOT](https://graphviz.org/doc/info/lang.html) language support
+## Modules
 
-3. **SVG Rasterization**
+- `artifact`: output format and render request types
+- `cache`: file-backed artifact cache
+- `graph`: expression syntax, DOT rendering, and programmatic graph building
+- `mermaid`: Mermaid diagrams, themes, and quadrant-specific configuration
+- `raster`: SVG-to-PNG conversion
 
-    Convert SVG images to PNG using `resvg` for terminal rendering.
+## Mermaid Example
 
-4. **File Caching**
+```rust,no_run
+use biscuit_visualized::artifact::RenderRequest;
+use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTheme};
 
-    Content-hashed caching of rendered diagrams using `biscuit-hash` xxHash keys. Cached files are stored in the OS temp directory for fast re-rendering.
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+    .with_theme(MermaidTheme::Dark)
+    .with_title("Example flow");
 
-This crate is a library only. For CLI access to these capabilities, use the `biscuit-terminal` CLI which provides convenient terminal rendering.
-
-## Module Overview
-
-- **`artifact`** - Artifact types for generated visualizations (PNG, SVG)
-- **`cache`** - Content-addressed file caching with xxHash keys
-- **`mermaid`** - Mermaid diagram rendering via `mermaid-rs-renderer`
-- **`graph`** - Graph visualization rendering via `layout-rs` with multiple syntaxes
-- **`raster`** - SVG-to-PNG conversion via `resvg`
-
-## Usage Examples
-
-### Mermaid Diagrams
-
-```rust
-use biscuit_visualized::mermaid::MermaidDiagram;
-
-// Create and render a flowchart
-let diagram = MermaidDiagram::new(
-    "flowchart LR\n    A --> B --> C",
-    None,  // title
-)?;
-
-// Render to PNG
-let png_path = diagram.render()?;
-println!("Rendered to: {}", png_path.display());
+let artifact = diagram.render(&RenderRequest::default())?;
+println!("{}", artifact.path.display());
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-### Graph Visualizations
+## Graph Example
 
-```rust
+```rust,no_run
+use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
 use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax, GraphOrientation};
 
-// Arrow syntax (directed graph)
-let graph = GraphDiagram::new(
-    "a -> b -> c; b -> d",
-    GraphInputSyntax::Arrow,
-    Some("My Graph"),
-    GraphOrientation::LeftToRight,
-)?;
+let graph = GraphDiagram::parse("a -> b -> c", GraphInputSyntax::Auto)?
+    .with_orientation(GraphOrientation::LeftToRight)
+    .with_title("Example graph");
 
-// Dash syntax (undirected graph)
-let graph = GraphDiagram::new(
-    "a -- b -- c",
-    GraphInputSyntax::Dash,
-    None,
-    GraphOrientation::TopToBottom,
-)?;
+let artifact = graph.render(&RenderRequest {
+    format: OutputFormat::Svg,
+    scale: 1,
+    transparent_background: true,
+})?;
 
-// DOT syntax (full Graphviz)
-let graph = GraphDiagram::new(
-    "digraph { A -> B; B -> C; }",
-    GraphInputSyntax::Dot,
-    None,
-    GraphOrientation::LeftToRight,
-)?;
-
-// Render to PNG
-let png_path = graph.render()?;
+println!("{}", artifact.path.display());
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Expression Syntax for Graphs
+## Programmatic Graph Builder
 
-### Arrow Syntax (Directed)
+```rust,no_run
+use biscuit_visualized::graph::{GraphBuilder, GraphOrientation};
 
-Simple directed edges using `->`:
-
-```
-a -> b -> c
-a -> b; b -> c; c -> a
-start -> validate -> render
-```
-
-### Dash Syntax (Undirected)
-
-Undirected edges using `--`:
-
-```
-a -- b -- c
-node1 -- node2; node2 -- node3
+let graph = GraphBuilder::directed()
+    .with_orientation(GraphOrientation::LeftToRight)
+    .add_node("app", Some("App".to_string()))
+    .add_node("db", Some("Database".to_string()))
+    .add_edge("app", "db")
+    .build()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-### DOT Syntax
+## Graph Input Formats
 
-Full Graphviz DOT language support:
+- Expression syntax: `a -> b -> c`
+- Undirected expression syntax: `a -- b -- c`
+- DOT: `digraph { A -> B; B -> C; }`
 
-```
-digraph {
-    A -> B;
-    B -> C;
-    C -> A;
-}
-```
+Graph orientation support currently matches `layout-rs`:
 
-## CLI Examples using `bt`
+- `top-to-bottom`
+- `left-to-right`
 
-Try these commands with the `biscuit-terminal` CLI:
+## CLI Examples
 
 ```sh
-# Mermaid diagrams
-bt bar-chart --example
-bt pie-chart --example
-bt git-graph --example
-bt flowchart --example
-bt quadrant --example
-bt state-diagram --example
-bt erd --example
-
-# Graph visualization (using layout-rs)
 bt graph-expression --example
 bt graph-expression "a -> b -> c"
-bt graph-expression "a -- b -- c"
 bt graph-expression --syntax dot "digraph { A -> B; B -> C; }"
+bt flowchart --example
+bt quadrant --example
 ```

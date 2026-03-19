@@ -364,6 +364,11 @@ impl GraphDiagram {
 }
 ```
 
+`layout-rs` currently exposes the two graph directions that are practical to support here:
+
+- `LeftToRight`
+- `TopToBottom`
+
 ### Programmatic builder
 
 For library consumers, also expose a builder so callers do not have to serialize to text:
@@ -374,9 +379,10 @@ pub struct GraphBuilder { /* ... */ }
 impl GraphBuilder {
     pub fn directed() -> Self;
     pub fn undirected() -> Self;
+    pub fn with_orientation(&mut self, orientation: GraphOrientation) -> &mut Self;
     pub fn add_node(&mut self, id: impl Into<String>, label: Option<String>) -> &mut Self;
     pub fn add_edge(&mut self, from: impl Into<String>, to: impl Into<String>) -> &mut Self;
-    pub fn build(self) -> GraphDiagram;
+    pub fn build(&self) -> Result<GraphDiagram, GraphError>;
 }
 ```
 
@@ -509,7 +515,7 @@ GraphExpression {
     #[arg(long)]
     inverse: bool,
 
-    #[arg(long, value_enum, default_value = "left-right")]
+    #[arg(long, value_enum, default_value = "top-to-bottom")]
     orientation: GraphOrientationArg,
 
     #[command(flatten)]
