@@ -157,10 +157,10 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         self.sink.on_turn_error(&meta);
     }
 
-    fn handle_agent_message_item(&mut self, item: &Value) {
+    fn handle_agent_message_item(&mut self, item: &Value) -> Option<String> {
         if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
             self.assistant_text.push_str(text);
-            return;
+            return Some(text.to_string());
         }
 
         if let Some(parts) = item.get("content").and_then(|v| v.as_array()) {
@@ -170,8 +170,11 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
                 .collect::<String>();
             if !text.is_empty() {
                 self.assistant_text.push_str(&text);
+                return Some(text);
             }
         }
+
+        None
     }
 
     fn tool_meta_from_item(&self, item: &Value) -> EventMeta {
@@ -243,15 +246,14 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         }
     }
 
-    fn handle_item_completed(&mut self, obj: &Value) {
+    fn handle_item_completed(&mut self, obj: &Value) -> Option<String> {
         let Some(item) = obj.get("item") else {
-            return;
+            return None;
         };
         let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         if item_type == "agent_message" {
-            self.handle_agent_message_item(item);
-            return;
+            return self.handle_agent_message_item(item);
         }
 
         if Self::is_tool_item_type(item_type) {
@@ -273,6 +275,8 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             self.sink
                 .on_after_tool(&self.tool_meta_from_item(&merged_item));
         }
+
+        None
     }
 }
 
@@ -313,10 +317,7 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
                 self.handle_item_started(&obj);
                 Ok(None)
             }
-            "item.completed" => {
-                self.handle_item_completed(&obj);
-                Ok(None)
-            }
+            "item.completed" => Ok(self.handle_item_completed(&obj)),
             "item.tool_use" | "tool_use" => {
                 self.tool_calls += 1;
                 let meta = self.tool_meta_from_item(&obj);
@@ -393,12 +394,13 @@ mod tests {
         let tc = r#"{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":100},"duration_ms":5000,"status":"completed"}"#;
         assert_eq!(parser.feed_line(tc).unwrap(), None);
 
-        // Stream fallback text is accumulated but never emitted live.
-        parser
+        // Agent message text is emitted live and accumulated in the summary.
+        let streamed = parser
             .feed_line(
                 r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Text from stream"}}"#,
             )
             .unwrap();
+        assert_eq!(streamed.as_deref(), Some("Text from stream"));
 
         let summary = parser.finish(0);
         assert_eq!(summary.provider, Provider::Codex);
@@ -415,15 +417,14 @@ mod tests {
     }
 
     #[test]
-    fn stream_never_returns_text() {
+    fn stream_returns_text_for_agent_messages() {
         let mut parser = make_parser();
-        // Even message-like events don't return text for Codex
         let result = parser
             .feed_line(
                 r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"should not appear"}}"#,
             )
             .unwrap();
-        assert_eq!(result, None);
+        assert_eq!(result.as_deref(), Some("should not appear"));
     }
 
     #[test]

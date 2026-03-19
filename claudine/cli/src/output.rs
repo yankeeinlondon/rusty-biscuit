@@ -582,6 +582,13 @@ pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal) {
     log::message(&rendered);
 }
 
+/// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.
+pub(crate) fn render_assistant_text(text: &str, term: &Terminal) -> String {
+    Prose::new(text)
+        .with_word_wrap(WordWrap::WrapProse(None, None))
+        .render(term)
+}
+
 /// Format a frontmatter-prompt validation check line (success).
 pub(crate) fn fm_check_ok(message: &str, term: &Terminal) -> String {
     Prose::new(format!("<green-500>\u{2713}</green-500> {message}")).render(term)
@@ -623,9 +630,7 @@ pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
             .and_then(|e| e.get("message"))
             .and_then(|m| m.as_str())
             .unwrap_or("Unknown error");
-        let request_id = obj
-            .get("request_id")
-            .and_then(|r| r.as_str());
+        let request_id = obj.get("request_id").and_then(|r| r.as_str());
 
         let mut parts = vec![format!(
             "<red><bold>API Error ({status}):</bold></red> {message}"
@@ -640,7 +645,9 @@ pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
                 parts.push("<dim>An internal server error occurred. This is usually transient — retrying the command may succeed.</dim>".to_string());
             }
             "rate_limit_error" => {
-                parts.push("<dim>Rate limit exceeded. Wait a moment before retrying.</dim>".to_string());
+                parts.push(
+                    "<dim>Rate limit exceeded. Wait a moment before retrying.</dim>".to_string(),
+                );
             }
             _ => {}
         }
@@ -652,7 +659,10 @@ pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
         parts.join("\n")
     } else {
         // Not valid JSON, just format the raw message
-        format!("<red><bold>API Error ({status}):</bold></red> {}", json_part.trim())
+        format!(
+            "<red><bold>API Error ({status}):</bold></red> {}",
+            json_part.trim()
+        )
     };
 
     Some(Prose::new(friendly).render_optimistic(None))
@@ -738,5 +748,15 @@ mod tests {
         assert!(result.ends_with("...\""));
         // Should not panic or produce invalid UTF-8
         assert!(result.is_char_boundary(0));
+    }
+
+    #[test]
+    fn render_assistant_text_wraps_long_terminal_output() {
+        let term = Terminal::new_optimistic(24);
+        let rendered = render_assistant_text(
+            "This is a long assistant sentence that should wrap cleanly in the terminal.",
+            &term,
+        );
+        assert!(rendered.contains('\n'));
     }
 }

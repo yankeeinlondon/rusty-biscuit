@@ -484,9 +484,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     // Early check: --timeout + --interactive is always an error
     if args.timeout.is_some() && interactive_requested {
-        return Err(eyre!(
-            "--timeout cannot be used with --interactive mode"
-        ));
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
     }
 
     // Early check: --timeout requires non-interactive mode
@@ -671,11 +669,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             }
         }
 
-        let prepared = claudine::composition::prepare_inline_prompt(
-            &source,
-            env_plan.repo_root.as_deref(),
-        )
-        .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+        let prepared =
+            claudine::composition::prepare_inline_prompt(&source, env_plan.repo_root.as_deref())
+                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
 
         // Detect conflict with existing prompt source
         prompt_file::detect_existing_prompt_source(profile, &child_args, provider)?;
@@ -1054,10 +1050,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    let exit_code = if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) = inline_composition_source {
+    let exit_code = if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) =
+        inline_composition_source
+    {
         // Inline composition: the agent is responsible for writing to the file.
-        // We stream output to the terminal normally, then validate the file afterward,
-        // and emit the metadata summary line last.
+        // Capture structured assistant text so we can render it with terminal-aware
+        // wrapping before running validation checks and emitting the metadata line.
         let (agent_exit, deferred_summary) = if use_structured {
             let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
             let parser_config = claudine::stream::ParserConfig {
@@ -1084,18 +1082,29 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdin_seed.as_deref(),
                 parser,
             )?;
+            let had_streamed_assistant = !summary.assistant_text.trim().is_empty();
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
+            }
+            if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
+                let rendered = crate::output::render_assistant_text(&summary.assistant_text, &term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+                std::io::stdout().flush()?;
             }
 
             // Warn if agent provided no summary text to stdout
             if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
-                log::warn("the agent did not provide a summarized message on their completed work!");
+                log::warn(
+                    "the agent did not provide a summarized message on their completed work!",
+                );
             }
 
             let exit = summary.exit_code;
             let details = summary_details.lock().unwrap().clone();
-            (exit, Some((summary, details)))
+            (exit, Some((summary, details, had_streamed_assistant)))
         } else {
             // Legacy path: forward I/O to terminal
             let exit = exec::run_child(
@@ -1118,6 +1127,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         let mut final_exit = agent_exit;
         let show_checks = !silent_requested && !quiet_requested;
         let provider_name = crate::output::capitalize_provider(provider);
+        let should_separate_checks = deferred_summary
+            .as_ref()
+            .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+
+        if show_checks && should_separate_checks {
+            eprintln!();
+            eprintln!();
+        }
 
         if agent_exit == 0 && show_checks {
             log::message(&crate::output::fm_check_ok(
@@ -1138,12 +1155,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             .display();
 
         // Read the file from disk to see what the agent did
-        let disk_md = darkmatter::markdown::Markdown::try_from(
-            source.resolved_path.as_path(),
-        );
-
-        match disk_md {
-            Ok(on_disk) => {
+        match fs::read_to_string(source.resolved_path.as_path()) {
+            Ok(disk_text) => {
+                let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
                 // Check if the body was updated on disk
                 let disk_body_hash = on_disk.hash_body(false);
                 let body_updated = disk_body_hash != pre_body_hash;
@@ -1178,14 +1192,13 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                             ));
                         }
                         // Restore original frontmatter but keep the agent's body content
-                        let mut restored = source.markdown.clone();
                         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                        restored
-                            .fm_insert("last_updated", &today)
-                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                        *restored.content_mut() = on_disk.content().to_string();
-
-                        let doc_string = restored.as_string();
+                        let doc_string = rewrite_markdown_preserving_frontmatter(
+                            &source.original_text,
+                            on_disk.content(),
+                            &today,
+                        )
+                        .map_err(|e| eyre!("failed to restore frontmatter: {e}"))?;
                         claudine::config::atomic::atomic_write(
                             &source.resolved_path,
                             doc_string.as_bytes(),
@@ -1198,14 +1211,13 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                                 &term,
                             ));
                         }
-                        // Just update last_updated in the on-disk file
-                        let mut updated = on_disk;
                         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                        updated
-                            .fm_insert("last_updated", &today)
-                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-
-                        let doc_string = updated.as_string();
+                        let doc_string = rewrite_markdown_preserving_frontmatter(
+                            &disk_text,
+                            on_disk.content(),
+                            &today,
+                        )
+                        .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
                         claudine::config::atomic::atomic_write(
                             &source.resolved_path,
                             doc_string.as_bytes(),
@@ -1245,7 +1257,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
         // Emit the metadata summary line last, after validation checks.
         // Blank line before metadata to visually separate from checks.
-        if let Some((summary, details)) = deferred_summary {
+        if let Some((summary, details, _)) = deferred_summary {
             if stream_verbosity != Verbosity::Silent {
                 eprintln!();
             }
@@ -1287,11 +1299,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             stdin_seed.as_deref(),
             parser,
         )?;
+        let had_streamed_assistant = !summary.assistant_text.trim().is_empty();
         if let Some(codex_output) = structured_codex_output.as_ref() {
             codex_output.apply_to_summary(&mut summary);
         }
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            std::io::stdout().write_all(summary.assistant_text.as_bytes())?;
+        if provider == Provider::Codex
+            && !had_streamed_assistant
+            && !summary.assistant_text.is_empty()
+        {
+            let rendered = crate::output::render_assistant_text(&summary.assistant_text, &term);
+            std::io::stdout().write_all(rendered.as_bytes())?;
+            if !rendered.ends_with('\n') {
+                std::io::stdout().write_all(b"\n")?;
+            }
             std::io::stdout().flush()?;
         }
 
@@ -1540,6 +1560,134 @@ fn format_verbose_summary_details_prose(
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
+fn rewrite_markdown_preserving_frontmatter(
+    frontmatter_source: &str,
+    body: &str,
+    today: &str,
+) -> Result<String> {
+    if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
+        let newline = detect_newline(frontmatter_source);
+        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline);
+        let mut document = String::with_capacity(
+            parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
+        );
+        document.push_str(parts.opening);
+        document.push_str(&yaml);
+        document.push_str(parts.closing);
+        document.push_str(body);
+        return Ok(document);
+    }
+
+    let mut markdown: darkmatter::markdown::Markdown = frontmatter_source.to_string().into();
+    markdown
+        .fm_insert("last_updated", today)
+        .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+    *markdown.content_mut() = body.to_string();
+    Ok(markdown.as_string())
+}
+
+struct FrontmatterParts<'a> {
+    opening: &'a str,
+    yaml: &'a str,
+    closing: &'a str,
+}
+
+fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
+    let mut lines = text.split_inclusive('\n');
+    let opening = lines.next()?;
+    if trim_line_ending(opening) != "---" {
+        return None;
+    }
+
+    let yaml_start = opening.len();
+    let mut offset = yaml_start;
+    for line in lines {
+        let next_offset = offset + line.len();
+        if trim_line_ending(line) == "---" {
+            return Some(FrontmatterParts {
+                opening: &text[..yaml_start],
+                yaml: &text[yaml_start..offset],
+                closing: &text[offset..next_offset],
+            });
+        }
+        offset = next_offset;
+    }
+
+    None
+}
+
+fn upsert_last_updated_in_frontmatter(yaml: &str, today: &str, newline: &str) -> String {
+    let mut updated = String::with_capacity(yaml.len() + today.len() + 32);
+    let mut found = false;
+    let mut had_trailing_newline = yaml.is_empty();
+
+    for line in yaml.split_inclusive('\n') {
+        let line_ending = if line.ends_with("\r\n") {
+            "\r\n"
+        } else if line.ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        let content = trim_line_ending(line);
+
+        if let Some(rewritten) = rewrite_last_updated_line(content, today) {
+            updated.push_str(&rewritten);
+            updated.push_str(line_ending);
+            found = true;
+        } else {
+            updated.push_str(line);
+        }
+
+        had_trailing_newline = !line_ending.is_empty();
+    }
+
+    if !found {
+        if !updated.is_empty() && !had_trailing_newline {
+            updated.push_str(newline);
+        }
+        updated.push_str("last_updated: ");
+        updated.push_str(today);
+        updated.push_str(newline);
+    }
+
+    updated
+}
+
+fn rewrite_last_updated_line(line: &str, today: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("last_updated:")?;
+    let indent = &line[..line.len() - trimmed.len()];
+    if !indent.is_empty() {
+        return None;
+    }
+    let quote = rest
+        .trim_start()
+        .chars()
+        .next()
+        .filter(|quote| matches!(quote, '"' | '\''));
+
+    let mut rewritten = String::from(indent);
+    rewritten.push_str("last_updated: ");
+    match quote {
+        Some(quote) => {
+            rewritten.push(quote);
+            rewritten.push_str(today);
+            rewritten.push(quote);
+        }
+        None => rewritten.push_str(today),
+    }
+    Some(rewritten)
+}
+
+fn detect_newline(text: &str) -> &str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    line.trim_end_matches(['\r', '\n'])
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptLocation {
     Value(usize),
@@ -1707,11 +1855,7 @@ fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
 
 /// Returns true if a prompt string is present — either as a remaining
 /// non-switch arg in `child_args`, from a composition source, or via stdin.
-fn has_prompt_source(
-    args: &WrapperArgs,
-    child_args: &[String],
-    stdin_seed: Option<&str>,
-) -> bool {
+fn has_prompt_source(args: &WrapperArgs, child_args: &[String], stdin_seed: Option<&str>) -> bool {
     // Composition switches provide a prompt
     if args.prompt_file.is_some() || args.frontmatter_prompt.is_some() || args.compose.is_some() {
         return true;
@@ -1911,10 +2055,7 @@ mod tests {
 
         // Old flags should NOT be consumed by Claudine
         assert!(!extracted.interactive);
-        assert_eq!(
-            args,
-            vec!["-n", "--non-interactive", "--ni", "task"]
-        );
+        assert_eq!(args, vec!["-n", "--non-interactive", "--ni", "task"]);
     }
 
     #[test]
@@ -2136,6 +2277,47 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn rewrite_markdown_preserves_block_scalar_frontmatter_layout() {
+        let original = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "  First line\n",
+            "  Second line\n",
+            "last_updated: 2026-03-18\n",
+            "---\n",
+            "Old body\n",
+        );
+
+        let rewritten =
+            rewrite_markdown_preserving_frontmatter(original, "Fresh body\n", "2026-03-19")
+                .unwrap();
+
+        assert!(rewritten.contains("prompt: |-"));
+        assert!(rewritten.contains("  First line\n  Second line\n"));
+        assert!(rewritten.contains("last_updated: 2026-03-19"));
+        assert!(rewritten.ends_with("---\nFresh body\n"));
+    }
+
+    #[test]
+    fn rewrite_markdown_adds_last_updated_without_reserializing_frontmatter() {
+        let original = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "  Keep this formatting\n",
+            "---\n",
+            "Body\n",
+        );
+
+        let rewritten =
+            rewrite_markdown_preserving_frontmatter(original, "Updated body\n", "2026-03-19")
+                .unwrap();
+
+        assert!(rewritten.contains("prompt: |-"));
+        assert!(rewritten.contains("  Keep this formatting\n"));
+        assert!(rewritten.contains("last_updated: 2026-03-19\n---\nUpdated body\n"));
     }
 
     fn make_catalog_with_servers(names: &[&str]) -> Vec<McpServer> {

@@ -36,7 +36,8 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
 
     // Read existing file
     if guardrails_path.is_file() {
-        return fs::read_to_string(&guardrails_path).unwrap_or_else(|_| DEFAULT_GUARDRAILS.to_string());
+        return fs::read_to_string(&guardrails_path)
+            .unwrap_or_else(|_| DEFAULT_GUARDRAILS.to_string());
     }
 
     // Create .claudine/ directory if needed, then write the default template

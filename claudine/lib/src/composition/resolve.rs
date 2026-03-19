@@ -1,5 +1,6 @@
 //! File reference resolution for composition sources.
 
+use std::fs;
 use std::path::Path;
 
 use biscuit_file::FileReference;
@@ -34,12 +35,14 @@ pub fn resolve_composition_source(
         ));
     }
 
-    let markdown = Markdown::try_from(resolved_path.as_path())
+    let original_text = fs::read_to_string(&resolved_path)
         .map_err(|e| CompositionError::MarkdownLoad(format!("{}: {e}", resolved_path.display())))?;
+    let markdown: Markdown = original_text.clone().into();
 
     Ok(ResolvedCompositionSource {
         original_ref: file_ref.to_string(),
         resolved_path,
+        original_text,
         markdown,
     })
 }
@@ -87,6 +90,7 @@ mod tests {
         let result = resolve_composition_source(file.to_str().unwrap()).unwrap();
         assert_eq!(result.resolved_path, file);
         assert_eq!(result.original_ref, file.to_str().unwrap());
+        assert_eq!(result.original_text, "---\ntitle: Test\n---\n# Hello");
 
         let title: Option<String> = result.markdown.fm_get("title").unwrap();
         assert_eq!(title, Some("Test".to_string()));
@@ -136,7 +140,10 @@ mod tests {
         fs::set_permissions(&file, perms).unwrap();
 
         let err = validate_file_permissions(&file).unwrap_err();
-        assert!(matches!(err, CompositionError::InsufficientFilePermissions(_)));
+        assert!(matches!(
+            err,
+            CompositionError::InsufficientFilePermissions(_)
+        ));
 
         // Cleanup: restore permissions so TempDir can delete
         let mut perms = fs::metadata(&file).unwrap().permissions();
@@ -155,7 +162,10 @@ mod tests {
     #[test]
     fn validate_permissions_nonexistent_file() {
         let err = validate_file_permissions(Path::new("/nonexistent/path.md")).unwrap_err();
-        assert!(matches!(err, CompositionError::InsufficientFilePermissions(_)));
+        assert!(matches!(
+            err,
+            CompositionError::InsufficientFilePermissions(_)
+        ));
     }
 
     #[test]

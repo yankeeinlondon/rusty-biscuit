@@ -117,13 +117,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .args([
-            "codex",
-            "--yolo",
-            "--",
-            "--json",
-            "summarize repo",
-        ])
+        .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
 
@@ -905,9 +899,7 @@ exit 0
         .args(["codex", "--timeout", "30", "-i", "--", "hello"])
         .assert()
         .code(1)
-        .stderr(contains(
-            "--timeout cannot be used with --interactive mode",
-        ));
+        .stderr(contains("--timeout cannot be used with --interactive mode"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,7 +994,9 @@ printf '%s' 'Final assistant response' > "$LAST"
         .stdout("Final assistant response");
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(stderr.contains("Codex") && stderr.contains("session ID") && stderr.contains("thread-123"));
+    assert!(
+        stderr.contains("Codex") && stderr.contains("session ID") && stderr.contains("thread-123")
+    );
     assert!(stderr.contains("codex-mini"));
     assert!(stderr.contains("✓ 1.0s"));
 
@@ -1292,7 +1286,18 @@ fn codex_frontmatter_prompt_validates_agent_file_update() {
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
 
-    fs::write(&doc_path, "---\nprompt: Write a haiku\n---\nOld body\n").unwrap();
+    fs::write(
+        &doc_path,
+        concat!(
+            "---\n",
+            "prompt: |-\n",
+            "  Write a haiku about wrapping text.\n",
+            "  Keep the YAML readable.\n",
+            "---\n",
+            "Old body\n",
+        ),
+    )
+    .unwrap();
 
     // The fake agent writes directly to the target file (as a real agent would)
     let doc_path_str = doc_path.to_str().unwrap().replace('\'', "'\\''");
@@ -1318,11 +1323,89 @@ printf '%s\n' '{{"type":"thread.started","thread_id":"thread-compose"}}'
 printf '%s\n' '{{"type":"turn.started"}}'
 # Agent writes to the target file directly (preserving frontmatter)
 printf '%s\n' '---' > "$DOC"
-printf '%s\n' 'prompt: Write a haiku' >> "$DOC"
+printf '%s\n' 'prompt: |-' >> "$DOC"
+printf '%s\n' '  Write a haiku about wrapping text.' >> "$DOC"
+printf '%s\n' '  Keep the YAML readable.' >> "$DOC"
 printf '%s\n' '---' >> "$DOC"
 printf '%s' 'Fresh agent body' >> "$DOC"
 printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":8,"output_tokens":6}},"duration_ms":900,"status":"completed"}}'
-printf '%s' 'Summary of work done' > "$LAST"
+printf '%s' 'Summary of work done with enough words to require terminal-aware wrapping.' > "$LAST"
+"#
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "36")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["codex", "--frontmatter-prompt", doc_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let updated = fs::read_to_string(&doc_path).unwrap();
+    let stdout_plain = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    assert!(updated.contains("last_updated:"));
+    assert!(updated.contains("prompt: |-"));
+    assert!(updated.contains("  Write a haiku about wrapping text.\n  Keep the YAML readable.\n"));
+    assert!(updated.contains("Fresh agent body"));
+    assert!(!updated.contains("Old body"));
+    assert!(stdout_plain.contains("Summary of work done"));
+    assert!(stderr_plain.contains("\n\n✓ Codex agent completed successfully"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_frontmatter_prompt_restores_original_frontmatter_layout_after_tamper() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let doc_path = workspace.path().join("note.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &doc_path,
+        concat!(
+            "---\n",
+            "prompt: |-\n",
+            "  Preserve this block scalar.\n",
+            "  Do not fold it into one line.\n",
+            "---\n",
+            "Old body\n",
+        ),
+    )
+    .unwrap();
+
+    let doc_path_str = doc_path.to_str().unwrap().replace('\'', "'\\''");
+    write_executable(
+        &path_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+LAST=""
+DOC='{doc_path_str}'
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      LAST="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+printf '%s\n' '{{"type":"thread.started","thread_id":"thread-compose"}}'
+printf '%s\n' '{{"type":"turn.started"}}'
+# Agent tampers with the frontmatter representation.
+printf '%s\n' '---' > "$DOC"
+printf '%s\n' 'prompt: Preserve this block scalar. Do not fold it into one line.' >> "$DOC"
+printf '%s\n' '---' >> "$DOC"
+printf '%s' 'Tampered body replacement' >> "$DOC"
+printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":8,"output_tokens":6}},"duration_ms":900,"status":"completed"}}'
+printf '%s' 'Agent completed after tampering with frontmatter.' > "$LAST"
 "#
         ),
     );
@@ -1331,18 +1414,15 @@ printf '%s' 'Summary of work done' > "$LAST"
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args([
-            "codex",
-            "--frontmatter-prompt",
-            doc_path.to_str().unwrap(),
-        ])
+        .args(["codex", "--frontmatter-prompt", doc_path.to_str().unwrap()])
         .assert()
         .success();
 
     let updated = fs::read_to_string(&doc_path).unwrap();
+    assert!(updated.contains("prompt: |-"));
+    assert!(updated.contains("  Preserve this block scalar.\n  Do not fold it into one line.\n"));
+    assert!(updated.contains("Tampered body replacement"));
     assert!(updated.contains("last_updated:"));
-    assert!(updated.contains("Fresh agent body"));
-    assert!(!updated.contains("Old body"));
 }
 
 #[cfg(unix)]
@@ -1383,11 +1463,7 @@ exit 9
         .env("NO_COLOR", "1")
         .env("HOME", &fake_home)
         .env("PATH", &path_dir)
-        .args([
-            "codex",
-            "--frontmatter-prompt",
-            doc_path.to_str().unwrap(),
-        ])
+        .args(["codex", "--frontmatter-prompt", doc_path.to_str().unwrap()])
         .assert()
         .code(9)
         .stderr(contains("structured failure"));

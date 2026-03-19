@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::Instant;
 
+use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{StreamParseError, StreamParser};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
@@ -14,6 +15,52 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
     pub(crate) stderr_noise_prefixes: &'a [&'a str],
     pub(crate) stdin_seed: Option<&'a str>,
+}
+
+struct StreamTextRenderer {
+    buffer: String,
+    term: Option<Terminal>,
+}
+
+impl StreamTextRenderer {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            term: std::io::stdout().is_terminal().then(Terminal::new),
+        }
+    }
+
+    fn push<W: Write>(&mut self, out: &mut W, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
+        self.buffer.push_str(text);
+        while let Some(index) = self.buffer.find("\n\n") {
+            let flush_len = index + 2;
+            let chunk = self.buffer[..flush_len].to_string();
+            self.flush_chunk(out, &chunk);
+            self.buffer.drain(..flush_len);
+        }
+    }
+
+    fn flush_remaining<W: Write>(&mut self, out: &mut W) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        let chunk = std::mem::take(&mut self.buffer);
+        self.flush_chunk(out, &chunk);
+    }
+
+    fn flush_chunk<W: Write>(&self, out: &mut W, chunk: &str) {
+        if let Some(term) = &self.term {
+            let rendered = crate::output::render_assistant_text(chunk, term);
+            let _ = out.write_all(rendered.as_bytes());
+        } else {
+            let _ = out.write_all(chunk.as_bytes());
+        }
+        let _ = out.flush();
+    }
 }
 
 /// Spawn the provider child process and return its exit code.
@@ -440,6 +487,7 @@ pub(crate) fn run_child_stream(
         let mut out = std::io::stdout().lock();
         let mut parser = parser;
         let mut fallback_mode = false;
+        let mut renderer = StreamTextRenderer::new();
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -452,8 +500,7 @@ pub(crate) fn run_child_stream(
 
             match parser.feed_line(&line) {
                 Ok(Some(text)) => {
-                    let _ = out.write_all(text.as_bytes());
-                    let _ = out.flush();
+                    renderer.push(&mut out, &text);
                 }
                 Ok(None) => {
                     // Metadata-only line
@@ -465,12 +512,14 @@ pub(crate) fn run_child_stream(
                 }
                 Err(StreamParseError::Fatal(_)) => {
                     // Fall back to raw forwarding
+                    renderer.flush_remaining(&mut out);
                     fallback_mode = true;
                     let _ = writeln!(out, "{line}");
                 }
             }
         }
 
+        renderer.flush_remaining(&mut out);
         parser
     });
 
@@ -765,5 +814,21 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         assert_eq!(summary.assistant_text, "hello");
         assert!(summary.duration_ms.is_some());
         assert!(summary.duration_ms.unwrap() < 5_000);
+    }
+
+    #[test]
+    fn stream_text_renderer_flushes_completed_blocks() {
+        let mut renderer = StreamTextRenderer {
+            buffer: String::new(),
+            term: Some(Terminal::new_optimistic(20)),
+        };
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "First paragraph that should wrap.\n\nSecond");
+        let rendered = String::from_utf8(out).unwrap();
+
+        assert!(rendered.contains("First"));
+        assert!(rendered.contains('\n'));
+        assert_eq!(renderer.buffer, "Second");
     }
 }

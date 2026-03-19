@@ -38,6 +38,8 @@ pub struct ResolvedCompositionSource {
     pub original_ref: String,
     /// The resolved absolute path.
     pub resolved_path: PathBuf,
+    /// The original on-disk document text.
+    pub original_text: String,
     /// The parsed Markdown document.
     pub markdown: Markdown,
 }

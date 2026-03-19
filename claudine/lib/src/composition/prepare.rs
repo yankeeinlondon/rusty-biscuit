@@ -119,9 +119,11 @@ mod tests {
 
         // Re-parse from disk to match real workflow
         let markdown = Markdown::try_from(file.as_path()).unwrap();
+        let original_text = fs::read_to_string(&file).unwrap();
         ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,
+            original_text,
             markdown,
         }
     }

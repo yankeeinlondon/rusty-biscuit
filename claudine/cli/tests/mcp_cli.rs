@@ -443,14 +443,7 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
         .env("HOME", &home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args([
-            "claude",
-            "--mcp",
-            "--dry-run",
-            "--",
-            "--print",
-            "do work",
-        ])
+        .args(["claude", "--mcp", "--dry-run", "--", "--print", "do work"])
         .assert()
         .failure()
         .stderr(contains("Use `claudine mcp export claude --apply`"));
