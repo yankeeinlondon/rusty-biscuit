@@ -27,9 +27,14 @@
         {
             "name": "biscuit-hash",
             "path": "biscuit-hash"
-        },{
+        },
+        {
             "name": "biscuit-location",
             "path": "biscuit-location"
+        },
+        {
+            "name": "biscuit-visualized",
+            "path": "biscuit-visualized"
         },
         {
             "name": "biscuit-speaks",

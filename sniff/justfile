@@ -145,7 +145,7 @@ install *args="":
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Sniff CLI Installed{{RESET}}"
     @echo ""
-    @playa effect drop-4 2>/dev/null || exit 0
+    @just _play drop-4 --background
 
 # build and show the docs for the library code
 docs:

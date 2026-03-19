@@ -155,7 +155,7 @@ install:
     @echo ""
     @echo "{{BOLD}}{{BLUE}}unchained-ai CLI installed{{RESET}}"
     @echo ""
-    @playa effect drop-4 2>/dev/null || exit 0
+    @just _play drop-4 --background
 
 check:
     @echo ""
