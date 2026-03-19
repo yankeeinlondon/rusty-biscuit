@@ -25,9 +25,10 @@ Transclusion --> Summarize(Summarization)
 ```
 
 - **Rendering**
-    - **Multi-format output**: Terminal (ANSI), HTML, MDAST JSON, Enriched Markdown
-    - **Syntax highlighting**: 200+ languages via syntect with curated theme pairs
-    - **Mermaid Diagrams:** Render mermaid documents into both HTML (using dynamic runtime engine) and Markdown (as inline images)
+    - **Multi-format output**: Terminal (ANSI), HTML, [MDAST](https://github.com/syntax-tree/mdast) JSON, and Regular or Enriched Markdown
+    - **Syntax highlighting**: 200+ languages via `syntect` and `two-face` with curated theme pairs
+    - **Mermaid Diagrams:** Render [Mermaid](https://mermaid.js.org/) code blocks into both HTML (using dynamic runtime engine) and Markdown (as inline images)
+    - **Visualization of Graph Structures:** Render [DOT](https://graphviz.org/doc/info/lang.html) based graph schemas as vector or raster based images.
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
     - **Inline TOC:** Render an inline table of contents linking to the various sections of a page
     - **YouTube Embeddings (future):** Embed a YouTube video player for sharable YouTube video references
@@ -55,45 +56,13 @@ Transclusion --> Summarize(Summarization)
     - **Link Validation:** validate that all links (both file and images) are pointing at valid and accessible locations
     - **Graph Visualizer:** 
 
-## Dependencies
-
-### Monorepo Dependencies
-
-The Darkmatter Library uses the following libraries from this monorepo to achieve some of it's outcomes:
-
-- `biscuit-hash`
-    - leverages the **xxHash** hasher as well some of the "context-aware" features to help detect false positives on non-semantic file changes
-- `biscuit-terminal`
-    - Terminal Detection (`Terminal` struct)
-    - Terminal Image Rendering (`TerminalImage` struct)
-    - Mermaid Rendering to inline image 
-- `biscuit-file`
-    - File reference lookups (`FileReference` struct)
-        - provides relative and absolute path resolution, magic multipath resolution, and even glob finding resolution strategies
-    - Conversion of common config and frontmatter formats (JSON, JSON5, YAML, TOML)
-
-> **Note:** each of these libraries above has an **Agent Skill** by the same name you can use to better navigate these libraries.
-
-### Key External Crates
-
-The following crates play an important role in Darkmatter providing it's current feature set:
-
-- `pulldown-cmark` - _a blazingly fast pulldown parser for Markdown files_
-- `syntect` & `two-face` - _provide a rich set of themes and code parsing for the purpose of code highlighting_
-- `tokio` - _for IO bound async including all remote requests_
-- `reqwest` - _for 
-- `this-error` & `tracing` - _provide error definition support and reporting_
-- 
-
-
-
 ## Quick Start
 
 ### Rendering 
 
-The most _grokkable_ feature that Darkmatter provides is a well designed **rendering** into multiple output formats.
+The most _grokkable_ feature that Darkmatter provides is a well designed **rendering engine** which supports multiple output formats.
 
-The `Markdown` struct is a central player in how we interact with **Darkmatter** and _rendering_ is most easily understand utility of the Darkmatter library:
+The `Markdown` struct is a central player in how we interact with **Darkmatter** and here is a simple example of using the `Markdown` struct along with `TerminalOptions` to output markdown to the terminal:
 
 ```rust
 use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
@@ -105,27 +74,24 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 
 ### Composition
 
-Composition is probably the most powerful feature that Darkmatter has to offer. The types of composition each documents employ vary considerably but in all cases we run the Markdown through the same Markdown pipeline which will:
+Composition is probably the most powerful feature that Darkmatter has to offer. Darkmatter provides a small **DSL** that sits on top of the [CommonMark](https://commonmark.org/) + [GFM](https://github.github.com/gfm/) Markdown standards which are supported in Darkmatter as well. This DSL let's a document author to:
 
-- **Prepare** document
+The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
+
+- **Prepare** the document by mutating the body based on "state" or some external and measurable property
     - _this includes operations like "text replacement", "interpolation", "TOC linking", "normalization" and more_
 - Perform **Transclusions**
     - _there are many types of transclusions a document can employ with directives_
     - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
-- and if an _output_ other than the default output has been specified then we will transform to that output format
+        - If the base document, transcludes documents A, B, and C then all three documents can in turn transclude their own set of external resources.
+- and **Render** the combined document parts as a single document
+    - by default rendering during the **compose** operation will return regular Markdown as plain text (no ANSI escape codes, no HTML/CSS, minimal to no inline HTML)
+    - but of course that plain text Markdown can then be immediately transformed into any of the other output formats by leveraging Darkmatter's 
+
+Here's a simple example of using tiny bit of **interpolation** and a wee bit of **transclusion**. We will compose a set of fictional Markdown documents called:
 
 
-```mermaid
-flowchart LR
-
-Doc[Markdown Document]
-Compose[[Compose]]
-Transform[/Transform Pipeline/]
-
-Doc --> Compose --> Transform --> MdContent(Markdown Content)
-```
-
-Here's a simple example of using tiny bit of **interpolation** and a wee bit of **transclusion**. We will compose a fictional Markdown document called `main.md`:
+`main.md`
 
 ~~~md
 ---
@@ -138,34 +104,225 @@ Hi, my name is {{name}} and I'd like to share a few things with you.
 ## My Favorite Things
 
 ::file favorites.md
-
-## What I'm Avoiding
-
-::file avoid.md
 ~~~
 
-Now the imaginary `favorites.md` is defined as:
+`favorite.md`
 
 ~~~md
-## Sports
+{{name}}'s favorite sports.
 
-::file sports.md
 
-## Gadgets
+## Football
+- [NFL](https://pittsburgh.steelers.com)
+- [Premier League](https://queens-park-rangers.com) 
+  - ok so they're no longer in the premier league
+  - I'm still counting them tough
 
-:: file gadgets.md
+## Racket Sports
+
+- [Tennis](https://tennis.com)
+- [Pickleball](https://is-not-a-real-sport.com)
 ~~~
 
-
+We can then use a small amount of Rust code to compose the `main.md` document:
 
 ```rust
 // TODO: show a code example
 ```
 
+This results in a document which:
+
+- Replaces all Markdown body references of `{{name}}` to the static text `Bob`
+    - this replacement will happen not only in the `main.md` file but all child files too (unless these children redefine the `name` property)
+- In the `main.md` file's "My Favorite Things" section we use a `::file` references which interpolates the content from the external file `favorites.md`, before this external content is brought in, however, the child document(s) will first be run through the Markdown pipeline itself. This results in:
+    - The document is "cleaned up", in this particular case it will:
+        - add a **blank line** after `## Football` as all heading lines should have blank lines above and below them
+        - changed the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
+        - because `main.md` injects the `favorites.md` file into a section defined by an **H2** heading, the injected content will be _normalized_ to have it's headings start at **H3**
+    - Were the `favorites.md` file to have it's own `::file` reference then the recursive process would continue.
+
+## Composition Lifecycle
+
+If you want details on any stage of the composition lifecycle follow the links to the detailed documents below:
+
+- [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) provides an overview of the discrete steps -- _and the ordering of those steps_ - which are used to mutate every document in a composition graph.
+- The initial "prepatory" operations in the composition pipeline each have a document with more details:
+    - **Cleaning**:
+        - The [cleaning](../docs/preparation/cleaning.md) document covers the functionality and key symbols for cleaning up a Markdown document found in the library. 
+        - Alternatively if your interest is more focused on the CLI, you can read the [`clean`](../docs/cli/clean.md) subcommand documentation.
+    - **Normalization**:
+        - The [normalization and re-leveling](../docs/preparation/normalization-and-releveling.md) document goes into details about ensuring that the heading structure of a document is valid as well as how to "re-level" the document were needed.
+    - **Text Replacement**
+        - The "text replacement" functionality allows a caller to provide a key/value dictionary to do a full find-and-replace across the document graph of a composition. For more details read [Text Replacement](../docs/preparation/text-replacement.md)
+    - **Interpolation**:
+        - To able to _replace_ references to frontmatter properties, ENV variables, and "context" based properties in a body's page is what the **interpolate** operation provides. To get more information read the [Interpolation](../docs/preparation/interpolation.md) document.
+    - **TOC Linking**:
+        - Sometimes instead of hyperlinking to another Markdown document, it is useful instead to link to each (or a configured subset) of it's heading topics.
+        - Doing so is easy with the `::toc-linking` directive described in detail in [TOC Linking](../docs/preparation/toc-linking.md)
+    - **Shell Expansion**:
+        - Being able to inject the output of a shell command into a part of a Markdown document can be a powerful feature. 
+        - The [Shell Expansion](../docs/preparation/shell-expansion.md) document describes how to do this, what configuration is available, and how the built-in security model works.
+    - **Conditional Blocks**:
+        - The `::block` directive allows you to _conditionally_ render certain parts of a page based on frontmatter, ENV variables, and provided context variables.
+- Once the _prepatory_ steps are complete we move into **Transclusion**; there are many variants of this operation and you can get details from these links:
+    - j
+
+### Rendering Details
+
+The final stage of the composition process is _rendering_ and by default we typically just return the plain text Markdown "as is" but in cases where we want to present this to a user in a terminal, a browser, or even into a static analysis process we will lean on the rendering cycle to do that. The rendering output targets are:
+
+```mermaid
+flowchart LR
+Render(Rendering)
+Plain[Plain Text]
+Enriched(Enriched Markdown)
+Terminal("Terminal (_escape codes_)")
+Web("Web (_HTML, CSS, and JS_)")
+AST("Abstract Syntax Tree (**AST**)")
+
+Render -->|default| Plain
+Render --> Enriched
+Render --> Terminal
+Render --> Web
+Render --> AST
+```
+
+For the non-AST variants, there are a set of "features" which we try to employ across each of the output targets but since the target's capabilities vary greatly we will not always be able to be consistent. Some targets might be fully missing some features, other target's may have a reduced functionality variant.
+
+For each of these rendering features there are detailed documents which will describe the functionality as well as clarify the support across the different output targets.
+
+- **Table Rendering:**
+
+    - Being able to render tables, have control over alignment, column width, and other layout features are always going to be nice-to-haves but in Markdown they have no means to be defined (note: the CommonMark spec doesn't have any direct support for tables, that only comes with GFM support)
+    - Darkmatter supports the basics while allowing additional capabilities to be added in as "hints" to the renderer. 
+        - a Darkmatter renderer _will_ understand what to do with these hints, but 
+        - a normal Markdown renderer will not understand the semantics but it will still be "valid Markdown" and be able to render the document
+    - For details on this feature read [Table Rendering in Darkmatter](../docs/rendering/table-rendering.md)
+
+- **Code Highlighting:**
+
+    - Markdown is often used for technical documentation where a document is interspersed with code examples placed into **code blocks**
+    - In order to make the code be visually information rich and intuitive to a human reader it's very useful to parse the code and _colorize_ it in a way similar to how an editor would style it.
+    - **Darkmatter** provides rich support for this and you can find out more at [Code Highlighting](../docs/rendering/code-highlighting.md)
+
+- **Mermaid Rendering:**
+
+    - Mermaid charts/visualizations and Markdown documents are a form of ying and yang (aka, very complimentary and meant to be used together).
+    - A Mermaid chart/visualization is to added to a Markdown document's content as a _code block_ with the language set to `mermaid`.
+    - **Darkmatter** will see these code blocks as a special use case and pass it to our Mermaid rendering engine described in [Mermaid Rendering](../docs/rendering/mermaid-rendering.md).
+
+- **Graph Expression Visualization:**
+
+    - Being able to render a graph structure as a visualization can be done in a similar manner to Mermaid visualizations.
+    - The exact parameters and the underlying technical solution, however, are completely separate and distinct.
+    - The [Graph Visualization](../docs/rendering/graph-rendering.md) goes into more details on both.
+
+- **YouTube Embedding:**
+
+    - Being able to quickly reference a YouTube video's share link and have a visually compelling preview card linked to the video (or an embedded player on output targets which support that) is a quality of life feature which **Darkmatter** provides.
+    - More details are found in the [YouTube Embedding](../docs/rendering/youtube-embedding.md) document.
+
+- **Popovers:**
+
+    - A **Popover effect** is something many are familiar with on the web and it presents most commonly as a part of the page which when _hovered over_ (or sometimes clicked on, etc.), makes an small informational dialog box above (or at least not masking) the linked part of the page appear.
+    - This can be a useful UI pattern for allowing people to "inspect but not commit" to more information on a given topic while not overwhelming the user with all the content being rendered immediately but instead only when a user expresses interest.
+    - More detail on how this is implemented and on which platforms is found in the [popovers](../docs/popovers.md) document.
+
+- **Disclosure Blocks:**
+
+    - A disclosure block has some overlap in UI design with a popover but enough distinctions to be it's own thing
+    - People familiar with the HTML `<detail>` and `<summary>` tags will already have a good idea what this looks like because "disclosure blocks" are now natively supported in modern browsers by these tags.
+    - Because Markdown is a _superset_ of HTML, you could just use these tags in any Markdown document as inner-HTML blocks but doing that is awkward and doesn't meet the "notational velocity" vibe of Markdown authoring
+    - More detail on how **disclosure blocks** are made available via **Darkmatter**'s DSL can be found in the [disclosure](../docs/disclosure.md) document.
+
+- **List Expansion:**
+
+    - Being able to _expand_ or _contract/hide_ a list of items in Markdown is NOT supported in standard Markdown but is a desirable feature because it allows the reader how much detail they want to see. 
+    - Most note taking solutions which use Markdown add this feature in because of it's utility and **Darkmatter**'s DSL provides the syntax to do the same
+    - For more details on setting up List Expansion, read the [List Expansion](../rendering/list-expansion.md) document.
+
+- **Smart Images:**
+
+    - Large images (in file size) are one of the top reasons web pages are slow
+    - Being able to ensure that the image being rendered is size-appropriate and size-optimized for a rendering target is only really available for the Web but if that's what you're targeting then **Darkmatter** has an elegant solution for you in **Smart Images**.
+    - For more details on Smart Images, read the [Smart Images](../rendering/smart-images.md) document
+
+- **Column Support:**
+
+    - Markdown is great but, by default, it can be somewhat _horizontally_ challenged
+    - In typesetting a major tool to help with this the use of columns
+    - Sure if you're using GFM you can use tables but Markdown tables do **not** lend themselves well to many tasks where a real column solution would be so much more graceful.
+    - **Darkmatter** provides a more useful solution to solve this, to find out more read [Column Support](../rendering/column-support.md).
+
+- **Audio Content:**
+
+    - Hey, who doesn't love multi-modality? Well if you're someone who raised their hand when they heard that question you'll be happy to know that **Darkmatter** has some primitives which can help you integrate audio content into your Markdown documents.
+    - For more information read the [Audio Content](../docs/rendering/audio-content.md) document.
+
+- **TOC Generation:**
+
+    - For longer documents it's not uncommon to want to have a document lead with a table of contents so users can see the structure of the document and quickly move to the section they are most interested in.
+    - This kind of feature is a standard plugin to most Markdown parsing libraries and Darkmatter is no different in it's desire to provide this feature. However, because composition can lead to a dynamic document structure the TOC functionality that Darkmatter provides is "composable aware"
+    - For more details on this read the [TOC Generation](../docs/rendering/toc-generation.md) document.
+
+- **Person Card:**
+
+    - FUTURE
+    - Darkmatter provides the `::person` block directive as well as the `person::*` inline directive to allow you to show information about a person with pizazz
+    - If you want more information see the [Person Card](../docs/rendering/person-card.md) document.
+
+- **Place Card:**
+
+    - FUTURE
+
+- **Product Card:**
+
+    - FUTURE
 
 
+### Utilities
 
+The Darkmatter library also exposes some useful utilities for callers to be aware of including:
 
+- **Delta:**
+    - Darkmatter will provide a variety of ways of dissecting what has changed in a document
+    - It can provide a semantic/structural overview of changes
+    - It can provide visual reporting on distinct text changes in Markdown prose or frontmatter
+    - More details can be found at [Delta Utility](../docs/utilities/delta.md)
+- **Link Checking:**
+    - Darkmatter can traverse a compose pipeline's file graph and validate that all of the links point to valid resources
+    - More details can be found at [Link Checking](../docs/utilities/link-checking.md)
+
+## Darkmatter Dependencies
+
+### Monorepo Dependencies
+
+The Darkmatter Library uses the following libraries from this monorepo to achieve some of it's outcomes:
+
+- [`biscuit-hash`](../../biscuit-hash/README.md)
+    - leverages the **xxHash** hasher as well some of the "context-aware" features to help detect false positives on non-semantic file changes
+- [`biscuit-terminal`](../../biscuit-terminal/README.md)
+    - Terminal Detection (`Terminal` struct)
+    - Terminal Image Rendering (`TerminalImage` struct)
+- [`biscuit-visualized`](../../biscuit-visualized/README.md)
+    - Mermaid rendering
+    - Graph Structure rendering
+- [`biscuit-file`](../../biscuit-file/README.md)
+    - File reference lookups (`FileReference` struct)
+        - provides relative and absolute path resolution, magic multipath resolution, and even glob finding resolution strategies
+    - Conversion of common config and frontmatter formats (JSON, JSON5, YAML, TOML)
+
+> **Note:** each of these libraries above has an **Agent Skill** by the same name you can use to gain deep insights into these libraries.
+
+### Key External Crates
+
+The following crates play an important role in Darkmatter providing it's current feature set:
+
+- `pulldown-cmark` - _a blazingly fast pulldown parser for Markdown files_
+- `syntect` & `two-face` - _provide a rich set of themes and code parsing for the purpose of code highlighting_
+- `tokio` - _for IO bound async including all remote requests_
+- `reqwest` - _for 
+- `this-error` & `tracing` - _provide error definition support and reporting_
 
 
 
@@ -227,7 +384,7 @@ let fm = md.frontmatter_mut().as_map_mut();
 fm.shift_remove("draft");
 ```
 
-Note that there is **not** a strict semantic reason to preserve the order of the frontmatter properties but for humans (at the very least) preserving order is helpful as people tend to expect the order they've setup to be preserved and they may hold some semantic idea of grouping or ordering that the Markdown standard doesn't strictly care about.
+> **Note:** while there is **not** a strict _semantic_ reason to preserve the order of the frontmatter properties, humans (at the very least) intuitively expect order preservation and it helps them to quickly find the data they are looking for.
 
 ## Frontmatter Parsing and TOC Reliability
 
