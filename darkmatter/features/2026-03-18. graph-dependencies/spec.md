@@ -1,4 +1,4 @@
-# Graph Visualization
+# Graph Dependencies
 
 In the Darkmatter `compose` functionality we see that a base file we're composing is really the beginning of a graph of files which will be leveraged to produce the output. The graph is influenced by:
 
