@@ -1422,9 +1422,9 @@ fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
             let prefix = &pkg.relative;
             staged_paths.iter().any(|path| {
                 if prefix.is_empty() {
-                    !packages
-                        .iter()
-                        .any(|other| !other.relative.is_empty() && path.starts_with(&other.relative))
+                    !packages.iter().any(|other| {
+                        !other.relative.is_empty() && path.starts_with(&other.relative)
+                    })
                 } else {
                     path.starts_with(prefix)
                 }

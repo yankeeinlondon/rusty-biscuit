@@ -10,8 +10,8 @@ use crate::shared::{
     AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FieldInfo, FileSymbolIndex,
     FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage,
     ReferencedSymbol, SourceContext, SymbolInfo, SymbolKind, SymbolKindData, SymbolKindV2,
-    SymbolRecord, SyntaxDiagnostic, TextPoint, TextSpan, TypeAliasData, TypeMetadata,
-    VariantInfo, Visibility, stable_symbol_key, symbol_id_from_stable_key,
+    SymbolRecord, SyntaxDiagnostic, TextPoint, TextSpan, TypeAliasData, TypeMetadata, VariantInfo,
+    Visibility, stable_symbol_key, symbol_id_from_stable_key,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -1537,7 +1537,11 @@ impl TreeFile {
             );
             let sibling_ordinal = *ordinals.entry(ordinal_key).or_insert(0);
             *ordinals
-                .get_mut(&(v2_kind, record.identity.module_path.clone(), record.identity.name.clone()))
+                .get_mut(&(
+                    v2_kind,
+                    record.identity.module_path.clone(),
+                    record.identity.name.clone(),
+                ))
                 .expect("ordinal entry must exist") += 1;
 
             record.kind = v2_kind;
@@ -1922,10 +1926,7 @@ fn is_definition_like_reference(node: Node<'_>, language: ProgrammingLanguage) -
         ),
         ProgrammingLanguage::Rust => matches!(
             parent.kind(),
-            "parameter"
-                | "self_parameter"
-                | "field_declaration"
-                | "use_as_clause"
+            "parameter" | "self_parameter" | "field_declaration" | "use_as_clause"
         ),
         _ => false,
     }

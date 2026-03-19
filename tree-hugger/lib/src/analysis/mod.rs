@@ -50,18 +50,21 @@ fn parse_pass(tree_file: &TreeFile) -> Result<FileSymbolIndex, TreeHuggerError> 
                 start_byte: import.range.start_byte as u32,
                 end_byte: import.range.end_byte as u32,
             },
-            statement_span: import.statement_range.as_ref().map(|range| crate::shared::TextSpan {
-                start: crate::shared::TextPoint {
-                    line: range.start_line as u32,
-                    column: range.start_column as u32,
-                },
-                end: crate::shared::TextPoint {
-                    line: range.end_line as u32,
-                    column: range.end_column as u32,
-                },
-                start_byte: range.start_byte as u32,
-                end_byte: range.end_byte as u32,
-            }),
+            statement_span: import
+                .statement_range
+                .as_ref()
+                .map(|range| crate::shared::TextSpan {
+                    start: crate::shared::TextPoint {
+                        line: range.start_line as u32,
+                        column: range.start_column as u32,
+                    },
+                    end: crate::shared::TextPoint {
+                        line: range.end_line as u32,
+                        column: range.end_column as u32,
+                    },
+                    start_byte: range.start_byte as u32,
+                    end_byte: range.end_byte as u32,
+                }),
             symbol: SymbolRef {
                 id: None,
                 name: import.name,
@@ -153,7 +156,11 @@ fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), Tr
     let mut referenced_by_target: HashMap<crate::shared::SymbolId, Vec<SymbolRef>> = HashMap::new();
 
     for reference in tree_file.referenced_symbols()? {
-        let Some(owner_idx) = find_owner_symbol(&index.symbols, reference.range.start_byte as u32, reference.range.end_byte as u32) else {
+        let Some(owner_idx) = find_owner_symbol(
+            &index.symbols,
+            reference.range.start_byte as u32,
+            reference.range.end_byte as u32,
+        ) else {
             continue;
         };
 
@@ -190,7 +197,8 @@ fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), Tr
         symbol.relations.parent = parent_links[idx].clone();
         symbol.relations.container = parent_links[idx].clone();
         symbol.relations.members = members_by_parent.remove(&symbol.id).unwrap_or_default();
-        symbol.relations.referenced_by = referenced_by_target.remove(&symbol.id).unwrap_or_default();
+        symbol.relations.referenced_by =
+            referenced_by_target.remove(&symbol.id).unwrap_or_default();
         symbol.visibility.is_exported = exported_ids.contains(&symbol.id);
         symbol.provenance.parse_pass = AnalysisPass::Bind.as_str().to_string();
         symbol.provenance.updated_at_epoch_ms = now_epoch_ms();
@@ -299,9 +307,7 @@ fn find_reference_target<'a>(
     symbols: &'a [crate::shared::SymbolRecord],
     name: &str,
 ) -> Option<&'a crate::shared::SymbolRecord> {
-    symbols
-        .iter()
-        .find(|symbol| symbol.identity.name == name)
+    symbols.iter().find(|symbol| symbol.identity.name == name)
 }
 
 fn find_container_symbol(
@@ -337,13 +343,9 @@ fn find_export_target<'a>(
 ) -> Option<&'a crate::shared::SymbolRecord> {
     symbols.iter().find(|symbol| {
         symbol.identity.name == export.name
-            && symbol
-                .source
-                .name_span
-                .as_ref()
-                .is_some_and(|span| {
-                    span.start_byte == export.span.start_byte && span.end_byte == export.span.end_byte
-                })
+            && symbol.source.name_span.as_ref().is_some_and(|span| {
+                span.start_byte == export.span.start_byte && span.end_byte == export.span.end_byte
+            })
     })
 }
 

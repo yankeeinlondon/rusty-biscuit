@@ -924,7 +924,8 @@ fn captures_typescript_class_symbol() -> Result<(), TreeHuggerError> {
 }
 
 #[test]
-fn does_not_report_typescript_class_declaration_as_undefined_symbol() -> Result<(), TreeHuggerError> {
+fn does_not_report_typescript_class_declaration_as_undefined_symbol() -> Result<(), TreeHuggerError>
+{
     let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
     let symbols = tree_file.symbols()?;
     let diagnostics = tree_file.lint_diagnostics();
@@ -960,13 +961,15 @@ fn typescript_exports_exclude_class_members() -> Result<(), TreeHuggerError> {
         "exported symbols should include the Greeter class"
     );
     assert!(
-        exports
-            .iter()
-            .any(|symbol| symbol.name == "greet" && symbol.kind == tree_hugger::SymbolKind::Function),
+        exports.iter().any(
+            |symbol| symbol.name == "greet" && symbol.kind == tree_hugger::SymbolKind::Function
+        ),
         "exported symbols should include the top-level greet function"
     );
     assert!(
-        !exports.iter().any(|symbol| symbol.kind == tree_hugger::SymbolKind::Method),
+        !exports
+            .iter()
+            .any(|symbol| symbol.kind == tree_hugger::SymbolKind::Method),
         "class methods should not be treated as exported API symbols"
     );
     assert!(
@@ -985,7 +988,9 @@ fn symbol_index_relations_are_scoped_to_owning_symbol() -> Result<(), TreeHugger
     let greet = index
         .symbols
         .iter()
-        .find(|symbol| symbol.identity.name == "greet" && symbol.kind == tree_hugger::SymbolKindV2::Function)
+        .find(|symbol| {
+            symbol.identity.name == "greet" && symbol.kind == tree_hugger::SymbolKindV2::Function
+        })
         .expect("should find greet function");
     let greet_many = index
         .symbols
@@ -1012,7 +1017,11 @@ fn symbol_index_relations_are_scoped_to_owning_symbol() -> Result<(), TreeHugger
 #[test]
 fn stable_ids_ignore_leading_whitespace_changes() -> Result<(), TreeHuggerError> {
     let dir = TempDir::new().unwrap();
-    let path = create_temp_file(&dir, "stable.ts", "export function greet(): string { return \"hi\"; }\n");
+    let path = create_temp_file(
+        &dir,
+        "stable.ts",
+        "export function greet(): string { return \"hi\"; }\n",
+    );
 
     let first = TreeFile::new(&path)?
         .symbol_records()?
@@ -1021,7 +1030,11 @@ fn stable_ids_ignore_leading_whitespace_changes() -> Result<(), TreeHuggerError>
         .expect("should find greet symbol")
         .id;
 
-    fs::write(&path, "\n\nexport function greet(): string { return \"hi\"; }\n").unwrap();
+    fs::write(
+        &path,
+        "\n\nexport function greet(): string { return \"hi\"; }\n",
+    )
+    .unwrap();
 
     let second = TreeFile::new(&path)?
         .symbol_records()?
@@ -2108,10 +2121,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
     // Find the public greet method
     let public_greet = symbols
         .iter()
-        .find(|s| {
-            s.name == "greet"
-                && s.kind == tree_hugger::SymbolKind::Method
-        })
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find public greet method");
 
     let sig = public_greet

@@ -10,13 +10,13 @@ use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
+use tree_hugger::cache::{AnalyzerFingerprint, FileCacheKey, InMemorySymbolCache, SymbolSnapshot};
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
     FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
     ProgrammingLanguage, SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic,
     TreeFile, TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
 };
-use tree_hugger::cache::{AnalyzerFingerprint, FileCacheKey, InMemorySymbolCache, SymbolSnapshot};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -2829,20 +2829,20 @@ fn extract_class_summaries(
     static_only: bool,
     instance_only: bool,
 ) -> Result<Vec<ClassSummary>, TreeHuggerError> {
-    let symbols_by_id: HashMap<_, _> = index.symbols.iter().map(|symbol| (&symbol.id, symbol)).collect();
+    let symbols_by_id: HashMap<_, _> = index
+        .symbols
+        .iter()
+        .map(|symbol| (&symbol.id, symbol))
+        .collect();
 
     let mut result = Vec::new();
 
-    for class_record in index
-        .symbols
-        .iter()
-        .filter(|symbol| {
-            matches!(
-                symbol.kind,
-                tree_hugger::SymbolKindV2::Class | tree_hugger::SymbolKindV2::Type
-            )
-        })
-    {
+    for class_record in index.symbols.iter().filter(|symbol| {
+        matches!(
+            symbol.kind,
+            tree_hugger::SymbolKindV2::Class | tree_hugger::SymbolKindV2::Type
+        )
+    }) {
         let Ok(class) = SymbolInfo::try_from(class_record.clone()) else {
             continue;
         };

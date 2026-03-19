@@ -29,11 +29,10 @@ pub use topics::render_topics_table;
 pub(crate) use filesystem::{
     print_current_package_area_dirty, print_package_area_has_source_code_changes,
     render_dirty_package_areas, render_dirty_packages, render_docs_section, render_files_section,
-    render_staged_package_areas, render_staged_packages,
     render_filesystem_section, render_language_section, render_repo_deps_text,
     render_repo_deps_visual, render_repo_package, render_repo_package_area,
     render_repo_package_area_root, render_repo_package_root, render_repo_packages,
-    render_repo_root, render_repo_section,
+    render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
 };
 pub(crate) use hardware::{
     render_audio_devices_section, render_cpu_section, render_gpu_section, render_hardware_section,
