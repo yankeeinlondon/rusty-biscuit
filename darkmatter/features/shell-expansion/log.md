@@ -5,8 +5,8 @@ last_updated: 2026-03-16
 plan: darkmatter/features/shell-expansion/plan.md
 review: darkmatter/features/shell-expansion/review.md
 implement_complete: false
-implementation_files: darkmatter/lib/src/markdown/transform/shell_expansion/types.rs, darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs, darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs, darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs, darkmatter/lib/src/markdown/transform/shell_expansion/store.rs, darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs, darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs, darkmatter/lib/src/markdown/transform/mod.rs, darkmatter/lib/src/markdown/transform/types.rs, darkmatter/lib/src/markdown/types.rs, darkmatter/cli/src/approval.rs, darkmatter/cli/src/commands.rs, darkmatter/cli/src/lib.rs
-reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,darkmatter/cli/tests/cli.rs,darkmatter/docs/darkmatter-pipeline.md,darkmatter/docs/designs/shell-expansion.md,darkmatter/docs/preparation/shell-expansion.md,darkmatter/features/shell-expansion/spec.md,darkmatter/features/shell-expansion/tech-design.md,darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs,darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs,darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs,darkmatter/lib/src/markdown/transform/shell_expansion/store.rs,darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs,darkmatter/lib/src/markdown/transform/shell_expansion/types.rs,docs/dependencies.md
+implementation_files: darkmatter/lib/src/markdown/compose/shell_expansion/types.rs, darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs, darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs, darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs, darkmatter/lib/src/markdown/compose/shell_expansion/store.rs, darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs, darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs, darkmatter/lib/src/markdown/compose/mod.rs, darkmatter/lib/src/markdown/compose/types.rs, darkmatter/lib/src/markdown/types.rs, darkmatter/cli/src/approval.rs, darkmatter/cli/src/commands.rs, darkmatter/cli/src/lib.rs
+reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,darkmatter/cli/tests/cli.rs,darkmatter/docs/darkmatter-pipeline.md,darkmatter/docs/designs/shell-expansion.md,darkmatter/docs/preparation/shell-expansion.md,darkmatter/features/shell-expansion/spec.md,darkmatter/features/shell-expansion/tech-design.md,darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs,darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs,darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs,darkmatter/lib/src/markdown/compose/shell_expansion/store.rs,darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs,darkmatter/lib/src/markdown/compose/shell_expansion/types.rs,docs/dependencies.md
 ---
 ## Tech Design for shell-expansion Complete
 
@@ -18,19 +18,19 @@ reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,dar
 
 - **Stage placement**: Shell expansion slots into Stage 1 as step 4 (after replacement, interpolation, TOC linking; before cleanup, normalization). This lets `{{ }}` interpolation feed into command args and lets cleanup/normalization operate on shell-emitted markdown.
 
-- **Public API surface**: `ShellExpansionOptions` (timeout, policy_root, working_directory, approval_handler) added to `TransformOptions`; `ShellApprovalHandler` trait with `approve()` method; `ShellApprovalRequest`/`ShellApprovalDecision` enum (AllowExactPersist, AllowCommandPersist, AllowOnce, Deny, BlacklistPersist); new `shell_expansion` toggle on `Stage1Stages`; two new counters on `TransformReport`.
+- **Public API surface**: `ShellExpansionOptions` (timeout, policy_root, working_directory, approval_handler) added to `ComposeOptions`; `ShellApprovalHandler` trait with `approve()` method; `ShellApprovalRequest`/`ShellApprovalDecision` enum (AllowExactPersist, AllowCommandPersist, AllowOnce, Deny, BlacklistPersist); new `shell_expansion` toggle on `Stage1Stages`; two new counters on `ComposeReport`.
 
 - **Internal runtime changes**: Introduces `PipelineRuntime` wrapping both `TransclusionRuntime` and `ShellExpansionRuntime`, replacing the single-purpose transclusion runtime. This ensures allow-once decisions and policy mutations persist across recursively composed child documents within a single compose run.
 
-- **Module layout**: New `transform/shell_expansion/` module with six files: `mod.rs` (orchestration), `parser.rs` (directive scanning), `tokenize.rs` (argv tokenization), `policy.rs` (blacklist/whitelist matching), `store.rs` (policy file discovery/load/append), `executor.rs` (process spawn/timeout/capture), `types.rs` (data types and errors).
+- **Module layout**: New `compose/shell_expansion/` module with six files: `mod.rs` (orchestration), `parser.rs` (directive scanning), `tokenize.rs` (argv tokenization), `policy.rs` (blacklist/whitelist matching), `store.rs` (policy file discovery/load/append), `executor.rs` (process spawn/timeout/capture), `types.rs` (data types and errors).
 
 - **Security model**: Three-layer defense -- (1) built-in blacklist with structured rules (Executable, ExecutablePrefix, SubcommandPrefix, ArgExact, ArgPrefix, RawToken), (2) persisted user blacklist (`.darkmatter-shell-blacklist`), (3) persisted whitelist (`.darkmatter-shell-whitelist`) with `exact` and `prefix` entries. Shell metacharacters (`|`, `;`, `&&`, `>`, `` ` ``, `$(`) are rejected at tokenization. Shell-interpreter wrappers (`sh -c`, `bash -c`, etc.) are explicitly blocked.
 
 - **Execution model**: 10-second default timeout; stdin always null; stdout/stderr piped and captured concurrently; child killed on timeout; exit 0 with empty output removes the directive; non-zero exit is a hard pipeline failure including captured streams in the error. Working directory resolves from explicit option, then source file parent, then policy_root, then CWD.
 
-- **Error handling**: Dedicated `ShellExpansionError` enum (ParseDirective, CommandNotFound, Blacklisted, ApprovalRequired, Denied, Timeout, ExecutionFailed, PolicyIo) that converts into the existing `MarkdownError::Transform` surface. All shell failures are hard failures -- they never degrade to warnings even when `fail_fast = false`.
+- **Error handling**: Dedicated `ShellExpansionError` enum (ParseDirective, CommandNotFound, Blacklisted, ApprovalRequired, Denied, Timeout, ExecutionFailed, PolicyIo) that converts into the existing `MarkdownError::Compose` surface. All shell failures are hard failures -- they never degrade to warnings even when `fail_fast = false`.
 
-- **Implementation phases**: Phase 1 -- types, parser, tokenizer, blacklist, policy store. Phase 2 -- executor, PipelineRuntime, wire into transform pipeline, library tests. Phase 3 -- CLI approval handler, non-interactive error guidance, CLI tests, docs updates.
+- **Implementation phases**: Phase 1 -- types, parser, tokenizer, blacklist, policy store. Phase 2 -- executor, PipelineRuntime, wire into compose pipeline, library tests. Phase 3 -- CLI approval handler, non-interactive error guidance, CLI tests, docs updates.
 
 - **Key divergences from spec**: (1) Policy root resolution prefers source-file ancestry over CWD for file-backed compose. (2) `policy_root` naming replaces spec's `policy_dir`. (3) Shell-interpreter wrapper forms (`bash -lc`, etc.) are rejected despite appearing in spec examples. (4) Shell metacharacters are rejected at tokenization rather than relying solely on the textual blacklist. (5) The library never prompts directly -- it delegates via a caller-provided `ShellApprovalHandler` trait or returns `ApprovalRequired`.
 
@@ -47,7 +47,7 @@ The implementation plan organizes the shell-expansion feature into 3 phases with
 - Task 1.3: Directive parser (`parser.rs`) — line scanning with code-region exclusion, builds ShellDirective list
 - Task 1.4: Built-in blacklist (`policy.rs`) — structured rules for ~40+ dangerous commands, interpreter-wrapper blocking, whitelist/blacklist matching
 - Task 1.5: Policy file store (`store.rs`) — discovery (git root/HOME), line-oriented load/append, deduplication
-- Task 1.6: Module scaffold — wire into existing types (Stage1Stages, TransformOptions, TransformReport, MarkdownError), add `which` dependency
+- Task 1.6: Module scaffold — wire into existing types (Stage1Stages, ComposeOptions, ComposeReport, MarkdownError), add `which` dependency
 - Task 1.7: Phase 1 tests
 
 **Phase 2 — Executor, Pipeline Runtime, Pipeline Integration** (4 tasks):
@@ -64,19 +64,19 @@ The implementation plan organizes the shell-expansion feature into 3 phases with
 - Task 3.3: CLI integration tests — whitelisted/blacklisted/non-interactive scenarios
 - Task 3.4: Documentation updates — dependencies.md, pipeline docs
 
-**Key risks**: Phase 2 Task 2.2 (PipelineRuntime refactor) touches recursive pipeline plumbing and is highest-risk for regressions. All existing transform and transclusion tests must pass before proceeding.
+**Key risks**: Phase 2 Task 2.2 (PipelineRuntime refactor) touches recursive pipeline plumbing and is highest-risk for regressions. All existing compose and transclusion tests must pass before proceeding.
 
 ### Phase 1: Types, Parser, Tokenizer, Blacklist, Policy Store
 
 All Phase 1 components were already implemented in a prior session. Verified all files exist and compile:
 
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs` — ShellDirective, ShellExpansionOptions, ShellApprovalHandler, ShellExpansionError, PipelineRuntime, BlacklistRule, ShellRuleSet, ShellExpansionRuntime
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs` — tokenize() with quoting support and metacharacter rejection (36 unit tests)
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs` — parse_directives() with code-region exclusion (12 unit tests)
-- `darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs` — check_builtin_blacklist(), check_user_blacklist(), check_whitelist(), normalize_command() (18 unit tests)
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs` — resolve_policy_paths(), load_ruleset(), append helpers (10 unit tests)
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs` — execute_directive(), apply_replacements_in_reverse() + 6 integration tests
-- `darkmatter/lib/src/markdown/transform/types.rs` — Stage1Stages, TransformOptions, TransformReport already include shell expansion fields
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs` — ShellDirective, ShellExpansionOptions, ShellApprovalHandler, ShellExpansionError, PipelineRuntime, BlacklistRule, ShellRuleSet, ShellExpansionRuntime
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs` — tokenize() with quoting support and metacharacter rejection (36 unit tests)
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs` — parse_directives() with code-region exclusion (12 unit tests)
+- `darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs` — check_builtin_blacklist(), check_user_blacklist(), check_whitelist(), normalize_command() (18 unit tests)
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs` — resolve_policy_paths(), load_ruleset(), append helpers (10 unit tests)
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs` — execute_directive(), apply_replacements_in_reverse() + 6 integration tests
+- `darkmatter/lib/src/markdown/compose/types.rs` — Stage1Stages, ComposeOptions, ComposeReport already include shell expansion fields
 - `darkmatter/lib/src/markdown/types.rs` — MarkdownError::ShellExpansion variant already present
 - `darkmatter/lib/Cargo.toml` — `which = "7"` and `dirs = "6"` already present
 
@@ -84,8 +84,8 @@ All Phase 1 components were already implemented in a prior session. Verified all
 
 All Phase 2 components were already implemented:
 
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs` — execute_command() with timeout, output capture, working directory resolution (7 unit tests)
-- `darkmatter/lib/src/markdown/transform/mod.rs` — PipelineRuntime used in run_transform_pipeline(), shell expansion stage wired between TOC linking and cleanup, recursive transclusion shares PipelineRuntime
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs` — execute_command() with timeout, output capture, working directory resolution (7 unit tests)
+- `darkmatter/lib/src/markdown/compose/mod.rs` — PipelineRuntime used in run_compose_pipeline(), shell expansion stage wired between TOC linking and cleanup, recursive transclusion shares PipelineRuntime
 
 ### Phase 3: CLI Approval Handler, CLI Integration, Documentation
 
@@ -100,7 +100,7 @@ All Phase 3 components were already implemented:
 
 - Fixed doctest in `policy.rs` — `check_builtin_blacklist` example used `&str` slices instead of `&[String]`
 - Fixed 6 unnecessary `mut` warnings in integration test bindings in `mod.rs`
-- Fixed unused `TransformSource` import in integration tests
+- Fixed unused `ComposeSource` import in integration tests
 - Fixed trailing semicolons on struct initializations in tests
 
 ## Implementation of shell-expansion Complete
@@ -121,12 +121,12 @@ All three phases complete. 86 unit tests + 15 doctests pass. The only failing te
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes:**
@@ -155,8 +155,8 @@ Changes to be committed:
   modified:   darkmatter/features/shell-expansion/log.md
   new file:   darkmatter/features/shell-expansion/review.md
   modified:   darkmatter/justfile
-  modified:   darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs
-  modified:   darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs
+  modified:   darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+  modified:   darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs
 
 Changes not staged for commit:
   modified:   darkmatter/features/shell-expansion/feature.md
@@ -191,12 +191,12 @@ Changes not staged for commit:
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes made:**
@@ -227,12 +227,12 @@ Changes not staged for commit:
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes:**
@@ -257,12 +257,12 @@ Changes not staged for commit:
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes:**
@@ -285,12 +285,12 @@ Changes not staged for commit:
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes:**
@@ -313,12 +313,12 @@ Changes not staged for commit:
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/features/shell-expansion/tech-design.md`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `docs/dependencies.md`
 
 **Summary of changes:**

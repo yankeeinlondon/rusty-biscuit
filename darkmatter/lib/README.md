@@ -16,12 +16,14 @@ DM --> Render
 DM --> Composition
 DM --> Utility
 
+Composition --> MoreComposition(...)
 Composition --> Interpolation(Interpolation)
 Composition --> Transclusion(Transclusion)
 
 Transclusion --> Docs(Local Docs)
 Transclusion --> Shell(Shell Expansion)
 Transclusion --> Summarize(Summarization)
+Transclusion --> More(...)
 ```
 
 - **Rendering**
@@ -54,7 +56,7 @@ Transclusion --> Summarize(Summarization)
     - **Delta:** semantic and visual diff'ing tools for Markdown documents
     - **Cleaning:** cleanup a Markdown file to ensure standard based, and consistently using indentation, vertical spacing, etc.
     - **Link Validation:** validate that all links (both file and images) are pointing at valid and accessible locations
-    - **Graph Visualizer:** 
+    - **Graph Visualizer:** view the full compositional graph of files from a specified base document
 
 ## Quick Start
 
@@ -74,7 +76,7 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 
 ### Composition
 
-Composition is probably the most powerful feature that Darkmatter has to offer. Darkmatter provides a small **DSL** that sits on top of the [CommonMark](https://commonmark.org/) + [GFM](https://github.github.com/gfm/) Markdown standards which are supported in Darkmatter as well. This DSL let's a document author to:
+Composition is probably the most powerful feature that Darkmatter has to offer. Darkmatter provides a small **DSL** that sits on top of the [CommonMark](https://commonmark.org/) + [GFM](https://github.github.com/gfm/) Markdown standards which are supported in Darkmatter as well. 
 
 The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
 
@@ -127,14 +129,22 @@ Hi, my name is {{name}} and I'd like to share a few things with you.
 We can then use a small amount of Rust code to compose the `main.md` document:
 
 ```rust
-// TODO: show a code example
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::ComposeOptions;
+
+let md = Markdown::try_from(std::path::Path::new("main.md"))?;
+let options = ComposeOptions::new()
+    .with_source_file("main.md");
+
+let (composed, report) = md.compose_with(options)?;
+println!("{}", composed.content());
 ```
 
 This results in a document which:
 
 - Replaces all Markdown body references of `{{name}}` to the static text `Bob`
     - this replacement will happen not only in the `main.md` file but all child files too (unless these children redefine the `name` property)
-- In the `main.md` file's "My Favorite Things" section we use a `::file` references which interpolates the content from the external file `favorites.md`, before this external content is brought in, however, the child document(s) will first be run through the Markdown pipeline itself. This results in:
+- In the `main.md` file's "My Favorite Things" section we use a `::file` reference which interpolates the content from the external file `favorites.md`, before this external content is brought in, however, the child document(s) will first be run through the Markdown pipeline itself. This results in:
     - The document is "cleaned up", in this particular case it will:
         - add a **blank line** after `## Football` as all heading lines should have blank lines above and below them
         - changed the nested list to have an **indentation** of 4 spaces (this is the default Darkmatter uses but you can configure Darkmatter to use whatever you like, the key is in being consistent)
@@ -256,7 +266,7 @@ For each of these rendering features there are detailed documents which will des
 
 - **Audio Content:**
 
-    - Hey, who doesn't love multi-modality? Well if you're someone who raised their hand when they heard that question you'll be happy to know that **Darkmatter** has some primitives which can help you integrate audio content into your Markdown documents.
+    - Hey, who loves multi-modality? The spoken word? Well if you're someone who raised their hand when they heard that question you'll be happy to know that **Darkmatter** has some primitives which can help you integrate audio content into your Markdown documents.
     - For more information read the [Audio Content](../docs/rendering/audio-content.md) document.
 
 - **TOC Generation:**
@@ -288,7 +298,7 @@ The Darkmatter library also exposes some useful utilities for callers to be awar
     - Darkmatter will provide a variety of ways of dissecting what has changed in a document
     - It can provide a semantic/structural overview of changes
     - It can provide visual reporting on distinct text changes in Markdown prose or frontmatter
-    - More details can be found at [Delta Utility](../docs/utilities/delta.md)
+    - More details can be found in the [Delta Utility](../docs/utilities/delta.md) document
 - **Link Checking:**
     - Darkmatter can traverse a compose pipeline's file graph and validate that all of the links point to valid resources
     - More details can be found at [Link Checking](../docs/utilities/link-checking.md)
@@ -540,26 +550,26 @@ let normal  = cleanup_content(input);
 let compact = cleanup_content_compact(input);
 let loose   = cleanup_content_loose(input);
 
-// Via the transform pipeline
-use darkmatter::markdown::transform::TransformOptions;
+// Via the compose pipeline
+use darkmatter::markdown::compose::ComposeOptions;
 
-let options = TransformOptions::new()
+let options = ComposeOptions::new()
     .with_list_spacing(ListSpacingMode::Compact);
-let (transformed, report) = md.transform_with(options)?;
+let (composed, report) = md.compose_with(options)?;
 ```
 
-### Transform Pipeline (Stage 1 + Stage 2)
+### Compose Pipeline (Stage 1 + Stage 2)
 
 ```rust
-use darkmatter::markdown::transform::TransformOptions;
+use darkmatter::markdown::compose::ComposeOptions;
 
 let md = darkmatter::markdown::Markdown::try_from(std::path::Path::new("docs/root.md"))?;
-let options = TransformOptions::new()
+let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
 
-let (transformed, report) = md.transform_with(options)?;
+let (composed, report) = md.compose_with(options)?;
 println!("{}", report.summary());
-println!("{}", transformed.content());
+println!("{}", composed.content());
 ```
 
 Stage 2 includes:
@@ -621,7 +631,7 @@ if !validation.is_well_formed() {
 // Normalize to H1 root
 let (normalized, report) = md.normalize(Some(HeadingLevel::H1))?;
 
-// Relevel for embedding as subsection
+// Re-level for embedding as subsection
 let (releveled, adjustment) = md.relevel(HeadingLevel::H2)?;
 ```
 

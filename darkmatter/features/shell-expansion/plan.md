@@ -7,7 +7,7 @@ created: 2026-03-15
 
 # Shell Expansion Implementation Plan
 
-This plan implements the `::shell` directive feature for Darkmatter's Stage 1 transform pipeline. It is organized into three phases matching the tech design's phasing, with each task specifying the exact files to create or modify and the acceptance criteria.
+This plan implements the `::shell` directive feature for Darkmatter's Stage 1 compose pipeline. It is organized into three phases matching the tech design's phasing, with each task specifying the exact files to create or modify and the acceptance criteria.
 
 ## Dependencies
 
@@ -20,7 +20,7 @@ Phase 1 establishes all foundational types and the parsing/validation layer. No 
 
 ### Task 1.1: Shell Expansion Types
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs` (new)
 
 Create the core type definitions:
 
@@ -87,7 +87,7 @@ pub enum BlacklistRule { ... }
 
 ### Task 1.2: Shell-like Argv Tokenizer
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/tokenize.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs` (new)
 
 Implement a tokenizer that splits a raw command string into tokens:
 
@@ -124,7 +124,7 @@ Returns the first token as the executable and remaining as args.
 
 ### Task 1.3: Directive Parser
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/parser.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs` (new)
 
 Implement directive scanning that finds `::shell` directives in markdown content:
 
@@ -152,7 +152,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
 
 ### Task 1.4: Built-in Blacklist
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/policy.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs` (new)
 
 Implement the built-in blacklist as a static array of `BlacklistRule` values and a matching function.
 
@@ -208,13 +208,13 @@ pub fn normalize_command(executable: &str, args: &[String]) -> String
 
 ### Task 1.5: Policy File Store
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/store.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/store.rs` (new)
 
 Implement policy file discovery, loading, and persistence.
 
 **Discovery** (`resolve_policy_paths`):
 1. Use `options.shell.policy_root` if set
-2. Otherwise use `TransformSource::File` parent directory if available
+2. Otherwise use `ComposeSource::File` parent directory if available
 3. Otherwise use `std::env::current_dir()`
 4. If path is inside a git repo, walk up to find `.git` and use that directory
 5. Otherwise use `${HOME}`
@@ -240,7 +240,7 @@ Implement policy file discovery, loading, and persistence.
 ```rust
 pub fn resolve_policy_paths(
     shell_opts: &ShellExpansionOptions,
-    source: &TransformSource,
+    source: &ComposeSource,
 ) -> Result<ShellPolicyPaths, ShellExpansionError>
 
 pub fn load_ruleset(path: &Path) -> Result<ShellRuleSet, ShellExpansionError>
@@ -264,9 +264,9 @@ pub fn append_blacklist_exact(paths: &ShellPolicyPaths, normalized: &str) -> Res
 ### Task 1.6: Module Scaffold and Type Exports
 
 **Files modified**:
-- `darkmatter/lib/src/markdown/transform/shell_expansion/mod.rs` (new) — module declarations, re-exports
-- `darkmatter/lib/src/markdown/transform/mod.rs` — add `pub mod shell_expansion;` and re-exports
-- `darkmatter/lib/src/markdown/transform/types.rs` — add `shell_expansion: bool` to `Stage1Stages`, add `shell: ShellExpansionOptions` to `TransformOptions`, add report fields
+- `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs` (new) — module declarations, re-exports
+- `darkmatter/lib/src/markdown/compose/mod.rs` — add `pub mod shell_expansion;` and re-exports
+- `darkmatter/lib/src/markdown/compose/types.rs` — add `shell_expansion: bool` to `Stage1Stages`, add `shell: ShellExpansionOptions` to `ComposeOptions`, add report fields
 - `darkmatter/lib/src/markdown/types.rs` — add `ShellExpansion` variant to `MarkdownError`
 - `darkmatter/lib/Cargo.toml` — add `which = "7"` dependency
 
@@ -284,9 +284,9 @@ pub struct Stage1Stages {
 - Update `Default`, `none()`, and add `only_shell_expansion()`
 - Update existing `only_*` methods to set `shell_expansion: false`
 
-**Changes to `TransformOptions`**:
+**Changes to `ComposeOptions`**:
 ```rust
-pub struct TransformOptions {
+pub struct ComposeOptions {
     // ... existing fields ...
     pub shell: ShellExpansionOptions,  // NEW
 }
@@ -294,9 +294,9 @@ pub struct TransformOptions {
 - Update `new()` to initialize `shell: ShellExpansionOptions::default()`
 - Add `with_shell(mut self, shell: ShellExpansionOptions) -> Self` builder
 
-**Changes to `TransformReport`**:
+**Changes to `ComposeReport`**:
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     // ... existing fields ...
     pub shell_expansions_applied: usize,   // NEW
     pub shell_approvals_used: usize,       // NEW
@@ -317,15 +317,15 @@ pub enum MarkdownError {
 **Acceptance criteria**:
 - All existing tests pass (no regressions from type changes)
 - New `shell_expansion` field defaults to `true` in `Stage1Stages`
-- `TransformOptions::new()` includes default `ShellExpansionOptions`
-- `TransformReport::has_changes()` returns true when `shell_expansions_applied > 0`
-- `TransformReport::summary()` includes shell expansion counts
+- `ComposeOptions::new()` includes default `ShellExpansionOptions`
+- `ComposeReport::has_changes()` returns true when `shell_expansions_applied > 0`
+- `ComposeReport::summary()` includes shell expansion counts
 - `which` crate is available as a dependency
 - `ShellExpansionError` converts into `MarkdownError` via `From`
 
 ### Task 1.7: Phase 1 Tests
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/` — tests within each module file
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/` — tests within each module file
 
 Write unit tests for all Phase 1 components:
 
@@ -356,11 +356,11 @@ Write unit tests for all Phase 1 components:
 
 ## Phase 2: Executor, Pipeline Runtime, Pipeline Integration
 
-Phase 2 connects the parsing and validation layer to actual command execution and wires it into the transform pipeline.
+Phase 2 connects the parsing and validation layer to actual command execution and wires it into the compose pipeline.
 
 ### Task 2.1: Command Executor
 
-**File**: `darkmatter/lib/src/markdown/transform/shell_expansion/executor.rs` (new)
+**File**: `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs` (new)
 
 Implement command execution with timeout and output capture.
 
@@ -378,7 +378,7 @@ Implement command execution with timeout and output capture.
 
 **Working directory resolution**:
 1. `options.shell.working_directory` if set
-2. Source file's parent directory if `TransformSource::File`
+2. Source file's parent directory if `ComposeSource::File`
 3. `options.shell.policy_root` if set
 4. `std::env::current_dir()`
 
@@ -386,13 +386,13 @@ Implement command execution with timeout and output capture.
 ```rust
 pub fn resolve_working_directory(
     shell_opts: &ShellExpansionOptions,
-    source: &TransformSource,
+    source: &ComposeSource,
 ) -> PathBuf
 
 pub fn execute_command(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
-    source: &TransformSource,
+    source: &ComposeSource,
 ) -> Result<String, ShellExpansionError>
 ```
 
@@ -409,24 +409,24 @@ pub fn execute_command(
 ### Task 2.2: Pipeline Runtime Refactor
 
 **Files modified**:
-- `darkmatter/lib/src/markdown/transform/mod.rs` — replace `TransclusionRuntime` with `PipelineRuntime`
-- `darkmatter/lib/src/markdown/transform/shell_expansion/types.rs` — `PipelineRuntime` already defined in Task 1.1
+- `darkmatter/lib/src/markdown/compose/mod.rs` — replace `TransclusionRuntime` with `PipelineRuntime`
+- `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs` — `PipelineRuntime` already defined in Task 1.1
 
-**Changes to `run_transform_pipeline`**:
+**Changes to `run_compose_pipeline`**:
 ```rust
-fn run_transform_pipeline(&mut self, options: TransformOptions) -> MarkdownResult<TransformReport> {
+fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
     let mut runtime = PipelineRuntime::new(options.transclusion.max_depth);
-    self.run_transform_pipeline_internal(options, &mut runtime)
+    self.run_compose_pipeline_internal(options, &mut runtime)
 }
 ```
 
-**Changes to `run_transform_pipeline_internal`**:
+**Changes to `run_compose_pipeline_internal`**:
 ```rust
-pub(crate) fn run_transform_pipeline_internal(
+pub(crate) fn run_compose_pipeline_internal(
     &mut self,
-    options: TransformOptions,
+    options: ComposeOptions,
     runtime: &mut PipelineRuntime,
-) -> MarkdownResult<TransformReport> {
+) -> MarkdownResult<ComposeReport> {
     // ... existing source_id logic using runtime.transclusion ...
     // ... existing stages ...
     // NEW: shell expansion stage between TOC linking and cleanup
@@ -439,14 +439,14 @@ pub(crate) fn run_transform_pipeline_internal(
 - `run_frontmatter_transclusion_stage`
 
 **Acceptance criteria**:
-- All existing transform tests pass without modification
+- All existing compose tests pass without modification
 - All existing transclusion tests pass
 - `PipelineRuntime` is created once at the root and threaded through recursion
 - The transclusion runtime behavior is identical (just accessed through `.transclusion`)
 
 ### Task 2.3: Wire Shell Expansion Stage into Pipeline
 
-**File modified**: `darkmatter/lib/src/markdown/transform/mod.rs`
+**File modified**: `darkmatter/lib/src/markdown/compose/mod.rs`
 
 Insert the shell expansion stage call between TOC linking and cleanup:
 
@@ -461,9 +461,9 @@ if options.stages.shell_expansion {
 ```rust
 fn run_shell_expansion_stage(
     &mut self,
-    options: &TransformOptions,
+    options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
-    report: &mut TransformReport,
+    report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     let directives = shell_expansion::parse_directives(&self.content)?;
     if directives.is_empty() {
@@ -547,7 +547,7 @@ Sort replacements by span start descending, then apply `content.replace_range(sp
 **Acceptance criteria**:
 - All Phase 1 tests still pass
 - All new tests pass
-- No regressions in existing transform/transclusion tests
+- No regressions in existing compose/transclusion tests
 
 ---
 
@@ -608,7 +608,7 @@ Update `run_compose()`:
 2. If safe: set `approval_handler = Some(Arc::new(CliShellApprovalHandler))`
 3. If not safe: leave `approval_handler = None`
 4. Build `ShellExpansionOptions` with appropriate defaults
-5. Pass shell options into `TransformOptions` via `.with_shell(shell_opts)`
+5. Pass shell options into `ComposeOptions` via `.with_shell(shell_opts)`
 
 **Acceptance criteria**:
 - `md compose file.md` with a `::shell` directive and no whitelist entry prompts the user

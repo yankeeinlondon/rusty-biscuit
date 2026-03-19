@@ -9,7 +9,7 @@ use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme,
 };
-use darkmatter::markdown::transform::TransformOptions;
+use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
@@ -257,7 +257,7 @@ pub fn run_render(
     Ok(())
 }
 
-/// Run the compose (transform) pipeline.
+/// Run the compose pipeline.
 #[allow(clippy::too_many_arguments)]
 pub fn run_compose(
     input: Option<&PathBuf>,
@@ -282,7 +282,7 @@ pub fn run_compose(
         None
     };
 
-    let mut options = TransformOptions::new();
+    let mut options = ComposeOptions::new();
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -316,7 +316,7 @@ pub fn run_compose(
     }
 
     // Build shell expansion options
-    use darkmatter::markdown::transform::shell_expansion::ShellExpansionOptions;
+    use darkmatter::markdown::compose::shell_expansion::ShellExpansionOptions;
     use std::sync::Arc;
 
     let is_file_input = resolved_input.is_some();
@@ -341,9 +341,9 @@ pub fn run_compose(
         options = options.with_indent_size(size);
     }
 
-    let (transformed, _report) = md.transform_with(options).map_err(|e| {
+    let (composed, _report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
-        use darkmatter::markdown::transform::ShellExpansionError;
+        use darkmatter::markdown::compose::ShellExpansionError;
 
         match &e {
             ShellExpansion(ShellExpansionError::ApprovalRequired {
@@ -412,10 +412,10 @@ pub fn run_compose(
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
             let content = if include_frontmatter {
-                transformed.as_string()
+                composed.as_string()
             } else {
                 // Frontmatter drives the pipeline; once composition is complete, discard it.
-                transformed.content().to_string()
+                composed.content().to_string()
             };
             if show {
                 let artifact = OutputArtifact {
@@ -430,11 +430,11 @@ pub fn run_compose(
             }
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&transformed, prose_theme, code_theme, color_mode)?;
+            let artifact = html_artifact(&composed, prose_theme, code_theme, color_mode)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
-            let artifact = json_artifact(&transformed)?;
+            let artifact = json_artifact(&composed)?;
             emit_or_show_artifact(artifact, show)?;
         }
     }

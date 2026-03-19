@@ -92,7 +92,7 @@
 //! ### Transform pipeline
 //!
 //! ```bash
-//! # Compose a document through the transform pipeline
+//! # Compose a document through the compose pipeline
 //! md compose doc.md
 //! md compose doc.md --state '{"name":"Alice"}'
 //! md compose doc.md --output html

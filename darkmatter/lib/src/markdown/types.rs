@@ -51,19 +51,19 @@ pub enum MarkdownError {
 
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
-    Transclusion(#[from] crate::markdown::transform::TransclusionError),
+    Transclusion(#[from] crate::markdown::compose::TransclusionError),
 
     /// TOC linking pipeline error.
     #[error("TOC linking error: {0}")]
-    TocLinking(#[from] crate::markdown::transform::TocLinkingError),
+    TocLinking(#[from] crate::markdown::compose::TocLinkingError),
 
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
-    ShellExpansion(#[from] crate::markdown::transform::ShellExpansionError),
+    ShellExpansion(#[from] crate::markdown::compose::ShellExpansionError),
 
     /// Page block pipeline error.
     #[error("Page block error: {0}")]
-    PageBlock(#[from] crate::markdown::transform::page_blocks::PageBlockError),
+    PageBlock(#[from] crate::markdown::compose::page_blocks::PageBlockError),
 }
 
 /// Result type for markdown operations.

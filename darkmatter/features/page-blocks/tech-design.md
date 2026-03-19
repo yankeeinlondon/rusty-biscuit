@@ -4,7 +4,7 @@ This document defines the implementation-ready technical design for the `page-bl
 
 - `darkmatter/features/page-blocks/spec.md`
 - `darkmatter/docs/preparation/page-blocks.md`
-- the current transform pipeline in `darkmatter/lib/src/markdown/transform/`
+- the current compose pipeline in `darkmatter/lib/src/markdown/compose/`
 - the existing Stage 2 transclusion implementation and shared condition semantics
 
 The design goal is to add conditional, in-document content regions that compose cleanly with the current Stage 1 and Stage 2 pipeline without inventing a parallel expression or state model.
@@ -41,7 +41,7 @@ In scope:
 
 1. `::block ...` / `::end-block` parsing
 2. `when="..."` evaluation using existing Darkmatter condition semantics
-3. Stage 2 integration in the transform pipeline
+3. Stage 2 integration in the compose pipeline
 4. nested page blocks
 5. interaction with transclusion, interpolation, and environment-driven composition
 6. diagnostics for malformed or unterminated blocks
@@ -87,7 +87,7 @@ Rationale:
 
 1. if a page block evaluates to false, any nested `::file`, `::code`, or future expensive directives inside that block should never execute
 2. conditions should evaluate against the document state that exists after Stage 1 preparation but before new Stage 2 content is injected
-3. transcluded child documents can still use page blocks because recursive transforms will run the same Stage 2 order
+3. transcluded child documents can still use page blocks because recursive composes will run the same Stage 2 order
 
 ## Assumptions
 
@@ -130,7 +130,7 @@ The feature should use a paired-block parser rather than a line-by-line replacem
 ### Recommended module layout
 
 ```txt
-darkmatter/lib/src/markdown/transform/
+darkmatter/lib/src/markdown/compose/
 ├── conditions.rs
 ├── page_blocks/
 │   ├── mod.rs
@@ -143,7 +143,7 @@ darkmatter/lib/src/markdown/transform/
 
 ### Shared condition evaluator
 
-`transclusion/conditions.rs` should be promoted into a Stage 2 shared module such as `transform/conditions.rs`.
+`transclusion/conditions.rs` should be promoted into a Stage 2 shared module such as `compose/conditions.rs`.
 
 Reasons:
 
@@ -174,7 +174,7 @@ Malformed input should fail early:
 
 ## AST and Data Model Changes
 
-This feature does not require changes to Darkmatter's public Markdown AST or renderer-facing types. The changes are confined to transform-time data structures.
+This feature does not require changes to Darkmatter's public Markdown AST or renderer-facing types. The changes are confined to compose-time data structures.
 
 Recommended internal types:
 
@@ -225,7 +225,7 @@ pub struct Stage2Stages {
 ```
 
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     pub page_blocks_rendered: usize,
     pub page_blocks_skipped: usize,
     // existing fields...
@@ -326,7 +326,7 @@ These errors indicate authoring mistakes in the composition structure itself. Si
 
 ### Warnings
 
-The following should be non-fatal warnings recorded in `TransformReport`:
+The following should be non-fatal warnings recorded in `ComposeReport`:
 
 1. unknown `::block` attributes
 
@@ -348,15 +348,15 @@ Representative messages:
 
 ## Public API Integration
 
-`transform/mod.rs` should add a new Stage 2 hook before `run_block_transclusion_stage(...)`:
+`compose/mod.rs` should add a new Stage 2 hook before `run_block_transclusion_stage(...)`:
 
 ```rust
-impl MarkdownTransformer {
+impl MarkdownComposer {
     fn run_stage2(
         &mut self,
         effective_state: &EffectiveState,
-        options: &TransformOptions,
-        report: &mut TransformReport,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         if options.stage2.page_blocks {
             self.run_page_blocks_stage(effective_state, options, report)?;
@@ -370,12 +370,12 @@ impl MarkdownTransformer {
 Recommended implementation shape:
 
 ```rust
-impl MarkdownTransformer {
+impl MarkdownComposer {
     fn run_page_blocks_stage(
         &mut self,
         state: &EffectiveState,
-        options: &TransformOptions,
-        report: &mut TransformReport,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         todo!()
     }
@@ -411,7 +411,7 @@ Add unit tests for:
 
 ### Pipeline integration tests
 
-Add transform-level tests for:
+Add compose-level tests for:
 
 1. page blocks running before transclusion
 2. transclusion inside a false page block not executing
@@ -455,6 +455,6 @@ The cleanest implementation is a new Stage 2 `page_blocks` pass that:
 2. evaluates `when` with the same shared condition engine used by transclusion
 3. removes false blocks before transclusion runs
 4. preserves body content exactly for true blocks
-5. integrates with the existing transform report and stage toggles
+5. integrates with the existing compose report and stage toggles
 
 That approach keeps the feature narrow, predictable, and compatible with Darkmatter's existing composition architecture.

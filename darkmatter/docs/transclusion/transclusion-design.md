@@ -7,14 +7,14 @@
 
 ## Purpose
 
-Define a detailed technical design for Stage 2 transclusion in Darkmatter's transform pipeline, based on:
+Define a detailed technical design for Stage 2 transclusion in Darkmatter's compose pipeline, based on:
 
 - `darkmatter/docs/block-transclusion.md`
 - `darkmatter/docs/code-transclusion.md`
 - `darkmatter/docs/fm-transclusion.md`
 - `darkmatter/docs/darkmatter-pipeline.md`
 
-This design is meant to be implementation-ready and aligned with the current Stage 1 transform code in `darkmatter/lib/src/markdown/transform/`.
+This design is meant to be implementation-ready and aligned with the current Stage 1 compose code in `darkmatter/lib/src/markdown/compose/`.
 
 ## Scope
 
@@ -25,7 +25,7 @@ In scope:
 3. Recursive processing model, cycle detection, and depth limits
 4. State inheritance semantics (parent -> child)
 5. Path resolution (`./`, `/`, `~`, `@`)
-6. Stage integration with existing `transform()` APIs and report/warning model
+6. Stage integration with existing `compose()` APIs and report/warning model
 7. Error handling and testing strategy
 
 Out of scope for first implementation:
@@ -36,7 +36,7 @@ Out of scope for first implementation:
 
 ## Current Baseline (Code Today)
 
-Current pipeline implementation exists in `darkmatter/lib/src/markdown/transform/mod.rs` and supports Stage 1:
+Current pipeline implementation exists in `darkmatter/lib/src/markdown/compose/mod.rs` and supports Stage 1:
 
 1. Replacement
 2. Interpolation
@@ -45,7 +45,7 @@ Current pipeline implementation exists in `darkmatter/lib/src/markdown/transform
 
 Relevant existing pieces to leverage:
 
-- `TransformOptions`, `TransformReport`, warnings, `fail_fast`
+- `ComposeOptions`, `ComposeReport`, warnings, `fail_fast`
 - `EffectiveState` and context/environment snapshots
 - Interpolation parser/evaluator for expression syntax and value semantics
 - `Markdown::relevel()` for heading-level fitting
@@ -66,7 +66,7 @@ From the transclusion docs, Stage 2 must support:
    - `::code <path> [key=value ...]`
    - `::url <url> [key=value ...]` (future execution support)
 2. Recursive processing:
-   - markdown includes run through full transform pipeline
+   - markdown includes run through full compose pipeline
    - includes inside included markdown docs are supported
 3. Cycle safety:
    - looped transclusion dependencies must be detected and rejected
@@ -99,7 +99,7 @@ Pipeline order remains:
 
 1. Stage 1 (Preparation): replacement -> interpolation -> cleanup -> normalization
 2. Stage 2 (Transclusion): directive transclusion (`::file`, `::code`; `::url` future) -> frontmatter transclusion
-3. Stage 3 (Rendering transforms)
+3. Stage 3 (Rendering)
 
 Rationale:
 
@@ -109,18 +109,18 @@ Rationale:
 
 ## Public API and Option Changes
 
-### `TransformOptions` additions
+### `ComposeOptions` additions
 
 Add transclusion-specific configuration while preserving existing APIs:
 
 ```rust
-pub struct TransformOptions {
+pub struct ComposeOptions {
     pub stages: Stage1Stages,
     pub stage2: Stage2Stages,
     pub transclusion: TransclusionOptions,
     pub external_state: Option<serde_json::Value>,
     pub fail_fast: bool,
-    context: TransformContext,
+    context: ComposeContext,
 }
 
 pub struct Stage2Stages {
@@ -129,7 +129,7 @@ pub struct Stage2Stages {
 }
 
 pub struct TransclusionOptions {
-    pub source: TransformSource,
+    pub source: ComposeSource,
     pub max_depth: usize,
     pub allow_remote: bool,
     pub allow_local_markdown: bool,
@@ -139,7 +139,7 @@ pub struct TransclusionOptions {
     pub resolve_repo_root: bool,
 }
 
-pub enum TransformSource {
+pub enum ComposeSource {
     Unknown,
     File(std::path::PathBuf),
     Url(url::Url),
@@ -158,10 +158,10 @@ Defaults:
 - `code_fallback_language = "txt"`
 - `ignore_invalid = None` (defer to env/frontmatter)
 
-### `TransformReport` additions
+### `ComposeReport` additions
 
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     // existing fields...
     pub transclusions_applied: usize,
     pub transclusions_skipped: usize,
@@ -174,7 +174,7 @@ pub struct TransformReport {
 Recommended module layout:
 
 ```txt
-darkmatter/lib/src/markdown/transform/transclusion/
+darkmatter/lib/src/markdown/compose/transclusion/
 ├── mod.rs          # Stage orchestrator entry points
 ├── types.rs        # directives/options/errors/runtime structs
 ├── parser.rs       # block directive and option parsing
@@ -185,7 +185,7 @@ darkmatter/lib/src/markdown/transform/transclusion/
 └── wrappers.rs     # quotation/disclosure formatting
 ```
 
-`transform/mod.rs` adds a Stage 2 call after Stage 1 normalization.
+`compose/mod.rs` adds a Stage 2 call after Stage 1 normalization.
 
 ## Core Data Model
 
@@ -279,14 +279,14 @@ Implementation strategy:
 
 ### Resolution algorithm
 
-1. Resolve according to prefix and current `TransformSource`
+1. Resolve according to prefix and current `ComposeSource`
 2. Canonicalize with filesystem resolution
 3. Validate existence and file type
 4. Produce canonical ID for cycle detection
 
 Special handling:
 
-- `TransformSource::Unknown` cannot resolve `./` or `@` references
+- `ComposeSource::Unknown` cannot resolve `./` or `@` references
 - repo-root resolution walks ancestors from current file until `.git` is found
 - directive-specific content constraints:
   - `::file`: only markdown extensions (`.md`, `.markdown`) in first implementation
@@ -393,7 +393,7 @@ For each document in Stage 2:
        - detect cycle via active recursion stack
        - load child markdown
        - build child inherited state
-       - recursively run full transform on child (Stage 1 + Stage 2)
+       - recursively run full compose on child (Stage 1 + Stage 2)
        - re-level child headings to fit insertion context
        - apply wrappers (`quotation`, `disclosure`)
      - `::code`:
@@ -486,13 +486,13 @@ pub enum TransclusionError {
 Integrate as either:
 
 1. `MarkdownError::Transclusion(#[from] TransclusionError)` (preferred)
-2. `MarkdownError::Transform(String)` wrapping transclusion details
+2. `MarkdownError::Compose(String)` wrapping transclusion details
 
 ### Invalid reference policy
 
 `ignore_invalid` resolution precedence:
 
-1. explicit `TransformOptions.transclusion.ignore_invalid`
+1. explicit `ComposeOptions.transclusion.ignore_invalid`
 2. frontmatter `ignore_invalid`
 3. env `IGNORE_INVALID`
 4. default `false`
@@ -506,7 +506,7 @@ Behavior:
 
 Determinism:
 
-1. Keep one `TransformContext` snapshot for entire root run
+1. Keep one `ComposeContext` snapshot for entire root run
 2. Stable directive replacement order (source order, applied reverse by byte span)
 3. Stable path canonicalization and ID generation
 
@@ -583,7 +583,7 @@ Performance:
 
 ## Open Decisions
 
-1. Should Stage 2 require `TransformSource::File` for any relative/include usage, or support caller-provided base directory separately?
+1. Should Stage 2 require `ComposeSource::File` for any relative/include usage, or support caller-provided base directory separately?
 2. For root `external_state` merge behavior, should we keep current shallow `PreferExternal` semantics, or move all merges to deep/explicit policies?
 3. Should unknown block options be warnings (forward-compatible) or errors (strict mode)?
 4. If parent context is H6, should inclusion fail or clamp target to H6?
@@ -592,4 +592,4 @@ Performance:
 
 ## Summary
 
-This design introduces Stage 2 transclusion as a recursive, cycle-safe composition engine integrated into the existing `transform()` pipeline. It reuses current Darkmatter strengths (state/context, interpolation parser/evaluator, releveling) while adding the missing runtime pieces: directive parsing, source/path resolution, recursion management, and transclusion-specific merge/condition semantics. It now also explicitly supports the `::code` variant with text-file loading, safe fenced-block generation, language inference, and wrapper/condition parity with block transclusion.
+This design introduces Stage 2 transclusion as a recursive, cycle-safe composition engine integrated into the existing `compose()` pipeline. It reuses current Darkmatter strengths (state/context, interpolation parser/evaluator, releveling) while adding the missing runtime pieces: directive parsing, source/path resolution, recursion management, and transclusion-specific merge/condition semantics. It now also explicitly supports the `::code` variant with text-file loading, safe fenced-block generation, language inference, and wrapper/condition parity with block transclusion.

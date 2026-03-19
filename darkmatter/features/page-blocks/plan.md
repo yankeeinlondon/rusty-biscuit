@@ -2,15 +2,15 @@
 
 ## Overview
 
-Add `::block when="..."` / `::end-block` paired directives as a new Stage 2 transform pass that runs **before** block transclusion and frontmatter transclusion. False blocks are removed entirely (including any nested transclusion directives), true blocks have their wrapper lines stripped and body content preserved verbatim.
+Add `::block when="..."` / `::end-block` paired directives as a new Stage 2 compose pass that runs **before** block transclusion and frontmatter transclusion. False blocks are removed entirely (including any nested transclusion directives), true blocks have their wrapper lines stripped and body content preserved verbatim.
 
 ## Phase 1: Shared Condition Evaluator Extraction
 
 **Goal:** Promote `transclusion/conditions.rs` into a Stage 2 shared module so both page blocks and transclusion use the same condition engine without cross-module coupling.
 
-### Step 1.1: Create `transform/conditions.rs`
+### Step 1.1: Create `compose/conditions.rs`
 
-- Copy `transclusion/conditions.rs` to `transform/conditions.rs`
+- Copy `transclusion/conditions.rs` to `compose/conditions.rs`
 - Change the error type from `TransclusionError` to a new shared `ConditionError` enum:
 
 ```rust
@@ -24,7 +24,7 @@ pub enum ConditionError {
 ```
 
 - Update the `evaluate_condition()` signature to return `Result<bool, ConditionError>`
-- Add `pub mod conditions;` to `transform/mod.rs`
+- Add `pub mod conditions;` to `compose/mod.rs`
 
 ### Step 1.2: Update transclusion to use shared conditions
 
@@ -37,7 +37,7 @@ pub enum ConditionError {
 
 **Goal:** Define the data model for page blocks.
 
-### Step 2.1: Create `transform/page_blocks/types.rs`
+### Step 2.1: Create `compose/page_blocks/types.rs`
 
 ```rust
 /// Parsed options from a `::block` directive line.
@@ -63,7 +63,7 @@ pub struct PageBlockRegion {
 }
 ```
 
-### Step 2.2: Create `transform/page_blocks/mod.rs`
+### Step 2.2: Create `compose/page_blocks/mod.rs`
 
 - Declare submodules: `pub mod types; pub mod parser; pub mod engine;`
 - Re-export key types
@@ -86,16 +86,16 @@ pub enum PageBlockError {
 }
 ```
 
-### Step 2.4: Wire `PageBlockError` into `TransformError`
+### Step 2.4: Wire `PageBlockError` into `ComposeError`
 
-- Add `PageBlock(PageBlockError)` variant to the main `TransformError` enum (or `MarkdownError` — whichever is the pipeline's top-level error)
+- Add `PageBlock(PageBlockError)` variant to the main `ComposeError` enum (or `MarkdownError` — whichever is the pipeline's top-level error)
 - Add the corresponding `From` impl
 
 ## Phase 3: Parser
 
 **Goal:** Parse `::block` / `::end-block` directives into a nested `PageBlockRegion` tree.
 
-### Step 3.1: Create `transform/page_blocks/parser.rs`
+### Step 3.1: Create `compose/page_blocks/parser.rs`
 
 Implement `pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBlockError>`:
 
@@ -137,9 +137,9 @@ Add `#[cfg(test)] mod tests` in `parser.rs` with tests for:
 
 **Goal:** Walk the parsed region tree, evaluate conditions, and produce output content.
 
-### Step 4.1: Create `transform/page_blocks/engine.rs`
+### Step 4.1: Create `compose/page_blocks/engine.rs`
 
-Implement `pub fn render_page_blocks(content: &str, regions: &[PageBlockRegion], state: &EffectiveState, report: &mut TransformReport) -> Result<String, PageBlockError>`:
+Implement `pub fn render_page_blocks(content: &str, regions: &[PageBlockRegion], state: &EffectiveState, report: &mut ComposeReport) -> Result<String, PageBlockError>`:
 
 1. Sort top-level regions by `span.start` (they should already be in order from the parser)
 2. Initialize `cursor = 0` and `output = String::new()`
@@ -165,7 +165,7 @@ fn render_body(
     body_span: &Range<usize>,
     children: &[PageBlockRegion],
     state: &EffectiveState,
-    report: &mut TransformReport,
+    report: &mut ComposeReport,
 ) -> Result<String, PageBlockError>
 ```
 
@@ -192,7 +192,7 @@ Add tests for:
 
 ### Step 5.1: Add `page_blocks` to `Stage2Stages`
 
-In `transform/types.rs`:
+In `compose/types.rs`:
 
 ```rust
 pub struct Stage2Stages {
@@ -208,7 +208,7 @@ pub struct Stage2Stages {
 
 ### Step 5.2: Add report fields
 
-In `TransformReport`:
+In `ComposeReport`:
 
 ```rust
 pub page_blocks_rendered: usize,
@@ -219,17 +219,17 @@ pub page_blocks_skipped: usize,
 - Update `has_changes()` to include `page_blocks_rendered > 0`
 - Update `summary()` to include page block stats when non-zero
 
-### Step 5.3: Add `run_page_blocks_stage` to the transformer
+### Step 5.3: Add `run_page_blocks_stage` to the composer
 
-In `transform/mod.rs`:
+In `compose/mod.rs`:
 
 ```rust
-impl MarkdownTransformer {
+impl MarkdownComposer {
     fn run_page_blocks_stage(
         &mut self,
         state: &EffectiveState,
-        _options: &TransformOptions,
-        report: &mut TransformReport,
+        _options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
         if regions.is_empty() {
@@ -251,7 +251,7 @@ impl MarkdownTransformer {
 
 ### Step 5.4: Insert into Stage 2 execution order
 
-In the `run_transform_pipeline_internal` method (or wherever Stage 2 is orchestrated), add **before** block transclusion:
+In the `run_compose_pipeline_internal` method (or wherever Stage 2 is orchestrated), add **before** block transclusion:
 
 ```rust
 // Stage 2
@@ -268,22 +268,22 @@ if options.stage2.fm_transclusion {
 
 ### Step 5.5: Register the module
 
-- Add `pub mod page_blocks;` to `transform/mod.rs`
-- Add `mod page_blocks` to `darkmatter/lib/src/markdown/transform/mod.rs` module declarations
+- Add `pub mod page_blocks;` to `compose/mod.rs`
+- Add `mod page_blocks` to `darkmatter/lib/src/markdown/compose/mod.rs` module declarations
 
 ## Phase 6: Pipeline Integration Tests
 
-**Goal:** Verify end-to-end behavior through the full transform pipeline.
+**Goal:** Verify end-to-end behavior through the full compose pipeline.
 
 ### Step 6.1: Create integration test file
 
-Add tests in an appropriate test location (either inline in `transform/mod.rs` tests or a dedicated test file) covering:
+Add tests in an appropriate test location (either inline in `compose/mod.rs` tests or a dedicated test file) covering:
 
 1. **Ordering:** Page blocks run before transclusion
    - A `::file` directive inside a false `::block` must not be resolved
    - A `::file` directive inside a true `::block` must be resolved normally
 
-2. **Transcluded child documents:** A transcluded markdown file containing `::block` directives evaluates them during its own recursive transform
+2. **Transcluded child documents:** A transcluded markdown file containing `::block` directives evaluates them during its own recursive compose
 
 3. **Coexistence with Stage 1:** Interpolation output from Stage 1 is visible to page block conditions (since page blocks run in Stage 2)
 
@@ -319,18 +319,18 @@ Add tests in an appropriate test location (either inline in `transform/mod.rs` t
 ## Files Created/Modified
 
 ### New files:
-- `darkmatter/lib/src/markdown/transform/conditions.rs`
-- `darkmatter/lib/src/markdown/transform/page_blocks/mod.rs`
-- `darkmatter/lib/src/markdown/transform/page_blocks/types.rs`
-- `darkmatter/lib/src/markdown/transform/page_blocks/parser.rs`
-- `darkmatter/lib/src/markdown/transform/page_blocks/engine.rs`
+- `darkmatter/lib/src/markdown/compose/conditions.rs`
+- `darkmatter/lib/src/markdown/compose/page_blocks/mod.rs`
+- `darkmatter/lib/src/markdown/compose/page_blocks/types.rs`
+- `darkmatter/lib/src/markdown/compose/page_blocks/parser.rs`
+- `darkmatter/lib/src/markdown/compose/page_blocks/engine.rs`
 
 ### Modified files:
-- `darkmatter/lib/src/markdown/transform/mod.rs` — add module declarations, `run_page_blocks_stage`, Stage 2 ordering
-- `darkmatter/lib/src/markdown/transform/types.rs` — `Stage2Stages` field, `TransformReport` fields, `TransformWarning` usage
-- `darkmatter/lib/src/markdown/transform/transclusion/mod.rs` — re-export from shared conditions
-- `darkmatter/lib/src/markdown/transform/transclusion/conditions.rs` — removed (promoted to shared)
-- Error enum file (wherever `TransformError` or `MarkdownError` is defined) — add `PageBlock` variant
+- `darkmatter/lib/src/markdown/compose/mod.rs` — add module declarations, `run_page_blocks_stage`, Stage 2 ordering
+- `darkmatter/lib/src/markdown/compose/types.rs` — `Stage2Stages` field, `ComposeReport` fields, `ComposeWarning` usage
+- `darkmatter/lib/src/markdown/compose/transclusion/mod.rs` — re-export from shared conditions
+- `darkmatter/lib/src/markdown/compose/transclusion/conditions.rs` — removed (promoted to shared)
+- Error enum file (wherever `ComposeError` or `MarkdownError` is defined) — add `PageBlock` variant
 
 ### Not modified:
 - No changes to Darkmatter's public Markdown AST or renderer types

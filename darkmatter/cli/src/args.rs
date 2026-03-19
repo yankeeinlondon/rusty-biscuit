@@ -76,7 +76,7 @@ pub enum Command {
         loose: bool,
     },
 
-    /// Compose a document through the transform pipeline.
+    /// Compose a document through the compose pipeline.
     Compose {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]

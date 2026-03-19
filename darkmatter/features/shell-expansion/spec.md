@@ -40,13 +40,13 @@ It's important to understand that the `biscuit-file` package just added powerful
 
 ## Purpose
 
-Define an implementation-ready technical design for Darkmatter's Stage 1 shell expansion feature, based on the functional specification in `darkmatter/docs/preparation/shell-expansion.md` and aligned with the current transform pipeline in `darkmatter/lib/src/markdown/transform/`.
+Define an implementation-ready technical design for Darkmatter's Stage 1 shell expansion feature, based on the functional specification in `darkmatter/docs/preparation/shell-expansion.md` and aligned with the current compose pipeline in `darkmatter/lib/src/markdown/compose/`.
 
 This design focuses on three things:
 
 1. preserving the functional contract from the spec
 2. making the feature safe enough to ship in a library and CLI
-3. fitting the existing Stage 1 and recursive Stage 2 transform architecture
+3. fitting the existing Stage 1 and recursive Stage 2 compose architecture
 
 ## Scope
 
@@ -70,24 +70,24 @@ Out of scope for v1:
 
 ## Current Baseline
 
-Darkmatter already has a structured transform pipeline:
+Darkmatter already has a structured compose pipeline:
 
 1. Stage 1: replacement, interpolation, TOC linking, cleanup, normalization
 2. Stage 2: block transclusion and frontmatter transclusion
 
 Relevant implementation pieces already exist:
 
-- `TransformOptions`, `Stage1Stages`, and `TransformReport` are extensible
+- `ComposeOptions`, `Stage1Stages`, and `ComposeReport` are extensible
 - Stage scanners already ignore directives inside fenced code blocks via `parse_utils::find_code_regions()`
 - recursive processing already shares mutable runtime state for transclusion
-- the `compose` CLI already builds `TransformOptions` and runs `transform_with()`
+- the `compose` CLI already builds `ComposeOptions` and runs `compose_with()`
 
 Current gaps:
 
 - there is no shell-expansion stage or module
 - there is no approval callback mechanism in the library
 - there is no persisted allow/deny policy store
-- there is no shared runtime for shell approvals across recursive transforms
+- there is no shared runtime for shell approvals across recursive composes
 
 ## Functional Contract Summary
 
@@ -105,7 +105,7 @@ The shell-expansion stage must implement the following behavior from the spec:
 10. support these approval outcomes:
     - allow exact command and persist it
     - allow command with any parameters and persist it
-    - allow once for the current transform invocation
+    - allow once for the current compose invocation
     - deny
     - blacklist and stop
 
@@ -188,12 +188,12 @@ impl Stage1Stages {
 }
 ```
 
-### `TransformOptions`
+### `ComposeOptions`
 
 Add shell-specific configuration:
 
 ```rust
-pub struct TransformOptions {
+pub struct ComposeOptions {
     pub stages: Stage1Stages,
     pub stage2: Stage2Stages,
     pub transclusion: TransclusionOptions,
@@ -241,7 +241,7 @@ pub trait ShellApprovalHandler: Send + Sync {
 
 ```rust
 pub struct ShellApprovalRequest {
-    pub source: TransformSource,
+    pub source: ComposeSource,
     pub line: usize,
     pub raw_command: String,
     pub executable: String,
@@ -262,12 +262,12 @@ pub enum ShellApprovalDecision {
 }
 ```
 
-### `TransformReport`
+### `ComposeReport`
 
 Add shell-expansion reporting:
 
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     pub replacements_applied: usize,
     pub interpolations_applied: usize,
     pub toc_links_generated: usize,
@@ -278,17 +278,17 @@ pub struct TransformReport {
     pub transclusions_applied: usize,
     pub transclusions_skipped: usize,
     pub max_transclusion_depth: usize,
-    pub warnings: Vec<TransformWarning>,
+    pub warnings: Vec<ComposeWarning>,
 }
 ```
 
 `shell_expansions_applied` counts successful executions, including directives removed because output was empty.
 
-`shell_approvals_used` counts approvals granted during the current transform invocation.
+`shell_approvals_used` counts approvals granted during the current compose invocation.
 
 ## Internal Runtime Changes
 
-Shell approvals and "allow once" decisions must survive recursive transforms triggered by Stage 2 includes.
+Shell approvals and "allow once" decisions must survive recursive composes triggered by Stage 2 includes.
 
 The current internal API only threads `TransclusionRuntime` through recursion. That is not enough for shell expansion.
 
@@ -310,7 +310,7 @@ pub(crate) struct ShellExpansionRuntime {
 }
 ```
 
-`run_transform_pipeline()` creates `PipelineRuntime` once at the root and passes `&mut PipelineRuntime` into recursive child transforms.
+`run_compose_pipeline()` creates `PipelineRuntime` once at the root and passes `&mut PipelineRuntime` into recursive child composes.
 
 This ensures:
 
@@ -323,7 +323,7 @@ This ensures:
 Recommended module layout:
 
 ```txt
-darkmatter/lib/src/markdown/transform/shell_expansion/
+darkmatter/lib/src/markdown/compose/shell_expansion/
 ├── mod.rs         # stage entry point and orchestration
 ├── parser.rs      # ::shell directive scanning
 ├── tokenize.rs    # shell-like argv tokenizer
@@ -333,7 +333,7 @@ darkmatter/lib/src/markdown/transform/shell_expansion/
 └── types.rs       # directives, rules, runtime, and errors
 ```
 
-`transform/mod.rs` gets a new `run_shell_expansion_stage(...)` call between TOC linking and cleanup.
+`compose/mod.rs` gets a new `run_shell_expansion_stage(...)` call between TOC linking and cleanup.
 
 ## Directive Parsing
 
@@ -692,7 +692,7 @@ pub enum ShellExpansionError {
 }
 ```
 
-These errors should be wrapped into `MarkdownError::Transform(...)` the same way other stage failures are surfaced today.
+These errors should be wrapped into `MarkdownError::Compose(...)` the same way other stage failures are surfaced today.
 
 Important behavior:
 
@@ -726,9 +726,9 @@ Pseudo-flow:
 ```rust
 fn run_shell_expansion_stage(
     &mut self,
-    options: &TransformOptions,
+    options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
-    report: &mut TransformReport,
+    report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     let directives = shell_expansion::parse_directives(&self.content)?;
     if directives.is_empty() {
@@ -761,7 +761,7 @@ fn run_shell_expansion_stage(
 
 `darkmatter/cli/src/commands.rs::run_compose()` should:
 
-1. continue building `TransformOptions` as it does now
+1. continue building `ComposeOptions` as it does now
 2. attach a `CliShellApprovalHandler` when prompting is possible
 3. otherwise leave `approval_handler` unset
 
@@ -863,7 +863,7 @@ CLI behavior:
 ### Phase 2
 
 1. implement executor with timeout and output capture
-2. wire stage into `transform/mod.rs`
+2. wire stage into `compose/mod.rs`
 3. add internal `PipelineRuntime`
 4. add tests for pipeline integration
 

@@ -2,7 +2,7 @@
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use darkmatter::markdown::transform::shell_expansion::{
+use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -30,9 +30,9 @@ fn approve_with_io<R: BufRead, W: Write>(
     output: &mut W,
 ) -> Result<ShellApprovalDecision, ShellExpansionError> {
     let source_desc = match &request.source {
-        darkmatter::markdown::transform::TransformSource::File(p) => p.display().to_string(),
-        darkmatter::markdown::transform::TransformSource::Url(u) => u.to_string(),
-        darkmatter::markdown::transform::TransformSource::Unknown => "<stdin>".to_string(),
+        darkmatter::markdown::compose::ComposeSource::File(p) => p.display().to_string(),
+        darkmatter::markdown::compose::ComposeSource::Url(u) => u.to_string(),
+        darkmatter::markdown::compose::ComposeSource::Unknown => "<stdin>".to_string(),
     };
 
     loop {
@@ -177,13 +177,13 @@ pub fn can_prompt_interactively() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use darkmatter::markdown::transform::TransformSource;
+    use darkmatter::markdown::compose::ComposeSource;
     use std::io::Cursor;
     use std::path::PathBuf;
 
     fn request() -> ShellApprovalRequest {
         ShellApprovalRequest {
-            source: TransformSource::File(PathBuf::from("/tmp/doc.md")),
+            source: ComposeSource::File(PathBuf::from("/tmp/doc.md")),
             line: 12,
             raw_command: "echo hello".to_string(),
             executable: "echo".to_string(),
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn prompt_shows_url_source() {
         let mut request = request();
-        request.source = TransformSource::Url("https://example.com/doc.md".parse().unwrap());
+        request.source = ComposeSource::Url("https://example.com/doc.md".parse().unwrap());
         let mut input = Cursor::new(b"3\n".to_vec());
         let mut output = Vec::new();
 
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn prompt_shows_stdin_source() {
         let mut request = request();
-        request.source = TransformSource::Unknown;
+        request.source = ComposeSource::Unknown;
         let mut input = Cursor::new(b"3\n".to_vec());
         let mut output = Vec::new();
 

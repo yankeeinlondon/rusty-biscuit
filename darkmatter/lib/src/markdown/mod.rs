@@ -38,7 +38,7 @@ pub mod inline;
 pub mod normalize;
 pub mod output;
 pub mod toc;
-pub mod transform;
+pub mod compose;
 mod types;
 
 pub use delta::{

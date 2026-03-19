@@ -1,10 +1,10 @@
 # Shell Expansion Tech Design
 
-This document defines the implementation-ready technical design for the `shell-expansion` feature in Darkmatter's Stage 1 transform pipeline. It is derived from:
+This document defines the implementation-ready technical design for the `shell-expansion` feature in Darkmatter's Stage 1 compose pipeline. It is derived from:
 
 - `darkmatter/features/shell-expansion/spec.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
-- the current transform pipeline in `darkmatter/lib/src/markdown/transform/`
+- the current compose pipeline in `darkmatter/lib/src/markdown/compose/`
 - the current compose CLI flow in `darkmatter/cli/src/commands.rs`
 
 The design goal is to preserve the behavior required by the spec while fitting the existing Darkmatter architecture cleanly and safely.
@@ -31,7 +31,7 @@ The design focuses on four outcomes:
 
 1. preserve the functional contract in the shell-expansion spec
 2. keep the library safe enough to expose in both library and CLI usage
-3. fit the current Stage 1 and Stage 2 pipeline architecture without bending existing transform semantics
+3. fit the current Stage 1 and Stage 2 pipeline architecture without bending existing compose semantics
 4. keep policy and approval behavior deterministic across recursive document composition
 
 ## Scope
@@ -59,7 +59,7 @@ Out of scope for v1:
 
 ## Current Baseline
 
-The current transform pipeline in `darkmatter/lib/src/markdown/transform/mod.rs` runs Stage 1 in this order:
+The current compose pipeline in `darkmatter/lib/src/markdown/compose/mod.rs` runs Stage 1 in this order:
 
 1. replacement
 2. interpolation
@@ -71,19 +71,19 @@ Stage 2 then runs transclusion with a recursive `TransclusionRuntime`.
 
 Relevant existing implementation points:
 
-- `TransformOptions` in `transform/types.rs` is the public configuration surface
+- `ComposeOptions` in `compose/types.rs` is the public configuration surface
 - `Stage1Stages` controls Stage 1 toggles
-- `TransformReport` records stage counts and warnings
-- `TransformSource` and `TransclusionOptions` already carry source context
+- `ComposeReport` records stage counts and warnings
+- `ComposeSource` and `TransclusionOptions` already carry source context
 - `parse_utils::find_code_regions()` is already used to skip directives inside fenced code blocks
-- `run_compose()` in `darkmatter/cli/src/commands.rs` already builds `TransformOptions` and sets `with_source_file(...)` for file-backed compose runs
+- `run_compose()` in `darkmatter/cli/src/commands.rs` already builds `ComposeOptions` and sets `with_source_file(...)` for file-backed compose runs
 
 Current gaps:
 
 - there is no shell-expansion stage or module
 - there is no approval callback or runtime
 - there is no persisted whitelist or user blacklist support
-- recursive transform state only covers transclusion depth and cycle detection
+- recursive compose state only covers transclusion depth and cycle detection
 
 ## Functional Contract Summary
 
@@ -159,7 +159,7 @@ Headings emitted by shell expansion will not affect `::toc-linking` output in th
 
 ### `Stage1Stages`
 
-Add a new stage toggle in `darkmatter/lib/src/markdown/transform/types.rs`:
+Add a new stage toggle in `darkmatter/lib/src/markdown/compose/types.rs`:
 
 ```rust
 pub struct Stage1Stages {
@@ -189,12 +189,12 @@ impl Stage1Stages {
 }
 ```
 
-### `TransformOptions`
+### `ComposeOptions`
 
 Extend the public options surface with shell settings:
 
 ```rust
-pub struct TransformOptions {
+pub struct ComposeOptions {
     pub stages: Stage1Stages,
     pub stage2: Stage2Stages,
     pub transclusion: TransclusionOptions,
@@ -229,7 +229,7 @@ Meaning:
 
 `policy_root` is a better name than `policy_dir` because the resolution target is conceptually the root directory that contains the policy files. This supersedes the spec's `policy_dir` naming.
 
-`TransformOptions::new()` must initialize `shell: ShellExpansionOptions::default()` and a `with_shell(mut self, shell: ShellExpansionOptions) -> Self` builder should be added following the existing builder pattern.
+`ComposeOptions::new()` must initialize `shell: ShellExpansionOptions::default()` and a `with_shell(mut self, shell: ShellExpansionOptions) -> Self` builder should be added following the existing builder pattern.
 
 ### Approval callback
 
@@ -246,7 +246,7 @@ pub trait ShellApprovalHandler: Send + Sync {
 
 ```rust
 pub struct ShellApprovalRequest {
-    pub source: TransformSource,
+    pub source: ComposeSource,
     pub line: usize,
     pub raw_command: String,
     pub executable: String,
@@ -267,12 +267,12 @@ pub enum ShellApprovalDecision {
 }
 ```
 
-### `TransformReport`
+### `ComposeReport`
 
 Extend reporting with shell-expansion counters:
 
 ```rust
-pub struct TransformReport {
+pub struct ComposeReport {
     pub replacements_applied: usize,
     pub interpolations_applied: usize,
     pub toc_links_generated: usize,
@@ -283,16 +283,16 @@ pub struct TransformReport {
     pub transclusions_applied: usize,
     pub transclusions_skipped: usize,
     pub max_transclusion_depth: usize,
-    pub warnings: Vec<TransformWarning>,
+    pub warnings: Vec<ComposeWarning>,
 }
 ```
 
 Semantics:
 
 - `shell_expansions_applied` counts successful directives, including directives removed because output was empty
-- `shell_approvals_used` counts approvals granted during the current top-level transform invocation
+- `shell_approvals_used` counts approvals granted during the current top-level compose invocation
 
-`TransformReport::has_changes()` and `TransformReport::summary()` should also include shell-expansion changes.
+`ComposeReport::has_changes()` and `ComposeReport::summary()` should also include shell-expansion changes.
 
 Required updates:
 
@@ -363,8 +363,8 @@ impl ShellExpansionRuntime {
 
 Design requirements:
 
-1. `run_transform_pipeline()` creates `PipelineRuntime` once at the root
-2. `run_transform_pipeline_internal()` receives `&mut PipelineRuntime`
+1. `run_compose_pipeline()` creates `PipelineRuntime` once at the root
+2. `run_compose_pipeline_internal()` receives `&mut PipelineRuntime`
 3. transcluded child documents reuse the same shell runtime
 
 This preserves the intended meaning of:
@@ -375,10 +375,10 @@ This preserves the intended meaning of:
 
 ## Module Layout
 
-Add a new transform module:
+Add a new compose module:
 
 ```text
-darkmatter/lib/src/markdown/transform/shell_expansion/
+darkmatter/lib/src/markdown/compose/shell_expansion/
 ├── mod.rs
 ├── executor.rs
 ├── parser.rs
@@ -398,7 +398,7 @@ Responsibilities:
 - `executor.rs`: process spawning, timeout, and output capture
 - `types.rs`: directive types, policy types, runtime state, and shell-expansion errors
 
-`transform/mod.rs` should:
+`compose/mod.rs` should:
 
 1. `mod shell_expansion;`
 2. re-export the public approval types if they are part of the public API
@@ -433,7 +433,7 @@ Directive rules:
 
 ### Parser strategy
 
-Reuse the current transform pattern already used by Stage 2 parsing:
+Reuse the current compose pattern already used by Stage 2 parsing:
 
 1. compute excluded code regions with `parse_utils::find_code_regions()`
 2. scan content line by line
@@ -589,7 +589,7 @@ User blacklist checks should run after built-in blacklist checks and before whit
 Resolve policy files using this order:
 
 1. `options.shell.policy_root`, if set
-2. otherwise the transform source file's parent directory when `TransformSource::File` is available
+2. otherwise the compose source file's parent directory when `ComposeSource::File` is available
 3. otherwise `std::env::current_dir()`
 4. if that base path is inside a git repository, use the repository root
 5. otherwise use `${HOME}`
@@ -681,7 +681,7 @@ The library never prompts directly.
 
 ## CLI Integration
 
-`run_compose()` in `darkmatter/cli/src/commands.rs` should continue to build `TransformOptions`, then attach a CLI approval handler only when prompting is actually safe.
+`run_compose()` in `darkmatter/cli/src/commands.rs` should continue to build `ComposeOptions`, then attach a CLI approval handler only when prompting is actually safe.
 
 Prompting conditions:
 
@@ -720,7 +720,7 @@ This keeps `md compose -` and other pipe-driven workflows non-interactive and de
 Use this resolution order:
 
 1. `options.shell.working_directory`, if set
-2. the directory containing the file-backed transform source when available
+2. the directory containing the file-backed compose source when available
 3. `options.shell.policy_root`, if set and valid
 4. `std::env::current_dir()`
 
@@ -826,7 +826,7 @@ pub enum ShellExpansionError {
 }
 ```
 
-These errors should convert into the transform pipeline's existing `MarkdownError::Transform(...)` surface the same way other stage failures do today.
+These errors should convert into the compose pipeline's existing `MarkdownError::Compose(...)` surface the same way other stage failures do today.
 
 Important behavior:
 
@@ -848,16 +848,16 @@ Per document:
 4. validate and execute directives in source order
 5. collect replacement spans
 6. apply replacements from end to start
-7. update the transform report
+7. update the compose report
 
 Recommended stage entry point:
 
 ```rust
 fn run_shell_expansion_stage(
     document: &mut Markdown,
-    options: &TransformOptions,
+    options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
-    report: &mut TransformReport,
+    report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     let directives = shell_expansion::parse_directives(&document.content)?;
     if directives.is_empty() {
@@ -891,12 +891,12 @@ fn run_shell_expansion_stage(
 
 ## Interaction With Stage 2 Transclusion
 
-Recursive transforms triggered by `::file` and related Stage 2 features must share the same shell-expansion runtime.
+Recursive composes triggered by `::file` and related Stage 2 features must share the same shell-expansion runtime.
 
 Required behavior:
 
 1. child documents must reuse allow-once approvals granted earlier in the same compose run
-2. policy changes made during a parent document transform must be visible to child documents and vice versa
+2. policy changes made during a parent document compose must be visible to child documents and vice versa
 3. approval prompts should not repeat for the same allow-once command during the same top-level compose invocation
 
 This is the main reason the feature should move from a single-purpose `TransclusionRuntime` to a broader `PipelineRuntime`.
@@ -955,7 +955,7 @@ Pipeline integration:
 2. cleanup runs after shell expansion
 3. recursive transclusion shares shell runtime
 4. allow-once works across child documents within one compose run
-5. hard failures abort the transform even when `fail_fast = false`
+5. hard failures abort the compose even when `fail_fast = false`
 
 CLI integration:
 
@@ -990,7 +990,7 @@ Recommended crates:
 
 1. add executor with timeout and capture
 2. add `PipelineRuntime`
-3. wire shell expansion into `transform/mod.rs`
+3. wire shell expansion into `compose/mod.rs`
 4. add unit and integration tests for library behavior
 
 ### Phase 3
