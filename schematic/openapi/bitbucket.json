@@ -1,0 +1,1482 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bitbucket",
+    "description": "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.bitbucket.org/2.0",
+      "description": "Bitbucket API Server"
+    }
+  ],
+  "paths": {
+    "/repositories/{workspace}/{repo_slug}": {
+      "get": {
+        "summary": "Get repository metadata including default branch and workspace info",
+        "description": "Get repository metadata including default branch and workspace info",
+        "operationId": "GetRepository",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repository"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Repository"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}": {
+      "get": {
+        "summary": "Get raw file content at a specific commit",
+        "description": "Get raw file content at a specific commit",
+        "operationId": "GetFileContentRaw",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "headers": [
+            [
+              "Accept",
+              "text/plain"
+            ]
+          ],
+          "response": "Text"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "commit",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "commit",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/pullrequests": {
+      "get": {
+        "summary": "List pull requests (all states)",
+        "description": "List pull requests (all states)",
+        "operationId": "ListPullRequests",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<PullRequest>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<PullRequest>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/pullrequests/{id}": {
+      "get": {
+        "summary": "Get a single pull request by ID",
+        "description": "Get a single pull request by ID",
+        "operationId": "GetPullRequest",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequest"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PullRequest"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments": {
+      "get": {
+        "summary": "List comments on a pull request",
+        "description": "List comments on a pull request",
+        "operationId": "ListPullRequestComments",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<PullRequestComment>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<PullRequestComment>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/issues": {
+      "get": {
+        "summary": "List repository issues",
+        "description": "List repository issues",
+        "operationId": "ListIssues",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<Issue>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<Issue>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/issues/{id}": {
+      "get": {
+        "summary": "Get a single issue by ID",
+        "description": "Get a single issue by ID",
+        "operationId": "GetIssue",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Issue"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/issues/{id}/comments": {
+      "get": {
+        "summary": "List comments on an issue",
+        "description": "List comments on an issue",
+        "operationId": "ListIssueComments",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<IssueComment>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<IssueComment>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/issues/{id}/changes": {
+      "get": {
+        "summary": "List change history for an issue",
+        "description": "List change history for an issue",
+        "operationId": "ListIssueChanges",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<IssueChange>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<IssueChange>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/refs/tags": {
+      "get": {
+        "summary": "List repository tags",
+        "description": "List repository tags",
+        "operationId": "ListTags",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<Tag>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<Tag>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/refs/tags/{name}": {
+      "get": {
+        "summary": "Get a single tag by name",
+        "description": "Get a single tag by name",
+        "operationId": "GetTag",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Tag"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/downloads": {
+      "get": {
+        "summary": "List repository downloads (release artifacts)",
+        "description": "List repository downloads (release artifacts)",
+        "operationId": "ListDownloads",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<Download>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<Download>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}/{repo_slug}/downloads/{filename}": {
+      "get": {
+        "summary": "Download a file from repository downloads",
+        "description": "Download a file from repository downloads",
+        "operationId": "GetDownload",
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Binary"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "filename",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repositories/{workspace}": {
+      "get": {
+        "summary": "List repositories in a workspace",
+        "description": "List repositories in a workspace",
+        "operationId": "ListWorkspaceRepos",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse<Repository>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PaginatedResponse<Repository>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "Repository": {
+        "title": "Repository",
+        "description": "Repository information from `GET /repositories/{workspace}/{repo_slug}`.",
+        "type": "object",
+        "properties": {
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "description": {
+            "description": "Repository description.",
+            "type": "string"
+          },
+          "fork_policy": {
+            "description": "Fork policy: \"allow_forks\", \"no_public_forks\", \"no_forks\".",
+            "type": "string"
+          },
+          "full_name": {
+            "description": "Full name in \"workspace/repo_slug\" format.",
+            "type": "string"
+          },
+          "has_issues": {
+            "description": "Whether the repository has issues enabled.",
+            "type": "boolean"
+          },
+          "has_wiki": {
+            "description": "Whether the repository has a wiki enabled.",
+            "type": "boolean"
+          },
+          "is_private": {
+            "description": "Whether the repository is private.",
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Primary programming language.",
+            "type": "string"
+          },
+          "links": {
+            "description": "HATEOAS links for this repository.",
+            "type": "object"
+          },
+          "mainbranch": {
+            "description": "Main branch information."
+          },
+          "name": {
+            "description": "The repository name.",
+            "type": "string"
+          },
+          "owner": {
+            "description": "Repository owner."
+          },
+          "project": {
+            "description": "Project the repository belongs to."
+          },
+          "size": {
+            "description": "Size of the repository in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "slug": {
+            "description": "The repository slug (URL-friendly name).",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type (e.g., \"repository\").",
+            "type": "string"
+          },
+          "updated_on": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "uuid": {
+            "description": "The repository's UUID.",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace the repository belongs to."
+          }
+        }
+      },
+      "PaginatedResponse<SourceEntry>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SourceEntry"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PaginatedResponse<PullRequest>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PullRequest"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PullRequest": {
+        "title": "PullRequest",
+        "description": "Pull request from `GET /repositories/{workspace}/{repo_slug}/pullrequests`.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "PR author."
+          },
+          "close_source_branch": {
+            "description": "Whether to close the source branch after merge.",
+            "type": "boolean"
+          },
+          "closed_by": {
+            "description": "User who closed the PR."
+          },
+          "comment_count": {
+            "description": "Number of comments on this PR.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "description": {
+            "description": "PR description (markdown).",
+            "type": "string"
+          },
+          "destination": {
+            "description": "Destination branch information."
+          },
+          "id": {
+            "description": "PR ID (unique within the repository).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "links": {
+            "description": "HATEOAS links.",
+            "type": "object"
+          },
+          "merge_commit": {
+            "description": "PR merge commit (if merged)."
+          },
+          "participants": {
+            "description": "Users who have participated in this PR.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Participant"
+                }
+              ]
+            }
+          },
+          "reason": {
+            "description": "Reason for PR state.",
+            "type": "string"
+          },
+          "reviewers": {
+            "description": "Users who have been added as reviewers.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/User"
+                }
+              ]
+            }
+          },
+          "source": {
+            "description": "Source branch information."
+          },
+          "state": {
+            "description": "PR state: \"OPEN\", \"MERGED\", \"DECLINED\", \"SUPERSEDED\".",
+            "type": "string"
+          },
+          "summary": {
+            "description": "Summary of changes."
+          },
+          "task_count": {
+            "description": "Number of tasks on this PR.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "title": {
+            "description": "PR title.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type (e.g., \"pullrequest\").",
+            "type": "string"
+          },
+          "updated_on": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          }
+        }
+      },
+      "PaginatedResponse<PullRequestComment>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PullRequestComment"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PaginatedResponse<Issue>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Issue": {
+        "title": "Issue",
+        "description": "An issue from `GET /repositories/{workspace}/{repo_slug}/issues`.",
+        "type": "object",
+        "properties": {
+          "assignee": {
+            "description": "Assigned user."
+          },
+          "comment_count": {
+            "description": "Number of comments.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "component": {
+            "description": "Component (if any).",
+            "type": "string"
+          },
+          "content": {
+            "description": "Issue content/description."
+          },
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "edited_on": {
+            "description": "Last edit timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Issue ID (unique within the repository).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "kind": {
+            "description": "Issue type: \"bug\", \"enhancement\", \"proposal\", \"task\".",
+            "type": "string"
+          },
+          "links": {
+            "description": "HATEOAS links.",
+            "type": "object"
+          },
+          "milestone": {
+            "description": "Milestone (if any)."
+          },
+          "priority": {
+            "description": "Issue priority: \"trivial\", \"minor\", \"major\", \"critical\", \"blocker\".",
+            "type": "string"
+          },
+          "reporter": {
+            "description": "Issue reporter."
+          },
+          "repository": {
+            "description": "Repository this issue belongs to."
+          },
+          "state": {
+            "description": "Issue state: \"new\", \"open\", \"resolved\", \"on hold\", \"invalid\", \"duplicate\", \"wontfix\", \"closed\".",
+            "type": "string"
+          },
+          "title": {
+            "description": "Issue title.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type.",
+            "type": "string"
+          },
+          "updated_on": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "version": {
+            "description": "Version (if any).",
+            "type": "string"
+          },
+          "votes": {
+            "description": "Number of votes.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "watchers": {
+            "description": "Number of watchers.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
+      "PaginatedResponse<IssueComment>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/IssueComment"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PaginatedResponse<IssueChange>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/IssueChange"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PaginatedResponse<Tag>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Tag": {
+        "title": "Tag",
+        "description": "A repository tag from `GET /repositories/{workspace}/{repo_slug}/refs/tags`.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "Creation timestamp (ISO 8601, for annotated tags).",
+            "type": "string"
+          },
+          "links": {
+            "description": "HATEOAS links.",
+            "type": "object"
+          },
+          "message": {
+            "description": "Tag message (for annotated tags).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tag name.",
+            "type": "string"
+          },
+          "tagger": {
+            "description": "Tagger information (for annotated tags)."
+          },
+          "target": {
+            "description": "Commit this tag points to."
+          },
+          "type": {
+            "description": "Object type (e.g., \"tag\").",
+            "type": "string"
+          }
+        }
+      },
+      "PaginatedResponse<Download>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Download"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "PaginatedResponse<Repository>": {
+        "title": "PaginatedResponse",
+        "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
+        "type": "object",
+        "properties": {
+          "next": {
+            "description": "URL to the next page of results, if any.",
+            "type": "string"
+          },
+          "page": {
+            "description": "Current page number (1-indexed).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pagelen": {
+            "description": "Number of items per page.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "previous": {
+            "description": "URL to the previous page of results, if any.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Total number of items across all pages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "values": {
+            "description": "The items in this page.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Repository"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Basic HTTP authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "basicAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://developer.atlassian.com/cloud/bitbucket/rest/"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": {
+        "names": [
+          "BITBUCKET_APP_PASSWORD"
+        ]
+      },
+      "basic_user": {
+        "names": [
+          "BITBUCKET_USERNAME"
+        ]
+      },
+      "bearer_token": null
+    },
+    "module_path": "bitbucket"
+  }
+}

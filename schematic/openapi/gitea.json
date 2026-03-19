@@ -1,0 +1,1378 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Gitea",
+    "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://gitea.example.com/api/v1",
+      "description": "Gitea API Server"
+    }
+  ],
+  "paths": {
+    "/repos/{owner}/{repo}": {
+      "get": {
+        "summary": "Get repository metadata including default branch",
+        "description": "Get repository metadata including default branch",
+        "operationId": "GetRepository",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RepositoryInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/git/trees/{sha}": {
+      "get": {
+        "summary": "Get a Git tree (non-recursive, single level)",
+        "description": "Get a Git tree (non-recursive, single level)",
+        "operationId": "GetGitTree",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitTreeResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GitTreeResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "sha",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/git/trees/{sha}?recursive=true": {
+      "get": {
+        "summary": "Get a Git tree recursively (may be paginated for large repos)",
+        "description": "Get a Git tree recursively (may be paginated for large repos)",
+        "operationId": "GetGitTreeRecursive",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitTreeResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GitTreeResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "sha",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/raw/{filepath}": {
+      "get": {
+        "summary": "Get raw file content from repository",
+        "description": "Get raw file content from repository",
+        "operationId": "GetRepositoryContentRaw",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "filepath",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/pulls": {
+      "get": {
+        "summary": "List pull requests with metadata",
+        "description": "List pull requests with metadata",
+        "operationId": "ListPullRequests",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<PullRequestSummary>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<PullRequestSummary>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/pulls/{index}/files": {
+      "get": {
+        "summary": "List files changed in a pull request",
+        "description": "List files changed in a pull request",
+        "operationId": "ListPullRequestFiles",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<PullRequestFile>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<PullRequestFile>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "index",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/issues": {
+      "get": {
+        "summary": "List issues (use type=issues to exclude PRs)",
+        "description": "List issues (use type=issues to exclude PRs)",
+        "operationId": "ListIssues",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<IssueSummary>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<IssueSummary>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/issues/{index}": {
+      "get": {
+        "summary": "Get a single issue by index",
+        "description": "Get a single issue by index",
+        "operationId": "GetIssue",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueSummary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "IssueSummary"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "index",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/issues/{index}/comments": {
+      "get": {
+        "summary": "List comments on an issue",
+        "description": "List comments on an issue",
+        "operationId": "ListIssueComments",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<IssueComment>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<IssueComment>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "index",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/issues/{index}/timeline": {
+      "get": {
+        "summary": "List timeline events for an issue",
+        "description": "List timeline events for an issue",
+        "operationId": "ListIssueTimeline",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<TimelineEvent>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<TimelineEvent>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "index",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/tags": {
+      "get": {
+        "summary": "List repository tags",
+        "description": "List repository tags",
+        "operationId": "ListTags",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepoTag>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepoTag>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/releases": {
+      "get": {
+        "summary": "List releases (linked to tags via tag_name)",
+        "description": "List releases (linked to tags via tag_name)",
+        "operationId": "ListReleases",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Release>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Release>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/git/refs/{git_ref}": {
+      "get": {
+        "summary": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')",
+        "description": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')",
+        "operationId": "GetTagReference",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<GitRef>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<GitRef>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "git_ref",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/{owner}/{repo}/git/tags/{sha}": {
+      "get": {
+        "summary": "Get annotated tag object details (message, tagger)",
+        "description": "Get annotated tag object details (message, tagger)",
+        "operationId": "GetAnnotatedTag",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotatedTagObject"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AnnotatedTagObject"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "sha",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/orgs/{org}/repos": {
+      "get": {
+        "summary": "List repositories for an organization",
+        "description": "List repositories for an organization",
+        "operationId": "ListOrgRepos",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepositoryInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepositoryInfo>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "org",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "RepositoryInfo": {
+        "title": "RepositoryInfo",
+        "description": "Repository information from `GET /repos/{owner}/{repo}`.",
+        "type": "object",
+        "properties": {
+          "archived": {
+            "description": "Whether the repository is archived.",
+            "type": "boolean"
+          },
+          "clone_url": {
+            "description": "Clone URL (HTTPS).",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "default_branch": {
+            "description": "Default branch name.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Repository description.",
+            "type": "string"
+          },
+          "empty": {
+            "description": "Whether the repository is empty.",
+            "type": "boolean"
+          },
+          "forks_count": {
+            "description": "Number of forks.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "full_name": {
+            "description": "Full name in \"owner/repo\" format.",
+            "type": "string"
+          },
+          "html_url": {
+            "description": "HTML URL to the repository.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Repository ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "language": {
+            "description": "Primary programming language.",
+            "type": "string"
+          },
+          "mirror": {
+            "description": "Whether the repository is a mirror.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Repository name.",
+            "type": "string"
+          },
+          "open_issues_count": {
+            "description": "Number of open issues.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "owner": {
+            "description": "Repository owner."
+          },
+          "private": {
+            "description": "Whether the repository is private.",
+            "type": "boolean"
+          },
+          "ssh_url": {
+            "description": "SSH URL for cloning.",
+            "type": "string"
+          },
+          "stars_count": {
+            "description": "Number of stars.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "watchers_count": {
+            "description": "Number of watchers.",
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GitTreeResponse": {
+        "title": "GitTreeResponse",
+        "description": "Response from `GET /repos/{owner}/{repo}/git/trees/{sha}`.",
+        "type": "object",
+        "properties": {
+          "page": {
+            "description": "Current page (when paginated).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha": {
+            "description": "SHA of the tree.",
+            "type": "string"
+          },
+          "total_count": {
+            "description": "Total count of entries (when paginated).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "tree": {
+            "description": "Tree entries (files and directories).",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/GitTreeEntry"
+                }
+              ]
+            }
+          },
+          "truncated": {
+            "description": "Whether the response was truncated.",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "API URL for this tree.",
+            "type": "string"
+          }
+        }
+      },
+      "PullRequestSummary": {
+        "title": "PullRequestSummary",
+        "description": "Pull request summary from list endpoints.",
+        "type": "object",
+        "properties": {
+          "base": {
+            "description": "Base branch info."
+          },
+          "body": {
+            "description": "PR body/description.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "draft": {
+            "description": "Whether this is a draft PR.",
+            "type": "boolean"
+          },
+          "has_merged": {
+            "description": "Whether the PR has been merged.",
+            "type": "boolean"
+          },
+          "head": {
+            "description": "Head branch info."
+          },
+          "html_url": {
+            "description": "HTML URL to the PR.",
+            "type": "string"
+          },
+          "id": {
+            "description": "PR ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "mergeable": {
+            "description": "Whether the PR is mergeable.",
+            "type": "boolean"
+          },
+          "merged_at": {
+            "description": "Merge timestamp (if merged).",
+            "type": "string"
+          },
+          "number": {
+            "description": "PR number (index).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "description": "PR state: \"open\", \"closed\".",
+            "type": "string"
+          },
+          "title": {
+            "description": "PR title.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp.",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL for the PR.",
+            "type": "string"
+          },
+          "user": {
+            "description": "PR author."
+          }
+        }
+      },
+      "Vec<PullRequestSummary>": {
+        "title": "Array_of_PullRequestSummary",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/PullRequestSummary"
+            }
+          ]
+        }
+      },
+      "PullRequestFile": {
+        "title": "PullRequestFile",
+        "description": "A file changed in a pull request.",
+        "type": "object",
+        "properties": {
+          "additions": {
+            "description": "Number of additions.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "changes": {
+            "description": "Total number of changes.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "deletions": {
+            "description": "Number of deletions.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "filename": {
+            "description": "Filename (full path).",
+            "type": "string"
+          },
+          "status": {
+            "description": "Change status: \"added\", \"removed\", \"modified\", \"renamed\".",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<PullRequestFile>": {
+        "title": "Array_of_PullRequestFile",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/PullRequestFile"
+            }
+          ]
+        }
+      },
+      "IssueSummary": {
+        "title": "IssueSummary",
+        "description": "Issue summary from list/get endpoints.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "description": "Issue body/description.",
+            "type": "string"
+          },
+          "closed_at": {
+            "description": "Close timestamp (if closed).",
+            "type": "string"
+          },
+          "comments": {
+            "description": "Number of comments.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "html_url": {
+            "description": "HTML URL to the issue.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Issue ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "index": {
+            "description": "Issue index (number).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "description": "Alternative field name for index (some endpoints use `number`).",
+            "type": "integer",
+            "format": "int64"
+          },
+          "pull_request": {
+            "description": "Pull request info (present if this issue is a PR)."
+          },
+          "state": {
+            "description": "Issue state: \"open\", \"closed\".",
+            "type": "string"
+          },
+          "title": {
+            "description": "Issue title.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp.",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL for the issue.",
+            "type": "string"
+          },
+          "user": {
+            "description": "Issue author."
+          }
+        }
+      },
+      "Vec<IssueSummary>": {
+        "title": "Array_of_IssueSummary",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/IssueSummary"
+            }
+          ]
+        }
+      },
+      "IssueComment": {
+        "title": "IssueComment",
+        "description": "A comment on an issue.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "description": "Comment body.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Comment ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "description": "Last update timestamp.",
+            "type": "string"
+          },
+          "user": {
+            "description": "Comment author."
+          }
+        }
+      },
+      "Vec<IssueComment>": {
+        "title": "Array_of_IssueComment",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/IssueComment"
+            }
+          ]
+        }
+      },
+      "TimelineEvent": {
+        "title": "TimelineEvent",
+        "description": "A timeline event on an issue.",
+        "type": "object",
+        "properties": {
+          "created": {
+            "description": "Event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Event ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "description": "Event type.",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<TimelineEvent>": {
+        "title": "Array_of_TimelineEvent",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/TimelineEvent"
+            }
+          ]
+        }
+      },
+      "RepoTag": {
+        "title": "RepoTag",
+        "description": "A repository tag from `GET /repos/{owner}/{repo}/tags`.",
+        "type": "object",
+        "properties": {
+          "commit": {
+            "description": "Commit the tag points to."
+          },
+          "id": {
+            "description": "Tag ID (Gitea-specific).",
+            "type": "string"
+          },
+          "message": {
+            "description": "Tag message (for annotated tags).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tag name.",
+            "type": "string"
+          },
+          "tarball_url": {
+            "description": "URL to download tarball.",
+            "type": "string"
+          },
+          "zipball_url": {
+            "description": "URL to download zipball.",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<RepoTag>": {
+        "title": "Array_of_RepoTag",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/RepoTag"
+            }
+          ]
+        }
+      },
+      "Release": {
+        "title": "Release",
+        "description": "A Gitea release from `GET /repos/{owner}/{repo}/releases`.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "Author of the release."
+          },
+          "body": {
+            "description": "Release body (markdown).",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "draft": {
+            "description": "Whether this is a draft.",
+            "type": "boolean"
+          },
+          "html_url": {
+            "description": "HTML URL to the release.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Release ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "description": "Release name/title.",
+            "type": "string"
+          },
+          "prerelease": {
+            "description": "Whether this is a prerelease.",
+            "type": "boolean"
+          },
+          "published_at": {
+            "description": "Publish timestamp.",
+            "type": "string"
+          },
+          "tag_name": {
+            "description": "Tag name associated with the release.",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<Release>": {
+        "title": "Array_of_Release",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Release"
+            }
+          ]
+        }
+      },
+      "GitRef": {
+        "title": "GitRef",
+        "description": "A Git reference from `GET /repos/{owner}/{repo}/git/refs/{ref}`.\n\nNote: Gitea returns an **array** of refs for this endpoint, unlike GitHub.",
+        "type": "object",
+        "properties": {
+          "object": {
+            "description": "Object the ref points to."
+          },
+          "ref": {
+            "description": "Full ref name (e.g., \"refs/tags/v1.0.0\").",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL.",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<GitRef>": {
+        "title": "Array_of_GitRef",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/GitRef"
+            }
+          ]
+        }
+      },
+      "AnnotatedTagObject": {
+        "title": "AnnotatedTagObject",
+        "description": "An annotated tag object from `GET /repos/{owner}/{repo}/git/tags/{sha}`.",
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "Tag message.",
+            "type": "string"
+          },
+          "sha": {
+            "description": "Tag object SHA.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Tag name.",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL.",
+            "type": "string"
+          }
+        }
+      },
+      "Vec<RepositoryInfo>": {
+        "title": "Array_of_RepositoryInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/RepositoryInfo"
+            }
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "API Key authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://docs.gitea.com/api/1.25/"
+  },
+  "x-schematic": {
+    "headers": [
+      [
+        "Accept",
+        "application/json"
+      ]
+    ],
+    "module_path": "gitea"
+  }
+}

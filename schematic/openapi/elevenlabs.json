@@ -1,0 +1,2486 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ElevenLabs",
+    "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.elevenlabs.io",
+      "description": "ElevenLabs API Server"
+    }
+  ],
+  "paths": {
+    "/v1/text-to-speech/{voice_id}": {
+      "post": {
+        "summary": "Converts text into speech and returns audio",
+        "description": "Converts text into speech and returns audio",
+        "operationId": "CreateSpeech",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpeechBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateSpeechBody"
+            }
+          },
+          "response": "Binary"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/text-to-speech/{voice_id}/stream": {
+      "post": {
+        "summary": "Streams audio as it's generated",
+        "description": "Streams audio as it's generated",
+        "operationId": "StreamSpeech",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpeechBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateSpeechBody"
+            }
+          },
+          "response": "Binary"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/text-to-speech/{voice_id}/with-timestamps": {
+      "post": {
+        "summary": "Returns audio with character-level timing information",
+        "description": "Returns audio with character-level timing information",
+        "operationId": "CreateSpeechWithTimestamps",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpeechBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechWithTimestampsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateSpeechBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SpeechWithTimestampsResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/text-to-speech/{voice_id}/stream/with-timestamps": {
+      "post": {
+        "summary": "Streams audio chunks with timing information",
+        "description": "Streams audio chunks with timing information",
+        "operationId": "StreamSpeechWithTimestamps",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpeechBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechWithTimestampsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateSpeechBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SpeechWithTimestampsResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v2/voices": {
+      "get": {
+        "summary": "Lists all available voices",
+        "description": "Lists all available voices",
+        "operationId": "ListVoices",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListVoicesResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListVoicesResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/voices/{voice_id}": {
+      "get": {
+        "summary": "Retrieves a voice by ID",
+        "description": "Retrieves a voice by ID",
+        "operationId": "GetVoice",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceResponseModel"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "VoiceResponseModel"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a voice",
+        "description": "Deletes a voice",
+        "operationId": "DeleteVoice",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/settings/default": {
+      "get": {
+        "summary": "Gets default voice settings",
+        "description": "Gets default voice settings",
+        "operationId": "GetDefaultVoiceSettings",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSettings"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "VoiceSettings"
+            }
+          }
+        }
+      }
+    },
+    "/v1/voices/{voice_id}/settings": {
+      "get": {
+        "summary": "Gets voice settings for a specific voice",
+        "description": "Gets voice settings for a specific voice",
+        "operationId": "GetVoiceSettings",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSettings"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "VoiceSettings"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/{voice_id}/settings/edit": {
+      "post": {
+        "summary": "Updates voice settings",
+        "description": "Updates voice settings",
+        "operationId": "UpdateVoiceSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "VoiceSettings"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/{voice_id}/samples/{sample_id}/audio": {
+      "get": {
+        "summary": "Gets audio for a voice sample",
+        "description": "Gets audio for a voice sample",
+        "operationId": "GetVoiceSampleAudio",
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Binary"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "sample_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/{voice_id}/samples/{sample_id}": {
+      "delete": {
+        "summary": "Deletes a voice sample",
+        "description": "Deletes a voice sample",
+        "operationId": "DeleteVoiceSample",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "sample_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/{voice_id}/samples": {
+      "post": {
+        "summary": "Upload audio sample for voice cloning",
+        "description": "Upload audio sample for voice cloning",
+        "operationId": "AddVoiceSample",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "audio": {
+                    "description": "Audio file (mp3, wav, ogg, m4a)",
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "name": {
+                    "description": "Name for the sample",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "audio"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddSampleResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "FormData": {
+              "fields": [
+                {
+                  "description": "Audio file (mp3, wav, ogg, m4a)",
+                  "kind": {
+                    "File": {
+                      "accept": [
+                        "audio/*"
+                      ]
+                    }
+                  },
+                  "name": "audio",
+                  "required": true
+                },
+                {
+                  "description": "Name for the sample",
+                  "kind": "Text",
+                  "name": "name",
+                  "required": false
+                }
+              ]
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AddSampleResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/shared-voices": {
+      "get": {
+        "summary": "Lists voices from the public library",
+        "description": "Lists voices from the public library",
+        "operationId": "ListSharedVoices",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSharedVoicesResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListSharedVoicesResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/voices/add/{public_user_id}/{voice_id}": {
+      "post": {
+        "summary": "Adds a shared voice to your library",
+        "description": "Adds a shared voice to your library",
+        "operationId": "AddSharedVoice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSharedVoiceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddSharedVoiceResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AddSharedVoiceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AddSharedVoiceResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "public_user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/pvc": {
+      "post": {
+        "summary": "Creates a professional voice clone",
+        "description": "Creates a professional voice clone",
+        "operationId": "CreatePvcVoice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePvcVoiceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddSharedVoiceResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreatePvcVoiceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AddSharedVoiceResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/voices/pvc/{voice_id}": {
+      "post": {
+        "summary": "Updates a PVC voice",
+        "description": "Updates a PVC voice",
+        "operationId": "UpdatePvcVoice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePvcVoiceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreatePvcVoiceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/voices/pvc/{voice_id}/train": {
+      "post": {
+        "summary": "Starts training a PVC voice",
+        "description": "Starts training a PVC voice",
+        "operationId": "TrainPvcVoice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainPvcVoiceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "TrainPvcVoiceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "voice_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/sound-generation": {
+      "post": {
+        "summary": "Generates a sound effect from text",
+        "description": "Generates a sound effect from text",
+        "operationId": "CreateSoundEffect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSoundEffectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateSoundEffectBody"
+            }
+          },
+          "response": "Binary"
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "Lists all available models",
+        "description": "Lists all available models",
+        "operationId": "ListModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<ModelInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<ModelInfo>"
+            }
+          }
+        }
+      }
+    },
+    "/v1/single-use-token/{token_type}": {
+      "post": {
+        "summary": "Creates a single-use token for WebSocket auth",
+        "description": "Creates a single-use token for WebSocket auth",
+        "operationId": "CreateSingleUseToken",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleUseTokenResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SingleUseTokenResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "token_type",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/history": {
+      "get": {
+        "summary": "Gets generated items history",
+        "description": "Gets generated items history",
+        "operationId": "GetHistory",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetHistoryResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GetHistoryResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/history/{history_item_id}": {
+      "get": {
+        "summary": "Gets a specific history item",
+        "description": "Gets a specific history item",
+        "operationId": "GetHistoryItem",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechHistoryItemResponseModel"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SpeechHistoryItemResponseModel"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a history item",
+        "description": "Deletes a history item",
+        "operationId": "DeleteHistoryItem",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "history_item_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "history_item_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/history/{history_item_id}/audio": {
+      "get": {
+        "summary": "Gets audio for a history item",
+        "description": "Gets audio for a history item",
+        "operationId": "GetHistoryItemAudio",
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Binary"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "history_item_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/history/download": {
+      "post": {
+        "summary": "Downloads multiple history items as ZIP",
+        "description": "Downloads multiple history items as ZIP",
+        "operationId": "DownloadHistoryItems",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadHistoryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DownloadHistoryBody"
+            }
+          },
+          "response": "Binary"
+        }
+      }
+    },
+    "/v1/usage/character-stats": {
+      "get": {
+        "summary": "Gets usage statistics",
+        "description": "Gets usage statistics",
+        "operationId": "GetUsageStats",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UsageStatsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/user": {
+      "get": {
+        "summary": "Gets current user information",
+        "description": "Gets current user information",
+        "operationId": "GetUser",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UserResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/subscription": {
+      "get": {
+        "summary": "Gets user subscription information",
+        "description": "Gets user subscription information",
+        "operationId": "GetUserSubscription",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionModel"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SubscriptionModel"
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/resources/{resource_id}": {
+      "get": {
+        "summary": "Gets resource information",
+        "description": "Gets resource information",
+        "operationId": "GetResource",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ResourceResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "resource_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/workspace/resources/{resource_id}/share": {
+      "post": {
+        "summary": "Shares a resource",
+        "description": "Shares a resource",
+        "operationId": "ShareResource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareResourceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ShareResourceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "resource_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/workspace/resources/{resource_id}/unshare": {
+      "post": {
+        "summary": "Removes sharing for a resource",
+        "description": "Removes sharing for a resource",
+        "operationId": "UnshareResource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnshareResourceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UnshareResourceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "resource_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/workspace/resources/{resource_id}/copy-to-workspace": {
+      "post": {
+        "summary": "Copies a resource to another workspace",
+        "description": "Copies a resource to another workspace",
+        "operationId": "CopyResourceToWorkspace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyResourceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CopyResourceBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "resource_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/service-accounts": {
+      "get": {
+        "summary": "Lists service accounts",
+        "description": "Lists service accounts",
+        "operationId": "ListServiceAccounts",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListServiceAccountsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListServiceAccountsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{service_account_user_id}/api-keys": {
+      "get": {
+        "summary": "Lists API keys for a service account",
+        "description": "Lists API keys for a service account",
+        "operationId": "ListServiceAccountApiKeys",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListApiKeysResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListApiKeysResponse"
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Creates an API key for a service account",
+        "description": "Creates an API key for a service account",
+        "operationId": "CreateApiKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateApiKeyResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateApiKeyBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateApiKeyResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "service_account_user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "service_account_user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}": {
+      "delete": {
+        "summary": "Deletes an API key",
+        "description": "Deletes an API key",
+        "operationId": "DeleteApiKey",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Updates an API key",
+        "description": "Updates an API key",
+        "operationId": "UpdateApiKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApiKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UpdateApiKeyBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "service_account_user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "api_key_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "service_account_user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "api_key_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/v1/workspace/webhooks": {
+      "get": {
+        "summary": "Lists webhooks",
+        "description": "Lists webhooks",
+        "operationId": "ListWebhooks",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListWebhooksResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListWebhooksResponse"
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Creates a webhook",
+        "description": "Creates a webhook",
+        "operationId": "CreateWebhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWebhookResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateWebhookBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateWebhookResponse"
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/webhooks/{webhook_id}": {
+      "delete": {
+        "summary": "Deletes a webhook",
+        "description": "Deletes a webhook",
+        "operationId": "DeleteWebhook",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Updates a webhook",
+        "description": "Updates a webhook",
+        "operationId": "UpdateWebhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UpdateWebhookBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "webhook_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "webhook_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "SpeechWithTimestampsResponse": {
+        "title": "SpeechWithTimestampsResponse",
+        "description": "Response from TTS with timestamps endpoints.",
+        "type": "object",
+        "properties": {
+          "alignment": {
+            "description": "Timing data for original text."
+          },
+          "audioBase64": {
+            "description": "Base64-encoded audio data.",
+            "type": "string"
+          },
+          "normalizedAlignment": {
+            "description": "Timing data for normalized text."
+          }
+        },
+        "required": [
+          "audioBase64"
+        ]
+      },
+      "ListVoicesResponse": {
+        "title": "ListVoicesResponse",
+        "description": "Response from list voices endpoint.",
+        "type": "object",
+        "properties": {
+          "has_more": {
+            "description": "Whether more results exist.",
+            "type": "boolean"
+          },
+          "next_page_token": {
+            "description": "Token for next page.",
+            "type": "string"
+          },
+          "total_count": {
+            "description": "Total count of matching voices.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "voices": {
+            "description": "List of voices.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/VoiceResponseModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "voices"
+        ]
+      },
+      "VoiceResponseModel": {
+        "title": "VoiceResponseModel",
+        "description": "Full voice response model.",
+        "type": "object",
+        "properties": {
+          "available_for_tiers": {
+            "description": "Subscription tiers this voice is available for.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "description": "Voice category."
+          },
+          "collection_ids": {
+            "description": "Collection IDs this voice belongs to.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at_unix": {
+            "description": "Unix timestamp when the voice was created.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "description": "Voice description.",
+            "type": "string"
+          },
+          "favorited_at_unix": {
+            "description": "Unix timestamp when the voice was favorited.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "fine_tuning": {
+            "description": "Fine-tuning information."
+          },
+          "high_quality_base_model_ids": {
+            "description": "Base model IDs that support high-quality for this voice.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_legacy": {
+            "description": "Whether this is a legacy voice.",
+            "type": "boolean"
+          },
+          "is_mixed": {
+            "description": "Whether this voice uses mixed models.",
+            "type": "boolean"
+          },
+          "is_owner": {
+            "description": "Whether the current user owns this voice.",
+            "type": "boolean"
+          },
+          "labels": {
+            "description": "Voice labels (language, accent, gender, age).",
+            "type": "object"
+          },
+          "name": {
+            "description": "Voice display name.",
+            "type": "string"
+          },
+          "permission_on_resource": {
+            "description": "Permission level on this resource.",
+            "type": "string"
+          },
+          "preview_url": {
+            "description": "URL to preview audio for this voice.",
+            "type": "string"
+          },
+          "safety_control": {
+            "description": "Safety control level for this voice."
+          },
+          "samples": {
+            "description": "Voice samples.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SampleModel"
+                }
+              ]
+            }
+          },
+          "settings": {
+            "description": "Voice settings."
+          },
+          "sharing": {
+            "description": "Sharing information."
+          },
+          "verified_languages": {
+            "description": "Verified languages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/LanguageModel"
+                }
+              ]
+            }
+          },
+          "voice_id": {
+            "description": "Voice identifier.",
+            "type": "string"
+          },
+          "voice_verification": {
+            "description": "Voice verification status."
+          }
+        },
+        "required": [
+          "voice_id",
+          "name"
+        ]
+      },
+      "StatusResponse": {
+        "title": "StatusResponse",
+        "description": "Generic status response for many API operations.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Status message (typically \"ok\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "VoiceSettings": {
+        "title": "VoiceSettings",
+        "description": "Voice settings for TTS generation.",
+        "type": "object",
+        "properties": {
+          "similarity_boost": {
+            "description": "Adherence to original voice (0-1).",
+            "type": "number",
+            "format": "double"
+          },
+          "speed": {
+            "description": "Speech rate (0.7-1.2).",
+            "type": "number",
+            "format": "double"
+          },
+          "stability": {
+            "description": "Voice stability/randomness (0-1).",
+            "type": "number",
+            "format": "double"
+          },
+          "style": {
+            "description": "Style exaggeration (V2+ models).",
+            "type": "number",
+            "format": "double"
+          },
+          "use_speaker_boost": {
+            "description": "Enhanced similarity (V2+ models).",
+            "type": "boolean"
+          }
+        }
+      },
+      "AddSampleResponse": {
+        "title": "AddSampleResponse",
+        "description": "Response from adding a voice sample.",
+        "type": "object",
+        "properties": {
+          "sample_id": {
+            "description": "The sample ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sample_id"
+        ]
+      },
+      "ListSharedVoicesResponse": {
+        "title": "ListSharedVoicesResponse",
+        "description": "Response from list shared voices endpoint.",
+        "type": "object",
+        "properties": {
+          "has_more": {
+            "description": "Whether more results exist.",
+            "type": "boolean"
+          },
+          "last_sort_id": {
+            "description": "Cursor for pagination.",
+            "type": "string"
+          },
+          "voices": {
+            "description": "List of shared voices.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/LibraryVoiceResponseModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "voices",
+          "has_more"
+        ]
+      },
+      "AddSharedVoiceResponse": {
+        "title": "AddSharedVoiceResponse",
+        "description": "Response from add shared voice endpoint.",
+        "type": "object",
+        "properties": {
+          "voice_id": {
+            "description": "The new voice ID in your library.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "voice_id"
+        ]
+      },
+      "Vec<ModelInfo>": {
+        "title": "Array_of_ModelInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          ]
+        }
+      },
+      "SingleUseTokenResponse": {
+        "title": "SingleUseTokenResponse",
+        "description": "Response containing a single-use token.",
+        "type": "object",
+        "properties": {
+          "token": {
+            "description": "The generated token.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "GetHistoryResponse": {
+        "title": "GetHistoryResponse",
+        "description": "Response from get history endpoint.",
+        "type": "object",
+        "properties": {
+          "has_more": {
+            "description": "Whether more items exist.",
+            "type": "boolean"
+          },
+          "history": {
+            "description": "List of history items.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SpeechHistoryItemResponseModel"
+                }
+              ]
+            }
+          },
+          "last_history_item_id": {
+            "description": "Last item ID for pagination.",
+            "type": "string"
+          },
+          "scanned_until": {
+            "description": "Scan timestamp.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "history",
+          "has_more"
+        ]
+      },
+      "SpeechHistoryItemResponseModel": {
+        "title": "SpeechHistoryItemResponseModel",
+        "description": "Speech history item.",
+        "type": "object",
+        "properties": {
+          "alignments": {
+            "description": "Character alignments."
+          },
+          "content_type": {
+            "description": "Content type of audio.",
+            "type": "string"
+          },
+          "date_unix": {
+            "description": "Unix timestamp.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "feedback": {
+            "description": "User feedback."
+          },
+          "history_item_id": {
+            "description": "History item ID.",
+            "type": "string"
+          },
+          "model_id": {
+            "description": "Model ID used.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Source of generation."
+          },
+          "state": {
+            "description": "Generation state.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The text that was converted.",
+            "type": "string"
+          },
+          "voice_category": {
+            "description": "Voice category."
+          },
+          "voice_id": {
+            "description": "Voice ID used.",
+            "type": "string"
+          },
+          "voice_name": {
+            "description": "Voice name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "history_item_id",
+          "voice_id",
+          "date_unix"
+        ]
+      },
+      "UsageStatsResponse": {
+        "title": "UsageStatsResponse",
+        "description": "Usage statistics response.",
+        "type": "object",
+        "properties": {
+          "time": {
+            "description": "Time points.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "usage": {
+            "description": "Usage data by category.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "time",
+          "usage"
+        ]
+      },
+      "UserResponse": {
+        "title": "UserResponse",
+        "description": "User response model.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "Account creation timestamp.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "first_name": {
+            "description": "First name.",
+            "type": "string"
+          },
+          "is_new_user": {
+            "description": "Is new user.",
+            "type": "boolean"
+          },
+          "is_onboarding_completed": {
+            "description": "Onboarding completion.",
+            "type": "boolean"
+          },
+          "subscription": {
+            "description": "Subscription info."
+          },
+          "user_id": {
+            "description": "User identifier.",
+            "type": "string"
+          },
+          "xi_api_key": {
+            "description": "API key (if visible).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "SubscriptionModel": {
+        "title": "SubscriptionModel",
+        "description": "Subscription model.",
+        "type": "object",
+        "properties": {
+          "billing_period": {
+            "description": "Billing period."
+          },
+          "character_count": {
+            "description": "Characters used.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "character_limit": {
+            "description": "Character limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "description": "Currency."
+          },
+          "max_character_limit_extension": {
+            "description": "Max extension limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_invoice": {
+            "description": "Next invoice."
+          },
+          "professional_voice_limit": {
+            "description": "Pro voice limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "professional_voice_slots_used": {
+            "description": "Pro voice slots used.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "description": "Subscription status."
+          },
+          "tier": {
+            "description": "Subscription tier.",
+            "type": "string"
+          },
+          "voice_limit": {
+            "description": "Voice slot limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "voice_slots_used": {
+            "description": "Voice slots used.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "tier",
+          "character_count",
+          "character_limit"
+        ]
+      },
+      "ResourceResponse": {
+        "title": "ResourceResponse",
+        "description": "Resource response model.",
+        "type": "object",
+        "properties": {
+          "anonymous_access_level_override": {
+            "description": "Anonymous access level override."
+          },
+          "creator_user_id": {
+            "description": "Creator user ID.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Resource identifier.",
+            "type": "string"
+          },
+          "resource_type": {
+            "description": "Resource type."
+          },
+          "role_to_group_ids": {
+            "description": "Role to group ID mapping.",
+            "type": "object"
+          },
+          "share_options": {
+            "description": "Share options.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ShareOptionModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "resource_id",
+          "resource_type"
+        ]
+      },
+      "ListServiceAccountsResponse": {
+        "title": "ListServiceAccountsResponse",
+        "description": "Response from list service accounts endpoint.",
+        "type": "object",
+        "properties": {
+          "service-accounts": {
+            "description": "List of service accounts.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ServiceAccountModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "service-accounts"
+        ]
+      },
+      "ListApiKeysResponse": {
+        "title": "ListApiKeysResponse",
+        "description": "Response from list API keys endpoint.",
+        "type": "object",
+        "properties": {
+          "api-keys": {
+            "description": "List of API keys.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ApiKeyModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "api-keys"
+        ]
+      },
+      "CreateApiKeyResponse": {
+        "title": "CreateApiKeyResponse",
+        "description": "Response from create API key endpoint.",
+        "type": "object",
+        "properties": {
+          "key-id": {
+            "description": "Key identifier.",
+            "type": "string"
+          },
+          "xi-api-key": {
+            "description": "The full API key (only shown once).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "xi-api-key",
+          "key-id"
+        ]
+      },
+      "ListWebhooksResponse": {
+        "title": "ListWebhooksResponse",
+        "description": "Response from list webhooks endpoint.",
+        "type": "object",
+        "properties": {
+          "webhooks": {
+            "description": "List of webhooks.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/WebhookModel"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "webhooks"
+        ]
+      },
+      "CreateWebhookResponse": {
+        "title": "CreateWebhookResponse",
+        "description": "Response from create webhook endpoint.",
+        "type": "object",
+        "properties": {
+          "webhook_id": {
+            "description": "Webhook identifier.",
+            "type": "string"
+          },
+          "webhook_secret": {
+            "description": "Webhook secret (for HMAC auth).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "webhook_id"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "xi-api-key",
+        "description": "API Key authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://elevenlabs.io/docs/api-reference"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": {
+        "header": "xi-api-key",
+        "names": {
+          "names": [
+            "ELEVEN_LABS_API_KEY",
+            "ELEVENLABS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    }
+  }
+}

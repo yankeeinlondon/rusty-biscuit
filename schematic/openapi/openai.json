@@ -3,7 +3,7 @@
   "info": {
     "title": "OpenAI",
     "description": "OpenAI REST API for model management",
-    "version": "1.0.0"
+    "version": "0.1.0"
   },
   "servers": [
     {

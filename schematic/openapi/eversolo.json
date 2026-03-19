@@ -1,0 +1,903 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Eversolo",
+    "description": "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://192.168.1.1:9529",
+      "description": "Eversolo API Server"
+    }
+  ],
+  "paths": {
+    "/ZidooControlCenter/getModel": {
+      "get": {
+        "summary": "Get device model, firmware, and network information",
+        "description": "Get device model, firmware, and network information",
+        "operationId": "DeviceGetModel",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetModelResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GetModelResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooControlCenter/RemoteControl/sendkey": {
+      "get": {
+        "summary": "Send a remote control key command to the device",
+        "description": "Send a remote control key command to the device",
+        "operationId": "RemoteSendKey",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooControlCenter/RemoteControl/inputtext": {
+      "get": {
+        "summary": "Send text input to the device",
+        "description": "Send text input to the device",
+        "operationId": "RemoteInputText",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/getState": {
+      "get": {
+        "summary": "Get current playback state, track info, and volume",
+        "description": "Get current playback state, track info, and volume",
+        "operationId": "MusicGetState",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GetStateResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/playOrPause": {
+      "get": {
+        "summary": "Toggle play/pause on the current track",
+        "description": "Toggle play/pause on the current track",
+        "operationId": "MusicPlayOrPause",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/playNext": {
+      "get": {
+        "summary": "Skip to the next track",
+        "description": "Skip to the next track",
+        "operationId": "MusicPlayNext",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/playLast": {
+      "get": {
+        "summary": "Go back to the previous track",
+        "description": "Go back to the previous track",
+        "operationId": "MusicPlayLast",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/seekTo": {
+      "get": {
+        "summary": "Seek to a position in the current track",
+        "description": "Seek to a position in the current track",
+        "operationId": "MusicSeekTo",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/getInputAndOutputList": {
+      "get": {
+        "summary": "List available audio inputs and outputs",
+        "description": "List available audio inputs and outputs",
+        "operationId": "MusicGetInputOutputList",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputOutputListResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "InputOutputListResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/setInputList": {
+      "get": {
+        "summary": "Set the active audio input",
+        "description": "Set the active audio input",
+        "operationId": "MusicSetInput",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputOutputListResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "InputOutputListResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/setOutInputList": {
+      "get": {
+        "summary": "Set the active audio output",
+        "description": "Set the active audio output",
+        "operationId": "MusicSetOutput",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputOutputListResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "InputOutputListResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/setDevicesVolume": {
+      "get": {
+        "summary": "Set the absolute volume level",
+        "description": "Set the absolute volume level",
+        "operationId": "MusicSetVolume",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/setMuteVolume": {
+      "get": {
+        "summary": "Set or clear mute state",
+        "description": "Set or clear mute state",
+        "operationId": "MusicSetMute",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/getPowerOption": {
+      "get": {
+        "summary": "Get available power options (shutdown, reboot, etc.)",
+        "description": "Get available power options (shutdown, reboot, etc.)",
+        "operationId": "PowerGetOptions",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerOptionsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PowerOptionsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/setPowerOption": {
+      "get": {
+        "summary": "Execute a power action (poweroff, reboot, screen, timeshutdown)",
+        "description": "Execute a power action (poweroff, reboot, screen, timeshutdown)",
+        "operationId": "PowerSetOption",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/getScreenBrightness": {
+      "get": {
+        "summary": "Get current screen brightness level (community-discovered)",
+        "description": "Get current screen brightness level (community-discovered)",
+        "operationId": "SystemGetScreenBrightness",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrightnessResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "BrightnessResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/setScreenBrightness": {
+      "get": {
+        "summary": "Set screen brightness level (community-discovered)",
+        "description": "Set screen brightness level (community-discovered)",
+        "operationId": "SystemSetScreenBrightness",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/getKnobBrightness": {
+      "get": {
+        "summary": "Get current knob LED brightness level (community-discovered)",
+        "description": "Get current knob LED brightness level (community-discovered)",
+        "operationId": "SystemGetKnobBrightness",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrightnessResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "BrightnessResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/setKnobBrightness": {
+      "get": {
+        "summary": "Set knob LED brightness level (community-discovered)",
+        "description": "Set knob LED brightness level (community-discovered)",
+        "operationId": "SystemSetKnobBrightness",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/getVUModeList": {
+      "get": {
+        "summary": "List available VU meter display modes (community-discovered)",
+        "description": "List available VU meter display modes (community-discovered)",
+        "operationId": "SystemGetVuModeList",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayModeListResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DisplayModeListResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/setVUMode": {
+      "get": {
+        "summary": "Set the VU meter display mode (community-discovered)",
+        "description": "Set the VU meter display mode (community-discovered)",
+        "operationId": "SystemSetVuMode",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/getSpPlayModeList": {
+      "get": {
+        "summary": "List available spectrum display modes (community-discovered)",
+        "description": "List available spectrum display modes (community-discovered)",
+        "operationId": "SystemGetSpectrumModeList",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayModeListResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DisplayModeListResponse"
+            }
+          }
+        }
+      }
+    },
+    "/SystemSettings/displaySettings/setSpPlayModeList": {
+      "get": {
+        "summary": "Set the spectrum display mode (community-discovered)",
+        "description": "Set the spectrum display mode (community-discovered)",
+        "operationId": "SystemSetSpectrumMode",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/ZidooMusicControl/v2/changVUDisplay": {
+      "get": {
+        "summary": "Toggle VU display open/close (community-discovered)",
+        "description": "Toggle VU display open/close (community-discovered)",
+        "operationId": "SystemChangeVuDisplay",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StatusResponse": {
+        "title": "StatusResponse",
+        "description": "Generic status response returned by most endpoints.\n\nA `status` of 200 indicates success.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "GetModelResponse": {
+        "title": "GetModelResponse",
+        "description": "Response from the `getModel` endpoint with device identity information.",
+        "type": "object",
+        "properties": {
+          "ableRemoteBoot": {
+            "description": "Whether the device supports remote boot/wake behavior.\n\nThis field may be absent on firmware versions that do not expose it.",
+            "type": "boolean"
+          },
+          "androidVersion": {
+            "description": "Android base version reported by firmware.\n\nThis field may be absent on older firmware builds. The API uses\nall-lowercase `androidversion` rather than camelCase.",
+            "type": "string"
+          },
+          "firmware": {
+            "type": "string"
+          },
+          "hasEqSetting": {
+            "description": "Whether EQ settings are available on this hardware/firmware combination.\n\nThis field may be absent on models or firmware without EQ support metadata.",
+            "type": "boolean"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "net_mac": {
+            "description": "Wired MAC address.\n\nThe API uses snake_case `net_mac` rather than camelCase for this field.",
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "wif_mac": {
+            "description": "Wi-Fi MAC address.\n\nThe API uses `wif_mac` (missing the 'i' — a known Zidoo-lineage typo).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "model",
+          "ip",
+          "net_mac",
+          "wif_mac",
+          "firmware"
+        ]
+      },
+      "GetStateResponse": {
+        "title": "GetStateResponse",
+        "description": "Current playback state from `getState`.\n\n## Notes\n\nThe payload includes owned `String` fields under `playing_music`. Polling this\nendpoint at high frequency can create steady allocation churn in UI loops.",
+        "type": "object",
+        "properties": {
+          "duration": {
+            "description": "Total duration in milliseconds.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "playingMusic": {},
+          "position": {
+            "description": "Current position in milliseconds.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "description": "Playback state enum value.\n\nCommon values observed in Zidoo-derived firmware:\n- `0` = stopped\n- `1` = playing\n- `2` = paused\n\nAdditional values may appear on newer firmware revisions.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "description": "Status code (200 = success). Absent from some firmware versions.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "volumeData": {}
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "InputOutputListResponse": {
+        "title": "InputOutputListResponse",
+        "description": "Input and output device listing.",
+        "type": "object",
+        "properties": {
+          "inputData": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/InputItem"
+                }
+              ]
+            }
+          },
+          "inputIndex": {
+            "description": "Index into `input_data` of the currently selected input source.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "outputData": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OutputItem"
+                }
+              ]
+            }
+          },
+          "outputIndex": {
+            "description": "Index into `output_data` of the currently selected output port.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "outputInfo": {
+            "description": "Unstructured output info that varies by model/output type."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status",
+          "inputData",
+          "outputData"
+        ]
+      },
+      "PowerOptionsResponse": {
+        "title": "PowerOptionsResponse",
+        "description": "Available power options.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PowerOption"
+                }
+              ]
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ]
+      },
+      "BrightnessResponse": {
+        "title": "BrightnessResponse",
+        "description": "Brightness level response.",
+        "type": "object",
+        "properties": {
+          "currentValue": {
+            "description": "Current brightness level, typically in the range `0..=max`.\n\nThe API returns this as `currentValue`.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "max": {
+            "description": "Maximum brightness.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "description": "Status code (200 = success). May be absent on some firmware versions.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "currentValue"
+        ]
+      },
+      "DisplayModeListResponse": {
+        "title": "DisplayModeListResponse",
+        "description": "List of available display modes (VU or spectrum).",
+        "type": "object",
+        "properties": {
+          "currentIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/DisplayMode"
+                }
+              ]
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ]
+      }
+    }
+  },
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://eversolo.com/Support/developer/"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "module_path": "eversolo"
+  }
+}

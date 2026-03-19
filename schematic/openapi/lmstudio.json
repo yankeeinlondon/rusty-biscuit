@@ -1,0 +1,504 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "LmStudio",
+    "description": "LM Studio v1 native REST API for local LLM inference and model management",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:1234",
+      "description": "LmStudio API Server"
+    }
+  ],
+  "paths": {
+    "/api/v1/chat": {
+      "post": {
+        "summary": "Chat completion with SSE streaming support",
+        "description": "Chat completion with SSE streaming support",
+        "operationId": "Chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ChatBody"
+            }
+          },
+          "response": "Binary"
+        }
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "summary": "List available models",
+        "description": "List available models",
+        "operationId": "ListModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models/load": {
+      "post": {
+        "summary": "Load a model into memory",
+        "description": "Load a model into memory",
+        "operationId": "LoadModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoadModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadModelResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "LoadModelBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "LoadModelResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models/unload": {
+      "post": {
+        "summary": "Unload a model from memory",
+        "description": "Unload a model from memory",
+        "operationId": "UnloadModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnloadModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnloadModelResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UnloadModelBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UnloadModelResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models/download": {
+      "post": {
+        "summary": "Download a model from HuggingFace with SSE progress",
+        "description": "Download a model from HuggingFace with SSE progress",
+        "operationId": "DownloadModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful binary response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DownloadModelBody"
+            }
+          },
+          "response": "Binary"
+        }
+      }
+    },
+    "/api/v1/models/download/status": {
+      "post": {
+        "summary": "Check the status of a download job",
+        "description": "Check the status of a download job",
+        "operationId": "GetDownloadStatus",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadStatusBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DownloadStatusBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DownloadStatusResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ListModelsResponse": {
+        "title": "ListModelsResponse",
+        "description": "Response from the `/api/v1/models` endpoint.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of available models.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ModelInfo"
+                }
+              ]
+            }
+          },
+          "object": {
+            "description": "Object type (always \"list\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data"
+        ]
+      },
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "description": "Information about a model in the list response.",
+        "type": "object",
+        "properties": {
+          "architecture": {
+            "description": "Architecture of the model.",
+            "type": "string"
+          },
+          "capabilities": {
+            "description": "Model capabilities."
+          },
+          "compatibility_type": {
+            "description": "Compatibility type.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Model identifier (path).",
+            "type": "string"
+          },
+          "loaded_instances": {
+            "description": "Currently loaded instances.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/LoadedInstance"
+                }
+              ]
+            }
+          },
+          "object": {
+            "description": "Object type (always \"model\").",
+            "type": "string"
+          },
+          "publisher": {
+            "description": "Publisher/author of the model.",
+            "type": "string"
+          },
+          "quantization": {
+            "description": "Quantization details."
+          },
+          "stats": {
+            "description": "Model statistics."
+          },
+          "type": {
+            "description": "Model type (e.g., \"llm\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object"
+        ]
+      },
+      "Quantization": {
+        "title": "Quantization",
+        "description": "Quantization information for a model.",
+        "type": "object",
+        "properties": {
+          "format": {
+            "description": "The quantization format (e.g., \"Q4_0\", \"Q8_0\").",
+            "type": "string"
+          }
+        }
+      },
+      "Capabilities": {
+        "title": "Capabilities",
+        "description": "Model capabilities.",
+        "type": "object",
+        "properties": {
+          "function_calling": {
+            "description": "Whether the model supports function calling.",
+            "type": "boolean"
+          },
+          "vision": {
+            "description": "Whether the model supports vision/multimodal input.",
+            "type": "boolean"
+          }
+        }
+      },
+      "LoadedInstance": {
+        "title": "LoadedInstance",
+        "description": "A loaded model instance.",
+        "type": "object",
+        "properties": {
+          "context_length": {
+            "description": "Current context length.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "id": {
+            "description": "The instance identifier.",
+            "type": "string"
+          }
+        }
+      },
+      "Stats": {
+        "title": "Stats",
+        "description": "Statistics about a model.",
+        "type": "object",
+        "properties": {
+          "parameters": {
+            "description": "Number of parameters.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Model size in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "LoadModelResponse": {
+        "title": "LoadModelResponse",
+        "description": "Response from the `/api/v1/models/load` endpoint.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "description": "The loaded model's identifier.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Load status message.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ]
+      },
+      "UnloadModelResponse": {
+        "title": "UnloadModelResponse",
+        "description": "Response from the `/api/v1/models/unload` endpoint.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Unload status message.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "DownloadStatusResponse": {
+        "title": "DownloadStatusResponse",
+        "description": "Response from the `/api/v1/models/download/status` endpoint.",
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "Error message if download failed.",
+            "type": "string"
+          },
+          "output": {
+            "description": "Output items being downloaded.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OutputItem"
+                }
+              ]
+            }
+          },
+          "progress": {
+            "description": "Overall progress (0.0-1.0).",
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "description": "Current status (e.g., \"downloading\", \"completed\", \"failed\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "OutputItem": {
+        "title": "OutputItem",
+        "description": "An output item in the download status response.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Path where the file is being downloaded.",
+            "type": "string"
+          },
+          "progress": {
+            "description": "Download progress (0.0-1.0).",
+            "type": "number",
+            "format": "double"
+          },
+          "type": {
+            "description": "Type of output (e.g., \"file\").",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://lmstudio.ai/docs/developer/rest"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    }
+  }
+}

@@ -1,0 +1,1910 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GitLab",
+    "description": "GitLab REST API v4 for repository, MR, issue, and release workflows",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://gitlab.com/api/v4",
+      "description": "GitLab API Server"
+    }
+  ],
+  "paths": {
+    "/projects/{id}/repository/tree": {
+      "get": {
+        "summary": "List repository tree recursively (files and directories)",
+        "description": "List repository tree recursively (files and directories)",
+        "operationId": "ListRepositoryTree",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<TreeItem>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<TreeItem>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/repository/files/{file_path}?ref={git_ref}": {
+      "get": {
+        "summary": "Get file content (Base64 encoded, provide git_ref for branch/tag)",
+        "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)",
+        "operationId": "GetRepositoryFile",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileContent"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "FileContent"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "file_path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "git_ref",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/merge_requests": {
+      "get": {
+        "summary": "List merge requests with metadata",
+        "description": "List merge requests with metadata",
+        "operationId": "ListMergeRequests",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<MergeRequest>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<MergeRequest>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/merge_requests/{merge_request_iid}": {
+      "get": {
+        "summary": "Get a single merge request by IID",
+        "description": "Get a single merge request by IID",
+        "operationId": "GetMergeRequest",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeRequest"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MergeRequest"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "merge_request_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/merge_requests/{merge_request_iid}/commits": {
+      "get": {
+        "summary": "List commits in a merge request",
+        "description": "List commits in a merge request",
+        "operationId": "ListMergeRequestCommits",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Commit>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Commit>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "merge_request_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/merge_requests/{merge_request_iid}/changes": {
+      "get": {
+        "summary": "Get merge request with file changes/diffs",
+        "description": "Get merge request with file changes/diffs",
+        "operationId": "ListMergeRequestChanges",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeRequestChanges"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MergeRequestChanges"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "merge_request_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/issues": {
+      "get": {
+        "summary": "List issues",
+        "description": "List issues",
+        "operationId": "ListIssues",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Issue>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Issue>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/issues/{issue_iid}": {
+      "get": {
+        "summary": "Get a single issue by IID",
+        "description": "Get a single issue by IID",
+        "operationId": "GetIssue",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Issue"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "issue_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/issues/{issue_iid}/notes": {
+      "get": {
+        "summary": "List comments/notes on an issue",
+        "description": "List comments/notes on an issue",
+        "operationId": "ListIssueNotes",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Note>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Note>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "issue_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/issues/{issue_iid}/participants": {
+      "get": {
+        "summary": "List participants on an issue",
+        "description": "List participants on an issue",
+        "operationId": "ListIssueParticipants",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<User>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<User>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "issue_iid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/repository/tags": {
+      "get": {
+        "summary": "List repository tags (check `release` field for release tags)",
+        "description": "List repository tags (check `release` field for release tags)",
+        "operationId": "ListTags",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Tag>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Tag>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/repository/tags/{tag_name}": {
+      "get": {
+        "summary": "Get a single tag by name",
+        "description": "Get a single tag by name",
+        "operationId": "GetTag",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tag"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Tag"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "tag_name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/releases": {
+      "get": {
+        "summary": "List releases",
+        "description": "List releases",
+        "operationId": "ListReleases",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Release>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Release>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/releases/{tag_name}": {
+      "get": {
+        "summary": "Get a single release by tag name",
+        "description": "Get a single release by tag name",
+        "operationId": "GetRelease",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Release"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Release"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "tag_name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/releases/permalink/latest": {
+      "get": {
+        "summary": "Get the latest release",
+        "description": "Get the latest release",
+        "operationId": "GetLatestRelease",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Release"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Release"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}": {
+      "get": {
+        "summary": "Get project metadata (use URL-encoded path or numeric ID)",
+        "description": "Get project metadata (use URL-encoded path or numeric ID)",
+        "operationId": "GetProject",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Project"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/projects/{id}/pipelines": {
+      "get": {
+        "summary": "List CI/CD pipelines for a project",
+        "description": "List CI/CD pipelines for a project",
+        "operationId": "ListProjectPipelines",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Pipeline>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Pipeline>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/groups/{id}/projects": {
+      "get": {
+        "summary": "List projects in a group",
+        "description": "List projects in a group",
+        "operationId": "ListGroupProjects",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Project>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Project>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "TreeItem": {
+        "title": "TreeItem",
+        "description": "A single entry in a repository tree from `GET /projects/:id/repository/tree`.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Object ID (SHA).",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Git file mode (e.g., \"100644\" for regular file).",
+            "type": "string"
+          },
+          "name": {
+            "description": "File or directory name.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Full path from repository root.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Entry type: \"blob\" (file) or \"tree\" (directory).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "path"
+        ]
+      },
+      "Vec<TreeItem>": {
+        "title": "Array_of_TreeItem",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/TreeItem"
+            }
+          ]
+        }
+      },
+      "FileContent": {
+        "title": "FileContent",
+        "description": "File content from `GET /projects/:id/repository/files/:path`.\n\nNote: The `content` field is Base64 encoded.",
+        "type": "object",
+        "properties": {
+          "blob_id": {
+            "description": "Blob ID (SHA).",
+            "type": "string"
+          },
+          "commit_id": {
+            "description": "Commit ID (SHA).",
+            "type": "string"
+          },
+          "content": {
+            "description": "Base64-encoded file content.",
+            "type": "string"
+          },
+          "content_sha256": {
+            "description": "Content SHA256 hash.",
+            "type": "string"
+          },
+          "encoding": {
+            "description": "Content encoding (typically \"base64\").",
+            "type": "string"
+          },
+          "file_name": {
+            "description": "Filename.",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "Full file path.",
+            "type": "string"
+          },
+          "last_commit_id": {
+            "description": "Last commit ID that modified this file.",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Git ref (branch/tag) the file was retrieved from.",
+            "type": "string"
+          },
+          "size": {
+            "description": "File size in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "file_name",
+          "file_path",
+          "size",
+          "encoding",
+          "content",
+          "ref",
+          "blob_id",
+          "commit_id"
+        ]
+      },
+      "MergeRequest": {
+        "title": "MergeRequest",
+        "description": "Merge request summary from list/get endpoints.",
+        "type": "object",
+        "properties": {
+          "assignee": {
+            "description": "Assigned user (single)."
+          },
+          "assignees": {
+            "description": "Assigned users (multiple).",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/User"
+                }
+              ]
+            }
+          },
+          "author": {
+            "description": "MR author."
+          },
+          "changes_count": {
+            "description": "Number of changes.",
+            "type": "string"
+          },
+          "closed_at": {
+            "description": "Close timestamp (ISO 8601, if closed without merge).",
+            "type": "string"
+          },
+          "closed_by": {
+            "description": "User who closed the MR."
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "description": {
+            "description": "MR description/body.",
+            "type": "string"
+          },
+          "downvotes": {
+            "description": "Downvotes count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "draft": {
+            "description": "Whether this is a draft MR.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Global merge request ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "iid": {
+            "description": "Project-scoped internal ID (use this for API calls).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "labels": {
+            "description": "Labels on the MR.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "merge_commit_sha": {
+            "description": "Merge commit SHA (if merged).",
+            "type": "string"
+          },
+          "merge_status": {
+            "description": "Merge status (e.g., \"can_be_merged\", \"cannot_be_merged\").",
+            "type": "string"
+          },
+          "merge_when_pipeline_succeeds": {
+            "description": "Whether to merge when pipeline succeeds.",
+            "type": "boolean"
+          },
+          "merged_at": {
+            "description": "Merge timestamp (ISO 8601, if merged).",
+            "type": "string"
+          },
+          "merged_by": {
+            "description": "User who merged the MR."
+          },
+          "milestone": {
+            "description": "Associated milestone."
+          },
+          "project_id": {
+            "description": "Project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "references": {
+            "description": "Reference information."
+          },
+          "reviewers": {
+            "description": "Reviewers.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/User"
+                }
+              ]
+            }
+          },
+          "sha": {
+            "description": "HEAD commit SHA.",
+            "type": "string"
+          },
+          "source_branch": {
+            "description": "Source branch name.",
+            "type": "string"
+          },
+          "source_project_id": {
+            "description": "Source project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "squash": {
+            "description": "Whether to squash on merge.",
+            "type": "boolean"
+          },
+          "squash_commit_sha": {
+            "description": "Squash commit SHA (if squash merged).",
+            "type": "string"
+          },
+          "state": {
+            "description": "MR state: \"opened\", \"closed\", \"merged\", \"locked\".",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Target branch name.",
+            "type": "string"
+          },
+          "target_project_id": {
+            "description": "Target project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "time_stats": {
+            "description": "Time tracking statistics."
+          },
+          "title": {
+            "description": "MR title.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "upvotes": {
+            "description": "Upvotes count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "user_notes_count": {
+            "description": "Number of user comments/notes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "web_url": {
+            "description": "HTML URL to the MR.",
+            "type": "string"
+          },
+          "work_in_progress": {
+            "description": "Work in progress (legacy, prefer `draft`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "iid",
+          "project_id",
+          "title",
+          "state",
+          "created_at",
+          "updated_at",
+          "target_branch",
+          "source_branch",
+          "author"
+        ]
+      },
+      "Vec<MergeRequest>": {
+        "title": "Array_of_MergeRequest",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/MergeRequest"
+            }
+          ]
+        }
+      },
+      "Commit": {
+        "title": "Commit",
+        "description": "A commit in a merge request.",
+        "type": "object",
+        "properties": {
+          "author_email": {
+            "description": "Author email.",
+            "type": "string"
+          },
+          "author_name": {
+            "description": "Author name.",
+            "type": "string"
+          },
+          "authored_date": {
+            "description": "Authored timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "committed_date": {
+            "description": "Committed timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "committer_email": {
+            "description": "Committer email.",
+            "type": "string"
+          },
+          "committer_name": {
+            "description": "Committer name.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Full commit message.",
+            "type": "string"
+          },
+          "parent_ids": {
+            "description": "Parent commit SHAs.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "short_id": {
+            "description": "Short commit SHA.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Commit title (first line of message).",
+            "type": "string"
+          },
+          "web_url": {
+            "description": "HTML URL to the commit.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "short_id",
+          "created_at",
+          "title",
+          "author_name",
+          "author_email"
+        ]
+      },
+      "Vec<Commit>": {
+        "title": "Array_of_Commit",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Commit"
+            }
+          ]
+        }
+      },
+      "MergeRequestChanges": {
+        "title": "MergeRequestChanges",
+        "description": "Merge request with changes/diffs.",
+        "type": "object",
+        "properties": {
+          "changes": {
+            "description": "File changes/diffs.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Diff"
+                }
+              ]
+            }
+          },
+          "closed_at": {
+            "description": "Close timestamp.",
+            "type": "string"
+          },
+          "description": {
+            "description": "MR description.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Global merge request ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "iid": {
+            "description": "Project-scoped internal ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "merged_at": {
+            "description": "Merge timestamp.",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "source_branch": {
+            "description": "Source branch name.",
+            "type": "string"
+          },
+          "state": {
+            "description": "MR state.",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Target branch name.",
+            "type": "string"
+          },
+          "title": {
+            "description": "MR title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "iid",
+          "project_id",
+          "title",
+          "state",
+          "target_branch",
+          "source_branch"
+        ]
+      },
+      "Issue": {
+        "title": "Issue",
+        "description": "Issue summary from list/get endpoints.",
+        "type": "object",
+        "properties": {
+          "assignee": {
+            "description": "Single assigned user (legacy)."
+          },
+          "assignees": {
+            "description": "Assigned users.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/User"
+                }
+              ]
+            }
+          },
+          "author": {
+            "description": "Issue author."
+          },
+          "closed_at": {
+            "description": "Close timestamp (ISO 8601, if closed).",
+            "type": "string"
+          },
+          "closed_by": {
+            "description": "User who closed the issue."
+          },
+          "confidential": {
+            "description": "Whether this issue is confidential.",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "description": {
+            "description": "Issue description/body.",
+            "type": "string"
+          },
+          "discussion_locked": {
+            "description": "Whether discussion is locked.",
+            "type": "boolean"
+          },
+          "downvotes": {
+            "description": "Downvotes count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "due_date": {
+            "description": "Due date (YYYY-MM-DD).",
+            "type": "string"
+          },
+          "has_tasks": {
+            "description": "Whether the issue has tasks.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Global issue ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "iid": {
+            "description": "Project-scoped internal ID (use this for API calls).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "issue_type": {
+            "description": "Issue type: \"issue\", \"incident\", \"test_case\".",
+            "type": "string"
+          },
+          "labels": {
+            "description": "Labels on the issue.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "milestone": {
+            "description": "Associated milestone."
+          },
+          "moved_to_id": {
+            "description": "ID of issue this was moved to.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "project_id": {
+            "description": "Project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "references": {
+            "description": "Reference information."
+          },
+          "severity": {
+            "description": "Severity for incidents.",
+            "type": "string"
+          },
+          "state": {
+            "description": "Issue state: \"opened\", \"closed\".",
+            "type": "string"
+          },
+          "task_completion_status": {
+            "description": "Task completion status."
+          },
+          "task_status": {
+            "description": "Task status string.",
+            "type": "string"
+          },
+          "time_stats": {
+            "description": "Time tracking statistics."
+          },
+          "title": {
+            "description": "Issue title.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "upvotes": {
+            "description": "Upvotes count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "user_notes_count": {
+            "description": "Number of user comments/notes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "web_url": {
+            "description": "HTML URL to the issue.",
+            "type": "string"
+          },
+          "weight": {
+            "description": "Issue weight (for weighted issues).",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "id",
+          "iid",
+          "project_id",
+          "title",
+          "state",
+          "created_at",
+          "updated_at",
+          "author"
+        ]
+      },
+      "Vec<Issue>": {
+        "title": "Array_of_Issue",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Issue"
+            }
+          ]
+        }
+      },
+      "Note": {
+        "title": "Note",
+        "description": "A comment/note on an issue.",
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "description": "Attachment URL (if any).",
+            "type": "string"
+          },
+          "author": {
+            "description": "Note author."
+          },
+          "body": {
+            "description": "Note body/content.",
+            "type": "string"
+          },
+          "confidential": {
+            "description": "Whether this is a confidential note.",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Note ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "internal": {
+            "description": "Whether this is an internal note.",
+            "type": "boolean"
+          },
+          "noteable_id": {
+            "description": "ID of the noteable (issue/MR).",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "noteable_type": {
+            "description": "Type of noteable (\"Issue\", \"MergeRequest\").",
+            "type": "string"
+          },
+          "resolvable": {
+            "description": "Whether this note is resolvable.",
+            "type": "boolean"
+          },
+          "resolved": {
+            "description": "Whether this note is resolved.",
+            "type": "boolean"
+          },
+          "resolved_by": {
+            "description": "User who resolved this note."
+          },
+          "system": {
+            "description": "Whether this is a system-generated note.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Note type (e.g., \"DiffNote\", \"DiscussionNote\").",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "author",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "Vec<Note>": {
+        "title": "Array_of_Note",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Note"
+            }
+          ]
+        }
+      },
+      "User": {
+        "title": "User",
+        "description": "A GitLab user summary (common across many responses).",
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "description": "URL to the user's avatar image.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The user's unique ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "name": {
+            "description": "The user's display name.",
+            "type": "string"
+          },
+          "state": {
+            "description": "User state (e.g., \"active\", \"blocked\").",
+            "type": "string"
+          },
+          "username": {
+            "description": "The user's username handle.",
+            "type": "string"
+          },
+          "web_url": {
+            "description": "HTML URL to the user's profile.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ]
+      },
+      "Vec<User>": {
+        "title": "Array_of_User",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/User"
+            }
+          ]
+        }
+      },
+      "Tag": {
+        "title": "Tag",
+        "description": "A repository tag from `GET /projects/:id/repository/tags`.",
+        "type": "object",
+        "properties": {
+          "commit": {
+            "description": "Commit the tag points to."
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "message": {
+            "description": "Tag message (for annotated tags).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tag name.",
+            "type": "string"
+          },
+          "protected": {
+            "description": "Whether the tag is protected.",
+            "type": "boolean"
+          },
+          "release": {
+            "description": "Associated release info (if this is a release tag)."
+          },
+          "target": {
+            "description": "Target commit SHA.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "commit"
+        ]
+      },
+      "Vec<Tag>": {
+        "title": "Array_of_Tag",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Tag"
+            }
+          ]
+        }
+      },
+      "Release": {
+        "title": "Release",
+        "description": "A full release from `GET /projects/:id/releases`.",
+        "type": "object",
+        "properties": {
+          "_links": {
+            "description": "Related links."
+          },
+          "assets": {
+            "description": "Release assets."
+          },
+          "author": {
+            "description": "Release author."
+          },
+          "commit": {
+            "description": "Commit the release points to."
+          },
+          "commit_path": {
+            "description": "Path to the commit.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "description": {
+            "description": "Release description (markdown).",
+            "type": "string"
+          },
+          "description_html": {
+            "description": "Release description (rendered HTML).",
+            "type": "string"
+          },
+          "evidences": {
+            "description": "Release evidences.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ReleaseEvidence"
+                }
+              ]
+            }
+          },
+          "milestones": {
+            "description": "Associated milestones.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Milestone"
+                }
+              ]
+            }
+          },
+          "name": {
+            "description": "Release name/title.",
+            "type": "string"
+          },
+          "released_at": {
+            "description": "Release timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "tag_name": {
+            "description": "Tag name associated with the release.",
+            "type": "string"
+          },
+          "tag_path": {
+            "description": "Path to the tag.",
+            "type": "string"
+          },
+          "upcoming_release": {
+            "description": "Whether this is an upcoming release.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "tag_name",
+          "created_at",
+          "released_at",
+          "author",
+          "commit",
+          "assets"
+        ]
+      },
+      "Vec<Release>": {
+        "title": "Array_of_Release",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Release"
+            }
+          ]
+        }
+      },
+      "Project": {
+        "title": "Project",
+        "description": "Project metadata from `GET /projects/{id}`.",
+        "type": "object",
+        "properties": {
+          "archived": {
+            "description": "Whether the project is archived.",
+            "type": "boolean"
+          },
+          "avatar_url": {
+            "description": "URL to the project's avatar image.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "default_branch": {
+            "description": "Default branch name.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Project description.",
+            "type": "string"
+          },
+          "empty_repo": {
+            "description": "Whether the repository is empty.",
+            "type": "boolean"
+          },
+          "forks_count": {
+            "description": "Fork count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "http_url_to_repo": {
+            "description": "HTTPS URL for cloning.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "issues_enabled": {
+            "description": "Whether issues are enabled.",
+            "type": "boolean"
+          },
+          "last_activity_at": {
+            "description": "Last activity timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "merge_requests_enabled": {
+            "description": "Whether merge requests are enabled.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Project name.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Namespace the project belongs to."
+          },
+          "open_issues_count": {
+            "description": "Number of open issues.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "owner": {
+            "description": "Project owner."
+          },
+          "path": {
+            "description": "URL-safe path.",
+            "type": "string"
+          },
+          "path_with_namespace": {
+            "description": "Full path with namespace (e.g., \"group/subgroup/project\").",
+            "type": "string"
+          },
+          "ssh_url_to_repo": {
+            "description": "SSH URL for cloning.",
+            "type": "string"
+          },
+          "star_count": {
+            "description": "Star count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "topics": {
+            "description": "Topics/tags on the project.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "visibility": {
+            "description": "Visibility level: \"private\", \"internal\", \"public\".",
+            "type": "string"
+          },
+          "web_url": {
+            "description": "HTML URL to the project.",
+            "type": "string"
+          },
+          "wiki_enabled": {
+            "description": "Whether the wiki is enabled.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "Vec<Project>": {
+        "title": "Array_of_Project",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Project"
+            }
+          ]
+        }
+      },
+      "Pipeline": {
+        "title": "Pipeline",
+        "description": "A CI/CD pipeline from `GET /projects/{id}/pipelines`.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Pipeline ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "name": {
+            "description": "Pipeline name.",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Project ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "ref": {
+            "description": "Git ref (branch or tag name).",
+            "type": "string"
+          },
+          "sha": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Pipeline source (e.g., \"push\", \"merge_request_event\", \"schedule\", \"api\", \"web\").",
+            "type": "string"
+          },
+          "status": {
+            "description": "Pipeline status (e.g., \"created\", \"pending\", \"running\", \"success\", \"failed\", \"canceled\", \"skipped\", \"manual\").",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "web_url": {
+            "description": "HTML URL to the pipeline.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "Vec<Pipeline>": {
+        "title": "Array_of_Pipeline",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Pipeline"
+            }
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "PRIVATE-TOKEN",
+        "description": "API Key authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://docs.gitlab.com/api/rest/"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": {
+        "header": "PRIVATE-TOKEN",
+        "names": {
+          "names": [
+            "GITLAB_TOKEN",
+            "GITLAB_PRIVATE_TOKEN"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "headers": [
+      [
+        "User-Agent",
+        "schematic-gitlab-client"
+      ]
+    ],
+    "module_path": "gitlab"
+  }
+}

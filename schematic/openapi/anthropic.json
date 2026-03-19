@@ -1,0 +1,351 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Anthropic",
+    "description": "Anthropic Messages API for Claude AI interactions and agent tool use",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.anthropic.com/v1",
+      "description": "Anthropic API Server"
+    }
+  ],
+  "paths": {
+    "/messages": {
+      "post": {
+        "summary": "Create a message with optional tool use for agent interactions",
+        "description": "Create a message with optional tool use for agent interactions",
+        "operationId": "CreateMessage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMessageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateMessageBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MessageResponse"
+            }
+          }
+        }
+      }
+    },
+    "/messages/count_tokens": {
+      "post": {
+        "summary": "Count tokens in a message before sending",
+        "description": "Count tokens in a message before sending",
+        "operationId": "CountTokens",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CountTokensBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountTokensResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CountTokensBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CountTokensResponse"
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "List available Claude models",
+        "description": "List available Claude models",
+        "operationId": "ListModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/models/{model_id}": {
+      "get": {
+        "summary": "Get information about a specific model",
+        "description": "Get information about a specific model",
+        "operationId": "RetrieveModel",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ModelInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "model_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "MessageResponse": {
+        "title": "MessageResponse",
+        "description": "Response from the Create Message endpoint.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Content blocks in the response.\n\nMay contain text, tool_use, and thinking blocks.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ContentBlock"
+                }
+              ]
+            }
+          },
+          "id": {
+            "description": "Unique message identifier.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model used for generation.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Message role (always \"assistant\")."
+          },
+          "stop_reason": {
+            "description": "Why generation stopped."
+          },
+          "stop_sequence": {
+            "description": "The stop sequence that was matched, if any.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type (always \"message\").",
+            "type": "string"
+          },
+          "usage": {
+            "description": "Token usage statistics."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "role",
+          "model",
+          "content",
+          "stop_reason",
+          "usage"
+        ]
+      },
+      "CountTokensResponse": {
+        "title": "CountTokensResponse",
+        "description": "Response from the Count Tokens endpoint.",
+        "type": "object",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "description": "Tokens that would be written to cache.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "cache_read_input_tokens": {
+            "description": "Tokens that would be read from cache.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "input_tokens": {
+            "description": "Number of input tokens.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        },
+        "required": [
+          "input_tokens"
+        ]
+      },
+      "ListModelsResponse": {
+        "title": "ListModelsResponse",
+        "description": "Response from the List Models endpoint.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of available models.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ModelInfo"
+                }
+              ]
+            }
+          },
+          "first_id": {
+            "description": "First ID in the list (for backward pagination).",
+            "type": "string"
+          },
+          "has_more": {
+            "description": "Whether more results are available.",
+            "type": "boolean"
+          },
+          "last_id": {
+            "description": "Last ID in the list (for forward pagination).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "first_id",
+          "last_id",
+          "has_more"
+        ]
+      },
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "description": "Information about an available model.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "RFC 3339 datetime of when the model was released.",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Human-readable display name.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique model identifier.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type (always \"model\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "display_name",
+          "type"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "API Key authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://docs.anthropic.com/en/api/messages"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": {
+        "header": "X-Api-Key",
+        "names": {
+          "names": [
+            "ANTHROPIC_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "headers": [
+      [
+        "anthropic-version",
+        "2023-06-01"
+      ]
+    ]
+  }
+}
