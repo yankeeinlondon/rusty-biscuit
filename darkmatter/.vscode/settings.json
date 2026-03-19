@@ -16,6 +16,7 @@
         "mongosh",
         "mparted",
         "osascript",
+        "Pickleball",
         "pkill",
         "poweroff",
         "prepatory",
@@ -28,6 +29,7 @@
         "transcluding",
         "Transclusions",
         "vgremove",
-        "wipefs"
+        "wipefs",
+        "ying"
     ]
 }

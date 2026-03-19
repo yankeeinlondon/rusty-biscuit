@@ -7,7 +7,7 @@ flowchart LR
 
   S1[Preparation]
   S2[Transclusion]
-  S3[Output]
+  S3[Rendering]
 
   S1 --> S2 --> S3
 ```
@@ -47,9 +47,12 @@ Stage 1 runs in a fixed order in the implementation:
 |                           | ▎AI: Consolidation        |  Disclosure Blocks         |
 |                           | ▎AI: Normalization        |  Block Columns             |
 |                           |                           |  Audio Content             |
-| Cleanup                   |                           |  Charting                  |
+| Cleanup                   |                           |                            |
 | Normalization             |                           |  Mermaid Rendering         |
 |                           |                           |  TOC Generation            |
+|                           |                           |  Person Card               |
+|                           |                           |  Place Card                |
+|                           |                           |  Product Card              |
 
 ## Variance by Output Target
 
