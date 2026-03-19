@@ -13,7 +13,6 @@
 //! - `filename.jpg|fill` - Fill available width
 //! - `filename.jpg` - Default to 50% width
 
-use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -21,7 +20,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::discovery::detection::TerminalApp;
-use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
+use crate::{
+    components::renderable::Renderable,
+    terminal::Terminal,
+    utils::layout::{Alignment, Layout, Margin},
+};
 
 /// Error types for terminal image operations.
 ///
@@ -113,7 +116,7 @@ pub enum TerminalImageError {
 /// ## Variants
 ///
 /// - **`Fill`**: Use all available space. The image expands to fill the entire
-///   available width calculated from `terminal_width - margin_left - margin_right`.
+///   available width calculated from `terminal_width - left_margin - right_margin`.
 ///
 /// - **`Percent(f32)`**: Use a percentage of available space. Values range from 0.0 to 1.0
 ///   (internally, the percentage is specified as 0-100 in width spec strings like `"50%"`).
@@ -148,7 +151,7 @@ pub enum ImageWidth {
     /// Fill available space (using margins as offsets).
     Fill,
     /// Use a percentage of the available space where
-    /// available space is the number of characters - (margin_left + margin_right).
+    /// available space is the number of characters - (left_margin + right_margin).
     Percent(f32),
     /// A fixed width based on character width.
     Characters(u32),
@@ -241,14 +244,6 @@ pub struct TerminalImage {
     /// Parsed image width specification.
     pub width: ImageWidth,
 
-    /// Horizontal alignment of the image.
-    pub alignment: Alignment,
-
-    /// Left margin in characters (legacy; prefer layout margins).
-    pub margin_left: u32,
-    /// Right margin in characters (legacy; prefer layout margins).
-    pub margin_right: u32,
-
     /// Layout configuration for the Renderable trait (authoritative margins/width).
     layout: Layout,
 }
@@ -261,9 +256,6 @@ impl Default for TerminalImage {
             alt_text: None,
             width_raw: None,
             width: ImageWidth::default(),
-            alignment: Alignment::Left,
-            margin_left: 0,
-            margin_right: 0,
             layout: Layout::default(),
         }
     }
@@ -391,11 +383,9 @@ impl TerminalImage {
     pub fn resolve_dimensions(&self, term_width: u32) -> ResolvedDimensions {
         let term_width = term_width.max(1);
 
-        // Resolve margins from layout and legacy margin fields
-        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
-            .saturating_add(self.margin_left);
-        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
-            .saturating_add(self.margin_right);
+        // Resolve margins from layout
+        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width);
+        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width);
 
         // Calculate available width after margins
         let available_width = term_width
@@ -412,7 +402,7 @@ impl TerminalImage {
 
         // Calculate x offset based on alignment
         let slack = available_width.saturating_sub(image_width);
-        let x_offset = match self.alignment {
+        let x_offset = match self.layout.alignment {
             Alignment::Left => resolved_left,
             Alignment::Center => resolved_left + slack / 2,
             Alignment::Right => resolved_left + slack,
@@ -449,7 +439,6 @@ impl TerminalImage {
         Ok(Self {
             filename: absolute_path.to_string_lossy().to_string(),
             relative: filepath.to_string_lossy().to_string(),
-            alignment: Alignment::Left,
             ..Default::default()
         })
     }
@@ -599,8 +588,8 @@ impl TerminalImage {
 
     /// Set the margins for this image.
     pub fn with_margins(mut self, left: u32, right: u32) -> Self {
-        self.margin_left = left;
-        self.margin_right = right;
+        self.layout.left_margin = Margin::Chars(left);
+        self.layout.right_margin = Margin::Chars(right);
         self
     }
 
@@ -1752,8 +1741,11 @@ mod tests {
 
         assert_eq!(img.alt_text, Some("Test image".to_string()));
         assert_eq!(img.width, ImageWidth::Characters(40));
-        assert_eq!(img.margin_left, 2);
-        assert_eq!(img.margin_right, 2);
+
+        // Verify margins via resolve_dimensions
+        let dims = img.resolve_dimensions(80);
+        assert_eq!(dims.left_margin, 2);
+        assert_eq!(dims.right_margin, 2);
     }
 
     // Protocol rendering tests
@@ -2451,10 +2443,10 @@ mod tests {
             .write_all(&create_test_png())
             .unwrap();
 
-        let mut img = TerminalImage::new(&file_path)
+        let img = TerminalImage::new(&file_path)
             .unwrap()
-            .with_width(ImageWidth::Characters(40));
-        img.alignment = Alignment::Center;
+            .with_width(ImageWidth::Characters(40))
+            .alignment(Alignment::Center);
         let dims = img.resolve_dimensions(80);
 
         assert_eq!(dims.image_width, 40);
@@ -2471,10 +2463,10 @@ mod tests {
             .write_all(&create_test_png())
             .unwrap();
 
-        let mut img = TerminalImage::new(&file_path)
+        let img = TerminalImage::new(&file_path)
             .unwrap()
-            .with_width(ImageWidth::Characters(30));
-        img.alignment = Alignment::Right;
+            .with_width(ImageWidth::Characters(30))
+            .alignment(Alignment::Right);
         let dims = img.resolve_dimensions(80);
 
         assert_eq!(dims.image_width, 30);

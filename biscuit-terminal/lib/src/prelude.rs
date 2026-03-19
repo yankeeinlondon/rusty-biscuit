@@ -2,7 +2,7 @@ pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
 pub use crate::components::graph_expression::{
-    GraphExpressionRenderer, GraphInputSyntax, GraphOrientation, GraphRenderError,
+    GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
 };
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;

@@ -1,27 +1,37 @@
 //! Graph expression rendering for terminals.
 //!
-//! This module provides a thin adapter over `biscuit-visualized` for rendering
-//! graph diagrams in the terminal. It delegates rendering to `biscuit-visualized`
-//! and adds terminal-specific display logic using `viuer`.
+//! This module provides a `Renderable` component that renders graph diagrams
+//! in the terminal. It delegates graph layout to `biscuit-visualized` and
+//! uses `TerminalImage` for inline image display.
 //!
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
+//! use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
+//! use biscuit_terminal::components::renderable::Renderable;
+//! use biscuit_terminal::terminal::Terminal;
 //!
 //! fn example() -> Result<(), biscuit_terminal::components::graph_expression::GraphRenderError> {
-//!     let renderer = GraphExpressionRenderer::parse("a -> b -> c", GraphInputSyntax::Auto)?;
-//!     renderer.render_for_terminal()?;
+//!     let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?;
+//!     let term = Terminal::new();
+//!     println!("{}", graph.render(&term));
 //!     Ok(())
 //! }
 //! ```
 
+use std::any::Any;
 use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::components::renderable::Renderable;
+use crate::components::terminal_image::{ImageWidth, TerminalImage};
+use crate::terminal::Terminal;
+use crate::utils::layout::Layout;
+
 // Re-export types from biscuit-visualized
-pub use biscuit_visualized::graph::{GraphInputSyntax, GraphOrientation};
+pub use biscuit_visualized::graph::{GraphColorTheme, GraphInputSyntax, GraphOrientation};
+pub use biscuit_visualized::raster::available_font_families;
 
 /// Errors that can occur during terminal rendering of graph diagrams.
 #[derive(Error, Debug)]
@@ -37,72 +47,54 @@ pub enum GraphRenderError {
     DisplayError(String),
 }
 
-/// A graph expression renderer for terminal output.
+/// A graph expression component for terminal output.
 ///
-/// This struct wraps `biscuit_visualized::graph::GraphDiagram` and adds
-/// terminal-specific display capabilities using `viuer`.
+/// Implements `Renderable` so it integrates with the standard layout system
+/// (margins, alignment) and can be composed with other components.
 ///
 /// ## Examples
 ///
 /// ```rust,no_run
 /// use biscuit_terminal::components::graph_expression::{
-///     GraphExpressionRenderer, GraphInputSyntax, GraphOrientation,
+///     GraphExpression, GraphInputSyntax, GraphOrientation,
 /// };
+/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::utils::layout::Margin;
 ///
-/// // Basic usage with default settings
-/// let renderer = GraphExpressionRenderer::parse("a -> b -> c", GraphInputSyntax::Auto)?
+/// let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
 ///     .with_orientation(GraphOrientation::LeftToRight)
 ///     .with_title("My Graph")
-///     .with_scale(2);
+///     .left_margin(Margin::Chars(4));
 ///
-/// // Render to terminal (requires capable terminal)
-/// if let Err(e) = renderer.render_for_terminal() {
-///     // Fall back to code block on incapable terminals
-///     println!("{}", renderer.fallback_code_block());
-/// }
 /// # Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
 /// ```
-///
-/// ## Supported Input Formats
-///
-/// - Expression syntax: `a -> b -> c` (directed), `a -- b -- c` (undirected)
-/// - DOT format: full Graphviz DOT language
-/// - Auto-detection based on content
-///
-/// ## Terminal Compatibility
-///
-/// For inline image display, use a capable terminal:
-/// - **Kitty** - Full support
-/// - **iTerm2** - Full support
-/// - **WezTerm** - Full support
-/// - **Ghostty** - Full support
-/// - **Windows Terminal** - Limited support
-///
-/// On incompatible terminals, use `fallback_code_block()` for plain text output.
-pub struct GraphExpressionRenderer {
+pub struct GraphExpression {
     /// The inner diagram from biscuit-visualized
     diagram: biscuit_visualized::graph::GraphDiagram,
     /// Scale factor for output resolution (default: 2)
     scale: u32,
     /// Use transparent background
     transparent_background: bool,
+    /// Image width specification for terminal display
+    width: ImageWidth,
+    /// Layout configuration (margins, alignment)
+    layout: Layout,
 }
 
-impl GraphExpressionRenderer {
-    /// Creates a new GraphExpressionRenderer by parsing the given source.
+impl std::fmt::Debug for GraphExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphExpression")
+            .field("scale", &self.scale)
+            .field("transparent_background", &self.transparent_background)
+            .field("width", &self.width)
+            .finish()
+    }
+}
+
+impl GraphExpression {
+    /// Creates a new `GraphExpression` by parsing the given source.
     ///
-    /// Uses default settings: scale 2, opaque background.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?;
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Uses default settings: scale 2, opaque background, 50% width.
     ///
     /// ## Errors
     ///
@@ -117,24 +109,15 @@ impl GraphExpressionRenderer {
             diagram,
             scale: 2,
             transparent_background: false,
+            width: ImageWidth::Percent(0.5),
+            layout: Layout::default(),
         })
     }
 
-    /// Creates a GraphExpressionRenderer configured for the current terminal.
+    /// Creates a `GraphExpression` configured for the current terminal.
     ///
-    /// Automatically enables transparent background for better terminal integration.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::for_terminal("a -> b", GraphInputSyntax::Auto)?;
-    /// // Transparent background is automatically enabled
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Automatically detects dark/light mode and sets appropriate colors
+    /// and transparent background.
     ///
     /// ## Errors
     ///
@@ -143,69 +126,54 @@ impl GraphExpressionRenderer {
         source: impl Into<String>,
         syntax: GraphInputSyntax,
     ) -> Result<Self, GraphRenderError> {
-        let diagram = biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?;
+        use biscuit_visualized::graph::GraphColorTheme;
+
+        let color_mode = Terminal::color_mode();
+        let is_dark = matches!(
+            color_mode,
+            crate::discovery::detection::ColorMode::Dark
+                | crate::discovery::detection::ColorMode::Unknown
+        );
+
+        let theme = if is_dark {
+            GraphColorTheme::dark()
+        } else {
+            GraphColorTheme::light()
+        };
+
+        let diagram = biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?
+            .with_color_theme(theme);
 
         Ok(Self {
             diagram,
             scale: 2,
             transparent_background: true,
+            width: ImageWidth::Percent(0.5),
+            layout: Layout::default(),
         })
     }
 
     /// Sets the title for the diagram.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?
-    ///     .with_title("My Graph");
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.diagram = self.diagram.with_title(title);
         self
     }
 
     /// Sets the graph orientation.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{
-    ///     GraphExpressionRenderer, GraphInputSyntax, GraphOrientation,
-    /// };
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?
-    ///     .with_orientation(GraphOrientation::LeftToRight);
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_orientation(mut self, orientation: GraphOrientation) -> Self {
         self.diagram = self.diagram.with_orientation(orientation);
         self
     }
 
+    /// Overrides the font family for diagram labels.
+    ///
+    /// Accepts any CSS font-family value (e.g., `"Courier"`, `"Georgia, serif"`).
+    pub fn with_font_family(mut self, font_family: impl Into<String>) -> Self {
+        self.diagram = self.diagram.with_font_family(font_family);
+        self
+    }
+
     /// Enables transparent background for better terminal integration.
-    ///
-    /// When enabled, the diagram background will be transparent,
-    /// allowing it to blend with the terminal's background color.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?
-    ///     .with_transparent_background(true);
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_transparent_background(mut self, transparent: bool) -> Self {
         self.transparent_background = transparent;
         self
@@ -215,49 +183,24 @@ impl GraphExpressionRenderer {
     ///
     /// Higher values produce sharper images but larger files.
     /// Default is 2 (good for most modern displays).
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?
-    ///     .with_scale(3); // Extra sharp
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn with_scale(mut self, scale: u32) -> Self {
-        self.scale = scale.max(1); // Minimum scale of 1
+        self.scale = scale.max(1);
+        self
+    }
+
+    /// Sets the display width for the rendered image.
+    ///
+    /// Default is 50% of available terminal width.
+    pub fn with_width(mut self, width: ImageWidth) -> Self {
+        self.width = width;
         self
     }
 
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
-    /// This method renders the diagram using biscuit-visualized's caching system.
-    ///
-    /// ## Returns
-    ///
-    /// Returns `(PathBuf, bool)` where the bool indicates whether this was a cache hit.
-    ///
     /// ## Errors
     ///
-    /// Returns error if:
-    /// - Diagram rendering fails
-    /// - File I/O operations fail
-    ///
-    /// ## Examples
-    ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?;
-    /// let (path, cache_hit) = renderer.render_to_cached_png()?;
-    /// println!("Rendered to: {:?} (cache hit: {})", path, cache_hit);
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Returns error if diagram rendering or file I/O fails.
     #[tracing::instrument(skip(self))]
     pub fn render_to_cached_png(&self) -> Result<(PathBuf, bool), GraphRenderError> {
         let request = biscuit_visualized::artifact::RenderRequest {
@@ -277,105 +220,57 @@ impl GraphExpressionRenderer {
         Ok((artifact.path, artifact.cache_hit))
     }
 
-    /// Renders the diagram to the terminal.
-    ///
-    /// This method:
-    /// 1. Checks if the terminal supports image rendering
-    /// 2. Renders the diagram to PNG using biscuit-visualized
-    /// 3. Displays the PNG using viuer
-    ///
-    /// ## Errors
-    ///
-    /// Returns `GraphRenderError` if:
-    /// - Terminal doesn't support image rendering
-    /// - Diagram rendering fails (invalid syntax, etc.)
-    /// - Image display fails
-    ///
-    /// ## Examples
-    ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), biscuit_terminal::components::graph_expression::GraphRenderError> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?;
-    /// renderer.render_for_terminal()?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[tracing::instrument(skip(self))]
-    pub fn render_for_terminal(&self) -> Result<(), GraphRenderError> {
-        // Check terminal support
-        if !Self::terminal_supports_images() {
-            tracing::debug!("Terminal does not support image rendering");
-            return Err(GraphRenderError::NoImageSupport);
-        }
-
-        // Render to PNG using biscuit-visualized
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Png,
-            scale: self.scale,
-            transparent_background: self.transparent_background,
-        };
-
-        let artifact = self.diagram.render(&request)?;
-
-        tracing::info!(path = ?artifact.path, cache_hit = artifact.cache_hit, "Rendered graph diagram");
-
-        // Display with viuer
-        let config = viuer::Config {
-            absolute_offset: false,
-            ..Default::default()
-        };
-
-        viuer::print_from_file(&artifact.path, &config)
-            .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?;
-
-        tracing::debug!("Displayed graph diagram in terminal");
-
-        Ok(())
-    }
-
     /// Checks if the current terminal supports image rendering.
-    ///
-    /// Returns `true` if either Kitty or iTerm2 image protocols are supported.
     pub fn terminal_supports_images() -> bool {
         use crate::discovery::detection::ImageSupport;
-        use crate::terminal::Terminal;
 
         let term = Terminal::new();
         !matches!(term.image_support, ImageSupport::None)
     }
 
     /// Returns a fallback code block string for the diagram.
-    ///
-    /// This is used when terminal rendering fails or is not supported.
-    /// Returns the original graph input formatted as a fenced code block.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::graph_expression::{GraphExpressionRenderer, GraphInputSyntax};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)?;
-    /// let fallback = renderer.fallback_code_block();
-    /// assert!(fallback.contains("```graph-expression"));
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn fallback_code_block(&self) -> String {
         self.diagram.fallback_code_block()
     }
 
-    /// Prints the fallback code block to stdout.
-    ///
-    /// This is a convenience method for when terminal rendering fails.
-    pub fn print_fallback(&self) {
-        println!("{}", self.fallback_code_block());
+    /// Builds a `TerminalImage` from the cached PNG, inheriting this
+    /// component's layout and width settings.
+    fn to_terminal_image(&self) -> Result<TerminalImage, GraphRenderError> {
+        let (png_path, _cache_hit) = self.render_to_cached_png()?;
+
+        let mut term_image = TerminalImage::new(&png_path)
+            .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?
+            .with_width(self.width.clone());
+
+        // Copy our layout to the terminal image
+        *term_image.layout_mut() = self.layout.clone();
+
+        Ok(term_image)
     }
 }
 
-impl TryFrom<String> for GraphExpressionRenderer {
+impl Renderable for GraphExpression {
+    fn render(&self, term: &Terminal) -> String {
+        match self.to_terminal_image() {
+            Ok(img) => img.render(term),
+            Err(_) => self.fallback_code_block(),
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+}
+
+impl TryFrom<String> for GraphExpression {
     type Error = GraphRenderError;
 
     fn try_from(source: String) -> Result<Self, Self::Error> {
@@ -383,7 +278,7 @@ impl TryFrom<String> for GraphExpressionRenderer {
     }
 }
 
-impl TryFrom<&str> for GraphExpressionRenderer {
+impl TryFrom<&str> for GraphExpression {
     type Error = GraphRenderError;
 
     fn try_from(source: &str) -> Result<Self, Self::Error> {
@@ -396,40 +291,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_graph_expression_renderer_parse() {
-        let renderer = GraphExpressionRenderer::parse("a -> b -> c", GraphInputSyntax::Auto);
-        assert!(renderer.is_ok());
+    fn test_parse() {
+        let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto);
+        assert!(graph.is_ok());
     }
 
     #[test]
-    fn test_graph_expression_renderer_with_title() {
-        let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto)
+    fn test_with_title() {
+        let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
             .unwrap()
             .with_title("Test Graph");
-        // Title is stored internally, can verify through rendering
-        let dot = renderer.diagram.source_as_dot();
+        let dot = graph.diagram.source_as_dot();
         assert!(dot.contains("label=\"Test Graph\""));
     }
 
     #[test]
-    fn test_graph_expression_renderer_from_string() {
+    fn test_from_string() {
         let source = String::from("a -> b -> c");
-        let renderer = GraphExpressionRenderer::try_from(source).unwrap();
-        let dot = renderer.diagram.source_as_dot();
+        let graph = GraphExpression::try_from(source).unwrap();
+        let dot = graph.diagram.source_as_dot();
         assert!(dot.contains("digraph"));
     }
 
     #[test]
-    fn test_graph_expression_renderer_from_str() {
-        let renderer = GraphExpressionRenderer::try_from("a -> b -> c").unwrap();
-        let dot = renderer.diagram.source_as_dot();
+    fn test_from_str() {
+        let graph = GraphExpression::try_from("a -> b -> c").unwrap();
+        let dot = graph.diagram.source_as_dot();
         assert!(dot.contains("digraph"));
     }
 
     #[test]
     fn test_fallback_code_block() {
-        let renderer = GraphExpressionRenderer::parse("a -> b", GraphInputSyntax::Auto).unwrap();
-        let output = renderer.fallback_code_block();
+        let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto).unwrap();
+        let output = graph.fallback_code_block();
         assert!(output.starts_with("```graph-expression\n"));
         assert!(output.ends_with("\n```"));
         assert!(output.contains("a -> b"));
@@ -437,10 +331,17 @@ mod tests {
 
     #[test]
     fn test_fallback_code_block_uses_dot_info_string_for_dot_input() {
-        let renderer =
-            GraphExpressionRenderer::parse("digraph { A -> B; }", GraphInputSyntax::Dot).unwrap();
-        let output = renderer.fallback_code_block();
+        let graph =
+            GraphExpression::parse("digraph { A -> B; }", GraphInputSyntax::Dot).unwrap();
+        let output = graph.fallback_code_block();
         assert!(output.starts_with("```dot\n"));
         assert!(output.contains("digraph { A -> B; }"));
+    }
+
+    #[test]
+    fn test_implements_renderable() {
+        let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto).unwrap();
+        // Verify it has layout methods from Renderable
+        let _layout = graph.layout();
     }
 }
