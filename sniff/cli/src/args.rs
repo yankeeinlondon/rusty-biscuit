@@ -239,33 +239,6 @@ pub enum Commands {
     /// Show only audio devices (inputs, outputs, sample rates)
     AudioDevices,
 
-    /// Show git repository information, or inspect a remote by name/URL
-    #[command(disable_help_flag = true, hide = true)]
-    Git {
-        /// Number of recent commits to display (default: 10)
-        #[arg(short = 'h', long, default_value_t = DEFAULT_COMMIT_COUNT)]
-        history: usize,
-
-        /// Refresh remote-tracking data before reporting branch and sync status
-        #[arg(long, conflicts_with = "remote")]
-        refresh_remotes: bool,
-
-        /// Filter to commits and changes within a package
-        #[arg(short, long, value_name = "PKG")]
-        package: Option<String>,
-
-        /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
-        #[arg(value_name = "REMOTE")]
-        remote: Option<String>,
-
-        /// Print help
-        #[arg(long, action = clap::ArgAction::Help)]
-        help: Option<bool>,
-
-        #[command(subcommand)]
-        git_subcommand: Option<GitSubcommand>,
-    },
-
     /// Show only repository/monorepo structure
     Repo {
         /// Query package registries for latest dependency versions and report available updates
@@ -370,23 +343,6 @@ pub enum Commands {
         #[arg(long, value_enum, default_value = "running")]
         state: ServiceStateArg,
     },
-}
-
-/// Git-specific subcommands.
-#[derive(Subcommand, Debug, Clone)]
-pub enum GitSubcommand {
-    /// Show details for a specific commit by SHA
-    Hash {
-        /// Commit SHA (full or abbreviated)
-        #[arg(value_name = "SHA")]
-        sha: String,
-    },
-    /// List files staged for commit
-    Staged,
-    /// List modified but unstaged files
-    Unstaged,
-    /// List untracked files
-    Untracked,
 }
 
 /// Repo-specific subcommands.
@@ -512,7 +468,6 @@ impl Commands {
             Commands::Memory => OutputFilter::Memory,
             Commands::Storage => OutputFilter::Storage,
             Commands::AudioDevices => OutputFilter::AudioDevices,
-            Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
             Commands::Files { .. } => OutputFilter::Files,
@@ -617,7 +572,6 @@ impl Commands {
     /// Get history count if this is a git command.
     pub fn history(&self) -> usize {
         match self {
-            Commands::Git { history, .. } => *history,
             Commands::Repo {
                 repo_subcommand: Some(RepoSubcommand::GitStatus { history, .. }),
                 ..
@@ -631,9 +585,6 @@ impl Commands {
         matches!(
             self,
             Commands::Filesystem {
-                refresh_remotes: true,
-                ..
-            } | Commands::Git {
                 refresh_remotes: true,
                 ..
             } | Commands::Repo {
@@ -774,45 +725,6 @@ impl Commands {
         }
     }
 
-    /// Normalize a legacy Git command into a RepoAction for dispatch.
-    pub fn git_to_repo_action(&self) -> Option<RepoAction> {
-        match self {
-            Commands::Git {
-                history,
-                refresh_remotes,
-                package,
-                remote,
-                git_subcommand,
-                ..
-            } => {
-                if let Some(remote_ref) = remote {
-                    return Some(RepoAction::Remote {
-                        remote: remote_ref.clone(),
-                    });
-                }
-                match git_subcommand {
-                    Some(GitSubcommand::Hash { sha }) => {
-                        Some(RepoAction::Hash { sha: sha.clone() })
-                    }
-                    Some(GitSubcommand::Staged) => Some(RepoAction::StagedFiles {
-                        package: package.clone(),
-                    }),
-                    Some(GitSubcommand::Unstaged) => Some(RepoAction::UnstagedFiles {
-                        package: package.clone(),
-                    }),
-                    Some(GitSubcommand::Untracked) => Some(RepoAction::UntrackedFiles {
-                        package: package.clone(),
-                    }),
-                    None => Some(RepoAction::GitStatus {
-                        history: *history,
-                        refresh_remotes: *refresh_remotes,
-                        package: package.clone(),
-                    }),
-                }
-            }
-            _ => None,
-        }
-    }
 }
 
 /// Filter options for the docs subcommand.
@@ -1049,24 +961,6 @@ mod tests {
                 parse_args(&["topics"]).unwrap().command,
                 Some(Commands::Topics)
             ));
-        }
-
-        #[test]
-        fn git_flags_and_remote_parse() {
-            let cli = parse_args(&["git", "--history", "10", "--refresh-remotes"]).unwrap();
-            if let Some(Commands::Git {
-                history,
-                refresh_remotes,
-                remote,
-                ..
-            }) = cli.command
-            {
-                assert_eq!(history, 10);
-                assert!(refresh_remotes);
-                assert!(remote.is_none());
-            } else {
-                panic!("Expected Git command");
-            }
         }
 
         #[test]
@@ -1420,24 +1314,7 @@ mod tests {
         }
 
         #[test]
-        fn git_and_docs_accessors_work() {
-            let git = Commands::Git {
-                history: 3,
-                refresh_remotes: true,
-                package: None,
-                remote: Some("owner/repo".to_string()),
-                help: None,
-                git_subcommand: None,
-            };
-            assert_eq!(git.history(), 3);
-            assert!(git.refresh_remotes());
-            // Normalization captures remote
-            if let Some(RepoAction::Remote { remote }) = git.git_to_repo_action() {
-                assert_eq!(remote, "owner/repo");
-            } else {
-                panic!("Expected Remote action");
-            }
-
+        fn docs_accessors_work() {
             let docs = Commands::Docs {
                 readme: true,
                 plan: false,
@@ -1661,21 +1538,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn git_command_still_parses_but_hidden() {
-            let cli = parse_args(&["git", "--history", "10", "--refresh-remotes"]).unwrap();
-            if let Some(Commands::Git {
-                history,
-                refresh_remotes,
-                ..
-            }) = cli.command
-            {
-                assert_eq!(history, 10);
-                assert!(refresh_remotes);
-            } else {
-                panic!("Expected Git command (hidden but still functional)");
-            }
-        }
     }
 
     mod repo_action_normalization {
@@ -1725,84 +1587,5 @@ mod tests {
             }
         }
 
-        #[test]
-        fn git_to_repo_action_default() {
-            let cmd = Commands::Git {
-                history: 15,
-                refresh_remotes: true,
-                package: None,
-                remote: None,
-                help: None,
-                git_subcommand: None,
-            };
-            match cmd.git_to_repo_action() {
-                Some(RepoAction::GitStatus {
-                    history,
-                    refresh_remotes,
-                    package,
-                }) => {
-                    assert_eq!(history, 15);
-                    assert!(refresh_remotes);
-                    assert!(package.is_none());
-                }
-                _ => panic!("Expected GitStatus action"),
-            }
-        }
-
-        #[test]
-        fn git_to_repo_action_remote() {
-            let cmd = Commands::Git {
-                history: 10,
-                refresh_remotes: false,
-                package: None,
-                remote: Some("origin".to_string()),
-                help: None,
-                git_subcommand: None,
-            };
-            match cmd.git_to_repo_action() {
-                Some(RepoAction::Remote { remote }) => {
-                    assert_eq!(remote, "origin");
-                }
-                _ => panic!("Expected Remote action"),
-            }
-        }
-
-        #[test]
-        fn git_to_repo_action_hash() {
-            let cmd = Commands::Git {
-                history: 10,
-                refresh_remotes: false,
-                package: None,
-                remote: None,
-                help: None,
-                git_subcommand: Some(GitSubcommand::Hash {
-                    sha: "abc123".to_string(),
-                }),
-            };
-            match cmd.git_to_repo_action() {
-                Some(RepoAction::Hash { sha }) => {
-                    assert_eq!(sha, "abc123");
-                }
-                _ => panic!("Expected Hash action"),
-            }
-        }
-
-        #[test]
-        fn git_to_repo_action_staged() {
-            let cmd = Commands::Git {
-                history: 10,
-                refresh_remotes: false,
-                package: None,
-                remote: None,
-                help: None,
-                git_subcommand: Some(GitSubcommand::Staged),
-            };
-            match cmd.git_to_repo_action() {
-                Some(RepoAction::StagedFiles { package }) => {
-                    assert!(package.is_none());
-                }
-                _ => panic!("Expected StagedFiles action"),
-            }
-        }
     }
 }

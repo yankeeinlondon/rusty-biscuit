@@ -1222,29 +1222,6 @@ fn test_plain_with_json_ignores_plain() {
 }
 
 // ============================================================================
-// Deprecation warning tests
-// ============================================================================
-
-#[test]
-fn test_git_deprecation_warning() {
-    // `sniff git` should emit deprecation notice on stderr
-    cargo_bin_cmd!("sniff")
-        .arg("git")
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("deprecated"));
-}
-
-#[test]
-fn test_git_json_no_deprecation() {
-    // `sniff git --json` should NOT emit deprecation notice
-    cargo_bin_cmd!("sniff")
-        .args(["git", "--json"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("deprecated").not());
-}
-
 // ============================================================================
 // Repo subcommand tests (Phase 1 verification)
 // ============================================================================

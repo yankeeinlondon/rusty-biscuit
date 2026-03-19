@@ -69,8 +69,6 @@ pub enum OutputFilter {
     Storage,
     /// Show only audio devices (hardware subsection, flattened in JSON)
     AudioDevices,
-    /// Show only git info (filesystem subsection, flattened in JSON)
-    Git,
     /// Show only repo/monorepo info (filesystem subsection, flattened in JSON)
     Repo,
     /// Show only language detection (filesystem subsection, flattened in JSON)
@@ -356,7 +354,7 @@ pub fn render_text(
                 ));
             }
         }
-        OutputFilter::Git | OutputFilter::Repo => {
+        OutputFilter::Repo => {
             match repo_action {
                 Some(RepoAction::Package) => {
                     let rendered = render_repo_package(result, base_dir, verbose);
@@ -469,13 +467,7 @@ pub fn render_text(
                     }
                 }
                 None => {
-                    if filter == OutputFilter::Git {
-                        if let Some(ref filesystem) = result.filesystem
-                            && let Some(ref git) = filesystem.git
-                        {
-                            out.push_str(&render_git_section(git, history_count, verbose));
-                        }
-                    } else if let Some(ref filesystem) = result.filesystem
+                    if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
                         out.push_str(&render_repo_section(
@@ -622,14 +614,6 @@ fn apply_filter_to_json(
                 serde_json::to_value(&hw.audio_devices).unwrap_or(Value::Null)
             } else {
                 json!([])
-            }
-        }
-        OutputFilter::Git => {
-            // Flatten: return git data at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.git).unwrap_or(Value::Null)
-            } else {
-                json!({})
             }
         }
         OutputFilter::Repo => {

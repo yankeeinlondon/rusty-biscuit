@@ -31,18 +31,6 @@ Commands:
     sniff audio-devices   Show only audio devices
 
   Filesystem details:
-    sniff git                        Show only git repository information
-    sniff git --refresh-remotes      Refresh remotes before reporting sync status
-    sniff git hash HEAD              Show details for the latest commit
-    sniff git hash abc1234           Show details for a specific commit
-    sniff git staged                 List files staged for commit
-    sniff git staged -v              Staged files with action labels
-    sniff git unstaged               List modified but unstaged files
-    sniff git untracked              List untracked files
-    sniff git --package homelab      Scope to commits within a package
-    sniff git origin                 Inspect the 'origin' remote
-    sniff git owner/repo             Inspect by owner/repo shorthand
-    sniff git https://github.com/... Inspect a remote by URL
     sniff repo                       Show only repository/monorepo structure
     sniff repo --latest-versions     Check registries for dependency updates
     sniff repo biscuit               Filter to packages matching "biscuit"

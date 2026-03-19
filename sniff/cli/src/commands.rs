@@ -101,16 +101,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
-    // Emit deprecation warning for `sniff git` (text mode only)
-    if matches!(cli.command, Some(Commands::Git { .. })) && !cli.json {
-        eprintln!("note: 'sniff git' is deprecated, use 'sniff repo' subcommands instead");
-    }
-
     // Normalize to RepoAction for unified dispatch
     let repo_action = cli
         .command
         .as_ref()
-        .and_then(|cmd| cmd.to_repo_action().or_else(|| cmd.git_to_repo_action()));
+        .and_then(|cmd| cmd.to_repo_action());
 
     // Handle RepoAction variants that don't need full detection as early returns
     if let Some(ref action) = repo_action {
@@ -272,8 +267,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::AudioDevices => {
             config = config.skip_os().skip_network().skip_filesystem();
         }
-        OutputFilter::Git
-        | OutputFilter::Repo
+        OutputFilter::Repo
         | OutputFilter::Language
         | OutputFilter::Files
         | OutputFilter::Docs => {
