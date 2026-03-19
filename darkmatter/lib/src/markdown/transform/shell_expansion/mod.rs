@@ -120,20 +120,12 @@ pub fn execute_directive(
 
     // 3. Check whitelist (against resolved command)
     if check_whitelist(&shell_runtime.whitelist, &effective.executable, &normalized) {
-        return execute_and_handle_errors(
-            &effective,
-            options,
-            &directive.error_handling,
-        );
+        return execute_and_handle_errors(&effective, options, &directive.error_handling);
     }
 
     // 4. Check allow-once
     if shell_runtime.allow_once.contains(&normalized) {
-        return execute_and_handle_errors(
-            &effective,
-            options,
-            &directive.error_handling,
-        );
+        return execute_and_handle_errors(&effective, options, &directive.error_handling);
     }
 
     // 5. Request approval or fail
@@ -1003,12 +995,10 @@ name: world
 
     /// Helper to find python3 for integration tests.
     fn find_test_python() -> Option<String> {
-        ["python3", "python"]
-            .into_iter()
-            .find_map(|candidate| {
-                which::which(candidate)
-                    .ok()
-                    .map(|p| p.to_string_lossy().to_string())
-            })
+        ["python3", "python"].into_iter().find_map(|candidate| {
+            which::which(candidate)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        })
     }
 }

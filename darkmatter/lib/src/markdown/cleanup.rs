@@ -19,10 +19,10 @@
 //! // Content now has blank lines between headers
 //! ```
 
+use biscuit_terminal::utils::UnicodeWidthStr;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
 use std::ops::Range;
-use biscuit_terminal::utils::UnicodeWidthStr;
 
 /// Returns parser options suitable for cleanup operations.
 ///
@@ -1239,10 +1239,9 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
             }
 
             // Find the last non-blank line before the gap
-            let prev_is_item = is_list_item_start(lines[i - 1].trim_start())
-                || is_list_continuation(lines[i - 1]);
-            let next_is_item =
-                j < lines.len() && is_list_item_start(lines[j].trim_start());
+            let prev_is_item =
+                is_list_item_start(lines[i - 1].trim_start()) || is_list_continuation(lines[i - 1]);
+            let next_is_item = j < lines.len() && is_list_item_start(lines[j].trim_start());
 
             // Only strip if both sides are list items (not continuation prose)
             if prev_is_item && next_is_item {
@@ -1320,10 +1319,7 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
 /// Returns `true` if the line starts a list item (ordered or unordered).
 fn is_list_item_start(trimmed: &str) -> bool {
     // Unordered: *, -, or + followed by space
-    if trimmed.starts_with("* ")
-        || trimmed.starts_with("- ")
-        || trimmed.starts_with("+ ")
-    {
+    if trimmed.starts_with("* ") || trimmed.starts_with("- ") || trimmed.starts_with("+ ") {
         return true;
     }
 

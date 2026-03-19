@@ -46,13 +46,13 @@ use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, pa
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::path::{Path, PathBuf};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
-use biscuit_terminal::utils::UnicodeWidthStr;
 
 /// Parse image alt text to extract optional width specification.
 ///

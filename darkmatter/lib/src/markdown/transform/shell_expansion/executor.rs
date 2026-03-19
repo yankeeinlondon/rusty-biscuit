@@ -281,12 +281,7 @@ mod tests {
 
     #[test]
     fn command_not_found_for_nonexistent_executable() {
-        let d = directive(
-            "nonexistent_command_xyz",
-            "nonexistent_command_xyz",
-            &[],
-            1,
-        );
+        let d = directive("nonexistent_command_xyz", "nonexistent_command_xyz", &[], 1);
         let options = ShellExpansionOptions::default();
         let source = TransformSource::Unknown;
 

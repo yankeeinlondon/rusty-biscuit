@@ -61,8 +61,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                 }
 
                 // Extract error handling options from anywhere in the token list
-                let (error_handling, cmd_tokens) =
-                    extract_error_handling(&tokens, line_num)?;
+                let (error_handling, cmd_tokens) = extract_error_handling(&tokens, line_num)?;
 
                 if cmd_tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
@@ -153,7 +152,9 @@ fn extract_error_handling(
                 }
                 "--except-exit-code" => {
                     let code = parse_exit_code(&tokens[i + 1], option, line)?;
-                    handling.except_exit_code.push((code, tokens[i + 2].clone()));
+                    handling
+                        .except_exit_code
+                        .push((code, tokens[i + 2].clone()));
                 }
                 "--stderr-contains" => {
                     handling
@@ -186,17 +187,12 @@ fn extract_error_handling(
 }
 
 /// Parses an exit code string into an i32.
-fn parse_exit_code(
-    raw: &str,
-    option_name: &str,
-    line: usize,
-) -> Result<i32, ShellExpansionError> {
-    raw.parse::<i32>().map_err(|_| {
-        ShellExpansionError::ParseDirective {
+fn parse_exit_code(raw: &str, option_name: &str, line: usize) -> Result<i32, ShellExpansionError> {
+    raw.parse::<i32>()
+        .map_err(|_| ShellExpansionError::ParseDirective {
             line,
             message: format!("{option_name} requires an integer exit code, got '{raw}'"),
-        }
-    })
+        })
 }
 
 #[cfg(test)]
@@ -394,8 +390,7 @@ And `::shell echo inline` should also be ignored.
 
     #[test]
     fn parse_stderr_contains_option() {
-        let content =
-            "::shell --stderr-contains \"warning\" \"warnings found\" echo hello\n";
+        let content = "::shell --stderr-contains \"warning\" \"warnings found\" echo hello\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(
             directives[0].error_handling.stderr_contains,
@@ -405,8 +400,7 @@ And `::shell echo inline` should also be ignored.
 
     #[test]
     fn parse_stderr_lacks_option() {
-        let content =
-            "::shell --stderr-lacks \"fatal\" \"non-fatal error\" echo hello\n";
+        let content = "::shell --stderr-lacks \"fatal\" \"non-fatal error\" echo hello\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(
             directives[0].error_handling.stderr_lacks,
@@ -436,7 +430,8 @@ And `::shell echo inline` should also be ignored.
 
     #[test]
     fn parse_multiple_error_handling_options() {
-        let content = "::shell --when-exit-code 1 \"not found\" --when-error \"failed\" grep pattern\n";
+        let content =
+            "::shell --when-exit-code 1 \"not found\" --when-error \"failed\" grep pattern\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(directives[0].executable, "grep");
         assert_eq!(
@@ -454,10 +449,12 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell --when-error \"fallback\"\n";
         let result = parse_directives(content);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No command after error handling options"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No command after error handling options")
+        );
     }
 
     #[test]
@@ -465,10 +462,7 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell echo hello --when-error\n";
         let result = parse_directives(content);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("requires"));
+        assert!(result.unwrap_err().to_string().contains("requires"));
     }
 
     #[test]
@@ -476,10 +470,12 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell --when-exit-code abc \"text\" echo hello\n";
         let result = parse_directives(content);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("requires an integer exit code"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("requires an integer exit code")
+        );
     }
 
     #[test]
@@ -491,14 +487,10 @@ And `::shell echo inline` should also be ignored.
 
     #[test]
     fn parse_options_at_end_of_command() {
-        let content =
-            "::shell sniff repo staged-packages --when-error \"no packages staged\"\n";
+        let content = "::shell sniff repo staged-packages --when-error \"no packages staged\"\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(directives[0].executable, "sniff");
-        assert_eq!(
-            directives[0].args,
-            vec!["repo", "staged-packages"]
-        );
+        assert_eq!(directives[0].args, vec!["repo", "staged-packages"]);
         assert_eq!(
             directives[0].error_handling.when_error,
             Some("no packages staged".to_string())
@@ -508,14 +500,10 @@ And `::shell echo inline` should also be ignored.
 
     #[test]
     fn parse_options_in_middle_of_command() {
-        let content =
-            "::shell sniff --when-error \"fallback\" repo staged-packages\n";
+        let content = "::shell sniff --when-error \"fallback\" repo staged-packages\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(directives[0].executable, "sniff");
-        assert_eq!(
-            directives[0].args,
-            vec!["repo", "staged-packages"]
-        );
+        assert_eq!(directives[0].args, vec!["repo", "staged-packages"]);
         assert_eq!(
             directives[0].error_handling.when_error,
             Some("fallback".to_string())

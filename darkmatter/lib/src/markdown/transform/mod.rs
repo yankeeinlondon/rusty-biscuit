@@ -258,12 +258,10 @@ impl Markdown {
                             options.indent_size,
                         )
                     }
-                    cleanup::ListSpacingMode::Loose => {
-                        cleanup::cleanup_content_with_indent_loose(
-                            &self.content,
-                            options.indent_size,
-                        )
-                    }
+                    cleanup::ListSpacingMode::Loose => cleanup::cleanup_content_with_indent_loose(
+                        &self.content,
+                        options.indent_size,
+                    ),
                 };
                 report.cleanup_changed = self.content != original_content;
             }

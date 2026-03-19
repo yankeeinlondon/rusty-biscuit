@@ -554,26 +554,35 @@ mod tests {
     #[test]
     fn resolve_empty_handling_propagates() {
         let handling = ErrorHandling::default();
-        assert_eq!(handling.resolve(1, "any stderr"), ErrorHandlingOutcome::Propagate);
+        assert_eq!(
+            handling.resolve(1, "any stderr"),
+            ErrorHandlingOutcome::Propagate
+        );
     }
 
     #[test]
     fn is_empty_checks_all_fields() {
         assert!(ErrorHandling::default().is_empty());
-        assert!(!ErrorHandling {
-            when_error: Some("x".to_string()),
-            ..Default::default()
-        }
-        .is_empty());
-        assert!(!ErrorHandling {
-            when_exit_code: vec![(1, "x".to_string())],
-            ..Default::default()
-        }
-        .is_empty());
-        assert!(!ErrorHandling {
-            enrich_error: Some("x".to_string()),
-            ..Default::default()
-        }
-        .is_empty());
+        assert!(
+            !ErrorHandling {
+                when_error: Some("x".to_string()),
+                ..Default::default()
+            }
+            .is_empty()
+        );
+        assert!(
+            !ErrorHandling {
+                when_exit_code: vec![(1, "x".to_string())],
+                ..Default::default()
+            }
+            .is_empty()
+        );
+        assert!(
+            !ErrorHandling {
+                enrich_error: Some("x".to_string()),
+                ..Default::default()
+            }
+            .is_empty()
+        );
     }
 }

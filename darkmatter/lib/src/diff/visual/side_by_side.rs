@@ -11,8 +11,8 @@
 
 use super::VisualDiffOptions;
 use super::diff::{DiffLine, InlineSpan};
-use std::collections::HashSet;
 use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
+use std::collections::HashSet;
 
 // ANSI escape codes
 const RESET: &str = "\x1b[0m";

@@ -5,10 +5,10 @@ use crate::output::{
 };
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme,
 };
-use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::transform::TransformOptions;
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
