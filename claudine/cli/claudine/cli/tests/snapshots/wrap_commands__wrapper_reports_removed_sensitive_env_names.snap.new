@@ -1,0 +1,21 @@
+---
+source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 221
+expression: redact_session_id(&strip_ansi(&stderr))
+---
+
+Claudine ▸ Codex PACKAGE_NAME: claudine-cli (area: claudine)
+
+Environment Variables:
+• INTERNAL_TOKEN
+• OPENAI_API_KEY
+• AGENT=codex
+• AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
+• CLAUDINE_SESSION_ID=<redacted>
+• INTERACTIVE=true
+• PACKAGE=claudine-cli
+• PACKAGE_AREA=claudine
+• YOLO=false
+
+- Info: potentially dangerous ENV variables were removed; if you need one of
+   these to be included use the --include <ENV> CLI switch

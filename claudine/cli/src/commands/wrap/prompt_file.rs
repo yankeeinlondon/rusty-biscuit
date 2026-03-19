@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use color_eyre::eyre::{Result, bail, eyre};
-use darkmatter::markdown::{Markdown, transform::TransformOptions};
+use darkmatter::markdown::{Markdown, compose::ComposeOptions};
 
 use super::profile::WrapperProfile;
 
@@ -260,7 +260,7 @@ fn walk_dir_recursive(dir: &Path, filename: &str, matches: &mut Vec<PathBuf>) ->
 // Darkmatter composition
 // ---------------------------------------------------------------------------
 
-/// Load and compose a prompt file through the Darkmatter transform pipeline.
+/// Load and compose a prompt file through the Darkmatter compose pipeline.
 pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<ComposedPrompt> {
     let md = Markdown::try_from(resolved.resolved_path.as_path()).map_err(|e| {
         eyre!(
@@ -269,17 +269,17 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
         )
     })?;
 
-    let options = TransformOptions::new().with_source_file(&resolved.resolved_path);
+    let options = ComposeOptions::new().with_source_file(&resolved.resolved_path);
 
-    let (transformed, _report) = md.transform_with(options).map_err(|e| {
+    let (composed, _report) = md.compose_with(options).map_err(|e| {
         eyre!(
             "Darkmatter compose failed for '{}': {e}",
             resolved.resolved_path.display()
         )
     })?;
 
-    let body = transformed.content().to_string();
-    let fm_map = transformed.frontmatter().as_map();
+    let body = composed.content().to_string();
+    let fm_map = composed.frontmatter().as_map();
 
     // If the body is empty but frontmatter has a `prompt` key, the user likely
     // wants --frontmatter-prompt (--fp) instead of --prompt-file.

@@ -506,7 +506,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     if non_interactive_requested {
         profile.apply_non_interactive(&mut child_args)?;
-        profile.apply_non_interactive_defaults(&mut child_args);
+        // Only apply default model if the user didn't pass --model explicitly
+        // (apply_model handles it below when args.model is Some).
+        if args.model.is_none() {
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
     }
 
     // Universal --model flag

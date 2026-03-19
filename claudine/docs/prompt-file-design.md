@@ -213,10 +213,10 @@ Once a file is matched:
 
 1. Load it as Markdown from disk.
 2. Run it through Darkmatter's `compose` pipeline.
-3. Set the source file on `TransformOptions` so relative transclusions resolve from the matched file path.
+3. Set the source file on `ComposeOptions` so relative transclusions resolve from the matched file path.
 4. Treat the composed result as:
-   - `body = transformed.content()`
-   - `frontmatter = transformed.frontmatter()`
+   - `body = composed.content()`
+   - `frontmatter = composed.frontmatter()`
 
 This design relies on the library form of composition, not the CLI subprocess form, because Claudine needs both the composed body and the residual composed frontmatter.
 

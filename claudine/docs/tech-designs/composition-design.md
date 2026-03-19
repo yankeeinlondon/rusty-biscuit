@@ -222,8 +222,8 @@ Composition contract:
 3. Build a temporary `Markdown` value:
    - frontmatter = original document frontmatter
    - content = `prompt` field text
-4. Run `transform_with(TransformOptions::new().with_source_file(source_path))`.
-5. Use the transformed body as the provider prompt.
+4. Run `compose_with(ComposeOptions::new().with_source_file(source_path))`.
+5. Use the composed body as the provider prompt.
 
 Mutation contract:
 
@@ -243,8 +243,8 @@ Input:
 Composition contract:
 
 1. Load the full document with Darkmatter `Markdown`.
-2. Run `transform_with(TransformOptions::new().with_source_file(source_path))`.
-3. Use `transformed.content()` as the provider prompt.
+2. Run `compose_with(ComposeOptions::new().with_source_file(source_path))`.
+3. Use `composed.content()` as the provider prompt.
 
 Mutation contract:
 

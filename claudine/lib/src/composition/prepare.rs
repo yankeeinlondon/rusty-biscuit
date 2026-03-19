@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::transform::TransformOptions;
+use darkmatter::markdown::compose::ComposeOptions;
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
@@ -12,7 +12,7 @@ use super::types::{CompositionMode, PreparedPrompt, ResolvedCompositionSource};
 /// Prepare an inline prompt from a source document's `prompt` frontmatter.
 ///
 /// Extracts the `prompt` property, builds a temporary `Markdown` with the
-/// original frontmatter context, and transforms it through Darkmatter.
+/// original frontmatter context, and composes it through Darkmatter.
 ///
 /// When `repo_root` is provided the guardrails are loaded from (or created
 /// at) `.claudine/frontmatter-prompt.md`; otherwise built-in defaults apply.
@@ -40,14 +40,14 @@ pub fn prepare_inline_prompt(
     // Build a temporary Markdown with the original frontmatter and prompt as content
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
 
-    let options = TransformOptions::new().with_source_file(&source.resolved_path);
-    let (transformed, _report) = temp_md
-        .transform_with(options)
+    let options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    let (composed, _report) = temp_md
+        .compose_with(options)
         .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
 
     let agent_hint = fm.as_map().get("agent").cloned();
 
-    let mut prompt = transformed.content().to_string();
+    let mut prompt = composed.content().to_string();
 
     // Append guardrails so the agent doesn't mangle the source file.
     let guardrails = load_or_create_guardrails(repo_root);
@@ -69,10 +69,10 @@ pub fn prepare_inline_prompt(
 pub fn prepare_chained_prompt(
     source: &ResolvedCompositionSource,
 ) -> Result<PreparedPrompt, CompositionError> {
-    let options = TransformOptions::new().with_source_file(&source.resolved_path);
-    let (transformed, _report) = source
+    let options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    let (composed, _report) = source
         .markdown
-        .transform_with(options)
+        .compose_with(options)
         .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
 
     let agent_hint = source.markdown.frontmatter().as_map().get("agent").cloned();
@@ -80,7 +80,7 @@ pub fn prepare_chained_prompt(
     Ok(PreparedPrompt {
         mode: CompositionMode::ChainedDocument,
         resolved_path: source.resolved_path.clone(),
-        prompt: transformed.content().to_string(),
+        prompt: composed.content().to_string(),
         source_agent_hint: agent_hint,
     })
 }
