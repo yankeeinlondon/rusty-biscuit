@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "async")]
 use std::ffi::OsString;
@@ -68,18 +68,43 @@ pub fn playa_with_player_and_options(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    let status = command
-        .status()
+    let mut child = command
+        .spawn()
         .map_err(|source| PlaybackError::Spawn { player, source })?;
 
-    if !status.success() {
-        return Err(PlaybackError::PlayerFailed {
-            player,
-            exit_code: status.code(),
-        });
+    // Poll the child process with a timeout so we don't hang indefinitely
+    // if the player or audio device becomes unresponsive.
+    let timeout = Duration::from_secs(600);
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(PlaybackError::PlayerFailed {
+                        player,
+                        exit_code: status.code(),
+                    });
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    eprintln!(
+                        "playa: player {:?} timed out after {}s — killing process",
+                        player,
+                        timeout.as_secs()
+                    );
+                    return Err(PlaybackError::PlayerFailed {
+                        player,
+                        exit_code: None,
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(PlaybackError::Spawn { player, source: e }),
+        }
     }
-
-    Ok(())
 }
 
 // ============================================================================
@@ -168,19 +193,35 @@ pub async fn playa_with_player_and_options_async(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    let status = command
-        .status()
-        .await
+    let mut child = command
+        .spawn()
         .map_err(|source| PlaybackError::Spawn { player, source })?;
 
-    if !status.success() {
-        return Err(PlaybackError::PlayerFailed {
-            player,
-            exit_code: status.code(),
-        });
+    let timeout = Duration::from_secs(600);
+    match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => {
+            if !status.success() {
+                return Err(PlaybackError::PlayerFailed {
+                    player,
+                    exit_code: status.code(),
+                });
+            }
+            Ok(())
+        }
+        Ok(Err(e)) => Err(PlaybackError::Spawn { player, source: e }),
+        Err(_elapsed) => {
+            let _ = child.kill().await;
+            eprintln!(
+                "playa: player {:?} timed out after {}s — killing process",
+                player,
+                timeout.as_secs()
+            );
+            Err(PlaybackError::PlayerFailed {
+                player,
+                exit_code: None,
+            })
+        }
     }
-
-    Ok(())
 }
 
 fn select_player(

@@ -10,12 +10,18 @@
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
+use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
 
 use crate::audio::AudioData;
 use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions};
+
+/// Maximum time to wait for native audio playback to complete.
+/// Files longer than this should use a host player (mpv, ffplay, etc.)
+/// which manages its own timeouts.
+const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Errors from native audio playback.
 #[derive(Debug, Error)]
@@ -43,6 +49,10 @@ pub enum NativePlaybackError {
     /// An IO error occurred reading the audio file.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Playback timed out waiting for audio device.
+    #[error("audio playback timed out after {0}s — audio device may be unresponsive")]
+    Timeout(u64),
 }
 
 /// Check whether a given audio format can be decoded natively via symphonia.
@@ -130,8 +140,29 @@ fn play_source(
     }
 
     player.append(source);
-    player.sleep_until_end();
+    wait_with_timeout(&player, PLAYBACK_TIMEOUT)?;
 
+    Ok(())
+}
+
+/// Wait for the player to finish, but give up after `timeout`.
+///
+/// Polls `player.empty()` every 50 ms. If the deadline is exceeded the
+/// player is stopped and a `Timeout` error is returned so the caller can
+/// fall back to a host player or report the failure.
+fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), NativePlaybackError> {
+    let deadline = Instant::now() + timeout;
+    while !player.empty() {
+        if Instant::now() >= deadline {
+            player.stop();
+            eprintln!(
+                "playa: audio playback timed out after {}s — audio device may be unresponsive",
+                timeout.as_secs()
+            );
+            return Err(NativePlaybackError::Timeout(timeout.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
     Ok(())
 }
 

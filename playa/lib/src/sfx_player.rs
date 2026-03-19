@@ -30,11 +30,17 @@
 //! PulseAudio is not available (e.g., ALSA-only systems).
 
 use std::io::Cursor;
+use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
 
 use crate::types::PlaybackOptions;
+
+/// Maximum time to wait for native audio playback to complete before
+/// giving up. This prevents the process from hanging indefinitely when
+/// an audio device becomes unresponsive.
+const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Errors from native SFX playback.
 #[derive(Debug, Error)]
@@ -50,6 +56,10 @@ pub enum SfxPlaybackError {
     /// Failed to play audio.
     #[error("failed to play audio: {0}")]
     Play(#[from] rodio::PlayError),
+
+    /// Playback timed out waiting for audio device.
+    #[error("audio playback timed out after {0}s — audio device may be unresponsive")]
+    Timeout(u64),
 }
 
 /// Play sound effect bytes using native audio (rodio).
@@ -97,8 +107,29 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
 
     let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
     player.append(source);
-    player.sleep_until_end();
+    wait_with_timeout(&player, PLAYBACK_TIMEOUT)?;
 
+    Ok(())
+}
+
+/// Wait for the player to finish, but give up after `timeout`.
+///
+/// Polls `player.empty()` every 50 ms. If the deadline is exceeded the
+/// player is stopped and a `Timeout` error is returned so the caller can
+/// fall back to a host player or report the failure.
+fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlaybackError> {
+    let deadline = Instant::now() + timeout;
+    while !player.empty() {
+        if Instant::now() >= deadline {
+            player.stop();
+            eprintln!(
+                "playa: audio playback timed out after {}s — audio device may be unresponsive",
+                timeout.as_secs()
+            );
+            return Err(SfxPlaybackError::Timeout(timeout.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
     Ok(())
 }
 
