@@ -158,7 +158,7 @@ impl LiveStreamSink {
                 session_id,
                 self.model.as_deref(),
             );
-            eprintln!("{line}");
+            eprintln!("{line}\n"); // blank line after session ID separates from execution output
             self.start_emitted = true;
         }
     }
@@ -653,20 +653,15 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
 
         // Validate file read/write permissions before proceeding
-        match claudine::composition::validate_file_permissions(&source.resolved_path) {
-            Ok(()) => {
-                log::message(&crate::output::fm_check_ok(
-                    "validated that agent has read and write permissions to the referenced file",
-                    &term,
-                ));
-            }
-            Err(e) => {
-                log::message(&crate::output::fm_check_fail(
-                    "the agent does not have read and write permissions required to finish the task",
-                    &term,
-                ));
-                return Err(eyre!("frontmatter-prompt: {e}"));
-            }
+        // (success message is deferred to the reporting section below)
+        if let Err(e) =
+            claudine::composition::validate_file_permissions(&source.resolved_path)
+        {
+            log::message(&crate::output::fm_check_fail(
+                "the agent does not have read and write permissions required to finish the task",
+                &term,
+            ));
+            return Err(eyre!("frontmatter-prompt: {e}"));
         }
 
         let prepared =
@@ -1002,13 +997,20 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 log::message(&crate::output::post_env_message(message, &term));
             }
 
-            // Frontmatter-prompt: show file resolution and prompt blockquote
+            // Frontmatter-prompt: show validation, file resolution, and prompt blockquote.
+            // These are grouped together after the Info/warning lines with a blank
+            // line separator so the output sections are visually distinct.
             if let Some(ref ics) = inline_composition_source {
                 let (source, prepared, _, _) = ics;
                 let display_path = source
                     .resolved_path
                     .strip_prefix(child_cwd)
                     .unwrap_or(&source.resolved_path);
+                log::message(""); // blank line separating Info section from validation
+                log::message(&crate::output::fm_check_ok(
+                    "validated that agent has read and write permissions to the referenced file",
+                    &term,
+                ));
                 log::message(&crate::output::fm_check_ok(
                     &format!(
                         "resolved the file reference to <a href=\"{}\">{}</a>",

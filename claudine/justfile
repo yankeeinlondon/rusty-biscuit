@@ -247,7 +247,7 @@ install *args="":
     @echo
     @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} installed{{RESET}}"
     @echo
-    @playa effect drop-4 2>/dev/null || exit 0
+    @just _play drop-4 --background
 
 # Validate the source code without doing a full build
 check:
