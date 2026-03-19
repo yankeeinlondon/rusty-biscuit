@@ -4,34 +4,96 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 
 ## Features
 
-- **Multi-format output**: Terminal (ANSI), HTML, MDAST JSON, plain string
-- **Syntax highlighting**: 200+ languages via syntect with curated theme pairs
-- **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
-- **Mermaid diagrams**: Render to terminal images or HTML with theme support
-- **Document comparison**: Structural diff with change classification
-- **Visual diff utilities**: Reusable string/file diff rendering (no Markdown dependency)
-- **Table of Contents**: Hierarchical extraction with content hashing
-- **Heading normalization**: Fix hierarchy violations, relevel documents
-- **Transclusion (Stage 2)**: Recursive `::file`/`::code` and frontmatter `prologue`/`epilogue`
-- **Image rendering**: Inline images via biscuit-terminal (Kitty/iTerm2 protocols)
+```mermaid
+flowchart TD
 
-## Architecture
+DM[Darkmatter Library]
+Render(Rendering)
+Composition(Composition)
+Utility(Utility)
 
-Darkmatter focuses on **markdown parsing and transformation**. Visual diff rendering is exposed as a standalone module (`diff::visual`) for reuse outside Markdown. Terminal-specific capabilities are delegated to `biscuit-terminal`:
+DM --> Render
+DM --> Composition
+DM --> Utility
 
-| Responsibility | Package |
-|----------------|---------|
-| Markdown parsing (CommonMark + GFM) | darkmatter-lib |
-| Transform pipeline (Stage 1 + Stage 2 transclusion) | darkmatter-lib |
-| Syntax highlighting | darkmatter-lib (syntect) |
-| Frontmatter extraction | darkmatter-lib |
-| Document comparison/normalization | darkmatter-lib |
-| Terminal detection | biscuit-terminal |
-| Image rendering (Kitty/iTerm2) | biscuit-terminal |
-| Mermaid diagram rendering | biscuit-terminal |
-| Color depth, italic support | biscuit-terminal |
+Composition --> Interpolation(Interpolation)
+Composition --> Transclusion(Transclusion)
+
+Transclusion --> Docs(Local Docs)
+Transclusion --> Shell(Shell Expansion)
+Transclusion --> Summarize(Summarization)
+```
+
+- **Rendering**
+    - **Multi-format output**: Terminal (ANSI), HTML, MDAST JSON, Enriched Markdown
+    - **Syntax highlighting**: 200+ languages via syntect with curated theme pairs
+    - **Mermaid Diagrams:** Render mermaid documents into both HTML (using dynamic runtime engine) and Markdown (as inline images)
+    - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
+    - **Inline TOC:** Render an inline table of contents linking to the various sections of a page
+    - **YouTube Embeddings (future):** Embed a YouTube video player for sharable YouTube video references
+    - **Disclosure Blocks (future):** Show only a heading initially, but click to expand to full prose.
+    - **Popovers (future):**
+    - **Columnar Support (future):** Provides first class primitives for using columns to better utilize horizontal design space
+- **Composition**
+    - **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
+    - **Interpolation:** interpolate frontmatter, ENV vars, and context variables into Markdown body
+    - **Normalization:** fix heading hierarchy violations, re-level documents
+    - **TOC Linking:** hyperlink to each of the headings of another page as a strategy for progressive disclosure
+    - **Text Replacement:** Dictionary replacement of terms on a page
+    - **Conditional Block Rendering:** Conditionally render parts of a Markdown document based on frontmatter, ENV, and context
+    - **Transclusion:** 
+        - **Local Documents:** compose your Markdown by transcluding local Markdown files into the structure of a base document in real time (automatic heading rationalization built in)
+        - **Shell Expansion:** provide dynamic content from shell commands with a built-in security solution
+        - **Document Summarization (future):** summarize a Markdown, PDF, or word document into a section of a Markdown document
+        - **Website Summarization (future):** summarize the contents of a particular website and inject into a section of a Markdown document
+        - **Website PPT (future):** identify the people, places, and things on a particular website
+- **Utilities**
+    - **TOC Visualizer:** report out the table-of-contents to the terminal with well designed layout
+    - **Hashing:** context aware hashing of both frontmatter and markdown prose
+    - **Delta:** semantic and visual diff'ing tools for Markdown documents
+    - **Cleaning:** cleanup a Markdown file to ensure standard based, and consistently using indentation, vertical spacing, etc.
+    - **Link Validation:** validate that all links (both file and images) are pointing at valid and accessible locations
+    - **Graph Visualizer:** 
+
+## Dependencies
+
+### Monorepo Dependencies
+
+The Darkmatter Library uses the following libraries from this monorepo to achieve some of it's outcomes:
+
+- `biscuit-hash`
+    - leverages the **xxHash** hasher as well some of the "context-aware" features to help detect false positives on non-semantic file changes
+- `biscuit-terminal`
+    - Terminal Detection (`Terminal` struct)
+    - Terminal Image Rendering (`TerminalImage` struct)
+    - Mermaid Rendering to inline image 
+- `biscuit-file`
+    - File reference lookups (`FileReference` struct)
+        - provides relative and absolute path resolution, magic multipath resolution, and even glob finding resolution strategies
+    - Conversion of common config and frontmatter formats (JSON, JSON5, YAML, TOML)
+
+> **Note:** each of these libraries above has an **Agent Skill** by the same name you can use to better navigate these libraries.
+
+### Key External Crates
+
+The following crates play an important role in Darkmatter providing it's current feature set:
+
+- `pulldown-cmark` - _a blazingly fast pulldown parser for Markdown files_
+- `syntect` & `two-face` - _provide a rich set of themes and code parsing for the purpose of code highlighting_
+- `tokio` - _for IO bound async including all remote requests_
+- `reqwest` - _for 
+- `this-error` & `tracing` - _provide error definition support and reporting_
+- 
+
+
 
 ## Quick Start
+
+### Rendering 
+
+The most _grokkable_ feature that Darkmatter provides is a well designed **rendering** into multiple output formats.
+
+The `Markdown` struct is a central player in how we interact with **Darkmatter** and _rendering_ is most easily understand utility of the Darkmatter library:
 
 ```rust
 use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
@@ -40,6 +102,72 @@ let md: Markdown = "# Hello\n\nWorld".into();
 let mut stdout = std::io::stdout();
 write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ```
+
+### Composition
+
+Composition is probably the most powerful feature that Darkmatter has to offer. The types of composition each documents employ vary considerably but in all cases we run the Markdown through the same Markdown pipeline which will:
+
+- **Prepare** document
+    - _this includes operations like "text replacement", "interpolation", "TOC linking", "normalization" and more_
+- Perform **Transclusions**
+    - _there are many types of transclusions a document can employ with directives_
+    - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
+- and if an _output_ other than the default output has been specified then we will transform to that output format
+
+
+```mermaid
+flowchart LR
+
+Doc[Markdown Document]
+Compose[[Compose]]
+Transform[/Transform Pipeline/]
+
+Doc --> Compose --> Transform --> MdContent(Markdown Content)
+```
+
+Here's a simple example of using tiny bit of **interpolation** and a wee bit of **transclusion**. We will compose a fictional Markdown document called `main.md`:
+
+~~~md
+---
+name: "Bob"
+---
+# Example
+
+Hi, my name is {{name}} and I'd like to share a few things with you.
+
+## My Favorite Things
+
+::file favorites.md
+
+## What I'm Avoiding
+
+::file avoid.md
+~~~
+
+Now the imaginary `favorites.md` is defined as:
+
+~~~md
+## Sports
+
+::file sports.md
+
+## Gadgets
+
+:: file gadgets.md
+~~~
+
+
+
+```rust
+// TODO: show a code example
+```
+
+
+
+
+
+
+
 
 ## Modules
 
