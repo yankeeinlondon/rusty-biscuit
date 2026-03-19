@@ -1,0 +1,1756 @@
+{
+  "info": {
+    "name": "Emqx",
+    "description": "EmqxBasic: EMQX Broker REST API with Basic Authentication (API Key + Secret)\nEmqxBearer: EMQX Broker REST API with Bearer Token authentication (JWT)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:18083/api/v5",
+      "description": "Base URL for EmqxBasic"
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {
+        "key": "username",
+        "value": "{{username}}"
+      },
+      {
+        "key": "password",
+        "value": "{{password}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Alarms",
+      "item": [
+        {
+          "name": "ListAlarms",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/alarms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "alarms"
+              ]
+            },
+            "description": "List active alarms"
+          }
+        },
+        {
+          "name": "ListAlarms",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/alarms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "alarms"
+              ]
+            },
+            "description": "List active alarms"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "ListAuthenticators",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication"
+              ]
+            },
+            "description": "List all configured authentication providers"
+          }
+        },
+        {
+          "name": "GetAuthenticator",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific authenticator"
+          }
+        },
+        {
+          "name": "ListAuthUsers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "List users in a built-in database authenticator"
+          }
+        },
+        {
+          "name": "CreateAuthUser",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new user in a built-in database authenticator"
+          }
+        },
+        {
+          "name": "DeleteAuthUser",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users/:user_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "user_id",
+                  "value": "<user_id>"
+                }
+              ]
+            },
+            "description": "Delete a user from a built-in database authenticator"
+          }
+        },
+        {
+          "name": "ListAuthenticators",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication"
+              ]
+            },
+            "description": "List all configured authentication providers"
+          }
+        },
+        {
+          "name": "GetAuthenticator",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific authenticator"
+          }
+        },
+        {
+          "name": "ListAuthUsers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "List users in a built-in database authenticator"
+          }
+        },
+        {
+          "name": "CreateAuthUser",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new user in a built-in database authenticator"
+          }
+        },
+        {
+          "name": "DeleteAuthUser",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/authentication/:id/users/:user_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authentication",
+                ":id",
+                "users",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "user_id",
+                  "value": "<user_id>"
+                }
+              ]
+            },
+            "description": "Delete a user from a built-in database authenticator"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authorization",
+      "item": [
+        {
+          "name": "ListAuthzSources",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authorization/sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authorization",
+                "sources"
+              ]
+            },
+            "description": "List all authorization sources"
+          }
+        },
+        {
+          "name": "ListAuthzSources",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/authorization/sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "authorization",
+                "sources"
+              ]
+            },
+            "description": "List all authorization sources"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Banned",
+      "item": [
+        {
+          "name": "ListBanned",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/banned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned"
+              ]
+            },
+            "description": "List all banned clients, usernames, and hosts"
+          }
+        },
+        {
+          "name": "CreateBan",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/banned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Ban a client, username, or host"
+          }
+        },
+        {
+          "name": "DeleteBan",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/banned/:ban_type/:who",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned",
+                ":ban_type",
+                ":who"
+              ],
+              "variable": [
+                {
+                  "key": "ban_type",
+                  "value": "<ban_type>"
+                },
+                {
+                  "key": "who",
+                  "value": "<who>"
+                }
+              ]
+            },
+            "description": "Remove a ban by type (clientid, username, peerhost) and value"
+          }
+        },
+        {
+          "name": "ListBanned",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/banned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned"
+              ]
+            },
+            "description": "List all banned clients, usernames, and hosts"
+          }
+        },
+        {
+          "name": "CreateBan",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/banned",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Ban a client, username, or host"
+          }
+        },
+        {
+          "name": "DeleteBan",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/banned/:ban_type/:who",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "banned",
+                ":ban_type",
+                ":who"
+              ],
+              "variable": [
+                {
+                  "key": "ban_type",
+                  "value": "<ban_type>"
+                },
+                {
+                  "key": "who",
+                  "value": "<who>"
+                }
+              ]
+            },
+            "description": "Remove a ban by type (clientid, username, peerhost) and value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "item": [
+        {
+          "name": "ListClients",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/clients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients"
+              ]
+            },
+            "description": "List connected MQTT clients with pagination"
+          }
+        },
+        {
+          "name": "GetClient",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific client"
+          }
+        },
+        {
+          "name": "DisconnectClient",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "description": "Forcefully disconnect a client from the broker"
+          }
+        },
+        {
+          "name": "SubscribeClient",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid/subscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid",
+                "subscribe"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a subscription for a connected client"
+          }
+        },
+        {
+          "name": "UnsubscribeClient",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid/unsubscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid",
+                "unsubscribe"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Remove a subscription from a connected client"
+          }
+        },
+        {
+          "name": "ListClients",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/clients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients"
+              ]
+            },
+            "description": "List connected MQTT clients with pagination"
+          }
+        },
+        {
+          "name": "GetClient",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific client"
+          }
+        },
+        {
+          "name": "DisconnectClient",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "description": "Forcefully disconnect a client from the broker"
+          }
+        },
+        {
+          "name": "SubscribeClient",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid/subscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid",
+                "subscribe"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a subscription for a connected client"
+          }
+        },
+        {
+          "name": "UnsubscribeClient",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/clients/:clientid/unsubscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "clients",
+                ":clientid",
+                "unsubscribe"
+              ],
+              "variable": [
+                {
+                  "key": "clientid",
+                  "value": "<clientid>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Remove a subscription from a connected client"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cluster",
+      "item": [
+        {
+          "name": "GetCluster",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/cluster",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cluster"
+              ]
+            },
+            "description": "Get cluster status and node membership"
+          }
+        },
+        {
+          "name": "GetCluster",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/cluster",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cluster"
+              ]
+            },
+            "description": "Get cluster status and node membership"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Listeners",
+      "item": [
+        {
+          "name": "ListListeners",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listeners",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "listeners"
+              ]
+            },
+            "description": "List all configured listeners"
+          }
+        },
+        {
+          "name": "GetListener",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listeners/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "listeners",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific listener"
+          }
+        },
+        {
+          "name": "ListListeners",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listeners",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "listeners"
+              ]
+            },
+            "description": "List all configured listeners"
+          }
+        },
+        {
+          "name": "GetListener",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listeners/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "listeners",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific listener"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Authenticate with username/password and receive a JWT token"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logout",
+      "item": [
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "logout"
+              ]
+            },
+            "description": "Invalidate the current bearer token"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "item": [
+        {
+          "name": "ListMetrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "Get broker metrics for all nodes"
+          }
+        },
+        {
+          "name": "ListMetrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "Get broker metrics for all nodes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Nodes",
+      "item": [
+        {
+          "name": "ListNodes",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/nodes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "nodes"
+              ]
+            },
+            "description": "List all nodes in the EMQX cluster"
+          }
+        },
+        {
+          "name": "GetNode",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/nodes/:node",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "nodes",
+                ":node"
+              ],
+              "variable": [
+                {
+                  "key": "node",
+                  "value": "<node>"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific node"
+          }
+        },
+        {
+          "name": "ListNodes",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/nodes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "nodes"
+              ]
+            },
+            "description": "List all nodes in the EMQX cluster"
+          }
+        },
+        {
+          "name": "GetNode",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/nodes/:node",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "nodes",
+                ":node"
+              ],
+              "variable": [
+                {
+                  "key": "node",
+                  "value": "<node>"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific node"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Prometheus",
+      "item": [
+        {
+          "name": "GetPrometheus",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prometheus/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prometheus",
+                "stats"
+              ]
+            },
+            "description": "Get metrics in Prometheus format"
+          }
+        },
+        {
+          "name": "GetPrometheus",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prometheus/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prometheus",
+                "stats"
+              ]
+            },
+            "description": "Get metrics in Prometheus format"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Publish",
+      "item": [
+        {
+          "name": "Publish",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Publish an MQTT message to a topic"
+          }
+        },
+        {
+          "name": "PublishBulk",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/publish/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "publish",
+                "bulk"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Publish multiple MQTT messages in a single request"
+          }
+        },
+        {
+          "name": "Publish",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Publish an MQTT message to a topic"
+          }
+        },
+        {
+          "name": "PublishBulk",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/publish/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "publish",
+                "bulk"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Publish multiple MQTT messages in a single request"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Retainer",
+      "item": [
+        {
+          "name": "ListRetained",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages"
+              ]
+            },
+            "description": "List retained messages with pagination"
+          }
+        },
+        {
+          "name": "GetRetained",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages",
+                ":topic"
+              ],
+              "variable": [
+                {
+                  "key": "topic",
+                  "value": "<topic>"
+                }
+              ]
+            },
+            "description": "Get a specific retained message by topic"
+          }
+        },
+        {
+          "name": "DeleteRetained",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages",
+                ":topic"
+              ],
+              "variable": [
+                {
+                  "key": "topic",
+                  "value": "<topic>"
+                }
+              ]
+            },
+            "description": "Delete a retained message"
+          }
+        },
+        {
+          "name": "ListRetained",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages"
+              ]
+            },
+            "description": "List retained messages with pagination"
+          }
+        },
+        {
+          "name": "GetRetained",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages",
+                ":topic"
+              ],
+              "variable": [
+                {
+                  "key": "topic",
+                  "value": "<topic>"
+                }
+              ]
+            },
+            "description": "Get a specific retained message by topic"
+          }
+        },
+        {
+          "name": "DeleteRetained",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/retainer/messages/:topic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "retainer",
+                "messages",
+                ":topic"
+              ],
+              "variable": [
+                {
+                  "key": "topic",
+                  "value": "<topic>"
+                }
+              ]
+            },
+            "description": "Delete a retained message"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rules",
+      "item": [
+        {
+          "name": "ListRules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/rules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules"
+              ]
+            },
+            "description": "List all rules in the rules engine"
+          }
+        },
+        {
+          "name": "CreateRule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/rules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new rule in the rules engine"
+          }
+        },
+        {
+          "name": "GetRule",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific rule"
+          }
+        },
+        {
+          "name": "UpdateRule",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Update an existing rule"
+          }
+        },
+        {
+          "name": "DeleteRule",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Delete a rule from the rules engine"
+          }
+        },
+        {
+          "name": "TestRule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id",
+                "test"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Test a rule with sample data"
+          }
+        },
+        {
+          "name": "ListRules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/rules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules"
+              ]
+            },
+            "description": "List all rules in the rules engine"
+          }
+        },
+        {
+          "name": "CreateRule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/rules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new rule in the rules engine"
+          }
+        },
+        {
+          "name": "GetRule",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get details of a specific rule"
+          }
+        },
+        {
+          "name": "UpdateRule",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Update an existing rule"
+          }
+        },
+        {
+          "name": "DeleteRule",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Delete a rule from the rules engine"
+          }
+        },
+        {
+          "name": "TestRule",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/rules/:id/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rules",
+                ":id",
+                "test"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Test a rule with sample data"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stats",
+      "item": [
+        {
+          "name": "ListStats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats"
+              ]
+            },
+            "description": "Get broker statistics for all nodes"
+          }
+        },
+        {
+          "name": "ListStats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats"
+              ]
+            },
+            "description": "Get broker statistics for all nodes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Subscriptions",
+      "item": [
+        {
+          "name": "ListSubscriptions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "subscriptions"
+              ]
+            },
+            "description": "List all subscriptions across the cluster"
+          }
+        },
+        {
+          "name": "ListSubscriptions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "subscriptions"
+              ]
+            },
+            "description": "List all subscriptions across the cluster"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Topics",
+      "item": [
+        {
+          "name": "ListTopics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/topics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
+            },
+            "description": "List active topics in the broker"
+          }
+        },
+        {
+          "name": "ListTopics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/topics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "topics"
+              ]
+            },
+            "description": "List active topics in the broker"
+          }
+        }
+      ]
+    }
+  ]
+}

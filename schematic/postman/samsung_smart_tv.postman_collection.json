@@ -1,0 +1,191 @@
+{
+  "info": {
+    "name": "SamsungSmartTv",
+    "description": "Samsung Smart TV LAN API (S95C-focused modern Tizen subset)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://192.168.1.1:8001",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "Api",
+      "item": [
+        {
+          "name": "GetDeviceInfo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2"
+              ]
+            },
+            "description": "Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation."
+          }
+        },
+        {
+          "name": "LaunchApplicationById",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/applications/:app_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "applications",
+                ":app_id"
+              ],
+              "variable": [
+                {
+                  "key": "app_id",
+                  "value": "<app_id>"
+                }
+              ]
+            },
+            "description": "Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName."
+          }
+        },
+        {
+          "name": "GetAppStatus",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/applications/:app_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "applications",
+                ":app_id"
+              ],
+              "variable": [
+                {
+                  "key": "app_id",
+                  "value": "<app_id>"
+                }
+              ]
+            },
+            "description": "Get the running status and metadata of a specific application. Returns visibility, running state, version, and name."
+          }
+        },
+        {
+          "name": "CloseApp",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/applications/:app_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "applications",
+                ":app_id"
+              ],
+              "variable": [
+                {
+                  "key": "app_id",
+                  "value": "<app_id>"
+                }
+              ]
+            },
+            "description": "Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app."
+          }
+        },
+        {
+          "name": "InstallApp",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/applications/:app_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "applications",
+                ":app_id"
+              ],
+              "variable": [
+                {
+                  "key": "app_id",
+                  "value": "<app_id>"
+                }
+              ]
+            },
+            "description": "Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logs",
+      "item": [
+        {
+          "name": "GetServerLogs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/logs/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "logs"
+              ]
+            },
+            "description": "Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ws",
+      "item": [
+        {
+          "name": "LaunchApplicationByName",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/ws/apps/:app_name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ws",
+                "apps",
+                ":app_name"
+              ],
+              "variable": [
+                {
+                  "key": "app_name",
+                  "value": "<app_name>"
+                }
+              ]
+            },
+            "description": "Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}."
+          }
+        }
+      ]
+    }
+  ]
+}

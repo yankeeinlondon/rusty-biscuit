@@ -1,0 +1,915 @@
+{
+  "info": {
+    "name": "GitHub",
+    "description": "GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.github.com",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Orgs",
+      "item": [
+        {
+          "name": "ListOrgRepos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/orgs/:org/repos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orgs",
+                ":org",
+                "repos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "repo_type",
+                  "description": "Filter by repository type (API param: type)"
+                },
+                {
+                  "key": "sort",
+                  "description": "Sort field"
+                },
+                {
+                  "key": "direction",
+                  "description": "Sort direction"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "org",
+                  "value": "<org>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List repositories for an organization"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Repos",
+      "item": [
+        {
+          "name": "GetRepository",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get repository metadata including default branch"
+          }
+        },
+        {
+          "name": "GetGitTree",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:tree_sha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "trees",
+                ":tree_sha"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "tree_sha",
+                  "value": "<tree_sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get a Git tree (non-recursive, single level)"
+          }
+        },
+        {
+          "name": "GetGitTreeRecursive",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:tree_sha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "trees",
+                ":tree_sha"
+              ],
+              "query": [
+                {
+                  "key": "recursive",
+                  "description": "Fetch tree recursively (always true for this endpoint)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "tree_sha",
+                  "value": "<tree_sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get a Git tree recursively (may truncate at 100k entries or 7MB)"
+          }
+        },
+        {
+          "name": "GetRepositoryContentRaw",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/contents/:path",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "contents",
+                ":path"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "path",
+                  "value": "<path>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              },
+              {
+                "key": "Accept",
+                "value": "application/vnd.github.raw+json"
+              }
+            ],
+            "description": "Get raw file content from repository"
+          }
+        },
+        {
+          "name": "ListPullRequests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/pulls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "pulls"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by PR state"
+                },
+                {
+                  "key": "sort",
+                  "description": "Sort field"
+                },
+                {
+                  "key": "direction",
+                  "description": "Sort direction"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List pull requests with metadata"
+          }
+        },
+        {
+          "name": "ListPullRequestFiles",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/pulls/:pull_number/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "pulls",
+                ":pull_number",
+                "files"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "pull_number",
+                  "value": "<pull_number>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List files changed in a pull request"
+          }
+        },
+        {
+          "name": "ListIssues",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by issue state"
+                },
+                {
+                  "key": "sort",
+                  "description": "Sort field"
+                },
+                {
+                  "key": "direction",
+                  "description": "Sort direction"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List issues (includes PRs; filter by pull_request field)"
+          }
+        },
+        {
+          "name": "GetIssue",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:issue_number",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":issue_number"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "issue_number",
+                  "value": "<issue_number>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get a single issue by number"
+          }
+        },
+        {
+          "name": "ListIssueComments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:issue_number/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":issue_number",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "issue_number",
+                  "value": "<issue_number>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List comments on an issue"
+          }
+        },
+        {
+          "name": "ListIssueTimeline",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:issue_number/timeline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":issue_number",
+                "timeline"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "issue_number",
+                  "value": "<issue_number>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List timeline events for an issue"
+          }
+        },
+        {
+          "name": "ListTags",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "tags"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List repository tags"
+          }
+        },
+        {
+          "name": "ListReleases",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/releases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "releases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List releases (linked to tags via tag_name)"
+          }
+        },
+        {
+          "name": "GetTagReference",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/ref/tags/:tag",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "ref",
+                "tags",
+                ":tag"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "tag",
+                  "value": "<tag>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get tag reference (check object.type: 'commit' vs 'tag')"
+          }
+        },
+        {
+          "name": "GetAnnotatedTag",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/tags/:tag_sha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "tags",
+                ":tag_sha"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "tag_sha",
+                  "value": "<tag_sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get annotated tag object details (message, tagger, verification)"
+          }
+        },
+        {
+          "name": "ListWorkflowRuns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/actions/runs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "actions",
+                "runs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "status",
+                  "description": "Filter by workflow run status"
+                },
+                {
+                  "key": "branch",
+                  "description": "Filter by branch name"
+                },
+                {
+                  "key": "event",
+                  "description": "Filter by event type (e.g., push, pull_request)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "List workflow runs for a repository"
+          }
+        }
+      ]
+    }
+  ]
+}

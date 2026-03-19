@@ -1,0 +1,1239 @@
+{
+  "info": {
+    "name": "ElevenLabs",
+    "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.elevenlabs.io",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "value",
+        "value": "xi-api-key"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "History",
+      "item": [
+        {
+          "name": "GetHistory",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "history"
+              ]
+            },
+            "description": "Gets generated items history"
+          }
+        },
+        {
+          "name": "GetHistoryItem",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/history/:history_item_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "history",
+                ":history_item_id"
+              ],
+              "variable": [
+                {
+                  "key": "history_item_id",
+                  "value": "<history_item_id>"
+                }
+              ]
+            },
+            "description": "Gets a specific history item"
+          }
+        },
+        {
+          "name": "DeleteHistoryItem",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/v1/history/:history_item_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "history",
+                ":history_item_id"
+              ],
+              "variable": [
+                {
+                  "key": "history_item_id",
+                  "value": "<history_item_id>"
+                }
+              ]
+            },
+            "description": "Deletes a history item"
+          }
+        },
+        {
+          "name": "GetHistoryItemAudio",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/history/:history_item_id/audio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "history",
+                ":history_item_id",
+                "audio"
+              ],
+              "variable": [
+                {
+                  "key": "history_item_id",
+                  "value": "<history_item_id>"
+                }
+              ]
+            },
+            "description": "Gets audio for a history item"
+          }
+        },
+        {
+          "name": "DownloadHistoryItems",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/history/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "history",
+                "download"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Downloads multiple history items as ZIP"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Models",
+      "item": [
+        {
+          "name": "ListModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/models",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models"
+              ]
+            },
+            "description": "Lists all available models"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service-accounts",
+      "item": [
+        {
+          "name": "ListServiceAccounts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-accounts"
+              ]
+            },
+            "description": "Lists service accounts"
+          }
+        },
+        {
+          "name": "ListServiceAccountApiKeys",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-accounts/:service_account_user_id/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-accounts",
+                ":service_account_user_id",
+                "api-keys"
+              ],
+              "variable": [
+                {
+                  "key": "service_account_user_id",
+                  "value": "<service_account_user_id>"
+                }
+              ]
+            },
+            "description": "Lists API keys for a service account"
+          }
+        },
+        {
+          "name": "CreateApiKey",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-accounts/:service_account_user_id/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-accounts",
+                ":service_account_user_id",
+                "api-keys"
+              ],
+              "variable": [
+                {
+                  "key": "service_account_user_id",
+                  "value": "<service_account_user_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Creates an API key for a service account"
+          }
+        },
+        {
+          "name": "UpdateApiKey",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-accounts/:service_account_user_id/api-keys/:api_key_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-accounts",
+                ":service_account_user_id",
+                "api-keys",
+                ":api_key_id"
+              ],
+              "variable": [
+                {
+                  "key": "service_account_user_id",
+                  "value": "<service_account_user_id>"
+                },
+                {
+                  "key": "api_key_id",
+                  "value": "<api_key_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Updates an API key"
+          }
+        },
+        {
+          "name": "DeleteApiKey",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-accounts/:service_account_user_id/api-keys/:api_key_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-accounts",
+                ":service_account_user_id",
+                "api-keys",
+                ":api_key_id"
+              ],
+              "variable": [
+                {
+                  "key": "service_account_user_id",
+                  "value": "<service_account_user_id>"
+                },
+                {
+                  "key": "api_key_id",
+                  "value": "<api_key_id>"
+                }
+              ]
+            },
+            "description": "Deletes an API key"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Shared-voices",
+      "item": [
+        {
+          "name": "ListSharedVoices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/shared-voices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "shared-voices"
+              ]
+            },
+            "description": "Lists voices from the public library"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Single-use-token",
+      "item": [
+        {
+          "name": "CreateSingleUseToken",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/single-use-token/:token_type",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "single-use-token",
+                ":token_type"
+              ],
+              "variable": [
+                {
+                  "key": "token_type",
+                  "value": "<token_type>"
+                }
+              ]
+            },
+            "description": "Creates a single-use token for WebSocket auth"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sound-generation",
+      "item": [
+        {
+          "name": "CreateSoundEffect",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/sound-generation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "sound-generation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Generates a sound effect from text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Text-to-speech",
+      "item": [
+        {
+          "name": "CreateSpeech",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/text-to-speech/:voice_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "text-to-speech",
+                ":voice_id"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Converts text into speech and returns audio"
+          }
+        },
+        {
+          "name": "StreamSpeech",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/text-to-speech/:voice_id/stream",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "text-to-speech",
+                ":voice_id",
+                "stream"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Streams audio as it's generated"
+          }
+        },
+        {
+          "name": "CreateSpeechWithTimestamps",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/text-to-speech/:voice_id/with-timestamps",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "text-to-speech",
+                ":voice_id",
+                "with-timestamps"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Returns audio with character-level timing information"
+          }
+        },
+        {
+          "name": "StreamSpeechWithTimestamps",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/text-to-speech/:voice_id/stream/with-timestamps",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "text-to-speech",
+                ":voice_id",
+                "stream",
+                "with-timestamps"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Streams audio chunks with timing information"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usage",
+      "item": [
+        {
+          "name": "GetUsageStats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/usage/character-stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "character-stats"
+              ]
+            },
+            "description": "Gets usage statistics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "User",
+      "item": [
+        {
+          "name": "GetUser",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/user",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "user"
+              ]
+            },
+            "description": "Gets current user information"
+          }
+        },
+        {
+          "name": "GetUserSubscription",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/user/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "user",
+                "subscription"
+              ]
+            },
+            "description": "Gets user subscription information"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Voices",
+      "item": [
+        {
+          "name": "ListVoices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v2/voices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v2",
+                "voices"
+              ]
+            },
+            "description": "Lists all available voices"
+          }
+        },
+        {
+          "name": "GetVoice",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "description": "Retrieves a voice by ID"
+          }
+        },
+        {
+          "name": "DeleteVoice",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "description": "Deletes a voice"
+          }
+        },
+        {
+          "name": "GetDefaultVoiceSettings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/settings/default",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                "settings",
+                "default"
+              ]
+            },
+            "description": "Gets default voice settings"
+          }
+        },
+        {
+          "name": "GetVoiceSettings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id",
+                "settings"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "description": "Gets voice settings for a specific voice"
+          }
+        },
+        {
+          "name": "UpdateVoiceSettings",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id/settings/edit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id",
+                "settings",
+                "edit"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Updates voice settings"
+          }
+        },
+        {
+          "name": "GetVoiceSampleAudio",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id/samples/:sample_id/audio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id",
+                "samples",
+                ":sample_id",
+                "audio"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                },
+                {
+                  "key": "sample_id",
+                  "value": "<sample_id>"
+                }
+              ]
+            },
+            "description": "Gets audio for a voice sample"
+          }
+        },
+        {
+          "name": "DeleteVoiceSample",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id/samples/:sample_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id",
+                "samples",
+                ":sample_id"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                },
+                {
+                  "key": "sample_id",
+                  "value": "<sample_id>"
+                }
+              ]
+            },
+            "description": "Deletes a voice sample"
+          }
+        },
+        {
+          "name": "AddVoiceSample",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/:voice_id/samples",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                ":voice_id",
+                "samples"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio",
+                  "value": "",
+                  "description": "Audio file (mp3, wav, ogg, m4a)",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "",
+                  "description": "Name for the sample",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Upload audio sample for voice cloning"
+          }
+        },
+        {
+          "name": "AddSharedVoice",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/add/:public_user_id/:voice_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                "add",
+                ":public_user_id",
+                ":voice_id"
+              ],
+              "variable": [
+                {
+                  "key": "public_user_id",
+                  "value": "<public_user_id>"
+                },
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Adds a shared voice to your library"
+          }
+        },
+        {
+          "name": "CreatePvcVoice",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/pvc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                "pvc"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Creates a professional voice clone"
+          }
+        },
+        {
+          "name": "UpdatePvcVoice",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/pvc/:voice_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                "pvc",
+                ":voice_id"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Updates a PVC voice"
+          }
+        },
+        {
+          "name": "TrainPvcVoice",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/voices/pvc/:voice_id/train",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "voices",
+                "pvc",
+                ":voice_id",
+                "train"
+              ],
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Starts training a PVC voice"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workspace",
+      "item": [
+        {
+          "name": "GetResource",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/resources/:resource_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "resources",
+                ":resource_id"
+              ],
+              "variable": [
+                {
+                  "key": "resource_id",
+                  "value": "<resource_id>"
+                }
+              ]
+            },
+            "description": "Gets resource information"
+          }
+        },
+        {
+          "name": "ShareResource",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/resources/:resource_id/share",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "resources",
+                ":resource_id",
+                "share"
+              ],
+              "variable": [
+                {
+                  "key": "resource_id",
+                  "value": "<resource_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Shares a resource"
+          }
+        },
+        {
+          "name": "UnshareResource",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/resources/:resource_id/unshare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "resources",
+                ":resource_id",
+                "unshare"
+              ],
+              "variable": [
+                {
+                  "key": "resource_id",
+                  "value": "<resource_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Removes sharing for a resource"
+          }
+        },
+        {
+          "name": "CopyResourceToWorkspace",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/resources/:resource_id/copy-to-workspace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "resources",
+                ":resource_id",
+                "copy-to-workspace"
+              ],
+              "variable": [
+                {
+                  "key": "resource_id",
+                  "value": "<resource_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Copies a resource to another workspace"
+          }
+        },
+        {
+          "name": "ListWebhooks",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "webhooks"
+              ]
+            },
+            "description": "Lists webhooks"
+          }
+        },
+        {
+          "name": "CreateWebhook",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "webhooks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Creates a webhook"
+          }
+        },
+        {
+          "name": "UpdateWebhook",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/webhooks/:webhook_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "webhooks",
+                ":webhook_id"
+              ],
+              "variable": [
+                {
+                  "key": "webhook_id",
+                  "value": "<webhook_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Updates a webhook"
+          }
+        },
+        {
+          "name": "DeleteWebhook",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/v1/workspace/webhooks/:webhook_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspace",
+                "webhooks",
+                ":webhook_id"
+              ],
+              "variable": [
+                {
+                  "key": "webhook_id",
+                  "value": "<webhook_id>"
+                }
+              ]
+            },
+            "description": "Deletes a webhook"
+          }
+        }
+      ]
+    }
+  ]
+}

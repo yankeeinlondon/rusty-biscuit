@@ -1,0 +1,622 @@
+{
+  "info": {
+    "name": "Bitbucket",
+    "description": "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.bitbucket.org/2.0",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {
+        "key": "username",
+        "value": "{{username}}"
+      },
+      {
+        "key": "password",
+        "value": "{{password}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Repositories",
+      "item": [
+        {
+          "name": "GetRepository",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                }
+              ]
+            },
+            "description": "Get repository metadata including default branch and workspace info"
+          }
+        },
+        {
+          "name": "ListDirectoryContents",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/src/:commit/:path",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "src",
+                ":commit",
+                ":path"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "commit",
+                  "value": "<commit>"
+                },
+                {
+                  "key": "path",
+                  "value": "<path>"
+                }
+              ]
+            },
+            "description": "List directory contents at a specific commit"
+          }
+        },
+        {
+          "name": "GetFileContentRaw",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/src/:commit/:path",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "src",
+                ":commit",
+                ":path"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "commit",
+                  "value": "<commit>"
+                },
+                {
+                  "key": "path",
+                  "value": "<path>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              }
+            ],
+            "description": "Get raw file content at a specific commit"
+          }
+        },
+        {
+          "name": "ListPullRequests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/pullrequests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "pullrequests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                }
+              ]
+            },
+            "description": "List pull requests (all states)"
+          }
+        },
+        {
+          "name": "GetPullRequest",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/pullrequests/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "pullrequests",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get a single pull request by ID"
+          }
+        },
+        {
+          "name": "ListPullRequestComments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/pullrequests/:id/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "pullrequests",
+                ":id",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "List comments on a pull request"
+          }
+        },
+        {
+          "name": "ListIssues",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/issues",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "issues"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                }
+              ]
+            },
+            "description": "List repository issues"
+          }
+        },
+        {
+          "name": "GetIssue",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/issues/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "issues",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "Get a single issue by ID"
+          }
+        },
+        {
+          "name": "ListIssueComments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/issues/:id/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "issues",
+                ":id",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "List comments on an issue"
+          }
+        },
+        {
+          "name": "ListIssueChanges",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/issues/:id/changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "issues",
+                ":id",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "description": "List change history for an issue"
+          }
+        },
+        {
+          "name": "ListTags",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/refs/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "refs",
+                "tags"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                }
+              ]
+            },
+            "description": "List repository tags"
+          }
+        },
+        {
+          "name": "GetTag",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/refs/tags/:name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "refs",
+                "tags",
+                ":name"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "name",
+                  "value": "<name>"
+                }
+              ]
+            },
+            "description": "Get a single tag by name"
+          }
+        },
+        {
+          "name": "ListDownloads",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/downloads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "downloads"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                }
+              ]
+            },
+            "description": "List repository downloads (release artifacts)"
+          }
+        },
+        {
+          "name": "GetDownload",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/downloads/:filename",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "downloads",
+                ":filename"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "filename",
+                  "value": "<filename>"
+                }
+              ]
+            },
+            "description": "Download a file from repository downloads"
+          }
+        },
+        {
+          "name": "ListWorkspaceRepos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "pagelen",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                }
+              ]
+            },
+            "description": "List repositories in a workspace"
+          }
+        }
+      ]
+    }
+  ]
+}

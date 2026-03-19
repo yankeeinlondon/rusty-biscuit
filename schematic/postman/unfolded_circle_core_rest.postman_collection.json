@@ -1,0 +1,329 @@
+{
+  "info": {
+    "name": "UnfoldedCircleCoreRest",
+    "description": "Unfolded Circle Core REST API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://remote.local/api",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Intg",
+      "item": [
+        {
+          "name": "InstallCustomIntegration",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/intg/install",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "intg",
+                "install"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ir",
+      "item": [
+        {
+          "name": "UploadCustomIrCodeSet",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/ir/codes/custom/:code_set_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ir",
+                "codes",
+                "custom",
+                ":code_set_id"
+              ],
+              "variable": [
+                {
+                  "key": "code_set_id",
+                  "value": "<code_set_id>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pub",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/pub/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pub",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/pub/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pub",
+                "logout"
+              ]
+            },
+            "description": "Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resources",
+      "item": [
+        {
+          "name": "UploadResource",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/resources/:resource_type",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resources",
+                ":resource_type"
+              ],
+              "variable": [
+                {
+                  "key": "resource_type",
+                  "value": "<resource_type>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`."
+          }
+        },
+        {
+          "name": "GetResource",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/resources/:resource_type/:resource_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "resources",
+                ":resource_type",
+                ":resource_id"
+              ],
+              "variable": [
+                {
+                  "key": "resource_type",
+                  "value": "<resource_type>"
+                },
+                {
+                  "key": "resource_id",
+                  "value": "<resource_id>"
+                }
+              ]
+            },
+            "description": "Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources."
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "GetSystemInfo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/system",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system"
+              ]
+            },
+            "description": "Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn."
+          }
+        },
+        {
+          "name": "ExportBackup",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/system/backup/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system",
+                "backup",
+                "export"
+              ]
+            },
+            "description": "Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream."
+          }
+        },
+        {
+          "name": "RestoreBackup",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/system/backup/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system",
+                "backup",
+                "restore"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters."
+          }
+        },
+        {
+          "name": "InstallCustomComponent",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/system/install/:custom_component",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system",
+                "install",
+                ":custom_component"
+              ],
+              "variable": [
+                {
+                  "key": "custom_component",
+                  "value": "<custom_component>"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status."
+          }
+        },
+        {
+          "name": "QueryLogsText",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/system/logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "system",
+                "logs"
+              ]
+            },
+            "description": "Retrieve system logs as plain text export for diagnostics pipelines and offline inspection."
+          }
+        }
+      ]
+    }
+  ]
+}

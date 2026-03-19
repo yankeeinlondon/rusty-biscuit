@@ -1,0 +1,718 @@
+{
+  "info": {
+    "name": "Gitea",
+    "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://gitea.example.com/api/v1",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "value",
+        "value": "Authorization"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Orgs",
+      "item": [
+        {
+          "name": "ListOrgRepos",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/orgs/:org/repos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orgs",
+                ":org",
+                "repos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "org",
+                  "value": "<org>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List repositories for an organization"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Repos",
+      "item": [
+        {
+          "name": "GetRepository",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get repository metadata including default branch"
+          }
+        },
+        {
+          "name": "GetGitTree",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:sha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "trees",
+                ":sha"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "sha",
+                  "value": "<sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get a Git tree (non-recursive, single level)"
+          }
+        },
+        {
+          "name": "GetGitTreeRecursive",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:sha?recursive=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "trees",
+                "{sha}?recursive=true"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "sha",
+                  "value": "<sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get a Git tree recursively (may be paginated for large repos)"
+          }
+        },
+        {
+          "name": "GetRepositoryContentRaw",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/raw/:filepath",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "raw",
+                ":filepath"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "filepath",
+                  "value": "<filepath>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get raw file content from repository"
+          }
+        },
+        {
+          "name": "ListPullRequests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/pulls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "pulls"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by PR state"
+                },
+                {
+                  "key": "sort",
+                  "description": "Sort order for results"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List pull requests with metadata"
+          }
+        },
+        {
+          "name": "ListPullRequestFiles",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/pulls/:index/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "pulls",
+                ":index",
+                "files"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "index",
+                  "value": "<index>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List files changed in a pull request"
+          }
+        },
+        {
+          "name": "ListIssues",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by issue state"
+                },
+                {
+                  "key": "issue_type",
+                  "description": "Filter by type (issues, pulls, or all)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List issues (use type=issues to exclude PRs)"
+          }
+        },
+        {
+          "name": "GetIssue",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:index",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":index"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "index",
+                  "value": "<index>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get a single issue by index"
+          }
+        },
+        {
+          "name": "ListIssueComments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:index/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":index",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "index",
+                  "value": "<index>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List comments on an issue"
+          }
+        },
+        {
+          "name": "ListIssueTimeline",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues/:index/timeline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues",
+                ":index",
+                "timeline"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "index",
+                  "value": "<index>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List timeline events for an issue"
+          }
+        },
+        {
+          "name": "ListTags",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "tags"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List repository tags"
+          }
+        },
+        {
+          "name": "ListReleases",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/releases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "releases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "description": "Items per page (default: 50, max: 100)"
+                },
+                {
+                  "key": "draft",
+                  "description": "Include draft releases"
+                },
+                {
+                  "key": "pre_release",
+                  "description": "Include pre-releases"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "List releases (linked to tags via tag_name)"
+          }
+        },
+        {
+          "name": "GetTagReference",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/refs/:git_ref",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "refs",
+                ":git_ref"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "git_ref",
+                  "value": "<git_ref>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')"
+          }
+        },
+        {
+          "name": "GetAnnotatedTag",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/tags/:sha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "tags",
+                ":sha"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "sha",
+                  "value": "<sha>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get annotated tag object details (message, tagger)"
+          }
+        }
+      ]
+    }
+  ]
+}

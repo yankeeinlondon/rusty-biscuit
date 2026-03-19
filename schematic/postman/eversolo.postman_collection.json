@@ -1,0 +1,543 @@
+{
+  "info": {
+    "name": "Eversolo",
+    "description": "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://192.168.1.1:9529",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "SystemSettings",
+      "item": [
+        {
+          "name": "SystemGetScreenBrightness",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/getScreenBrightness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "getScreenBrightness"
+              ]
+            },
+            "description": "Get current screen brightness level (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemSetScreenBrightness",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/setScreenBrightness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "setScreenBrightness"
+              ],
+              "query": [
+                {
+                  "key": "index",
+                  "description": "Brightness level index"
+                }
+              ]
+            },
+            "description": "Set screen brightness level (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemGetKnobBrightness",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/getKnobBrightness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "getKnobBrightness"
+              ]
+            },
+            "description": "Get current knob LED brightness level (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemSetKnobBrightness",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/setKnobBrightness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "setKnobBrightness"
+              ],
+              "query": [
+                {
+                  "key": "index",
+                  "description": "Brightness level index"
+                }
+              ]
+            },
+            "description": "Set knob LED brightness level (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemGetVuModeList",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/getVUModeList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "getVUModeList"
+              ]
+            },
+            "description": "List available VU meter display modes (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemSetVuMode",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/setVUMode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "setVUMode"
+              ],
+              "query": [
+                {
+                  "key": "index",
+                  "description": "VU mode index from getVUModeList"
+                }
+              ]
+            },
+            "description": "Set the VU meter display mode (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemGetSpectrumModeList",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/getSpPlayModeList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "getSpPlayModeList"
+              ]
+            },
+            "description": "List available spectrum display modes (community-discovered)"
+          }
+        },
+        {
+          "name": "SystemSetSpectrumMode",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/SystemSettings/displaySettings/setSpPlayModeList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "SystemSettings",
+                "displaySettings",
+                "setSpPlayModeList"
+              ],
+              "query": [
+                {
+                  "key": "index",
+                  "description": "Spectrum mode index from getSpPlayModeList"
+                }
+              ]
+            },
+            "description": "Set the spectrum display mode (community-discovered)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ZidooControlCenter",
+      "item": [
+        {
+          "name": "DeviceGetModel",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooControlCenter/getModel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooControlCenter",
+                "getModel"
+              ]
+            },
+            "description": "Get device model, firmware, and network information"
+          }
+        },
+        {
+          "name": "RemoteSendKey",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooControlCenter/RemoteControl/sendkey",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooControlCenter",
+                "RemoteControl",
+                "sendkey"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "description": "Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)"
+                }
+              ]
+            },
+            "description": "Send a remote control key command to the device"
+          }
+        },
+        {
+          "name": "RemoteInputText",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooControlCenter/RemoteControl/inputtext",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooControlCenter",
+                "RemoteControl",
+                "inputtext"
+              ],
+              "query": [
+                {
+                  "key": "text",
+                  "description": "Text string to input"
+                }
+              ]
+            },
+            "description": "Send text input to the device"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ZidooMusicControl",
+      "item": [
+        {
+          "name": "MusicGetState",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/getState",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "getState"
+              ]
+            },
+            "description": "Get current playback state, track info, and volume"
+          }
+        },
+        {
+          "name": "MusicPlayOrPause",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/playOrPause",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "playOrPause"
+              ]
+            },
+            "description": "Toggle play/pause on the current track"
+          }
+        },
+        {
+          "name": "MusicPlayNext",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/playNext",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "playNext"
+              ]
+            },
+            "description": "Skip to the next track"
+          }
+        },
+        {
+          "name": "MusicPlayLast",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/playLast",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "playLast"
+              ]
+            },
+            "description": "Go back to the previous track"
+          }
+        },
+        {
+          "name": "MusicSeekTo",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/seekTo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "seekTo"
+              ],
+              "query": [
+                {
+                  "key": "time",
+                  "description": "Target position in milliseconds"
+                }
+              ]
+            },
+            "description": "Seek to a position in the current track"
+          }
+        },
+        {
+          "name": "MusicGetInputOutputList",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/getInputAndOutputList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "getInputAndOutputList"
+              ]
+            },
+            "description": "List available audio inputs and outputs"
+          }
+        },
+        {
+          "name": "MusicSetInput",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/setInputList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "setInputList"
+              ],
+              "query": [
+                {
+                  "key": "tag",
+                  "description": "Input tag from getInputAndOutputList"
+                }
+              ]
+            },
+            "description": "Set the active audio input"
+          }
+        },
+        {
+          "name": "MusicSetOutput",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/setOutInputList",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "setOutInputList"
+              ],
+              "query": [
+                {
+                  "key": "tag",
+                  "description": "Output tag from getInputAndOutputList"
+                }
+              ]
+            },
+            "description": "Set the active audio output"
+          }
+        },
+        {
+          "name": "MusicSetVolume",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/setDevicesVolume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "setDevicesVolume"
+              ],
+              "query": [
+                {
+                  "key": "volume",
+                  "description": "Volume level (0 to maxVolume)"
+                }
+              ]
+            },
+            "description": "Set the absolute volume level"
+          }
+        },
+        {
+          "name": "MusicSetMute",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/setMuteVolume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "setMuteVolume"
+              ],
+              "query": [
+                {
+                  "key": "isMute",
+                  "description": "Mute state: 0 = unmuted, 1 = muted"
+                }
+              ]
+            },
+            "description": "Set or clear mute state"
+          }
+        },
+        {
+          "name": "PowerGetOptions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/getPowerOption",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "getPowerOption"
+              ]
+            },
+            "description": "Get available power options (shutdown, reboot, etc.)"
+          }
+        },
+        {
+          "name": "PowerSetOption",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/setPowerOption",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "setPowerOption"
+              ],
+              "query": [
+                {
+                  "key": "tag",
+                  "description": "Power option tag (poweroff, reboot, screen, timeshutdown)"
+                }
+              ]
+            },
+            "description": "Execute a power action (poweroff, reboot, screen, timeshutdown)"
+          }
+        },
+        {
+          "name": "SystemChangeVuDisplay",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ZidooMusicControl/v2/changVUDisplay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ZidooMusicControl",
+                "v2",
+                "changVUDisplay"
+              ],
+              "query": [
+                {
+                  "key": "openType",
+                  "description": "Display open type"
+                }
+              ]
+            },
+            "description": "Toggle VU display open/close (community-discovered)"
+          }
+        }
+      ]
+    }
+  ]
+}

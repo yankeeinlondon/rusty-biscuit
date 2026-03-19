@@ -1,0 +1,157 @@
+{
+  "info": {
+    "name": "Anthropic",
+    "description": "Anthropic Messages API for Claude AI interactions and agent tool use",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.anthropic.com/v1",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "value",
+        "value": "X-Api-Key"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Messages",
+      "item": [
+        {
+          "name": "CreateMessage",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "messages"
+              ]
+            },
+            "header": [
+              {
+                "key": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a message with optional tool use for agent interactions"
+          }
+        },
+        {
+          "name": "CountTokens",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/messages/count_tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "messages",
+                "count_tokens"
+              ]
+            },
+            "header": [
+              {
+                "key": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Count tokens in a message before sending"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Models",
+      "item": [
+        {
+          "name": "ListModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/models",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models"
+              ]
+            },
+            "header": [
+              {
+                "key": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ],
+            "description": "List available Claude models"
+          }
+        },
+        {
+          "name": "RetrieveModel",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/models/:model_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models",
+                ":model_id"
+              ],
+              "variable": [
+                {
+                  "key": "model_id",
+                  "value": "<model_id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "anthropic-version",
+                "value": "2023-06-01"
+              }
+            ],
+            "description": "Get information about a specific model"
+          }
+        }
+      ]
+    }
+  ]
+}

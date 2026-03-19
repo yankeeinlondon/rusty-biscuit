@@ -1,0 +1,787 @@
+{
+  "info": {
+    "name": "GitLab",
+    "description": "GitLab REST API v4 for repository, MR, issue, and release workflows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://gitlab.com/api/v4",
+      "description": "Base URL for all requests"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "value",
+        "value": "PRIVATE-TOKEN"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Groups",
+      "item": [
+        {
+          "name": "ListGroupProjects",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/groups/:id/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "projects"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "archived",
+                  "description": "Filter by archived status"
+                },
+                {
+                  "key": "visibility",
+                  "description": "Filter by visibility level"
+                },
+                {
+                  "key": "order_by",
+                  "description": "Sort field"
+                },
+                {
+                  "key": "sort",
+                  "description": "Sort direction"
+                },
+                {
+                  "key": "include_subgroups",
+                  "description": "Include projects from subgroups"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List projects in a group"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "ListRepositoryTree",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/repository/tree",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "repository",
+                "tree"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "recursive",
+                  "description": "Include files from subdirectories recursively"
+                },
+                {
+                  "key": "git_ref",
+                  "description": "Branch, tag, or commit SHA to list tree for"
+                },
+                {
+                  "key": "path",
+                  "description": "Subdirectory path to list"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List repository tree recursively (files and directories)"
+          }
+        },
+        {
+          "name": "GetRepositoryFile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/repository/files/:file_path?ref=:git_ref",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "repository",
+                "files",
+                ":file_path}?ref={git_ref"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "file_path",
+                  "value": "<file_path>"
+                },
+                {
+                  "key": "git_ref",
+                  "value": "<git_ref>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)"
+          }
+        },
+        {
+          "name": "ListMergeRequests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/merge_requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "merge_requests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by merge request state"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List merge requests with metadata"
+          }
+        },
+        {
+          "name": "GetMergeRequest",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/merge_requests/:merge_request_iid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "merge_requests",
+                ":merge_request_iid"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "merge_request_iid",
+                  "value": "<merge_request_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get a single merge request by IID"
+          }
+        },
+        {
+          "name": "ListMergeRequestCommits",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/merge_requests/:merge_request_iid/commits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "merge_requests",
+                ":merge_request_iid",
+                "commits"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "merge_request_iid",
+                  "value": "<merge_request_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List commits in a merge request"
+          }
+        },
+        {
+          "name": "ListMergeRequestChanges",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/merge_requests/:merge_request_iid/changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "merge_requests",
+                ":merge_request_iid",
+                "changes"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "merge_request_iid",
+                  "value": "<merge_request_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get merge request with file changes/diffs"
+          }
+        },
+        {
+          "name": "ListIssues",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/issues",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "issues"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "state",
+                  "description": "Filter by issue state"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List issues"
+          }
+        },
+        {
+          "name": "GetIssue",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/issues/:issue_iid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "issues",
+                ":issue_iid"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "issue_iid",
+                  "value": "<issue_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get a single issue by IID"
+          }
+        },
+        {
+          "name": "ListIssueNotes",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/issues/:issue_iid/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "issues",
+                ":issue_iid",
+                "notes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "issue_iid",
+                  "value": "<issue_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List comments/notes on an issue"
+          }
+        },
+        {
+          "name": "ListIssueParticipants",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/issues/:issue_iid/participants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "issues",
+                ":issue_iid",
+                "participants"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "issue_iid",
+                  "value": "<issue_iid>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List participants on an issue"
+          }
+        },
+        {
+          "name": "ListTags",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/repository/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "repository",
+                "tags"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List repository tags (check `release` field for release tags)"
+          }
+        },
+        {
+          "name": "GetTag",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/repository/tags/:tag_name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "repository",
+                "tags",
+                ":tag_name"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "tag_name",
+                  "value": "<tag_name>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get a single tag by name"
+          }
+        },
+        {
+          "name": "ListReleases",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/releases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "releases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List releases"
+          }
+        },
+        {
+          "name": "GetRelease",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/releases/:tag_name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "releases",
+                ":tag_name"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "tag_name",
+                  "value": "<tag_name>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get a single release by tag name"
+          }
+        },
+        {
+          "name": "GetLatestRelease",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/releases/permalink/latest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "releases",
+                "permalink",
+                "latest"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get the latest release"
+          }
+        },
+        {
+          "name": "GetProject",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get project metadata (use URL-encoded path or numeric ID)"
+          }
+        },
+        {
+          "name": "ListProjectPipelines",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/pipelines",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "pipelines"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "description": "Page number (1-indexed, default: 1)"
+                },
+                {
+                  "key": "per_page",
+                  "description": "Items per page (default: 100, max: 100)"
+                },
+                {
+                  "key": "status",
+                  "description": "Filter by pipeline status"
+                },
+                {
+                  "key": "source",
+                  "description": "Filter by pipeline source (e.g., push, merge_request_event, schedule)"
+                },
+                {
+                  "key": "git_ref",
+                  "description": "Filter by branch or tag name"
+                },
+                {
+                  "key": "sha",
+                  "description": "Filter by commit SHA"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "List CI/CD pipelines for a project"
+          }
+        }
+      ]
+    }
+  ]
+}
