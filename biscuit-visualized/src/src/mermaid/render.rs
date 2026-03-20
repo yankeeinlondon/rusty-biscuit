@@ -209,7 +209,13 @@ impl MermaidDiagram {
         let parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
             .map_err(|err| MermaidError::RenderFailed(err.to_string()))?;
 
-        let theme = self.build_theme(request.transparent_background);
+        let mut theme = self.build_theme(request.transparent_background);
+
+        // Apply %%{init: {'themeVariables': {'pie1': '#xxx', ...}}}%% overrides
+        if let Some(ref init) = parsed.init_config {
+            apply_init_theme_overrides(&mut theme, init);
+        }
+
         let layout_config = mermaid_rs_renderer::LayoutConfig::default();
         let layout = mermaid_rs_renderer::compute_layout(&parsed.graph, &theme, &layout_config);
         let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &layout_config);
@@ -282,6 +288,70 @@ impl MermaidDiagram {
     /// ```
     pub fn fallback_code_block(&self) -> String {
         format!("```mermaid\n{}\n```", self.instructions)
+    }
+}
+
+/// Applies `%%{init: {'themeVariables': {...}}}%%` overrides to the theme.
+///
+/// This handles pie slice colors (`pie1`..`pie12`) and other theme variables
+/// that `mermaid-rs-renderer`'s parser extracts but only the CLI applies.
+fn apply_init_theme_overrides(theme: &mut mermaid_rs_renderer::Theme, init: &serde_json::Value) {
+    if let Some(vars) = init.get("themeVariables") {
+        // Apply pie slice colors (pie1 through pie12)
+        for i in 0..12 {
+            let key = format!("pie{}", i + 1);
+            if let Some(color) = vars.get(&key).and_then(|v| v.as_str()) {
+                theme.pie_colors[i] = color.to_string();
+            }
+        }
+
+        // Apply other commonly used theme variables
+        if let Some(val) = vars.get("primaryColor").and_then(|v| v.as_str()) {
+            theme.primary_color = val.to_string();
+        }
+        if let Some(val) = vars.get("primaryTextColor").and_then(|v| v.as_str()) {
+            theme.primary_text_color = val.to_string();
+        }
+        if let Some(val) = vars.get("primaryBorderColor").and_then(|v| v.as_str()) {
+            theme.primary_border_color = val.to_string();
+        }
+        if let Some(val) = vars.get("lineColor").and_then(|v| v.as_str()) {
+            theme.line_color = val.to_string();
+        }
+        if let Some(val) = vars.get("secondaryColor").and_then(|v| v.as_str()) {
+            theme.secondary_color = val.to_string();
+        }
+        if let Some(val) = vars.get("tertiaryColor").and_then(|v| v.as_str()) {
+            theme.tertiary_color = val.to_string();
+        }
+        if let Some(val) = vars.get("textColor").and_then(|v| v.as_str()) {
+            theme.text_color = val.to_string();
+        }
+        if let Some(val) = vars.get("background").and_then(|v| v.as_str()) {
+            theme.background = val.to_string();
+        }
+        if let Some(val) = vars.get("fontFamily").and_then(|v| v.as_str()) {
+            theme.font_family = val.to_string();
+        }
+        if let Some(val) = vars.get("fontSize").and_then(|v| v.as_f64()) {
+            theme.font_size = val as f32;
+        }
+        // Pie-specific text colors
+        if let Some(val) = vars.get("pieTitleTextColor").and_then(|v| v.as_str()) {
+            theme.pie_title_text_color = val.to_string();
+        }
+        if let Some(val) = vars.get("pieSectionTextColor").and_then(|v| v.as_str()) {
+            theme.pie_section_text_color = val.to_string();
+        }
+        if let Some(val) = vars.get("pieLegendTextColor").and_then(|v| v.as_str()) {
+            theme.pie_legend_text_color = val.to_string();
+        }
+        if let Some(val) = vars.get("pieStrokeColor").and_then(|v| v.as_str()) {
+            theme.pie_stroke_color = val.to_string();
+        }
+        if let Some(val) = vars.get("pieOuterStrokeColor").and_then(|v| v.as_str()) {
+            theme.pie_outer_stroke_color = val.to_string();
+        }
     }
 }
 
