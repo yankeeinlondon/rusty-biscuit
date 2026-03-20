@@ -191,14 +191,14 @@ lint-fix:
     cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
 
 _lint_fix_library ERR_FILE:
-    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    @echo "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
-    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
-    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+    echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    echo "{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
+    just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
+    cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
 
 _lint_fix_cli ERR_FILE:
     @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
@@ -229,6 +229,7 @@ commit:
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
+    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit )
     @claudine opencode --prompt-file "@prompts/commit.md" --op "commit" --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
     @just _speak "git commits completed in rusty-biscuit monorepo"

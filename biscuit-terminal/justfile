@@ -193,6 +193,7 @@ lint-fix:
     @cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
 
 _lint_fix_library ERR_FILE:
+    #!/usr/bin/env bash
     @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
     @echo -e "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
     @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
@@ -231,6 +232,7 @@ commit:
     @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
+    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit )
     @claudine opencode --prompt-file "@prompts/commit.md" --op "commit" --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
     @just _speak "git commits completed in rusty-biscuit monorepo"
@@ -381,7 +383,14 @@ drift *args="":
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
     @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
-
+# update
+dirty-doc-update:
+    @echo
+    @echo -e "Updating the README documents based on changes introduced by the currently"
+    @echo -e "{{RED}}{{ITALIC}}dirty{{RESET}} files in the {{BOLD}}$(sniff package-area){{RESET}} package area."
+    @echo
+    @echo -e "{{BOLD}}Dirty Files:{{RESET}}"
+    if $(sniff dirty-files)
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
