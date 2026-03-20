@@ -56,6 +56,12 @@ pub enum RepoAction {
     StagedPackageAreas {
         filter: Option<String>,
     },
+    UnstagedPackages {
+        filter: Option<String>,
+    },
+    UnstagedPackageAreas {
+        filter: Option<String>,
+    },
     PackageRoot,
     PackageAreaRoot,
     RepoRoot,
@@ -442,6 +448,18 @@ pub enum RepoSubcommand {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Option<String>,
     },
+    /// Output only package names that have unstaged changes
+    #[command(name = "unstaged-packages")]
+    UnstagedPackages {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
+    /// Output only package area names that have unstaged changes
+    #[command(name = "unstaged-package-areas")]
+    UnstagedPackageAreas {
+        /// Filter packages by name (or @area); prefix with ! to exclude
+        filter: Option<String>,
+    },
     /// Output the root directory of the current package
     PackageRoot,
     /// Output the root directory of the current package area
@@ -708,6 +726,16 @@ impl Commands {
                 }
                 Some(RepoSubcommand::StagedPackageAreas { filter: sub_filter }) => {
                     RepoAction::StagedPackageAreas {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::UnstagedPackages { filter: sub_filter }) => {
+                    RepoAction::UnstagedPackages {
+                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                    }
+                }
+                Some(RepoSubcommand::UnstagedPackageAreas { filter: sub_filter }) => {
+                    RepoAction::UnstagedPackageAreas {
                         filter: sub_filter.clone().or_else(|| filter.clone()),
                     }
                 }

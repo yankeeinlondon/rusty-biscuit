@@ -55,6 +55,17 @@ _notify message title=PACKAGE:
         notify-send '{{message}}'
     fi
 
+
+# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
+commit:
+    @echo ""
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo ""
+    @claudine opencode --prompt-file "@prompts/commit.md" --op "commit" --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
+    @just _speak "git commits completed in rusty-biscuit monorepo"
+    @sniff git 2>/dev/null || exit 0
+
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p {{CLI}} {{args}}

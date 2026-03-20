@@ -1116,7 +1116,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdin_seed.as_deref(),
                 parser,
             )?;
-            let had_streamed_assistant = !summary.assistant_text.trim().is_empty();
+            // Codex never emits text via feed_line; its accumulated text is
+            // fallback-only, so it doesn't count as "streamed to stdout".
+            let had_streamed_assistant = provider != Provider::Codex
+                && !summary.assistant_text.trim().is_empty();
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
             }
@@ -1333,14 +1336,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             stdin_seed.as_deref(),
             parser,
         )?;
-        let had_streamed_assistant = !summary.assistant_text.trim().is_empty();
         if let Some(codex_output) = structured_codex_output.as_ref() {
             codex_output.apply_to_summary(&mut summary);
         }
-        if provider == Provider::Codex
-            && !had_streamed_assistant
-            && !summary.assistant_text.is_empty()
-        {
+        // Codex never emits assistant text live (feed_line always returns None);
+        // the authoritative text comes from --output-last-message. Write it now.
+        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
             let rendered = crate::output::render_assistant_text(&summary.assistant_text, &term);
             std::io::stdout().write_all(rendered.as_bytes())?;
             if !rendered.ends_with('\n') {

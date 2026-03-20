@@ -991,7 +991,7 @@ printf '%s' 'Final assistant response' > "$LAST"
         .args(["codex", "--model", "codex-mini", "summarize repo"])
         .assert()
         .success()
-        .stdout("Final assistant response");
+        .stdout("Final assistant response\n");
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(

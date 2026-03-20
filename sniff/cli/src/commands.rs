@@ -183,22 +183,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(ref fs) = result.filesystem
                     && let Some(ref git) = fs.git
                 {
+                    let files: Vec<_> = git
+                        .file_changes
+                        .iter()
+                        .filter(|f| match status_filter {
+                            sniff::filesystem::git::FileStatus::Staged => {
+                                f.status == sniff::filesystem::git::FileStatus::Staged
+                                    || f.status == sniff::filesystem::git::FileStatus::Both
+                            }
+                            sniff::filesystem::git::FileStatus::Modified => {
+                                f.status == sniff::filesystem::git::FileStatus::Modified
+                                    || f.status == sniff::filesystem::git::FileStatus::Both
+                            }
+                            _ => f.status == status_filter,
+                        })
+                        .collect();
+                    if files.is_empty() {
+                        std::process::exit(1);
+                    }
                     if cli.json {
-                        let files: Vec<_> = git
-                            .file_changes
-                            .iter()
-                            .filter(|f| match status_filter {
-                                sniff::filesystem::git::FileStatus::Staged => {
-                                    f.status == sniff::filesystem::git::FileStatus::Staged
-                                        || f.status == sniff::filesystem::git::FileStatus::Both
-                                }
-                                sniff::filesystem::git::FileStatus::Modified => {
-                                    f.status == sniff::filesystem::git::FileStatus::Modified
-                                        || f.status == sniff::filesystem::git::FileStatus::Both
-                                }
-                                _ => f.status == status_filter,
-                            })
-                            .collect();
                         println!("{}", serde_json::to_string_pretty(&files)?);
                     } else {
                         output::emit_text(
@@ -206,6 +209,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             cli.plain,
                         );
                     }
+                } else {
+                    std::process::exit(1);
                 }
                 return Ok(());
             }

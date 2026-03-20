@@ -157,10 +157,16 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         self.sink.on_turn_error(&meta);
     }
 
-    fn handle_agent_message_item(&mut self, item: &Value) -> Option<String> {
+    /// Accumulate agent message text for fallback use only.
+    ///
+    /// The authoritative assistant text comes from the `--output-last-message`
+    /// temp file, not from the stream. We accumulate stream text as a fallback
+    /// but do NOT return it from `feed_line` to avoid emitting it to stdout
+    /// (which would prevent the file-based text from being used).
+    fn handle_agent_message_item(&mut self, item: &Value) {
         if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
             self.assistant_text.push_str(text);
-            return Some(text.to_string());
+            return;
         }
 
         if let Some(parts) = item.get("content").and_then(|v| v.as_array()) {
@@ -170,11 +176,8 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
                 .collect::<String>();
             if !text.is_empty() {
                 self.assistant_text.push_str(&text);
-                return Some(text);
             }
         }
-
-        None
     }
 
     fn tool_meta_from_item(&self, item: &Value) -> EventMeta {
@@ -253,7 +256,8 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         if item_type == "agent_message" {
-            return self.handle_agent_message_item(item);
+            self.handle_agent_message_item(item);
+            return None;
         }
 
         if Self::is_tool_item_type(item_type) {
@@ -394,13 +398,14 @@ mod tests {
         let tc = r#"{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":100},"duration_ms":5000,"status":"completed"}"#;
         assert_eq!(parser.feed_line(tc).unwrap(), None);
 
-        // Agent message text is emitted live and accumulated in the summary.
+        // Agent message text is accumulated for fallback but NOT emitted live
+        // (authoritative text comes from --output-last-message file).
         let streamed = parser
             .feed_line(
                 r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Text from stream"}}"#,
             )
             .unwrap();
-        assert_eq!(streamed.as_deref(), Some("Text from stream"));
+        assert_eq!(streamed, None);
 
         let summary = parser.finish(0);
         assert_eq!(summary.provider, Provider::Codex);
@@ -417,14 +422,17 @@ mod tests {
     }
 
     #[test]
-    fn stream_returns_text_for_agent_messages() {
+    fn stream_accumulates_text_without_emitting() {
         let mut parser = make_parser();
         let result = parser
             .feed_line(
-                r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"should not appear"}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"accumulated only"}}"#,
             )
             .unwrap();
-        assert_eq!(result.as_deref(), Some("should not appear"));
+        // Text is accumulated for fallback but not returned for live emission
+        assert_eq!(result, None);
+        let summary = parser.finish(0);
+        assert_eq!(summary.assistant_text, "accumulated only");
     }
 
     #[test]

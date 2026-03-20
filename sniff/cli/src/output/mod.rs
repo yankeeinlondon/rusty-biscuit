@@ -33,6 +33,7 @@ pub(crate) use filesystem::{
     render_repo_deps_visual, render_repo_package, render_repo_package_area,
     render_repo_package_area_root, render_repo_package_root, render_repo_packages,
     render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
+    render_unstaged_package_areas, render_unstaged_packages,
 };
 pub(crate) use hardware::{
     render_audio_devices_section, render_cpu_section, render_gpu_section, render_hardware_section,
@@ -379,11 +380,17 @@ pub fn render_text(
                 }
                 Some(RepoAction::DirtyPackages { filter }) => {
                     let rendered = render_dirty_packages(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
                 Some(RepoAction::DirtyPackageAreas { filter }) => {
                     let rendered = render_dirty_package_areas(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
@@ -397,6 +404,22 @@ pub fn render_text(
                 }
                 Some(RepoAction::StagedPackageAreas { filter }) => {
                     let rendered = render_staged_package_areas(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
+                }
+                Some(RepoAction::UnstagedPackages { filter }) => {
+                    let rendered = render_unstaged_packages(result, filter.as_deref());
+                    if rendered.is_empty() {
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                    out.push('\n');
+                }
+                Some(RepoAction::UnstagedPackageAreas { filter }) => {
+                    let rendered = render_unstaged_package_areas(result, filter.as_deref());
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }

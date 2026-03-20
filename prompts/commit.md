@@ -62,6 +62,8 @@ Your task is to:
 3. evaluate all the _staged_ files in this monorepo,
 4. organize the work into **semantic groups**
    - each group will have an "operation" and "scope" in addition to the set of files representing the group
+   - every group must have a minimum of 1 file associated to it 
+   - a file can only be in one group
 5. act as an orchestrator and concurrently execute a subagent for every semantic group:
    - provide the subagent the grouped files and the delta's in these files
    - provide the subagent the "operation" and "scope" (including no scope if that's the determination)

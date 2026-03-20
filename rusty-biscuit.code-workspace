@@ -25,6 +25,10 @@
             "path": "biscuit-file"
         },
         {
+            "name": "biscuit-clipboard",
+            "path": "biscuit-clipboard"
+        },
+        {
             "name": "biscuit-hash",
             "path": "biscuit-hash"
         },
@@ -33,16 +37,16 @@
             "path": "biscuit-location"
         },
         {
-            "name": "biscuit-visualized",
-            "path": "biscuit-visualized"
-        },
-        {
             "name": "biscuit-speaks",
             "path": "biscuit-speaks"
         },
         {
             "name": "biscuit-terminal",
             "path": "biscuit-terminal"
+        },
+        {
+            "name": "biscuit-visualized",
+            "path": "biscuit-visualized"
         },
         {
             "name": "claudine",
