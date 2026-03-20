@@ -137,14 +137,14 @@ lint *args="":
 # install latest release version of CLI
 install *args="":
     @echo ""
-    @echo "{{BOLD}}Building Sniff Library{{RESET}}"
+    @echo -e "{{BOLD}}Building Sniff Library{{RESET}}"
     @cargo build --release -p sniff  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Sniff CLI{{RESET}}"
+    @echo -e "{{BOLD}}{{YELLOW}}Installing Sniff CLI{{RESET}}"
     @cargo build --release -p sniff-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
     @cargo install --path cli -- {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo "{{BOLD}}{{BLUE}}Sniff CLI Installed{{RESET}}"
+    @echo -e "{{BOLD}}{{BLUE}}Sniff CLI Installed{{RESET}}"
     @echo ""
     @playa effect drop-4 2>/dev/null || exit 0
 
