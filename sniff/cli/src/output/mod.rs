@@ -6,6 +6,7 @@
 
 mod filesystem;
 mod hardware;
+mod just;
 mod network;
 mod os;
 mod programs;
@@ -20,6 +21,7 @@ use sniff::SniffResult;
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
 pub use filesystem::{render_git_file_list, render_git_section, render_hash_section};
+pub use just::render_just_text;
 pub use programs::{print_programs_json, render_programs_markdown};
 pub use remote::{print_remote_json, render_remote_text};
 pub use services::{print_services_json, render_services_text};
@@ -98,6 +100,8 @@ pub enum OutputFilter {
     AiClients,
     /// Show only system services (init system and service list)
     Services,
+    /// Show justfiles and their recipes
+    Just,
 }
 
 // ============================================================================
@@ -539,8 +543,9 @@ pub fn render_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
-            unreachable!("Programs, Services, and Remote filters should be handled separately")
+        | OutputFilter::Services
+        | OutputFilter::Just => {
+            unreachable!("Programs, Services, Just, and Remote filters should be handled separately")
         }
     }
 
@@ -676,7 +681,7 @@ fn apply_filter_to_json(
                 json!([])
             }
         }
-        // Programs and Services filters are handled separately
+        // Programs, Services, and Just filters are handled separately
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -686,8 +691,9 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
-            unreachable!("Programs and Services filters should be handled separately")
+        | OutputFilter::Services
+        | OutputFilter::Just => {
+            unreachable!("Programs, Services, and Just filters should be handled separately")
         }
     }
 }

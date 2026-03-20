@@ -75,6 +75,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
 
+        // Handle just mode separately (doesn't use SniffResult)
+        if let Commands::Just { filter } = cmd {
+            let base = cli
+                .base
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+            let justfiles = sniff::filesystem::detect_justfiles(&base, filter)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&justfiles)?);
+            } else {
+                let rendered = output::render_just_text(&justfiles, cli.verbose);
+                output::emit_text(&rendered, cli.plain);
+            }
+            return Ok(());
+        }
+
         // Handle services mode separately (doesn't use SniffResult)
         if let Some(state_arg) = cmd.state() {
             let services_info = detect_services();
@@ -290,8 +306,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
-            unreachable!("Programs and Services mode should be handled before this point")
+        | OutputFilter::Services
+        | OutputFilter::Just => {
+            unreachable!("Programs, Services, and Just mode should be handled before this point")
         }
     }
 

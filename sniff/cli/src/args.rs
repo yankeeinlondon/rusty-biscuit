@@ -349,6 +349,12 @@ pub enum Commands {
         #[arg(long, value_enum, default_value = "running")]
         state: ServiceStateArg,
     },
+
+    /// Detect justfiles and their recipes
+    Just {
+        /// Filter justfiles by path substring (OR logic: matches any filter)
+        filter: Vec<String>,
+    },
 }
 
 /// Repo-specific subcommands.
@@ -500,6 +506,7 @@ impl Commands {
             Commands::Audio { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
+            Commands::Just { .. } => OutputFilter::Just,
         }
     }
 
@@ -860,6 +867,10 @@ Commands:
 
   Services:
     sniff services        Show running services
+
+  Justfiles:
+    sniff just            Detect justfiles and recipes
+    sniff just sniff      Filter to justfiles with \"sniff\" in their path
 
   Discovery:
     sniff topics          Show all subsection topics
