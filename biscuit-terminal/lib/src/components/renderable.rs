@@ -27,6 +27,9 @@ pub trait Renderable: std::fmt::Debug + Any {
     ///
     /// `term_width` provides the terminal width in columns.
     /// When `None`, the component uses 80 columns.
+    ///
+    /// **NOTE:** you should always use `render()` over `render_optimistic()`
+    /// unless there is a good reason not to.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
@@ -34,6 +37,9 @@ pub trait Renderable: std::fmt::Debug + Any {
     }
 
     /// Render with all capabilities copied from `term` but a fixed width override.
+    ///
+    /// **NOTE:** you should always use `render()` over `render_in_width()`
+    /// unless there is a good reason not to.
     fn render_in_width(&self, term: &Terminal, width: u32) -> String {
         let mut term_with_width = Terminal::from(term);
         term_with_width.fixed_width = Some(width);

@@ -8,8 +8,10 @@ pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOp
 pub use crate::components::inline_content::InlineContent;
 pub use crate::components::list::{OrderedList, UnorderedList};
 pub use crate::components::mermaid::{
-    MermaidConfig, MermaidRenderError, MermaidRenderer, MermaidTheme, QuadrantTheme,
+    MermaidConfig, MermaidDiagram, MermaidRenderError, MermaidRenderResult, MermaidTheme,
+    QuadrantTheme,
 };
+pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
 pub use crate::components::renderable::{Renderable, RenderableContent};

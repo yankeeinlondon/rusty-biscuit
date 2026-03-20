@@ -1,24 +1,30 @@
 //! Mermaid diagram rendering for terminals.
 //!
-//! This module provides a thin adapter over `biscuit-visualized` for rendering
-//! Mermaid diagrams in the terminal. It delegates rendering to `biscuit-visualized`
-//! and adds terminal-specific display logic using `viuer`.
+//! This module provides [`MermaidDiagram`], a composable [`Renderable`] component
+//! for rendering Mermaid diagrams inline in the terminal. It delegates rendering
+//! to `biscuit-visualized` and displays via the terminal's image protocol.
 //!
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use biscuit_terminal::components::mermaid::MermaidRenderer;
+//! use biscuit_terminal::components::mermaid::MermaidDiagram;
+//! use biscuit_terminal::terminal::Terminal;
 //!
-//! fn example() -> Result<(), biscuit_terminal::components::mermaid::MermaidRenderError> {
-//!     let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-//!     renderer.render_for_terminal()?;
-//!     Ok(())
+//! let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+//! let term = Terminal::new();
+//!
+//! // Fallible path with metadata
+//! match diagram.try_render(&term) {
+//!     Ok(result) => print!("{}", result.output),
+//!     Err(e) => eprintln!("Render failed: {}", e),
 //! }
 //! ```
 
 use std::path::PathBuf;
 
 use thiserror::Error;
+
+use crate::components::renderable::Renderable;
 
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
@@ -82,8 +88,14 @@ pub enum MermaidRenderError {
 /// - **Windows Terminal** - Limited support
 ///
 /// On incompatible terminals, use `fallback_code_block()` for plain text output.
+///
+/// ## Note
+///
+/// For composable rendering, prefer [`MermaidDiagram`] which implements
+/// [`Renderable`] and provides proper error handling via
+/// [`try_render()`](MermaidDiagram::try_render).
 #[derive(Debug, Clone)]
-pub struct MermaidRenderer {
+pub(crate) struct MermaidRenderer {
     /// The inner diagram from biscuit-visualized
     diagram: biscuit_visualized::mermaid::MermaidDiagram,
     /// Scale factor for output resolution (default: 2)
@@ -262,82 +274,6 @@ impl MermaidRenderer {
         self.diagram.fallback_code_block()
     }
 
-    /// Prints the fallback code block to stdout.
-    ///
-    /// This is a convenience method for when terminal rendering fails.
-    pub fn print_fallback(&self) {
-        println!("{}", self.fallback_code_block());
-    }
-
-    /// Checks if the current terminal supports image rendering.
-    ///
-    /// Returns `true` if either Kitty or iTerm2 image protocols are supported.
-    pub fn terminal_supports_images() -> bool {
-        use crate::discovery::detection::ImageSupport;
-        use crate::terminal::Terminal;
-
-        let term = Terminal::new();
-        !matches!(term.image_support, ImageSupport::None)
-    }
-
-    /// Renders the diagram to the terminal.
-    ///
-    /// This method:
-    /// 1. Checks if the terminal supports image rendering
-    /// 2. Renders the diagram to PNG using biscuit-visualized
-    /// 3. Displays the PNG using viuer
-    ///
-    /// ## Errors
-    ///
-    /// Returns `MermaidRenderError` if:
-    /// - Terminal doesn't support image rendering
-    /// - Diagram rendering fails (invalid syntax, etc.)
-    /// - Image display fails
-    ///
-    /// ## Examples
-    ///
-    /// ```rust,no_run
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
-    ///
-    /// fn example() -> Result<(), biscuit_terminal::components::mermaid::MermaidRenderError> {
-    ///     let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-    ///     renderer.render_for_terminal()?;
-    ///     Ok(())
-    /// }
-    /// ```
-    #[tracing::instrument(skip(self))]
-    pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
-        // Check terminal support
-        if !Self::terminal_supports_images() {
-            tracing::debug!("Terminal does not support image rendering");
-            return Err(MermaidRenderError::NoImageSupport);
-        }
-
-        // Render to PNG using biscuit-visualized
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Png,
-            scale: self.scale,
-            transparent_background: self.transparent_background,
-        };
-
-        let artifact = self.diagram.render(&request)?;
-
-        tracing::info!(path = ?artifact.path, cache_hit = artifact.cache_hit, "Rendered diagram");
-
-        // Display with viuer
-        let config = viuer::Config {
-            absolute_offset: false,
-            ..Default::default()
-        };
-
-        viuer::print_from_file(&artifact.path, &config)
-            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?;
-
-        tracing::debug!("Displayed diagram in terminal");
-
-        Ok(())
-    }
-
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
     /// This method renders the diagram using biscuit-visualized's caching system.
@@ -390,6 +326,243 @@ impl From<&str> for MermaidRenderer {
     }
 }
 
+/// A composable Mermaid diagram that implements [`Renderable`].
+///
+/// `MermaidDiagram` wraps [`MermaidRenderer`] and makes diagrams usable
+/// anywhere a `Renderable` is expected — inside `Section`, `Compose`,
+/// lists, or any other container component.
+///
+/// The render pipeline is:
+/// 1. Render Mermaid instructions to a cached PNG via `MermaidRenderer`
+/// 2. Load the PNG into a [`TerminalImage`]
+/// 3. Render the image inline using the terminal's image protocol
+///
+/// When image rendering is unavailable (no terminal support, render
+/// failure, etc.) the component falls back to a fenced code block
+/// of the Mermaid source.
+///
+/// ## Examples
+///
+/// ```rust
+/// use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
+/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::terminal_image::ImageWidth;
+///
+/// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
+///     .with_theme(MermaidTheme::Forest)
+///     .with_title("My Flow")
+///     .with_width(ImageWidth::Percent(0.6));
+///
+/// // Use in any Renderable context
+/// let term = biscuit_terminal::terminal::Terminal::default();
+/// let output = diagram.render(&term);
+/// ```
+#[derive(Debug, Clone)]
+pub struct MermaidDiagram {
+    renderer: MermaidRenderer,
+    width: super::terminal_image::ImageWidth,
+    layout: crate::utils::layout::Layout,
+}
+
+impl MermaidDiagram {
+    /// Creates a new `MermaidDiagram` with the given Mermaid instructions.
+    ///
+    /// Automatically configures theme based on terminal color mode and
+    /// uses a transparent background. Default width is 50%.
+    pub fn new<S: Into<String>>(instructions: S) -> Self {
+        Self {
+            renderer: MermaidRenderer::for_terminal(instructions),
+            width: super::terminal_image::ImageWidth::Percent(0.5),
+            layout: crate::utils::layout::Layout::default(),
+        }
+    }
+
+    /// Sets the display width for the rendered image.
+    pub fn with_width(mut self, width: super::terminal_image::ImageWidth) -> Self {
+        self.width = width;
+        self
+    }
+
+    /// Sets the Mermaid theme.
+    pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
+        self.renderer = self.renderer.with_theme(theme);
+        self
+    }
+
+    /// Sets the diagram title.
+    pub fn with_title<S: Into<String>>(mut self, title: S) -> Self {
+        self.renderer = self.renderer.with_title(title);
+        self
+    }
+
+    /// Sets the Mermaid configuration.
+    pub fn with_config(mut self, config: MermaidConfig) -> Self {
+        self.renderer = self.renderer.with_config(config);
+        self
+    }
+
+    /// Sets the render scale factor (default: 2).
+    pub fn with_scale(mut self, scale: u32) -> Self {
+        self.renderer = self.renderer.with_scale(scale);
+        self
+    }
+
+    /// Enables or disables transparent background.
+    pub fn with_transparent_background(mut self, transparent: bool) -> Self {
+        self.renderer = self.renderer.with_transparent_background(transparent);
+        self
+    }
+
+    /// Uses inverted colors (solid background with opposite theme).
+    pub fn inverted(mut self, is_dark_mode: bool) -> Self {
+        let theme = MermaidTheme::for_color_mode(is_dark_mode).inverse();
+        self.renderer = self.renderer.with_theme(theme).with_transparent_background(false);
+        self
+    }
+
+    /// Returns the underlying Mermaid instructions.
+    pub fn instructions(&self) -> &str {
+        self.renderer.instructions()
+    }
+
+    /// Returns the fallback code block for the diagram.
+    pub fn fallback_code_block(&self) -> String {
+        self.renderer.fallback_code_block()
+    }
+
+    /// Renders the diagram to a terminal-displayable string.
+    ///
+    /// This is the **fallible** render path. Use this when you need to
+    /// handle errors explicitly rather than silently falling back.
+    ///
+    /// ## Returns
+    ///
+    /// On success, returns a [`MermaidRenderResult`] containing the rendered
+    /// output string along with metadata (PNG path, cache hit status).
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MermaidRenderError`] if:
+    /// - The Mermaid instructions fail to render (invalid syntax, etc.)
+    /// - The PNG file cannot be loaded as a terminal image
+    /// - The terminal does not support inline images
+    ///
+    /// ## Examples
+    ///
+    /// ```rust,no_run
+    /// use biscuit_terminal::components::mermaid::MermaidDiagram;
+    /// use biscuit_terminal::terminal::Terminal;
+    ///
+    /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+    /// let term = Terminal::new();
+    /// match diagram.try_render(&term) {
+    ///     Ok(result) => {
+    ///         print!("{}", result.output);
+    ///         eprintln!("cache hit: {}", result.cache_hit);
+    ///     }
+    ///     Err(e) => {
+    ///         eprintln!("Render failed: {}", e);
+    ///         println!("{}", diagram.fallback_code_block());
+    ///     }
+    /// }
+    /// ```
+    pub fn try_render(&self, term: &crate::terminal::Terminal) -> Result<MermaidRenderResult, MermaidRenderError> {
+        let (output, png_path, cache_hit) = self.render_to_image(term)?;
+        let output = self.layout.apply_layout(&output, term.width());
+
+        Ok(MermaidRenderResult {
+            output,
+            png_path,
+            cache_hit,
+        })
+    }
+
+    /// Renders the diagram to a terminal image string without layout applied.
+    ///
+    /// Returns the raw image output on success, or the fallback code block
+    /// on failure.
+    fn render_raw(&self, term: &crate::terminal::Terminal) -> String {
+        match self.render_to_image(term) {
+            Ok((output, _, _)) => output,
+            Err(_) => self.renderer.fallback_code_block(),
+        }
+    }
+
+    /// Core render pipeline: Mermaid → PNG → terminal image string.
+    ///
+    /// Returns `(output, png_path, cache_hit)` on success.
+    fn render_to_image(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<(String, PathBuf, bool), MermaidRenderError> {
+        let (png_path, cache_hit) = self.renderer.render_to_cached_png()?;
+
+        let term_image = super::terminal_image::TerminalImage::new(&png_path)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
+            .with_width(self.width.clone());
+
+        let output = term_image.render(term);
+        if output.is_empty() {
+            return Err(MermaidRenderError::NoImageSupport);
+        }
+
+        Ok((output, png_path, cache_hit))
+    }
+}
+
+/// Successful render result from [`MermaidDiagram::try_render()`].
+#[derive(Debug, Clone)]
+pub struct MermaidRenderResult {
+    /// The rendered terminal output string.
+    pub output: String,
+    /// Path to the cached PNG file.
+    pub png_path: PathBuf,
+    /// Whether the PNG was served from cache.
+    pub cache_hit: bool,
+}
+
+impl super::renderable::Renderable for MermaidDiagram {
+    fn render(&self, term: &crate::terminal::Terminal) -> String {
+        let content = self.render_raw(term);
+        self.layout.apply_layout(&content, term.width())
+    }
+
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        let term = crate::terminal::Terminal::new_optimistic(width);
+        let content = self.render_raw(&term);
+        self.layout.apply_layout(&content, width)
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn layout(&self) -> &crate::utils::layout::Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut crate::utils::layout::Layout {
+        &mut self.layout
+    }
+}
+
+impl From<String> for MermaidDiagram {
+    fn from(instructions: String) -> Self {
+        Self::new(instructions)
+    }
+}
+
+impl From<&str> for MermaidDiagram {
+    fn from(instructions: &str) -> Self {
+        Self::new(instructions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,4 +608,52 @@ mod tests {
         assert!(output.ends_with("\n```"));
         assert!(output.contains("A --> B"));
     }
+
+    // ── MermaidDiagram tests ──────────────────────────────────
+
+    #[test]
+    fn diagram_new_preserves_instructions() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+        assert_eq!(diagram.instructions(), "flowchart LR\n    A --> B");
+    }
+
+    #[test]
+    fn diagram_from_string() {
+        let diagram = MermaidDiagram::from("pie\n    Dogs: 50".to_string());
+        assert_eq!(diagram.instructions(), "pie\n    Dogs: 50");
+    }
+
+    #[test]
+    fn diagram_from_str() {
+        let diagram = MermaidDiagram::from("pie\n    Dogs: 50");
+        assert_eq!(diagram.instructions(), "pie\n    Dogs: 50");
+    }
+
+    #[test]
+    fn diagram_builder_methods_chain() {
+        use crate::components::terminal_image::ImageWidth;
+
+        let diagram = MermaidDiagram::new("flowchart LR\n    X --> Y")
+            .with_title("Test")
+            .with_theme(MermaidTheme::Neutral)
+            .with_width(ImageWidth::Percent(0.75))
+            .with_scale(3)
+            .with_transparent_background(false);
+        assert_eq!(diagram.instructions(), "flowchart LR\n    X --> Y");
+    }
+
+    #[test]
+    fn diagram_is_block_level() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+        assert!(diagram.is_block_level());
+    }
+
+    #[test]
+    fn diagram_clone() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+            .with_title("Clone Test");
+        let cloned = diagram.clone();
+        assert_eq!(diagram.instructions(), cloned.instructions());
+    }
+
 }
