@@ -1168,9 +1168,77 @@ pub enum Command {
         layout: LayoutArgs,
     },
 
+    /// Pad text on the left to a minimum width
+    ///
+    /// Right-aligns content by prepending spaces so the output is at least
+    /// WIDTH characters wide. With --truncate, the output is exactly WIDTH
+    /// characters (excess is trimmed from the left).
+    #[command(
+        name = "padleft",
+        display_order = 14,
+        after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Pad to 20 characters:
+    bt padleft 20 \"hello\"
+
+  Exact width (truncate long content):
+    bt padleft 10 --truncate \"hello world\"
+
+  With Prose styling:
+    bt padleft 20 \"<bold>Name</bold>\"
+"
+    )]
+    PadLeft {
+        /// Minimum (or exact with --truncate) output width in characters
+        #[arg(value_name = "WIDTH")]
+        width: u32,
+
+        /// Content to pad (supports {{tokens}} and <block>tags</block>)
+        #[arg(value_name = "TEXT")]
+        text: Vec<String>,
+
+        /// Truncate to exactly WIDTH characters (trim from the left)
+        #[arg(long)]
+        truncate: bool,
+    },
+
+    /// Pad text on the right to a minimum width
+    ///
+    /// Left-aligns content by appending spaces so the output is at least
+    /// WIDTH characters wide. With --truncate, the output is exactly WIDTH
+    /// characters (excess is trimmed from the right).
+    #[command(
+        name = "padright",
+        display_order = 14,
+        after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Pad to 20 characters:
+    bt padright 20 \"hello\"
+
+  Exact width (truncate long content):
+    bt padright 10 --truncate \"hello world\"
+
+  With Prose styling:
+    bt padright 20 \"<bold>Name</bold>\"
+"
+    )]
+    PadRight {
+        /// Minimum (or exact with --truncate) output width in characters
+        #[arg(value_name = "WIDTH")]
+        width: u32,
+
+        /// Content to pad (supports {{tokens}} and <block>tags</block>)
+        #[arg(value_name = "TEXT")]
+        text: Vec<String>,
+
+        /// Truncate to exactly WIDTH characters (trim from the right)
+        #[arg(long)]
+        truncate: bool,
+    },
+
     /// Render two columns of text side by side
     #[command(
-        display_order = 14,
+        display_order = 15,
         after_long_help = r#"
 [1m[4mExamples:[0m
   Basic columns:

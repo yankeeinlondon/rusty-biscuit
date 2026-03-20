@@ -12,7 +12,7 @@ use std::path::Path;
 #[allow(unused_imports)] // layout is re-exported via `use crate::*` for args.rs
 use biscuit_terminal::{
     components::{
-        mermaid::{MermaidRenderer, QuadrantTheme},
+        mermaid::QuadrantTheme,
         renderable::Renderable,
         terminal_image::{ImageWidth, parse_filepath_and_width},
         two_column::TwoColumn,
@@ -379,6 +379,20 @@ fn main() -> color_eyre::Result<()> {
                 relationships,
                 args.json,
             );
+        }
+        Some(Command::PadLeft {
+            width,
+            ref text,
+            truncate,
+        }) => {
+            return render_pad_left(text, width, truncate);
+        }
+        Some(Command::PadRight {
+            width,
+            ref text,
+            truncate,
+        }) => {
+            return render_pad_right(text, width, truncate);
         }
         Some(Command::Prose {
             ref content,

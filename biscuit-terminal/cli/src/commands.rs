@@ -258,51 +258,75 @@ const FLOWCHART_EXAMPLE: &[&str] = &[
 ];
 const FLOWCHART_EXAMPLE_CMD: &str = r#"bt flowchart "A[Start] --> B{Decision}" "B -->|Yes| C[Success]" "B -->|No| D[Retry]" "D --> B""#;
 
-/// General helper for displaying diagrams (Mermaid or Graph).
+/// Build a [`MermaidDiagram`] from instructions, applying common CLI options.
 ///
-/// This helper function:
-/// 1. Displays the cached PNG in the terminal
-/// 2. Optionally outputs metadata to stderr
-///
-/// This is used internally by `display_mermaid_diagram()`.
-fn display_diagram(
-    png_path: std::path::PathBuf,
-    cache_hit: bool,
-    render_time_ms: u64,
+/// Handles inverse mode, width parsing, and layout application.
+pub fn build_mermaid_diagram(
+    instructions: &str,
+    inverse: bool,
     width: Option<&str>,
+    layout: &LayoutArgs,
+) -> color_eyre::Result<biscuit_terminal::components::mermaid::MermaidDiagram> {
+    use biscuit_terminal::components::mermaid::MermaidDiagram;
+
+    let mut diagram = if inverse {
+        MermaidDiagram::new(instructions).inverted(is_dark_mode())
+    } else {
+        MermaidDiagram::new(instructions)
+    };
+
+    // Apply width
+    if let Some(w) = width {
+        let image_width = parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+        diagram = diagram.with_width(image_width);
+    }
+
+    // Apply layout
+    apply_renderable_layout(&mut diagram, layout);
+
+    Ok(diagram)
+}
+
+/// Display a [`MermaidDiagram`] and optionally output metadata.
+///
+/// Uses [`MermaidDiagram::try_render()`] for proper error reporting.
+pub fn display_mermaid(
+    diagram: &biscuit_terminal::components::mermaid::MermaidDiagram,
+    instructions: &str,
+    diagram_type: &str,
     layout: &LayoutArgs,
     meta: bool,
 ) -> color_eyre::Result<()> {
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+    let terminal = Terminal::new();
+
+    let result = match diagram.try_render(&terminal) {
+        Ok(result) => result,
+        Err(e) => {
+            return handle_mermaid_error(e, instructions, diagram_type);
+        }
     };
 
-    // Use TerminalImage to display
-    let terminal = Terminal::new();
-    let mut term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    // Apply margin and alignment overrides
-    apply_image_layout(&mut term_image, layout);
+    let render_time_ms = start_time.elapsed().as_millis() as u64;
 
     // Top margin
     for _ in 0..layout.margin_top.unwrap_or(0) {
         println!();
     }
 
-    let output = term_image.render(&terminal);
-    emit_image_output(&output)?;
+    emit_image_output(&result.output)?;
 
     // Output metadata if requested
     if meta {
-        let file_size_bytes = std::fs::metadata(&png_path).map(|m| m.len()).unwrap_or(0);
+        let file_size_bytes = std::fs::metadata(&result.png_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
 
         let render_meta = RenderMeta {
-            filename: png_path.to_string_lossy().to_string(),
-            cache_hit,
+            filename: result.png_path.to_string_lossy().to_string(),
+            cache_hit: result.cache_hit,
             file_size_bytes,
             render_time_ms,
         };
@@ -319,39 +343,6 @@ fn display_diagram(
     settle_terminal();
 
     Ok(())
-}
-
-/// Display a mermaid diagram and optionally output metadata.
-///
-/// This helper function:
-/// 1. Renders the diagram using the cached renderer
-/// 2. Displays it in the terminal
-/// 3. Optionally outputs metadata to stderr
-///
-/// Returns the render metadata (path, cache_hit, file_size, render_time) for further use.
-pub fn display_mermaid_diagram(
-    renderer: &MermaidRenderer,
-    instructions: &str,
-    diagram_type: &str,
-    width: Option<&str>,
-    layout: &LayoutArgs,
-    meta: bool,
-) -> color_eyre::Result<()> {
-    use std::time::Instant;
-
-    let start_time = Instant::now();
-
-    // Render the diagram to a cached PNG file
-    let (png_path, cache_hit) = match renderer.render_to_cached_png() {
-        Ok((path, hit)) => (path, hit),
-        Err(e) => {
-            return handle_mermaid_error(e, instructions, diagram_type);
-        }
-    };
-
-    let render_time_ms = start_time.elapsed().as_millis() as u64;
-
-    display_diagram(png_path, cache_hit, render_time_ms, width, layout, meta)
 }
 
 /// Render a flowchart to the terminal.
@@ -371,7 +362,6 @@ pub fn render_flowchart(
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -410,20 +400,9 @@ pub fn render_flowchart(
         return Ok(());
     }
 
-    // Configure renderer based on inverse flag
-    let renderer = if inverse {
-        // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        // Default: transparent background with theme matching terminal
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "flowchart", width, layout, meta)?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "flowchart", layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -472,7 +451,7 @@ pub fn render_quadrant(
     points: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::{MermaidConfig, MermaidTheme};
+    use biscuit_terminal::components::mermaid::MermaidConfig;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -586,28 +565,9 @@ pub fn render_quadrant(
         cfg
     };
 
-    // Configure renderer based on inverse flag, applying config for point styling
-    let renderer = if inverse {
-        // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-            .with_config(config)
-    } else {
-        // Default: transparent background with theme matching terminal
-        MermaidRenderer::for_terminal(&instructions).with_config(config)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(
-        &renderer,
-        &instructions,
-        "quadrant chart",
-        width,
-        layout,
-        meta,
-    )?;
+    // Build and display the diagram with config
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?.with_config(config);
+    display_mermaid(&diagram, &instructions, "quadrant chart", layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -822,7 +782,6 @@ pub fn render_pie_chart(
     data: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -889,20 +848,9 @@ pub fn render_pie_chart(
         return Ok(());
     }
 
-    // Configure renderer based on inverse flag
-    let renderer = if inverse {
-        // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        // Default: transparent background with theme matching terminal
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "pie chart", width, layout, meta)?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "pie chart", layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -942,7 +890,6 @@ pub fn render_git_graph(
     commands: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -979,20 +926,9 @@ pub fn render_git_graph(
         return Ok(());
     }
 
-    // Configure renderer based on inverse flag
-    let renderer = if inverse {
-        // Inverse: solid background with opposite theme
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        // Default: transparent background with theme matching terminal
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "git-graph", width, layout, meta)?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "git-graph", layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1039,7 +975,6 @@ pub fn render_xy_chart(
     data: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1180,22 +1115,13 @@ pub fn render_xy_chart(
         return Ok(());
     }
 
-    // Configure renderer based on inverse flag
-    let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
     let chart_name = match chart_type {
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",
     };
-    display_mermaid_diagram(&renderer, &instructions, chart_name, width, layout, meta)?;
+    display_mermaid(&diagram, &instructions, chart_name, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1279,7 +1205,6 @@ pub fn render_timeline(
     events: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1353,18 +1278,9 @@ pub fn render_timeline(
         return Ok(());
     }
 
-    // Configure renderer
-    let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "timeline", width, layout, meta)?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "timeline", layout, meta)?;
 
     if example {
         print_example_command(TIMELINE_EXAMPLE_CMD);
@@ -1396,7 +1312,6 @@ pub fn render_state_diagram(
     transitions: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1445,25 +1360,9 @@ pub fn render_state_diagram(
         return Ok(());
     }
 
-    // Configure renderer
-    let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(
-        &renderer,
-        &instructions,
-        "state diagram",
-        width,
-        layout,
-        meta,
-    )?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "state diagram", layout, meta)?;
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
@@ -1598,7 +1497,6 @@ pub fn render_erd(
     relationships: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
-    use biscuit_terminal::components::mermaid::MermaidTheme;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1659,18 +1557,9 @@ pub fn render_erd(
         return Ok(());
     }
 
-    // Configure renderer
-    let renderer = if inverse {
-        let theme = MermaidTheme::for_color_mode(is_dark_mode()).inverse();
-        MermaidRenderer::new(&instructions)
-            .with_theme(theme)
-            .with_transparent_background(false)
-    } else {
-        MermaidRenderer::for_terminal(&instructions)
-    };
-
-    // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "ERD", width, layout, meta)?;
+    // Build and display the diagram
+    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    display_mermaid(&diagram, &instructions, "ERD", layout, meta)?;
 
     if example {
         print_example_command(ERD_EXAMPLE_CMD);
@@ -1781,6 +1670,54 @@ pub fn render_prose(
         println!("{}", output);
         Ok(())
     })
+}
+
+/// Pad text on the left (right-align) to a minimum width.
+pub fn render_pad_left(text: &[String], width: u32, truncate: bool) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::pad::PadLeft;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+
+    let content = text.join(" ");
+    if content.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No content provided. Usage: bt padleft 20 \"hello\""
+        ));
+    }
+
+    let prose = Prose::new(&content);
+    let mut pad = PadLeft::new(prose, width);
+    if truncate {
+        pad = pad.truncate();
+    }
+
+    let term = Terminal::new();
+    println!("{}", pad.render(&term));
+    Ok(())
+}
+
+/// Pad text on the right (left-align) to a minimum width.
+pub fn render_pad_right(text: &[String], width: u32, truncate: bool) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::pad::PadRight;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+
+    let content = text.join(" ");
+    if content.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No content provided. Usage: bt padright 20 \"hello\""
+        ));
+    }
+
+    let prose = Prose::new(&content);
+    let mut pad = PadRight::new(prose, width);
+    if truncate {
+        pad = pad.truncate();
+    }
+
+    let term = Terminal::new();
+    println!("{}", pad.render(&term));
+    Ok(())
 }
 
 /// Render prose content inside a block quote.
