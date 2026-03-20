@@ -267,7 +267,7 @@ impl Renderable for OrderedList {
 /// An **UnorderedList** contains a list of renderable items
 /// which will be rendered into an **unordered** (bullet-point) list.
 ///
-/// Each item is prefixed with a bullet character (default: `• `) and
+/// Each item is prefixed with a bullet character (default: `- `) and
 /// supports proper word-wrapping with hanging indentation so that
 /// continuation lines align with the start of the item text.
 ///
@@ -279,9 +279,9 @@ impl Renderable for OrderedList {
 /// // Create from a vec of strings
 /// let list = UnorderedList::new(vec!["First item", "Second item", "Third item"]);
 /// // Renders as:
-/// // • First item
-/// // • Second item
-/// // • Third item
+/// // - First item
+/// // - Second item
+/// // - Third item
 ///
 /// // Build incrementally with add()
 /// let mut list = UnorderedList::empty();
@@ -289,7 +289,7 @@ impl Renderable for OrderedList {
 ///
 /// // Custom bullet character
 /// let list = UnorderedList::new(vec!["Option A", "Option B", "Option C"])
-///     .with_bullet("→ ");  // Renders with → instead of •
+///     .with_bullet("→ ");  // Renders with → instead of -
 ///
 /// // Disable hanging indent for wrapped lines
 /// let list = UnorderedList::new(vec!["Long item that wraps"])
@@ -559,7 +559,7 @@ mod tests {
     fn test_unordered_list_simple() {
         let list = UnorderedList::new(vec!["Apple", "Banana", "Cherry"]);
         let result = list.render_optimistic(None);
-        assert_eq!(result, "• Apple\n• Banana\n• Cherry\n");
+        assert_eq!(result, "- Apple\n- Banana\n- Cherry\n");
     }
 
     #[test]
@@ -636,7 +636,7 @@ mod tests {
         ];
         let list = UnorderedList::from(items);
         let result = list.render_optimistic(Some(80));
-        assert_eq!(result, "• Top\n  • Sub A\n  • Sub B\n");
+        assert_eq!(result, "- Top\n  - Sub A\n  - Sub B\n");
     }
 
     #[test]
@@ -648,7 +648,7 @@ mod tests {
         ];
         let list = OrderedList::from(items);
         let result = list.render_optimistic(Some(80));
-        assert_eq!(result, "1. Fruits:\n    • Apple\n    • Banana\n");
+        assert_eq!(result, "1. Fruits:\n    - Apple\n    - Banana\n");
     }
 
     #[test]
@@ -689,12 +689,12 @@ mod tests {
 
     #[test]
     fn test_unordered_string_wraps_with_hanging_indent() {
-        // "• " is 2 chars wide, so with width=20 content gets 18 chars.
+        // "- " is 2 chars wide, so with width=20 content gets 18 chars.
         let list = UnorderedList::new(vec!["This is a long item that wraps"]);
         let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
-        assert!(lines[0].starts_with("• "));
+        assert!(lines[0].starts_with("- "));
         for line in &lines[1..] {
             assert!(
                 line.starts_with("  "),
@@ -721,7 +721,7 @@ mod tests {
         let result = list.render_optimistic(Some(25));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
-        assert!(lines[0].starts_with("• "));
+        assert!(lines[0].starts_with("- "));
         // Continuation lines aligned after bullet (2 spaces)
         for line in &lines[1..] {
             assert!(
@@ -746,7 +746,7 @@ mod tests {
         let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
-        assert!(lines[0].starts_with("• "));
+        assert!(lines[0].starts_with("- "));
         for line in &lines[1..] {
             assert!(
                 line.starts_with("  "),
@@ -765,7 +765,7 @@ mod tests {
     fn test_unordered_no_hanging_indent() {
         let list = UnorderedList::new(vec!["Short"]).without_hanging_indent();
         let result = list.render_optimistic(Some(80));
-        assert_eq!(result, "• Short\n");
+        assert_eq!(result, "- Short\n");
     }
 
     #[test]
