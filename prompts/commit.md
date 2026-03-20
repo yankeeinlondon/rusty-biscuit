@@ -67,14 +67,30 @@ Your task is to:
 5. act as an orchestrator and concurrently execute a subagent for every semantic group:
    - provide the subagent the grouped files and the delta's in these files
    - provide the subagent the "operation" and "scope" (including no scope if that's the determination)
-   - tell the subagent to run `sniff git commits` for examples of real commits in this repo
-   - the subagent is then responsible for:
-       - reviewing the changes and drafting a useful summary of the change for the rest of the message,
-       - and then using `git` to make the commit
-       - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
-       - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
-       - the subagent SHOULD NOT push commits to any remote!
-       - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
+      - tell the subagent to run `sniff git commits` for examples of real commits in this repo
+      - **CRITICAL - File Limiting:** Git does NOT limit a commit to specific files when you use `git commit -- path`. If other files are staged, git will commit ALL staged files! To commit only specific files:
+          - use `git commit -m "message" -- path1 path2` ONLY when you are certain only those files are staged
+      - **Commit Message Format:** Messages must follow this structure:
+          - First line: Brief summary (under 72 chars)
+          - Blank line
+          - Bullet points describing WHAT changed, WHY it changed, and any NOTABLE ASPECTS (each bullet starts with `-`)
+          - Example:
+
+            ```
+            feat(biscuit-clip): add initial clipboard package structure
+
+            - add README.md documenting package purpose and usage
+            - add lib.rs with basic module exports
+            - add cli.rs for command-line interface
+            ```
+
+      - the subagent is then responsible for:
+          - reviewing the changes and drafting a useful commit message following the format above,
+          - committing ONLY the files assigned to them (using the file-limiting technique above),
+          - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
+   - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
+   - the subagent SHOULD NOT push commits to any remote!
+   - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
    - the subagent, if it ran into any problems while trying to commit
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
