@@ -100,7 +100,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             return None;
         }
         self.assistant_text.push_str(&text);
-        Some(text)
+        Some(super::ensure_message_newline(text))
     }
 
     fn handle_result(&mut self, obj: &Value) {
@@ -345,14 +345,14 @@ mod tests {
                 r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Hello from ","delta":true}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Hello from ".into()));
+        assert_eq!(text, Some("Hello from \n".into()));
 
         let text2 = parser
             .feed_line(
                 r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Gemini","delta":true}"#,
             )
             .unwrap();
-        assert_eq!(text2, Some("Gemini".into()));
+        assert_eq!(text2, Some("Gemini\n".into()));
 
         // Real result with stats object
         parser
@@ -484,6 +484,6 @@ mod tests {
                 r#"{"type":"message","role":"assistant","content":[{"text":"Array format"}]}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Array format".into()));
+        assert_eq!(text, Some("Array format\n".into()));
     }
 }

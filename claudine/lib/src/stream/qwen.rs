@@ -84,7 +84,7 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             }
             if !text_parts.is_empty() {
                 self.assistant_text.push_str(&text_parts);
-                return Some(text_parts);
+                return Some(super::ensure_message_newline(text_parts));
             }
         }
 
@@ -93,7 +93,7 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(text.to_string());
+            return Some(super::ensure_message_newline(text.to_string()));
         }
 
         None
@@ -273,7 +273,7 @@ mod tests {
                 r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Hello from Qwen".into()));
+        assert_eq!(text, Some("Hello from Qwen\n".into()));
 
         parser
             .feed_line(r#"{"type":"result","duration_ms":5000,"usage":{"input_tokens":300,"output_tokens":150}}"#)
@@ -299,7 +299,7 @@ mod tests {
                 r#"{"type":"assistant_message","role":"assistant","content":"String content"}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("String content".into()));
+        assert_eq!(text, Some("String content\n".into()));
 
         // Qwen-specific tool event names
         parser
@@ -335,7 +335,7 @@ mod tests {
             .feed_line(r#"{"type":"assistant","content":[{"text":"Hook design assistant event"}]}"#)
             .unwrap();
 
-        assert_eq!(text, Some("Hook design assistant event".into()));
+        assert_eq!(text, Some("Hook design assistant event\n".into()));
 
         let summary = parser.finish(0);
         assert_eq!(summary.session_id.as_deref(), Some("qw-2"));
@@ -348,6 +348,6 @@ mod tests {
         let text = parser
             .feed_line(r#"{"type":"message","role":"assistant","content":"Plain string content"}"#)
             .unwrap();
-        assert_eq!(text, Some("Plain string content".into()));
+        assert_eq!(text, Some("Plain string content\n".into()));
     }
 }

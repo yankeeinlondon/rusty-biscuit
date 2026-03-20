@@ -15,6 +15,21 @@ use serde::{Deserialize, Serialize};
 use crate::events::Provider;
 use parser::{StreamEventSink, StreamParser};
 
+/// Ensure text from a full assistant message ends with a newline.
+///
+/// When the stream renderer receives text from consecutive assistant messages
+/// (e.g. between tool calls), it concatenates them in its line buffer. Without
+/// a trailing newline, sentences run together without whitespace separation
+/// (e.g. "files.Let me" instead of proper paragraph flow).
+///
+/// This must only be applied to complete message text, not streaming deltas.
+pub(crate) fn ensure_message_newline(mut text: String) -> String {
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
 /// The structured stream format used by a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

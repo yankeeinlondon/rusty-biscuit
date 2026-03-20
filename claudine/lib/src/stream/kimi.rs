@@ -74,7 +74,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             }
             if !text_parts.is_empty() {
                 self.assistant_text.push_str(&text_parts);
-                return Some(text_parts);
+                return Some(super::ensure_message_newline(text_parts));
             }
         }
 
@@ -83,7 +83,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(text.to_string());
+            return Some(super::ensure_message_newline(text.to_string()));
         }
 
         // Try content as string
@@ -91,7 +91,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(text.to_string());
+            return Some(super::ensure_message_newline(text.to_string()));
         }
 
         None

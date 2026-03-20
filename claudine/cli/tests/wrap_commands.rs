@@ -1043,7 +1043,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .args(["gemini", "say hi"])
         .assert()
         .success()
-        .stdout("Hello");
+        .stdout("Hello\n");
     let default_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(default_stderr.contains("session ID gem-1"));
     assert!(!default_stderr.contains("Malformed JSON"));
@@ -1061,7 +1061,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
-        .stdout("Hello");
+        .stdout("Hello\n");
     let quiet_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(!quiet_stderr.contains("session ID gem-1"));
     assert!(!quiet_stderr.contains("Malformed JSON"));
@@ -1079,7 +1079,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .args(["gemini", "--silent", "say hi"])
         .assert()
         .success()
-        .stdout("Hello");
+        .stdout("Hello\n");
     let silent_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(!silent_stderr.contains("session ID gem-1"));
     assert!(!silent_stderr.contains("Malformed JSON"));
@@ -1116,7 +1116,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
-        .stdout("Recovered answer");
+        .stdout("Recovered answer\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(!stderr_plain.contains("throwErrorIfNotOK"));
@@ -1152,7 +1152,7 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
-        .stdout("Hello without newline");
+        .stdout("Hello without newline\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr_plain.contains("\n\n✓ 1.5s"));
@@ -1189,7 +1189,7 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
         .args(["gemini", "-v", "say hi"])
         .assert()
         .success()
-        .stdout("Verbose summary");
+        .stdout("Verbose summary\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr_plain.contains("4.6s"));
@@ -1229,7 +1229,7 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
         .args(["claude", "--quiet", "-v", "say hi"])
         .assert()
         .success()
-        .stdout("Quiet verbose summary");
+        .stdout("Quiet verbose summary\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(!stderr_plain.contains("claude session claude-1"));
@@ -1270,7 +1270,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
         .args(["claude", "-v", "say hi"])
         .assert()
         .success()
-        .stdout("No tools here");
+        .stdout("No tools here\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr_plain.contains("no tool calls"));

@@ -103,7 +103,7 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             return None;
         }
         self.assistant_text.push_str(&text_parts);
-        Some(text_parts)
+        Some(super::ensure_message_newline(text_parts))
     }
 
     fn handle_content_block_delta(&mut self, obj: &Value) -> Option<String> {
@@ -384,7 +384,7 @@ mod tests {
 
         // Assistant message
         let msg = r#"{"type":"assistant","content":[{"type":"text","text":"Hello, world!"}]}"#;
-        assert_eq!(parser.feed_line(msg).unwrap(), Some("Hello, world!".into()));
+        assert_eq!(parser.feed_line(msg).unwrap(), Some("Hello, world!\n".into()));
 
         // Result
         let result = r#"{"type":"result","duration_ms":12345,"duration_api_ms":11000,"num_turns":1,"stop_reason":"end_turn","cost_usd":0.0042,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}"#;
@@ -474,7 +474,7 @@ mod tests {
         let msg = r#"{"type":"assistant","content":[{"type":"text","text":"After recovery"}]}"#;
         assert_eq!(
             parser.feed_line(msg).unwrap(),
-            Some("After recovery".into())
+            Some("After recovery\n".into())
         );
 
         let summary = parser.finish(0);
@@ -635,7 +635,7 @@ mod tests {
         let result = parser.feed_line(msg).unwrap();
         assert_eq!(
             result.as_deref(),
-            Some("The sky is blue because of Rayleigh scattering.")
+            Some("The sky is blue because of Rayleigh scattering.\n")
         );
 
         let summary = parser.finish(0);
