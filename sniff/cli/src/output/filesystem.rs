@@ -1757,7 +1757,7 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
         .any(|path| {
             if area_prefix.is_empty() {
                 // Root area: dirty if file is not inside any non-root area
-                !repo.packages.as_ref().map_or(false, |pkgs| {
+                !repo.packages.as_ref().is_some_and(|pkgs| {
                     pkgs.iter()
                         .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
                 })
@@ -1842,7 +1842,7 @@ pub fn print_package_area_has_source_code_changes(
         )
         .filter(|path| {
             let in_area = if area_prefix.is_empty() {
-                !repo.packages.as_ref().map_or(false, |pkgs| {
+                !repo.packages.as_ref().is_some_and(|pkgs| {
                     pkgs.iter()
                         .any(|p| p.package_area != "root" && path.starts_with(&p.package_area))
                 })
