@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
@@ -2736,14 +2736,9 @@ pub fn render_repo_deps_visual(
         }
     };
 
-    let renderer = MermaidRenderer::for_terminal(&mermaid);
-    match renderer.render_for_terminal() {
-        Ok(()) => String::new(),
-        Err(_) => {
-            // Return fallback text representation
-            renderer.fallback_code_block()
-        }
-    }
+    let diagram = MermaidDiagram::new(&mermaid);
+    let term = Terminal::default();
+    diagram.render(&term)
 }
 
 /// Render an internal dependency list for the repository as styled text.
