@@ -181,31 +181,17 @@ outdated:
 	@cargo outdated --root-deps-only
 
 
-# commits all the staged changes using MiniMax M2.5-highspeed model in OpenCode
+# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
-    #!/usr/bin/env bash
-    echo ""
-    if sniff repo package >/dev/null 2>&1; then
-        echo -e "- Staging all changes in the {{GREEN}}$(sniff repo package){{RESET}} package"
-        cd "$(sniff repo package-root)" && git add .
-    elif sniff repo package-area >/dev/null 2>&1; then
-        echo -e "- Staging all changes in the {{GREEN}}$(sniff repo package-area){{RESET}} package area"
-        cd "$(sniff repo package-area-root)" && git add .
-    fi
-    echo -e "- Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    echo -e "{{DIM}}{{ITALIC}}  - using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.5-highspeed}} {{DIM}}model{{RESET}}"
-    echo -e "{{DIM}}{{ITALIC}}  - set the {{BOLD}}MODEL{{RESET}} or {{BOLD}}COMMIT_MODEL{{RESET}}{{DIM}}{{ITALIC}} env variables to change model used.{{RESET}}"
-    echo ""
-    if claudine opencode --prompt-file "@docs/operations/commit.md" --op "commit"; then
-        just _speak "git commits completed in rusty-biscuit monorepo"
-        sniff git 2>/dev/null || exit 0
-    else
-        echo -e "\n{{RED}}Problems committing staged changes!{{RESET}}"
-        just _speak "Problems encountered trying to commit staged changes to git!"
-        just _play "error-2"
-        exit 1
-    fi
-
+    @echo ""
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo ""
+    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit )
+    @claudine opencode --prompt-file "@prompts/commit.md" --op "commit" --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
+    @just _speak "git commits completed in rusty-biscuit monorepo"
+    @sniff git 2>/dev/null || exit 0
 
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
