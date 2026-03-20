@@ -470,8 +470,24 @@ impl Layout {
             return String::new();
         }
 
+        // Remember if content ended with a newline so we can preserve it.
+        // Without this, split_lines produces an empty trailing element that
+        // gets padded with left_margin spaces — leaving invisible trailing
+        // whitespace that triggers zsh's missing-newline indicator (%).
+        let had_trailing_newline = content.ends_with('\n');
+
         // Split content into lines
-        let lines = split_lines(content);
+        let mut lines = split_lines(content);
+
+        // Remove the empty trailing element produced by a trailing newline;
+        // we'll restore the newline at the end instead.
+        if had_trailing_newline {
+            if let Some(last) = lines.last() {
+                if last.is_empty() {
+                    lines.pop();
+                }
+            }
+        }
 
         // Apply word wrapping
         let wrapped_lines = match &self.word_wrap {
@@ -516,8 +532,9 @@ impl Layout {
             result.push('\n');
         }
 
-        // Remove trailing newline
-        if result.ends_with('\n') {
+        // Remove trailing newline (unless content originally ended with one,
+        // which was stripped above and should be preserved)
+        if !had_trailing_newline && result.ends_with('\n') {
             result.pop();
         }
 
@@ -639,6 +656,40 @@ mod tests {
             ..Layout::default()
         };
         assert_eq!(layout.available_width(80), 0);
+    }
+
+    #[test]
+    fn test_layout_trailing_newline_not_padded() {
+        // Content ending with \n (e.g., image escape sequences with scroll
+        // compensation) should preserve the trailing newline without adding
+        // left-margin padding to the empty trailing line.
+        let layout = Layout {
+            left_margin: Margin::Chars(4),
+            ..Layout::default()
+        };
+        let result = layout.apply_layout("hello\n", 80);
+        // Should end with \n, not with trailing spaces
+        assert!(
+            result.ends_with('\n'),
+            "Trailing newline should be preserved"
+        );
+        assert!(
+            !result.ends_with("    \n"),
+            "Empty trailing line should not be padded"
+        );
+        assert_eq!(result, "    hello\n");
+    }
+
+    #[test]
+    fn test_layout_no_trailing_newline_unchanged() {
+        // Content without trailing newline should not gain one
+        let layout = Layout {
+            left_margin: Margin::Chars(4),
+            ..Layout::default()
+        };
+        let result = layout.apply_layout("hello", 80);
+        assert!(!result.ends_with('\n'));
+        assert_eq!(result, "    hello");
     }
 
     #[test]
