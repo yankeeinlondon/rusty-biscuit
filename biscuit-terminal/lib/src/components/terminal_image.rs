@@ -392,11 +392,14 @@ impl TerminalImage {
             .saturating_sub(resolved_left + resolved_right)
             .max(1);
 
-        // Calculate image width based on width specification
+        // Calculate image width based on width specification.
+        // Percentage is resolved against the full terminal width so that
+        // margins affect only position, not size. The result is then
+        // clamped so it still fits within the available space.
         let image_width = match &self.width {
             ImageWidth::Fill => available_width,
-            ImageWidth::Percent(pct) => ((available_width as f32) * pct).round() as u32,
-            ImageWidth::Characters(chars) => (*chars).min(available_width),
+            ImageWidth::Percent(pct) => ((term_width as f32) * pct).round() as u32,
+            ImageWidth::Characters(chars) => *chars,
         }
         .clamp(1, available_width);
 
