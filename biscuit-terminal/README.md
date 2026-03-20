@@ -47,12 +47,12 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
 
     The `biscuit-terminal` library defines a **Renderable** trait which provides a consistent interface for components. These components include:
 
-    - `Table`
-    - `TwoColumn`
-    - `Prose`
-    - `BlockQuote`
-    - `TerminalImage`
-    - `Filesystem`
+    - [`Table`](./docs/components/table.md)
+    - [`TwoColumn`](./docs/components/two_column.md)
+    - [`Prose`](./docs/components/prose.md)
+    - [`BlockQuote`](./docs/components/block_quote.md)
+    - [`TerminalImage`](./docs/components/terminal_image.md)
+    - [`Filesystem`](./docs/components/file_system.md)
     - `Progress`
     - `MermaidDiagram`
     - `GraphExpression`
@@ -62,7 +62,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - `OrderedList` and `UnorderedList`
     - `TextBlock`
   
-    As well compositional components:
+    As well as compositional components:
 
     - `Compose` and `InlineContent`
 
