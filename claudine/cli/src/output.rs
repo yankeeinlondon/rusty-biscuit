@@ -6,7 +6,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{
-    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
+    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, PROMPT_FILE, REPO_FLAG, VERBOSE, YOLO,
 };
 use claudine::events::Provider;
 use std::path::Path;
@@ -23,6 +23,8 @@ pub(crate) enum ComposeDisplay {
     Compose,
     /// Inline frontmatter-prompt composition (`--frontmatter-prompt`).
     InlineCompose,
+    /// Prompt sourced from a file (`--prompt-file`).
+    PromptFile,
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -67,6 +69,7 @@ pub(crate) fn log_wrapper_header(
     match compose_display {
         Some(ComposeDisplay::Compose) => header_parts.push(COMPOSE.to_string()),
         Some(ComposeDisplay::InlineCompose) => header_parts.push(INLINE_COMPOSE.to_string()),
+        Some(ComposeDisplay::PromptFile) => header_parts.push(PROMPT_FILE.to_string()),
         None => {}
     }
 
@@ -561,9 +564,11 @@ pub(crate) fn format_session_start(
 }
 
 /// Render the user prompt as a truncated blockquote for frontmatter-prompt display.
-pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal) {
+///
+/// When `verbose` is true, the full prompt is shown without truncation.
+pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal, verbose: bool) {
     let lines: Vec<&str> = prompt.lines().collect();
-    let (display_text, truncated) = if lines.len() > 10 {
+    let (display_text, truncated) = if !verbose && lines.len() > 10 {
         let first_10 = lines[..10].join("\n");
         (first_10, true)
     } else {
@@ -575,7 +580,7 @@ pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal) {
     if truncated {
         bq_text.push_str(&format!(
             "\n{}",
-            Prose::new("<dim><i>truncated for brevity</i></dim>").render(term)
+            Prose::new("<dim><i>remaining prompt shortened for brevity</i></dim>").render(term)
         ));
     }
     let rendered = BlockQuote::from(bq_text.as_str()).render(term);

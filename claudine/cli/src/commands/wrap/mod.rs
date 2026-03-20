@@ -640,6 +640,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             resolved_path: composed.resolved_path.clone(),
             delivery_method: delivery_method.to_string(),
             env_names: composed.env_names.clone(),
+            body: composed.body.clone(),
         });
     }
 
@@ -935,15 +936,17 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         Some(crate::output::ComposeDisplay::InlineCompose)
     } else if chained_composition {
         Some(crate::output::ComposeDisplay::Compose)
+    } else if prompt_file_dry_run.is_some() {
+        Some(crate::output::ComposeDisplay::PromptFile)
     } else {
         None
     };
 
     // Extract the user's prompt for display in the header line.
-    // Frontmatter-prompt shows the actual prompt text from the file;
+    // Both prompt-file and frontmatter-prompt show the actual prompt text;
     // other modes show the file path; regular runs show the prompt text.
-    let prompt_display: Option<String> = if let Some(ref pf) = args.prompt_file {
-        Some(format!("--prompt-file {pf}"))
+    let prompt_display: Option<String> = if let Some(ref pf_info) = prompt_file_dry_run {
+        Some(pf_info.body.clone())
     } else if inline_composition_source.is_some() {
         inline_composition_source
             .as_ref()
@@ -999,6 +1002,29 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 log::message(&crate::output::post_env_message(message, &term));
             }
 
+            // Prompt-file: show file resolution and prompt blockquote.
+            if let Some(ref pf_info) = prompt_file_dry_run {
+                let display_path = pf_info
+                    .resolved_path
+                    .strip_prefix(child_cwd)
+                    .unwrap_or(&pf_info.resolved_path);
+                log::message(""); // blank line separating Info section from validation
+                log::message(&crate::output::fm_check_ok(
+                    &format!(
+                        "resolved the file reference to <a href=\"{}\">{}</a>",
+                        pf_info.resolved_path.display(),
+                        display_path.display()
+                    ),
+                    &term,
+                ));
+                log::message("");
+                crate::output::render_prompt_blockquote(
+                    &pf_info.body,
+                    &term,
+                    verbose_requested,
+                );
+            }
+
             // Frontmatter-prompt: show validation, file resolution, and prompt blockquote.
             // These are grouped together after the Info/warning lines with a blank
             // line separator so the output sections are visually distinct.
@@ -1021,7 +1047,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     ),
                     &term,
                 ));
-                crate::output::render_prompt_blockquote(&prepared.prompt, &term);
+                crate::output::render_prompt_blockquote(
+                    &prepared.prompt,
+                    &term,
+                    verbose_requested,
+                );
             }
 
             // Blank line to separate preamble from execution output

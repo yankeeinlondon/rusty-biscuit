@@ -69,13 +69,15 @@ pub(crate) struct ComposedPrompt {
     pub env_names: Vec<String>,
 }
 
-/// Dry-run metadata for prompt-file display.
+/// Metadata for prompt-file display (used in both dry-run and normal output).
 #[derive(Debug)]
 pub(crate) struct PromptFileDryRunInfo {
     pub original: String,
     pub resolved_path: PathBuf,
     pub delivery_method: String,
     pub env_names: Vec<String>,
+    /// The composed prompt body, for display in the output section.
+    pub body: String,
 }
 
 // ---------------------------------------------------------------------------
