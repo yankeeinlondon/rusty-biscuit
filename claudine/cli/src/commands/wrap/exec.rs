@@ -17,16 +17,39 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdin_seed: Option<&'a str>,
 }
 
+/// Renders streamed assistant text as Markdown, flushing at block boundaries.
+///
+/// Accumulates incoming text and detects Markdown block boundaries (blank lines,
+/// code fence closings) to render complete blocks through darkmatter for rich
+/// terminal output (syntax highlighting, tables, bold/italic, etc.).
 struct StreamTextRenderer {
-    buffer: String,
+    /// Accumulated text for the current Markdown block.
+    block_buffer: String,
+    /// Trailing text without a newline (incomplete line).
+    line_buffer: String,
+    /// Whether we are inside a fenced code block (``` or ~~~).
+    in_code_fence: bool,
+    /// Terminal reference for rendering.
     term: Option<Terminal>,
+    /// Cached darkmatter options (created once to avoid repeated theme detection).
+    terminal_options: Option<darkmatter::markdown::output::terminal::TerminalOptions>,
 }
 
 impl StreamTextRenderer {
     fn new() -> Self {
+        let term = std::io::stdout().is_terminal().then(Terminal::new);
+        let terminal_options = term.as_ref().map(|_| {
+            use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
+            let mut opts = TerminalOptions::default();
+            opts.image_mode = TerminalImageMode::Never;
+            opts
+        });
         Self {
-            buffer: String::new(),
-            term: std::io::stdout().is_terminal().then(Terminal::new),
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            term,
+            terminal_options,
         }
     }
 
@@ -35,32 +58,80 @@ impl StreamTextRenderer {
             return;
         }
 
-        self.buffer.push_str(text);
+        self.line_buffer.push_str(text);
 
-        // Flush complete lines immediately so output streams in real-time.
-        // Keep any trailing partial line (no newline) in the buffer.
-        if let Some(last_newline) = self.buffer.rfind('\n') {
-            let flush_len = last_newline + 1;
-            let chunk = self.buffer[..flush_len].to_string();
-            self.flush_chunk(out, &chunk);
-            self.buffer.drain(..flush_len);
+        // Extract and process each complete line (ending with \n).
+        while let Some(newline_pos) = self.line_buffer.find('\n') {
+            let line = self.line_buffer[..=newline_pos].to_string();
+            self.line_buffer.drain(..=newline_pos);
+            self.process_line(out, &line);
         }
     }
 
-    fn flush_remaining<W: Write>(&mut self, out: &mut W) {
-        if self.buffer.is_empty() {
+    /// Process a single complete line, accumulating into the block buffer
+    /// and flushing when a block boundary is detected.
+    fn process_line<W: Write>(&mut self, out: &mut W, line: &str) {
+        let trimmed = line.trim();
+
+        // Track code fence open/close (``` or ~~~)
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            self.block_buffer.push_str(line);
+            if self.in_code_fence {
+                // Closing fence — render the complete fenced block
+                self.in_code_fence = false;
+                self.flush_block(out);
+            } else {
+                self.in_code_fence = true;
+            }
             return;
         }
-        let chunk = std::mem::take(&mut self.buffer);
-        self.flush_chunk(out, &chunk);
+
+        // Inside a code fence — just accumulate, don't look for boundaries
+        if self.in_code_fence {
+            self.block_buffer.push_str(line);
+            return;
+        }
+
+        // Blank line outside a code fence = block boundary
+        if trimmed.is_empty() {
+            // Include the blank line so darkmatter sees proper paragraph spacing
+            self.block_buffer.push_str(line);
+            self.flush_block(out);
+            return;
+        }
+
+        // Regular content — accumulate
+        self.block_buffer.push_str(line);
     }
 
-    fn flush_chunk<W: Write>(&self, out: &mut W, chunk: &str) {
+    /// Render the accumulated block through darkmatter and write to output.
+    fn flush_block<W: Write>(&mut self, out: &mut W) {
+        if self.block_buffer.is_empty() {
+            return;
+        }
+        let block = std::mem::take(&mut self.block_buffer);
+        self.render_markdown(out, &block);
+    }
+
+    /// Flush any remaining buffered content (incomplete line + block buffer).
+    fn flush_remaining<W: Write>(&mut self, out: &mut W) {
+        if !self.line_buffer.is_empty() {
+            let leftover = std::mem::take(&mut self.line_buffer);
+            self.block_buffer.push_str(&leftover);
+        }
+        self.flush_block(out);
+    }
+
+    fn render_markdown<W: Write>(&self, out: &mut W, text: &str) {
         if let Some(term) = &self.term {
-            let rendered = crate::output::render_assistant_text(chunk, term);
+            let rendered = crate::output::render_assistant_markdown_with_options(
+                text,
+                term,
+                self.terminal_options.as_ref(),
+            );
             let _ = out.write_all(rendered.as_bytes());
         } else {
-            let _ = out.write_all(chunk.as_bytes());
+            let _ = out.write_all(text.as_bytes());
         }
         let _ = out.flush();
     }
@@ -820,18 +891,64 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
     }
 
     #[test]
-    fn stream_text_renderer_flushes_completed_blocks() {
+    fn stream_text_renderer_flushes_on_blank_line() {
         let mut renderer = StreamTextRenderer {
-            buffer: String::new(),
-            term: Some(Terminal::new_optimistic(20)),
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            term: None,
+            terminal_options: None,
         };
         let mut out = Vec::new();
 
-        renderer.push(&mut out, "First paragraph that should wrap.\n\nSecond");
-        let rendered = String::from_utf8(out).unwrap();
+        renderer.push(&mut out, "First paragraph.\n\nSecond");
+        let flushed = String::from_utf8(out).unwrap();
 
-        assert!(rendered.contains("First"));
-        assert!(rendered.contains('\n'));
-        assert_eq!(renderer.buffer, "Second");
+        assert!(flushed.contains("First paragraph."));
+        // "Second" has no newline yet — sits in line_buffer
+        assert_eq!(renderer.line_buffer, "Second");
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn stream_text_renderer_buffers_code_fence() {
+        let mut renderer = StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            term: None,
+            terminal_options: None,
+        };
+        let mut out = Vec::new();
+
+        // Opening fence + code — should NOT flush yet
+        renderer.push(&mut out, "```rust\nfn main() {}\n");
+        assert!(out.is_empty());
+        assert!(renderer.in_code_fence);
+
+        // Closing fence — should flush the whole block
+        renderer.push(&mut out, "```\n");
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(flushed.contains("fn main()"));
+        assert!(!renderer.in_code_fence);
+    }
+
+    #[test]
+    fn stream_text_renderer_flush_remaining_drains_everything() {
+        let mut renderer = StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            term: None,
+            terminal_options: None,
+        };
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "trailing text without newline");
+        assert!(out.is_empty());
+
+        renderer.flush_remaining(&mut out);
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "trailing text without newline");
     }
 }

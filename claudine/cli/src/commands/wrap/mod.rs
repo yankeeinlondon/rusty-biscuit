@@ -1124,7 +1124,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 codex_output.apply_to_summary(&mut summary);
             }
             if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
-                let rendered = crate::output::render_assistant_text(&summary.assistant_text, &term);
+                let rendered = crate::output::render_assistant_markdown(&summary.assistant_text, &term);
                 std::io::stdout().write_all(rendered.as_bytes())?;
                 if !rendered.ends_with('\n') {
                     std::io::stdout().write_all(b"\n")?;
@@ -1342,7 +1342,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // Codex never emits assistant text live (feed_line always returns None);
         // the authoritative text comes from --output-last-message. Write it now.
         if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            let rendered = crate::output::render_assistant_text(&summary.assistant_text, &term);
+            let rendered = crate::output::render_assistant_markdown(&summary.assistant_text, &term);
             std::io::stdout().write_all(rendered.as_bytes())?;
             if !rendered.ends_with('\n') {
                 std::io::stdout().write_all(b"\n")?;
