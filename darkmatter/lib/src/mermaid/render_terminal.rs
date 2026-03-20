@@ -4,27 +4,19 @@
 //! for rendering Mermaid diagrams in the terminal. The actual implementation
 //! (mmdc CLI execution, viuer display) is handled by biscuit-terminal.
 //!
-//! ## CLI Detection
-//!
-//! The underlying implementation uses a fallback chain for finding the Mermaid CLI:
-//! 1. **Direct `mmdc`**: If `mmdc` is in PATH, use it directly
-//! 2. **npx fallback**: If `mmdc` is not found but `npx` is available, use `npx mmdc`
-//!    with a warning to stderr explaining the temporary installation
-//! 3. **Error**: If neither is available, return an error asking the user to install npm
-//!
 //! ## Re-exports
 //!
-//! This module re-exports the error type from biscuit-terminal for backward compatibility:
+//! This module re-exports the error type from biscuit-terminal:
 //! - [`MermaidRenderError`] - Error type for mermaid terminal rendering
 
 // Re-export the error type from biscuit-terminal for API compatibility
 pub use biscuit_terminal::components::mermaid::MermaidRenderError;
 
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 
-/// Renders a Mermaid diagram to the terminal using the local mmdc CLI.
+/// Renders a Mermaid diagram to the terminal.
 ///
-/// This function delegates to `biscuit_terminal::components::mermaid::MermaidRenderer`.
+/// Uses [`MermaidDiagram::try_render()`] for proper error reporting.
 ///
 /// ## Examples
 ///
@@ -42,12 +34,14 @@ use biscuit_terminal::components::mermaid::MermaidRenderer;
 /// Returns `MermaidRenderError` if:
 /// - Terminal doesn't support image rendering
 /// - mmdc is not installed or not in PATH
-/// - Diagram is too large (> 10KB)
 /// - mmdc execution fails (invalid syntax, etc.)
 #[tracing::instrument(skip(instructions))]
 pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError> {
-    let renderer = MermaidRenderer::new(instructions);
-    renderer.render_for_terminal()
+    let diagram = MermaidDiagram::new(instructions);
+    let term = biscuit_terminal::terminal::Terminal::new();
+    let result = diagram.try_render(&term)?;
+    print!("{}", result.output);
+    Ok(())
 }
 
 /// Returns a fallback code block string for the given instructions.
@@ -64,7 +58,7 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
 /// assert!(output.contains("```mermaid"));
 /// ```
 pub fn fallback_code_block(instructions: &str) -> String {
-    biscuit_terminal::components::mermaid::MermaidRenderer::new(instructions).fallback_code_block()
+    MermaidDiagram::new(instructions).fallback_code_block()
 }
 
 /// Renders a fallback code block for the given instructions.
@@ -80,7 +74,7 @@ pub fn fallback_code_block(instructions: &str) -> String {
 /// render_fallback_code_block("flowchart LR\n    A --> B");
 /// ```
 pub fn render_fallback_code_block(instructions: &str) {
-    biscuit_terminal::components::mermaid::MermaidRenderer::new(instructions).print_fallback()
+    println!("{}", fallback_code_block(instructions));
 }
 
 #[cfg(test)]
