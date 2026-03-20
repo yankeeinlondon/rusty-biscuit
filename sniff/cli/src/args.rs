@@ -354,6 +354,9 @@ pub enum Commands {
     Just {
         /// Filter justfiles by path substring (OR logic: matches any filter)
         filter: Vec<String>,
+        /// Filter to justfiles containing a specific recipe
+        #[arg(long, value_name = "RECIPE")]
+        with: Option<String>,
     },
 }
 
@@ -871,6 +874,8 @@ Commands:
   Justfiles:
     sniff just            Detect justfiles and recipes
     sniff just sniff      Filter to justfiles with \"sniff\" in their path
+    sniff just --with build   Show justfiles containing a \"build\" recipe
+    sniff just -v         Show justfiles with recipe details
 
   Discovery:
     sniff topics          Show all subsection topics

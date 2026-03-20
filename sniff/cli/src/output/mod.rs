@@ -21,7 +21,7 @@ use sniff::SniffResult;
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
 pub use filesystem::{render_git_file_list, render_git_section, render_hash_section};
-pub use just::render_just_text;
+pub use just::{filter_justfiles_for_json, render_just_text};
 pub use programs::{print_programs_json, render_programs_markdown};
 pub use remote::{print_remote_json, render_remote_text};
 pub use services::{print_services_json, render_services_text};

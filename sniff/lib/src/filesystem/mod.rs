@@ -21,7 +21,7 @@ pub use git::{
     BehindStatus, CommitInfo, DeltaKind, GitHostingProvider, GitInfo, LocalBranchInfo, RemoteInfo,
     RepoStatus, detect_git, get_commit_by_sha, get_commit_files, get_commits_for_path,
 };
-pub use just::{JustRecipe, JustfileInfo, detect_justfiles};
+pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{
     DependencyEntry, DependencyKind, MonorepoTool, Package, PackageDiscoverySource,

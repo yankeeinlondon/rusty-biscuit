@@ -76,16 +76,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Handle just mode separately (doesn't use SniffResult)
-        if let Commands::Just { filter } = cmd {
+        if let Commands::Just { filter, with } = cmd {
             let base = cli
                 .base
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             let justfiles = sniff::filesystem::detect_justfiles(&base, filter)?;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&justfiles)?);
+                let filtered = output::filter_justfiles_for_json(&justfiles, with.as_deref());
+                println!("{}", serde_json::to_string_pretty(&filtered)?);
             } else {
-                let rendered = output::render_just_text(&justfiles, cli.verbose);
+                let rendered =
+                    output::render_just_text(&justfiles, cli.verbose, with.as_deref());
                 output::emit_text(&rendered, cli.plain);
             }
             return Ok(());
