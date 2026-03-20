@@ -90,16 +90,20 @@ pub(crate) fn log_wrapper_header(
         );
     }
 
-    // Show only the user's prompt text (no provider-specific switches)
+    // Show only the user's prompt text (no provider-specific switches).
+    // We avoid Prose here because the prompt may contain `<` characters
+    // that Prose would interpret as markup tags. Raw ANSI dim codes are
+    // sufficient and preserve the exact visible width calculation.
     if let Some(prompt) = prompt_display {
-        let escaped = shell_escape(prompt);
+        let flattened = prompt.replace('\n', "\\n").replace('\r', "\\r");
+        let escaped = shell_escape(&flattened);
         let prefix = header_parts.join(" ");
         let prefix_width = visible_width(&prefix) as usize;
         let used = prefix_width + 1;
         let term_width = term.width() as usize;
         let available = term_width.saturating_sub(used);
         let truncated = truncate_args(&escaped, available);
-        header_parts.push(Prose::new(format!("<dim>{truncated}</dim>")).render(term));
+        header_parts.push(format!("\x1b[2m{truncated}\x1b[22m"));
     }
 
     log::message(&format!("\n{}\n", header_parts.join(" ")));

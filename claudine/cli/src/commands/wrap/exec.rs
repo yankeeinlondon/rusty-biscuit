@@ -36,8 +36,11 @@ impl StreamTextRenderer {
         }
 
         self.buffer.push_str(text);
-        while let Some(index) = self.buffer.find("\n\n") {
-            let flush_len = index + 2;
+
+        // Flush complete lines immediately so output streams in real-time.
+        // Keep any trailing partial line (no newline) in the buffer.
+        if let Some(last_newline) = self.buffer.rfind('\n') {
+            let flush_len = last_newline + 1;
             let chunk = self.buffer[..flush_len].to_string();
             self.flush_chunk(out, &chunk);
             self.buffer.drain(..flush_len);
