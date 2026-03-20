@@ -377,6 +377,40 @@ fn mermaid_alt_text_uses_title() {
 
 #[test]
 #[serial]
+fn mermaid_pie_chart_init_directive_applies_custom_colors() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let instructions = "%%{init: {'themeVariables': {'pie1': '#3178C6', 'pie2': '#A72145'}}}%%\npie\n    \"TypeScript\" : 45\n    \"Rust\" : 35\n    \"Python\" : 20";
+    let diagram = MermaidDiagram::new(instructions);
+    let artifact = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: true,
+        })
+        .unwrap();
+
+    let svg = std::fs::read_to_string(artifact.path).unwrap();
+    assert!(
+        svg.contains("#3178C6"),
+        "SVG should contain custom TypeScript color #3178C6"
+    );
+    assert!(
+        svg.contains("#A72145"),
+        "SVG should contain custom Rust color #A72145"
+    );
+
+    // Verify legend text uses dominant-baseline="central" for proper vertical alignment
+    // with the color marker rectangles
+    assert!(
+        svg.contains("dominant-baseline=\"central\""),
+        "Legend text should use dominant-baseline=\"central\" for vertical alignment"
+    );
+}
+
+#[test]
+#[serial]
 fn mermaid_alt_text_defaults_to_mermaid_diagram() {
     // Clear cache to ensure clean state
     let cache = FileCache::new();

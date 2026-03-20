@@ -262,6 +262,12 @@ impl MermaidDiagram {
             output = replace_circle_radius(&output, radius);
         }
 
+        // Fix legend text vertical alignment: mermaid-rs-renderer positions legend
+        // text at the vertical center of the color rect but uses the default
+        // alphabetic baseline, causing misalignment. Add dominant-baseline="central"
+        // to legend text elements (those following legend rect markers).
+        output = fix_legend_text_baseline(&output);
+
         output
     }
 
@@ -289,6 +295,86 @@ impl MermaidDiagram {
     pub fn fallback_code_block(&self) -> String {
         format!("```mermaid\n{}\n```", self.instructions)
     }
+}
+
+/// Fixes vertical alignment of legend text relative to color marker rectangles.
+///
+/// The mermaid-rs-renderer positions legend text at the vertical center of the
+/// marker rect (`rect_y + marker_size / 2`) but renders with SVG's default
+/// alphabetic baseline. This makes text appear too high relative to the marker.
+/// Adding `dominant-baseline="central"` centers the text vertically.
+///
+/// Targets `<text>` elements that immediately follow legend-style `<rect>` elements
+/// (identified by having equal `fill` and `stroke` attributes with small dimensions).
+fn fix_legend_text_baseline(svg: &str) -> String {
+    let mut output = String::with_capacity(svg.len() + 200);
+    let mut remaining = svg;
+
+    // Legend rects have matching fill/stroke and are followed by <text> elements.
+    // Pattern: <rect ... fill="X" stroke="X" .../><text ...>
+    while let Some(rect_start) = remaining.find("<rect ") {
+        let (before, from_rect) = remaining.split_at(rect_start);
+        output.push_str(before);
+
+        // Find end of rect tag
+        let Some(rect_end) = from_rect.find("/>") else {
+            output.push_str(from_rect);
+            remaining = "";
+            break;
+        };
+
+        let rect_tag = &from_rect[..rect_end + 2];
+        let after_rect = &from_rect[rect_end + 2..];
+        output.push_str(rect_tag);
+
+        // Check if this is a legend marker rect (matching fill and stroke)
+        if is_legend_rect(rect_tag) {
+            // Look for an immediately following <text> element
+            let trimmed = after_rect.trim_start();
+            if trimmed.starts_with("<text ") {
+                let skipped = after_rect.len() - trimmed.len();
+                output.push_str(&after_rect[..skipped]);
+
+                // Find the closing > of the <text ...> opening tag
+                if let Some(gt_pos) = trimmed.find('>') {
+                    let text_open = &trimmed[..gt_pos];
+                    if !text_open.contains("dominant-baseline") {
+                        output.push_str(text_open);
+                        output.push_str(" dominant-baseline=\"central\">");
+                        remaining = &trimmed[gt_pos + 1..];
+                        continue;
+                    }
+                }
+                remaining = &after_rect[skipped..];
+                continue;
+            }
+        }
+
+        remaining = after_rect;
+    }
+
+    output.push_str(remaining);
+    output
+}
+
+/// Checks if a `<rect>` tag looks like a legend color marker.
+///
+/// Legend markers have matching `fill` and `stroke` attributes.
+fn is_legend_rect(rect_tag: &str) -> bool {
+    let fill = extract_attr(rect_tag, "fill");
+    let stroke = extract_attr(rect_tag, "stroke");
+    match (fill, stroke) {
+        (Some(f), Some(s)) => f == s,
+        _ => false,
+    }
+}
+
+/// Extracts the value of an attribute from an XML tag string.
+fn extract_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    let pattern = format!("{}=\"", attr);
+    let start = tag.find(&pattern)? + pattern.len();
+    let end = start + tag[start..].find('"')?;
+    Some(&tag[start..end])
 }
 
 /// Applies `%%{init: {'themeVariables': {...}}}%%` overrides to the theme.
