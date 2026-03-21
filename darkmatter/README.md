@@ -1,78 +1,24 @@
----
-test:
-    - one
-    - two
-    - three
----
 # Darkmatter
 
-A themed markdown renderer for terminal and browser output with syntax highlighting, Mermaid diagrams, and document processing.
+<img src="../assets/darkmatter-512.png" style="position:absolute; top:0; right: 100; width: 100" />
 
-## Quick Start
-
-```bash
-# Install the CLI
-cargo install --path cli
-
-# Or run in development mode
-just -f darkmatter/justfile cli README.md
-```
+- [Compose](./docs/topics/what-is-composition.md) documents together dynamically
+- Render to [multiple output formats](./docs/topics/output-formats.md)
+- Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
+- Provides auto-completions via [shell completions](./docs/cli/completions.md) in the terminal and the [LSP](./lsp/README.md) in an editor.
 
 ## Packages
 
-| Package | Crate | Description |
-|---------|-------|-------------|
-| [`cli/`](cli/) | `darkmatter-cli` | The `md` command-line tool for rendering markdown |
-| [`lib/`](lib/) | `darkmatter` | Core library for markdown parsing, rendering, and manipulation |
+For details, choose one or more of the packages in this package area.
 
-## Features
+| Type | Package  &nbsp;&nbsp;&nbsp; | Description |
+|---------|-------|-------------      |
+| [**Library**](./lib/README.md) | `darkmatter` | Core library; follow the link for a much deeper functional and technical overview of what Darkmatter provides |
+| [**CLI**](./cli/README.md) | `darkmatter-cli` | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
+| [**LSP**](./lsp/README.md) | `darkmatter-lsp` | **FUTURE:** A language server for Darkmatter (aka, Markdown + DSL) |
 
-- **Terminal rendering**: ANSI escape codes with automatic color depth detection
-- **HTML output**: Standalone HTML with embedded styles
-- **Syntax highlighting**: Language-aware code block highlighting via syntect with two-face themes
-- **Image rendering**: Inline images in supported terminals (Kitty, iTerm2, sixel)
-- **Mermaid diagrams**: Terminal rendering via biscuit-terminal, HTML rendering via mermaid.js
-- **Theme support**: 9 theme pairs with automatic light/dark detection
-- **Hyperlink rendering**: Clickable links in supported terminals via OSC 8
-- **Markdown cleanup**: Normalize formatting and heading levels
-- **Transclusion pipeline**: Stage 2 support for `::file`, `::code`, `prologue`, and `epilogue`
-- **Frontmatter operations**: Parse, extract, and manipulate YAML frontmatter with key-order preservation
-- **Visual diff**: Colored inline diffs for strings and files
-- **Table of contents**: Extract document structure as tree or JSON
 
-## Library Modules
 
-| Module | Purpose |
-|--------|---------|
-| `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
-| `diff` | Visual diff utilities for strings and files |
-| `mermaid` | Mermaid diagram theming |
-| `render` | Hyperlink rendering (OSC 8 terminal links) |
-| `terminal` | ANSI color depth detection utilities |
-| `testing` | Test utilities for terminal output verification |
-
-## Transclusion Support
-
-Darkmatter's transform pipeline now includes Stage 2 transclusion:
-
-- Block directives: `::file ./doc.md`, `::code ./main.rs`
-- Frontmatter directives: `prologue`, `epilogue`
-- Recursive includes with cycle detection and max-depth limits
-- Conditional includes via `when=\"...\"`
-- Heading re-leveling for included markdown (with graceful H6 overflow handling)
-
-## Common Commands
-
-```bash
-# Build both packages
-just -f darkmatter/justfile build
-
-# Run tests
-just -f darkmatter/justfile test
-
-# Lint with clippy
-just -f darkmatter/justfile lint
-```
 
 ## License
 

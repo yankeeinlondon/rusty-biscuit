@@ -155,9 +155,9 @@ This results in a document which:
 
 If you want details on any stage of the composition lifecycle follow the links to the detailed documents below:
 
-- [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) provides an overview of the discrete steps -- _and the ordering of those steps_ - which are used to mutate every document in a composition graph.
-- The initial "prepatory" operations in the composition pipeline each have a document with more details:
-    - **Cleaning**:
+- [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) provides an overview of the steps -- _and the ordering of those steps_ - which are used to mutate every document in a composition graph.
+- For more details on any of the operations choose the operation links below:
+    - [**Cleaning**](../docs/preparation/cleaning.md):
         - The [cleaning](../docs/preparation/cleaning.md) document covers the functionality and key symbols for cleaning up a Markdown document found in the library. 
         - Alternatively if your interest is more focused on the CLI, you can read the [`clean`](../docs/cli/clean.md) subcommand documentation.
     - **Normalization**:
