@@ -4,7 +4,7 @@
 
 - I am not responsible for running tests, this will already have been done before i'm handed the job of making git commits
 
-- When viewing commit history, use `git log --oneline -n` instead of `sniff git commits -n` which doesn't support the `-n` flag
+- When viewing commit history, use `git log --oneline -n` directly — `sniff git commits` is not a valid command in this repo
 
 - The repo uses lowercase after the colon in conventional commits (e.g., `docs(darkmatter):` not `Docs(Darkmatter):`)
 
