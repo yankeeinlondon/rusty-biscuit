@@ -7,6 +7,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
 
+use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
@@ -21,6 +22,14 @@ use playa::ducking::{DuckConfig, backend_name, create_backend};
 const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
 const RESET: &str = "\x1b[0m";
 const TABLE_DIVIDER: char = '\u{2502}';
+
+/// Print a styled error to stderr and exit.
+fn error_exit(message: &str, code: i32) -> ! {
+    let styled = format!("<b>Playa(<red-500>error</red-500>):</b> {message}");
+    let rendered = Prose::new(styled).render(&Terminal::default());
+    eprintln!("{rendered}");
+    std::process::exit(code)
+}
 
 const AFTER_HELP: &str = "\
 Shell Completions:
@@ -345,7 +354,7 @@ fn spawn_background_process() -> Result<(), std::io::Error> {
         .args(&args[1..])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
         .spawn()?;
 
     Ok(())
@@ -357,13 +366,14 @@ fn maybe_spawn_background(cli: &Cli) -> bool {
     }
 
     if !has_playback_target(cli) {
-        eprintln!("--background can only be used when playing an audio file or sound effect.");
-        std::process::exit(2);
+        error_exit(
+            "--background can only be used when playing an audio file or sound effect",
+            2,
+        );
     }
 
     if let Err(error) = spawn_background_process() {
-        eprintln!("Failed to start background playback: {error}");
-        std::process::exit(1);
+        error_exit(&format!("failed to start background playback: {error}"), 1);
     }
 
     true
@@ -474,29 +484,26 @@ async fn play_file(path: &PathBuf, opts: &PlaybackOptions) {
     let playa = match Playa::from_path(path) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
-            eprintln!("Failed to detect audio format: {error}");
-            std::process::exit(1);
+            error_exit(&format!("failed to detect audio format: {error}"), 1);
         }
     };
 
     if opts.has_ducking() {
         if let Err(error) = playa.play_async().await {
-            eprintln!("Playback failed: {error}");
-            std::process::exit(1);
+            error_exit(&format!("playback failed: {error}"), 1);
         }
     } else if let Err(error) = playa.play() {
-        eprintln!("Playback failed: {error}");
-        std::process::exit(1);
+        error_exit(&format!("playback failed: {error}"), 1);
     }
 }
 
 #[cfg(feature = "audio-ducking")]
 async fn play_effect(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
-        eprintln!(
-            "Unknown sound effect: {name}. Use `playa list-effects` to see available effects."
+        error_exit(
+            &format!("unknown sound effect: {name}. Use `playa list-effects` to see available effects"),
+            2,
         );
-        std::process::exit(2);
     };
 
     // Use native SFX playback when available (with OS audio channel routing).
@@ -527,8 +534,7 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
                 if let Some(guard) = guard {
                     guard.restore().await;
                 }
-                eprintln!("Playback failed: audio device unavailable");
-                std::process::exit(1);
+                error_exit("audio device unavailable", 1);
             }
             Err(_) => {
                 // Decode/stream error — fall through to Playa builder path
@@ -539,19 +545,16 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
-            eprintln!("Failed to load sound effect: {error}");
-            std::process::exit(1);
+            error_exit(&format!("failed to load sound effect: {error}"), 1);
         }
     };
 
     if opts.has_ducking() {
         if let Err(error) = playa.play_async().await {
-            eprintln!("Playback failed: {error}");
-            std::process::exit(1);
+            error_exit(&format!("playback failed: {error}"), 1);
         }
     } else if let Err(error) = playa.play() {
-        eprintln!("Playback failed: {error}");
-        std::process::exit(1);
+        error_exit(&format!("playback failed: {error}"), 1);
     }
 }
 
@@ -560,24 +563,22 @@ fn play_file_sync(path: &PathBuf, opts: &PlaybackOptions) {
     let playa = match Playa::from_path(path) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
-            eprintln!("Failed to detect audio format: {error}");
-            std::process::exit(1);
+            error_exit(&format!("failed to detect audio format: {error}"), 1);
         }
     };
 
     if let Err(error) = playa.play() {
-        eprintln!("Playback failed: {error}");
-        std::process::exit(1);
+        error_exit(&format!("playback failed: {error}"), 1);
     }
 }
 
 #[cfg(not(feature = "audio-ducking"))]
 fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
-        eprintln!(
-            "Unknown sound effect: {name}. Use `playa list-effects` to see available effects."
+        error_exit(
+            &format!("unknown sound effect: {name}. Use `playa list-effects` to see available effects"),
+            2,
         );
-        std::process::exit(2);
     };
 
     // Use native SFX playback when available.
@@ -586,8 +587,7 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
         match playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()) {
             Ok(()) => return,
             Err(playa::sfx_player::SfxPlaybackError::Timeout(_)) => {
-                eprintln!("Playback failed: audio device unavailable");
-                std::process::exit(1);
+                error_exit("audio device unavailable", 1);
             }
             Err(_) => {
                 // Decode/stream error — fall through to host player
@@ -598,24 +598,22 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
-            eprintln!("Failed to load sound effect: {error}");
-            std::process::exit(1);
+            error_exit(&format!("failed to load sound effect: {error}"), 1);
         }
     };
 
     if let Err(error) = playa.play() {
-        eprintln!("Playback failed: {error}");
-        std::process::exit(1);
+        error_exit(&format!("playback failed: {error}"), 1);
     }
 }
 
 fn list_sound_effects(filter: Option<&str>) {
     let effects = SoundEffect::all();
     if effects.is_empty() {
-        eprintln!(
-            "No sound effects are enabled in this build. Rebuild with `cargo build -p playa-cli --features sound-effects`."
+        error_exit(
+            "no sound effects are enabled in this build. Rebuild with `cargo build -p playa-cli --features sound-effects`",
+            1,
         );
-        std::process::exit(1);
     }
 
     // Apply fuzzy filter: case-insensitive, strip non-alphanumeric, match against
@@ -636,8 +634,10 @@ fn list_sound_effects(filter: Option<&str>) {
     };
 
     if effects.is_empty() {
-        eprintln!("No effects match filter {:?}.", filter.unwrap_or(""));
-        std::process::exit(1);
+        error_exit(
+            &format!("no effects match filter {:?}", filter.unwrap_or("")),
+            1,
+        );
     }
 
     // Group effects by category
@@ -1111,8 +1111,7 @@ fn list_output_channels() {
             print!("{}", output);
         }
         Err(e) => {
-            eprintln!("Failed to get output channels: {}", e);
-            std::process::exit(1);
+            error_exit(&format!("failed to get output channels: {e}"), 1);
         }
     }
 }
