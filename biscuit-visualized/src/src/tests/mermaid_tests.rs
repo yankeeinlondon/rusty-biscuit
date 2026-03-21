@@ -407,6 +407,21 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
         svg.contains("dominant-baseline=\"central\""),
         "Legend text should use dominant-baseline=\"central\" for vertical alignment"
     );
+
+    // Verify contrast-aware text: the Python slice (#FFFFFF, white) should get
+    // dark text (#1a1a1a), while darker slices keep light text (#e2e8f0)
+    assert!(
+        svg.contains("fill=\"#1a1a1a\">20%"),
+        "Light pie slice (Python/white) should have dark text for contrast"
+    );
+    assert!(
+        svg.contains("fill=\"#e2e8f0\">45%"),
+        "Dark pie slice (TypeScript) should keep light text"
+    );
+    assert!(
+        svg.contains("fill=\"#e2e8f0\">35%"),
+        "Dark pie slice (Rust) should keep light text"
+    );
 }
 
 #[test]

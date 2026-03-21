@@ -268,6 +268,11 @@ impl MermaidDiagram {
         // to legend text elements (those following legend rect markers).
         output = fix_legend_text_baseline(&output);
 
+        // Fix pie chart text contrast: mermaid-rs-renderer uses a single text color
+        // for all slice labels. When a slice is light (e.g. white), light text is
+        // unreadable. Adjust each label's fill based on its slice's luminance.
+        output = fix_pie_text_contrast(&output);
+
         output
     }
 
@@ -470,6 +475,105 @@ fn replace_circle_radius(svg: &str, radius: u32) -> String {
 
     output.push_str(remaining);
     output
+}
+
+/// Fixes pie chart percentage label contrast by adjusting text color per slice.
+///
+/// The mermaid-rs-renderer uses a single `pie_section_text_color` for all slice
+/// labels, which can produce unreadable text on light-colored slices. This
+/// post-processes the SVG to set each label's fill based on its slice's relative
+/// luminance (WCAG formula), using dark text on light slices.
+fn fix_pie_text_contrast(svg: &str) -> String {
+    // Collect pie slice fill colors from <path> elements (in order)
+    let slice_fills: Vec<&str> = svg
+        .match_indices("<path ")
+        .filter_map(|(start, _)| {
+            let rest = &svg[start..];
+            let tag_end = rest.find('>')?;
+            let tag = &rest[..tag_end];
+            // Pie slice paths have opacity="0.850" — use this to distinguish
+            // from other paths (arrows, borders)
+            if !tag.contains("opacity=\"0.850\"") {
+                return None;
+            }
+            extract_attr(tag, "fill")
+        })
+        .collect();
+
+    if slice_fills.is_empty() {
+        return svg.to_string();
+    }
+
+    // Collect percentage text elements: <text> with dominant-baseline="middle"
+    // (as opposed to legend text which uses dominant-baseline="central")
+    let text_positions: Vec<usize> = svg
+        .match_indices("<text ")
+        .filter_map(|(start, _)| {
+            let rest = &svg[start..];
+            let tag_end = rest.find('>')?;
+            let tag = &rest[..tag_end];
+            if tag.contains("dominant-baseline=\"middle\"") {
+                Some(start)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Must have matching counts to pair them
+    if text_positions.len() != slice_fills.len() {
+        return svg.to_string();
+    }
+
+    let mut output = svg.to_string();
+    // Process in reverse order so earlier positions stay valid
+    for (i, &pos) in text_positions.iter().enumerate().rev() {
+        let rest = &output[pos..];
+        let Some(tag_end) = rest.find('>') else {
+            continue;
+        };
+        let tag = &rest[..tag_end];
+
+        let desired_fill = if is_light_color(slice_fills[i]) {
+            "#1a1a1a"
+        } else {
+            "#e2e8f0"
+        };
+
+        // Replace the fill attribute in this text tag
+        if let Some(fill_start) = tag.find("fill=\"") {
+            let abs_fill_start = pos + fill_start + 6; // after fill="
+            let fill_rest = &output[abs_fill_start..];
+            if let Some(fill_end) = fill_rest.find('"') {
+                output.replace_range(abs_fill_start..abs_fill_start + fill_end, desired_fill);
+            }
+        }
+    }
+
+    output
+}
+
+/// Returns true if a hex color is perceptually light (relative luminance > 0.5).
+fn is_light_color(hex: &str) -> bool {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() < 6 {
+        return false;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0) as f64 / 255.0;
+    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0) as f64 / 255.0;
+    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0) as f64 / 255.0;
+
+    // sRGB to linear
+    let to_linear = |c: f64| -> f64 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+
+    let luminance = 0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b);
+    luminance > 0.4
 }
 
 fn dark_theme() -> mermaid_rs_renderer::Theme {
