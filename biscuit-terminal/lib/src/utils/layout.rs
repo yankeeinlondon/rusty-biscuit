@@ -481,12 +481,11 @@ impl Layout {
 
         // Remove the empty trailing element produced by a trailing newline;
         // we'll restore the newline at the end instead.
-        if had_trailing_newline {
-            if let Some(last) = lines.last() {
-                if last.is_empty() {
-                    lines.pop();
-                }
-            }
+        if had_trailing_newline
+            && let Some(last) = lines.last()
+            && last.is_empty()
+        {
+            lines.pop();
         }
 
         // Apply word wrapping
