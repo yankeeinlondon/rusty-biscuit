@@ -1,19 +1,60 @@
 # Rusty Biscuit
 
-<img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
+<img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 200px; right: 0; top: 0; opacity: 0.75"></img>
 
-> A monorepo of tools to help you achieve AI excellence
+> A set of tools of deterministic tools for a non-deterministic world
+
+## Package Areas
+
+This monorepo is broken up into _package areas_ many of which combine a Library package for programmatic access and a CLI for terminal access. 
+
+| Capability | Communicate | Inspect |
+| ---                                      | ---         | --- |
+| [biscuit-file](./biscuit-file/README.md) - _file utils_   | [biscuit-speaks](./biscuit-speaks/README.md) (TTS) | [tree-hugger](./tree-hugger/README.md) - _static-analysis_ |
+| [biscuit-hash](./biscuit-hash/README.md) - _hash utils_ | [messenger](./messenger/README.md) - _Discord, Slack, ..._  | [sniff](./sniff/README.md) - _host detection_  |
+|  [biscuit-terminal](./biscuit-terminal/README.md) - _term detect & render_ | [playa](./playa/README.md) - _headless audio_ | |
+| [biscuit-visualized](./biscuit-visualized/README.md) - _data viz_ | | |
+| [schematic](./schematic/README.md) - _API clients_ | | | 
+
+Then there are two libraries centered around the ideas of _composition_ and _orchestration_:
+
+- [darkmatter](./darkmatter/README.md) - provide a DSL on top of Markdown to provide powerful composition patterns in Markdown
+- [unchained-ai](./unchained-ai/README.md) - provides a compositional tool that allows the chaining and parallelization of many AI related tasks (both deterministic and non-deterministic).
+
+It being 2026, it feels wrong not to have a more AI related package areas, and largely to meet your expectations we have added:
+
+- [agent-sandbox](./agent-sandbox/README.md) - FUTURE
+- [claudine](./claudine/README.md) - allows working cross-agent more consistent while offering some nice compositional strategies
+- [research](./research/README.md) - research and organize topics, publish as either an "agent skill", a "deep dive doc" or both.
+- [model-citizen](./model-citizen/README.md) - aids in the download, management, and serving of local LLM models
+
+Everyone knows that _naming_ is hard but no one talks about how _grouping_ is equally as hard. Due to this we have decided not to name the category/group of the remaining packages:
+
+- [homelab](./homelab/README.md) - integrations with popular automation platforms and standards as well as some AV equipment for those with universal remotes.
+- [tabby](./tabby/README.md)
 
 ## Usage
 
-We use the [`just`](https://github.com/casey/just) runner for packages in this repo to organize all key operations. The first step is to make sure your host has **just** installed.
+- We have not yet pushed any of these packages to `crates.io` (though that is the eventual plan)
+- For many of the CLI's we also _plan_ on publishing to the **npm** package manager too
+- For now, however, if you want to use the libraries or CLI's in this monorepo you'll need to clone it:
+
+    ```sh
+    git clone https://github.com/yankeeinlondon/rusty-biscuit
+    ```
+
+Once you've cloned you're going to want to install the [`just`](https://github.com/casey/just) runner. This is used throughout this monorepo to organize all key devops operations. Install with:
 
 ```sh
 # macOS
 brew install just
 # ubuntu / debian
 apt install just
-# ...
+```
+
+<details>
+<summary>Other Package Managers</summary>
+<pre><code lang=sh>
 asdf install just
 apk add just
 # Red Hat, CentOS, Rocky, etc.
@@ -28,7 +69,9 @@ nix-env -iA nixpkgs.just
 npm install -g rust-just
 # Python's **uv** package manager
 uv tool install rust-just
-```
+</code></pre>
+</details>
+<br><p>
 
 Once installed you should run `just init` from the repo's root which will:
 
@@ -71,123 +114,7 @@ At this point you're ready to explore, install, test, whatever you like.
 >     - You can check what headless audio players exist on your host by running `playa players`
 >     - You can install any which are missing with `playa install`
 
-## Packages
 
-This monorepo hosts the following package areas:
-
-```mermaid
-flowchart LR
-repo@{label: "Rusty Biscuit\nMonorepo"}
-foundation((Foundation))
-infra((Infrastructure))
-app((Applications))
-
-terminal(biscuit-terminal) --> T@{ shape: braces, label: "Terminal\nfeature detection and \nrendering components" }
-hashing(biscuit-hash) --> H@{ shape: braces, label: "Hash Utilities" }
-file(biscuit-file) --> F@{ shape: braces, label: "File Utilities" }
-tts(biscuit-speaks) --> TTS@{ shape: braces, label: "Text-to-Speech" }
-schematic(schematic) --> SCHEMA@{ shape: braces, label: "API Client Builder" }
-playa(playa) --> AUDIO@{ shape: braces, label: "Audio Playback\nand Sound Effects" }
-tree(tree-hugger) --> TREE@{ shape: braces, label: "Static Analysis" }
-
-repo --> foundation
-repo --> infra
-repo --> app
-
-foundation --> terminal
-foundation --> hashing
-foundation --> file
-foundation --> tts
-foundation --> schematic
-foundation --> playa
-foundation --> tree
-
-app --> darkmatter(Darkmatter)
-app --> unchained(Unchained AI)
-app --> research
-app --> sniff
-app --> homelab
-app --> claudine
-app --> messenger
-
-
-darkmatter(darkmatter) --> DM@{ shape: braces, label: "Markdown Pipeline:\nDSL, LSP, and CLI"}
-unchained(unchained-ai) --> UN@{ shape: braces, label: "AI Pipeline:\nconcurrency, chaining,\nserializable, conditional"}
-research(research) --> R@{ shape: braces, label: "Full lifecycle skill based\nResearch Management"}
-sniff(sniff) --> Detection@{ shape: braces, label: "Hardware, software,\nOS, and filesystem\ndetection"}
-homelab(homelab) --> HL@{ shape: braces, label: "Container Mgmt,\nAutomation APIs,\nNetwork Utils"}
-claudine(claudine) --> CL@{ shape: braces, label: "Agentic CLI abstraction:\nClaude, Codex, OpenCode,\nGemini CLI, Qwen, Kimi, ..."}
-messenger(messenger) --> M@{ shape: braces, label: "Multi-Platform\nMessaging Client"}
-
-infra --> sandbox(Agent Sandbox) --> A@{ shape: braces, label: "Docker and LxC\nUtilities and Images"}
-```
-
-### Core Libraries
-
-1. **biscuit-speaks** [[`./biscuit-speaks`](./biscuit-speaks/README.md)]
-
-    A library and CLI which provides TTS functionality it borrows from the host.
-
-    - The **biscuit-speaks-cli** [[`./biscuit-speaks/cli`](./biscuit-speaks/cli/README.md)] binary is called **so-you-say**:
-
-      ```sh
-      # TTS
-      so-you-say "hello world"
-      # TTS with specific gender voice
-      so-you-say "hello world" --gender male
-      # List TTS providers on host
-      so-you-say --list-providers
-      ```
-
-1. **schematic** [[`./schematic`](./schematic/README.md)]
-
-   Builds type-strong API clients to be consumed by other libraries.
-
-   - **schematic-define** [[`./schematic/define`](./schematic/define/README.md)] - primitives for defining an API
-   - **schematic-definitions** [[`./schematic/definitions`](./schematic/definitions/README.md)] - API's which have been defined
-   - **schematic-gen** [[`./schematic/gen`](./schematic/gen/README.md)] - generates the API client's from schematic-definitions _into_ schematic-schema
-   - **schematic-schema** [[`./schematic/schema`](./schematic/schema/README.md)] - the generated API clients
-
-### Applications
-
-
-1. **darkmatter** [[`./darkmatter`](./darkmatter/README.md)]
-
-   A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
-
-   ```sh
-   # render markdown to the terminal with auto-light/dark theming
-   md doc.md
-   # clean a document to make it a more conformant CommonMark+GFM document
-   md doc.md --clean
-   # render to HTML
-   md doc.md --html
-   # render as JSON AST (`mdast`)
-   md doc.md --ast
-   ```
-
-1. **unchained-ai** [[`./unchained-ai`](./unchained-ai/README.md)]
-
-   Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
-
-
-1. **research** [ [`./research`](./research/README.md) ]
-
-   A **CLI** which facilitates the research process and is able to produce content rich deep dives and tree-based **agent skills** for Agentic CLI's like Claude Code, Codex, OpenCode, etc.
-
-   ```sh
-   # do research
-   research library chalk
-   # list research
-   research list
-   # link research to Claude Code and Opencode
-   research link
-   ```
-
-
-## More Details
-
-For more functional/usage details on any of the packages in this monorepo refer to the `README.md` files in their respective directories.
 
 
 ## License
