@@ -204,9 +204,10 @@ impl GraphDiagram {
                 let trimmed = source.trim();
                 let first_word = trimmed.split_whitespace().next().unwrap_or("");
 
-                if first_word == "graph" || first_word == "digraph" {
-                    GraphInputSyntax::Dot
-                } else if trimmed.contains('{') && trimmed.contains('}') {
+                if first_word == "graph"
+                    || first_word == "digraph"
+                    || (trimmed.contains('{') && trimmed.contains('}'))
+                {
                     GraphInputSyntax::Dot
                 } else {
                     GraphInputSyntax::Expression

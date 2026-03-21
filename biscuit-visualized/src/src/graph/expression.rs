@@ -68,7 +68,7 @@ impl GraphExpression {
 
         // Split by semicolons and newlines into statements
         let statements = input
-            .split(|c| c == ';' || c == '\n')
+            .split([';', '\n'])
             .map(str::trim)
             .filter(|s| !s.is_empty());
 
@@ -159,7 +159,7 @@ impl GraphExpression {
                     let mut id = String::new();
                     let mut found_closing = false;
 
-                    while let Some(ch) = chars.next() {
+                    for ch in chars.by_ref() {
                         if ch == '"' {
                             found_closing = true;
                             break;
