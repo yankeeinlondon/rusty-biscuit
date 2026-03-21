@@ -689,6 +689,8 @@ dependencies = [
  "darkmatter",
  "inquire",
  "owo-colors",
+ "sniff",
+ "strum 0.28.0",
  "tokio",
 ]
 

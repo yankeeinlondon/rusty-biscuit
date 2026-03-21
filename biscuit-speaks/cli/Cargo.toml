@@ -15,4 +15,6 @@ biscuit-speaks = { path = "../lib", features = ["playa"] }
 inquire = "0.9"
 owo-colors = { version = "4.3", features = ["supports-colors"] }
 darkmatter = { path = "../../darkmatter/lib" }
+sniff = { path = "../../sniff/lib" }
+strum = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

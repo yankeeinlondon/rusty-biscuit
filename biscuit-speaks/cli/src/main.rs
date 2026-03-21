@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 
 use biscuit_speaks::{
     CloudTtsProvider, ESpeakProvider, EchogardenProvider, ElevenLabsProvider, Gender, GttsProvider,
@@ -9,12 +9,14 @@ use biscuit_speaks::{
     parse_provider_name, populate_cache_for_all_providers, read_from_cache, speak,
     speak_with_result,
 };
-use clap::{CommandFactory, Parser, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
-use inquire::Select;
+use inquire::{Confirm, Select};
 use owo_colors::OwoColorize;
+use sniff::programs::{InstalledTtsClients, ProgramDetector, TtsClient};
+use strum::IntoEnumIterator;
 
 const CLI_BINARY_NAME: &str = "so-you-say";
 
@@ -55,13 +57,8 @@ impl From<GenderArg> for Gender {
 #[command(version)]
 #[command(after_help = AFTER_HELP)]
 struct Cli {
-    /// List available TTS providers and exit
-    #[arg(long)]
-    list_providers: bool,
-
-    /// List available voices for a provider and exit
-    #[arg(long, conflicts_with = "list_providers")]
-    list_voices: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
 
     /// Use a specific TTS provider
     #[arg(long)]
@@ -79,7 +76,7 @@ struct Cli {
         short,
         long,
         help = "Language code for voice selection (e.g., \"en\", \"fr\", \"de\")",
-        long_help = "Language code for voice selection (e.g., \"en\", \"fr\", \"de\"). When used with --list-voices, filters to only show voices for this language. When speaking, sets the preferred language for voice selection."
+        long_help = "Language code for voice selection (e.g., \"en\", \"fr\", \"de\"). When used with list-voices, filters to only show voices for this language. When speaking, sets the preferred language for voice selection."
     )]
     lang: Option<String>,
 
@@ -111,11 +108,37 @@ struct Cli {
     refresh_cache: bool,
 
     /// Speak in the background, returning control to the terminal immediately
-    #[arg(long, conflicts_with_all = ["list_providers", "list_voices", "refresh_cache"])]
+    #[arg(long)]
     background: bool,
 
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// List available TTS providers
+    ListProviders,
+
+    /// List available voices for a provider
+    ListVoices {
+        /// Show voices for a specific provider
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Filter voices by language code (e.g., "en", "fr", "de")
+        #[arg(short, long)]
+        lang: Option<String>,
+    },
+
+    /// Check TTS provider setup and recommend improvements
+    Init,
+
+    /// Install a TTS provider
+    Install {
+        /// Provider to install (interactive selection if omitted)
+        pkg: Option<String>,
+    },
 }
 
 /// Joins multiple arguments into a single string with spaces
@@ -783,11 +806,383 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
     );
 }
 
+// ============================================================================
+// HostTtsProvider <-> TtsClient mapping
+// ============================================================================
+
+/// Map a `HostTtsProvider` to its corresponding `TtsClient` for sniff operations.
+#[cfg(test)]
+fn host_provider_to_tts_client(provider: HostTtsProvider) -> Option<TtsClient> {
+    match provider {
+        HostTtsProvider::Say => Some(TtsClient::Say),
+        HostTtsProvider::ESpeak => Some(TtsClient::EspeakNg),
+        HostTtsProvider::Piper => Some(TtsClient::Piper),
+        HostTtsProvider::EchoGarden => Some(TtsClient::Echogarden),
+        HostTtsProvider::Sherpa => Some(TtsClient::SherpaOnnx),
+        HostTtsProvider::Mimic3 => Some(TtsClient::Mimic3),
+        HostTtsProvider::Festival => Some(TtsClient::Festival),
+        HostTtsProvider::Gtts => Some(TtsClient::GttsCli),
+        HostTtsProvider::Sapi => Some(TtsClient::WindowsSapi),
+        HostTtsProvider::KokoroTts => Some(TtsClient::KokoroTts),
+        HostTtsProvider::Pico2Wave => Some(TtsClient::Pico2Wave),
+        HostTtsProvider::SpdSay => None, // Not tracked by sniff
+        _ => None,
+    }
+}
+
+/// Map a `TtsClient` back to its `HostTtsProvider`.
+#[cfg(test)]
+fn tts_client_to_host_provider(client: TtsClient) -> Option<HostTtsProvider> {
+    match client {
+        TtsClient::Say => Some(HostTtsProvider::Say),
+        TtsClient::Espeak | TtsClient::EspeakNg => Some(HostTtsProvider::ESpeak),
+        TtsClient::Piper => Some(HostTtsProvider::Piper),
+        TtsClient::Echogarden => Some(HostTtsProvider::EchoGarden),
+        TtsClient::SherpaOnnx => Some(HostTtsProvider::Sherpa),
+        TtsClient::Mimic3 => Some(HostTtsProvider::Mimic3),
+        TtsClient::Festival => Some(HostTtsProvider::Festival),
+        TtsClient::GttsCli => Some(HostTtsProvider::Gtts),
+        TtsClient::WindowsSapi => Some(HostTtsProvider::Sapi),
+        TtsClient::KokoroTts => Some(HostTtsProvider::KokoroTts),
+        TtsClient::Pico2Wave => Some(HostTtsProvider::Pico2Wave),
+        _ => None,
+    }
+}
+
+/// Display name for a TtsClient (for install UI).
+fn tts_client_display_name(client: TtsClient) -> &'static str {
+    match client {
+        TtsClient::Say => "say (macOS)",
+        TtsClient::Espeak | TtsClient::EspeakNg => "espeak-ng",
+        TtsClient::Piper => "piper (Piper TTS)",
+        TtsClient::Echogarden => "echogarden",
+        TtsClient::SherpaOnnx => "sherpa (Sherpa-ONNX)",
+        TtsClient::Mimic => "mimic",
+        TtsClient::Mimic3 => "mimic3 (Mycroft)",
+        TtsClient::Festival => "festival",
+        TtsClient::GttsCli => "gtts (Google TTS CLI)",
+        TtsClient::WindowsSapi => "sapi (Windows)",
+        TtsClient::KokoroTts => "kokoro (Kokoro TTS)",
+        TtsClient::Pico2Wave => "pico2wave",
+        TtsClient::Balcon => "balcon",
+        TtsClient::CoquiTts => "coqui-tts",
+    }
+}
+
+// ============================================================================
+// init subcommand
+// ============================================================================
+
+fn run_init() {
+    let installed = InstalledTtsClients::new();
+    let available = get_available_providers();
+
+    println!("{}", "TTS Provider Status".bold());
+    println!();
+
+    if available.is_empty() {
+        println!(
+            "  {} No TTS providers detected on this system.",
+            "!".yellow().bold()
+        );
+        println!();
+        println!("  Run {} to install one.", "so-you-say install".bold());
+        return;
+    }
+
+    // Show installed providers
+    for provider in available {
+        let name = provider_display_name(provider);
+        println!("  {} {}", "✓".green().bold(), name);
+    }
+    println!();
+
+    // Check if user only has low-quality providers (espeak-only)
+    let only_espeak = available.len() == 1
+        && matches!(available[0], TtsProvider::Host(HostTtsProvider::ESpeak));
+    let has_high_quality = available.iter().any(|p| {
+        matches!(
+            p,
+            TtsProvider::Host(
+                HostTtsProvider::KokoroTts
+                    | HostTtsProvider::EchoGarden
+                    | HostTtsProvider::Sherpa
+                    | HostTtsProvider::Say
+                    | HostTtsProvider::Piper
+            ) | TtsProvider::Cloud(CloudTtsProvider::ElevenLabs)
+        )
+    });
+
+    if only_espeak || !has_high_quality {
+        println!(
+            "  {} Your current setup only has basic-quality voices.",
+            "→".yellow().bold()
+        );
+        println!(
+            "    For much better quality, consider installing {}.",
+            "kokoro".bold()
+        );
+        println!();
+
+        // Check if kokoro is installable
+        if installed.installable(TtsClient::KokoroTts) {
+            match Confirm::new("Would you like to install kokoro now?")
+                .with_default(true)
+                .prompt()
+            {
+                Ok(true) => {
+                    println!();
+                    println!("Installing kokoro...");
+                    match installed.install(TtsClient::KokoroTts) {
+                        Ok(()) => {
+                            println!("  {} kokoro installed successfully!", "✓".green().bold());
+                        }
+                        Err(e) => {
+                            eprintln!("  {} Failed to install kokoro: {}", "✗".red().bold(), e);
+                        }
+                    }
+                }
+                Ok(false) => {
+                    println!(
+                        "  You can install it later with: {}",
+                        "so-you-say install kokoro".bold()
+                    );
+                }
+                Err(_) => {}
+            }
+        } else {
+            println!(
+                "    Install it manually: {}",
+                "https://github.com/nazdridoy/kokoro-tts".dimmed()
+            );
+        }
+    } else {
+        println!(
+            "  {} Your TTS setup looks good!",
+            "✓".green().bold()
+        );
+    }
+}
+
+// ============================================================================
+// install subcommand
+// ============================================================================
+
+fn run_install(pkg: Option<&str>) {
+    let installed = InstalledTtsClients::new();
+
+    if let Some(pkg_name) = pkg {
+        // Install a specific provider by name
+        let client = match parse_tts_client_name(pkg_name) {
+            Some(c) => c,
+            None => {
+                eprintln!("Error: Unknown TTS provider '{}'", pkg_name);
+                eprintln!("Use {} to see installable providers.", "so-you-say install".bold());
+                std::process::exit(1);
+            }
+        };
+
+        if installed.is_installed(client) {
+            println!(
+                "  {} {} is already installed.",
+                "✓".green().bold(),
+                tts_client_display_name(client)
+            );
+            return;
+        }
+
+        if !installed.installable(client) {
+            eprintln!(
+                "  {} {} cannot be automatically installed on this OS.",
+                "✗".red().bold(),
+                tts_client_display_name(client)
+            );
+            std::process::exit(1);
+        }
+
+        println!("Installing {}...", tts_client_display_name(client));
+        match installed.install(client) {
+            Ok(()) => {
+                println!(
+                    "  {} {} installed successfully!",
+                    "✓".green().bold(),
+                    tts_client_display_name(client)
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} Failed to install {}: {}",
+                    "✗".red().bold(),
+                    tts_client_display_name(client),
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Interactive mode: show installed, prompt to install from remaining
+        let installed_clients = installed.installed();
+
+        if !installed_clients.is_empty() {
+            println!("{}", "Installed TTS providers:".bold());
+            println!();
+            for client in &installed_clients {
+                println!("  {} {}", "✓".green().bold(), tts_client_display_name(*client));
+            }
+            println!();
+        }
+
+        // Build list of installable but not-yet-installed clients
+        let installable: Vec<TtsClient> = TtsClient::iter()
+            .filter(|c| !installed.is_installed(*c) && installed.installable(*c))
+            .collect();
+
+        if installable.is_empty() {
+            if installed_clients.is_empty() {
+                println!("No TTS providers can be automatically installed on this OS.");
+            } else {
+                println!("All installable TTS providers are already installed.");
+            }
+            return;
+        }
+
+        #[derive(Clone)]
+        struct ClientOption {
+            client: TtsClient,
+            label: String,
+        }
+
+        impl fmt::Display for ClientOption {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.label)
+            }
+        }
+
+        let options: Vec<ClientOption> = installable
+            .iter()
+            .map(|c| ClientOption {
+                client: *c,
+                label: tts_client_display_name(*c).to_string(),
+            })
+            .collect();
+
+        match Select::new("Select a TTS provider to install", options).prompt() {
+            Ok(selection) => {
+                println!();
+                println!("Installing {}...", tts_client_display_name(selection.client));
+                match installed.install(selection.client) {
+                    Ok(()) => {
+                        println!(
+                            "  {} {} installed successfully!",
+                            "✓".green().bold(),
+                            tts_client_display_name(selection.client)
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "  {} Failed to install {}: {}",
+                            "✗".red().bold(),
+                            tts_client_display_name(selection.client),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// Parse a user-provided string into a TtsClient.
+fn parse_tts_client_name(name: &str) -> Option<TtsClient> {
+    match name.to_lowercase().as_str() {
+        "say" | "macos" => Some(TtsClient::Say),
+        "espeak" | "espeak-ng" | "espeakng" => Some(TtsClient::EspeakNg),
+        "piper" => Some(TtsClient::Piper),
+        "echogarden" => Some(TtsClient::Echogarden),
+        "sherpa" | "sherpa-onnx" | "sherpaonnx" => Some(TtsClient::SherpaOnnx),
+        "mimic3" | "mimic" => Some(TtsClient::Mimic3),
+        "festival" => Some(TtsClient::Festival),
+        "gtts" | "gtts-cli" | "google" => Some(TtsClient::GttsCli),
+        "sapi" | "windows" => Some(TtsClient::WindowsSapi),
+        "kokoro" | "kokoro-tts" | "kokorotts" => Some(TtsClient::KokoroTts),
+        "pico" | "pico2wave" => Some(TtsClient::Pico2Wave),
+        "balcon" => Some(TtsClient::Balcon),
+        "coqui" | "coqui-tts" => Some(TtsClient::CoquiTts),
+        _ => None,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
+
+    // Handle subcommands first
+    if let Some(command) = &cli.command {
+        match command {
+            Command::ListProviders => {
+                print_providers();
+                return Ok(());
+            }
+            Command::ListVoices { provider, lang } => {
+                let resolved_provider = if let Some(provider_name) = provider {
+                    match parse_provider_name(provider_name) {
+                        Some(provider) => provider,
+                        None => {
+                            eprintln!("Error: Unknown provider '{}'", provider_name);
+                            eprintln!("Use `so-you-say list-providers` to see available providers");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    let providers = listable_providers();
+                    if providers.is_empty() {
+                        println!("No TTS providers available for voice listing on this system.");
+                        return Ok(());
+                    }
+
+                    match prompt_for_provider(&providers) {
+                        Ok(selected) => selected,
+                        Err(err) => {
+                            eprintln!("Error: {}", err);
+                            eprintln!("Use --provider to select a provider directly");
+                            std::process::exit(1);
+                        }
+                    }
+                };
+
+                if !provider_supports_voice_listing(&resolved_provider) {
+                    eprintln!(
+                        "Error: Voice listing is not supported for '{}'",
+                        provider_display_name(&resolved_provider)
+                    );
+                    eprintln!("Use `so-you-say list-providers` to see available providers");
+                    std::process::exit(1);
+                }
+
+                match list_voices_for_provider(resolved_provider).await {
+                    Ok(voices) => print_voices(resolved_provider, &voices, lang.as_deref()),
+                    Err(err) => {
+                        eprintln!("Error: {}", err);
+                        std::process::exit(1);
+                    }
+                }
+
+                return Ok(());
+            }
+            Command::Init => {
+                run_init();
+                return Ok(());
+            }
+            Command::Install { pkg } => {
+                run_install(pkg.as_deref());
+                return Ok(());
+            }
+        }
+    }
 
     // Handle --background: re-spawn ourselves without --background as a detached process
     if cli.background {
@@ -819,64 +1214,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
         }
-        // Continue with other operations (--list-voices, speaking, etc.)
+        // Continue with other operations (speaking, etc.)
     }
 
-    // Handle --list-providers flag
-    if cli.list_providers {
-        print_providers();
-        return Ok(());
-    }
-
-    if cli.list_voices {
-        let provider = if let Some(provider_name) = &cli.provider {
-            match parse_provider_name(provider_name) {
-                Some(provider) => provider,
-                None => {
-                    eprintln!("Error: Unknown provider '{}'", provider_name);
-                    eprintln!("Use --list-providers to see available providers");
-                    std::process::exit(1);
-                }
-            }
-        } else {
-            let providers = listable_providers();
-            if providers.is_empty() {
-                println!("No TTS providers available for voice listing on this system.");
-                return Ok(());
-            }
-
-            match prompt_for_provider(&providers) {
-                Ok(selected) => selected,
-                Err(err) => {
-                    eprintln!("Error: {}", err);
-                    eprintln!("Use --provider to select a provider directly");
-                    std::process::exit(1);
-                }
-            }
-        };
-
-        if !provider_supports_voice_listing(&provider) {
-            eprintln!(
-                "Error: Voice listing is not supported for '{}'",
-                provider_display_name(&provider)
-            );
-            eprintln!("Use --list-providers to see available providers");
-            std::process::exit(1);
-        }
-
-        match list_voices_for_provider(provider).await {
-            Ok(voices) => print_voices(provider, &voices, cli.lang.as_deref()),
-            Err(err) => {
-                eprintln!("Error: {}", err);
-                std::process::exit(1);
-            }
-        }
-
-        return Ok(());
-    }
-
+    // No subcommand: speaking mode
+    // If no text args and stdin is a terminal (not piped), show help
     let message = if cli.text.is_empty() {
-        // No arguments provided, read from stdin
+        if io::stdin().is_terminal() {
+            // No piped input and no text args — show help
+            Cli::command().print_help()?;
+            return Ok(());
+        }
+        // Piped input — read from stdin
         read_from_stdin()?
     } else {
         // Join all arguments with spaces
@@ -892,7 +1241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(p) => Some(p),
             None => {
                 eprintln!("Error: Unknown provider '{}'", provider_name);
-                eprintln!("Use --list-providers to see available providers");
+                eprintln!("Use `so-you-say list-providers` to see available providers");
                 std::process::exit(1);
             }
         }
@@ -927,7 +1276,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     provider_display_name(&prov)
                                 );
                                 eprintln!(
-                                    "Use --list-voices --provider {} to see available voices",
+                                    "Use `so-you-say list-voices --provider {}` to see available voices",
                                     cli.provider.as_ref().unwrap()
                                 );
                                 std::process::exit(1);
@@ -1643,5 +1992,35 @@ mod tests {
         assert_eq!(speed_label(SpeedLevel::Slow), "slow");
         assert_eq!(speed_label(SpeedLevel::Normal), "normal");
         assert_eq!(speed_label(SpeedLevel::Explicit(1.5)), "custom");
+    }
+
+    // ========================================================================
+    // TtsClient mapping tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_tts_client_name() {
+        assert_eq!(parse_tts_client_name("kokoro"), Some(TtsClient::KokoroTts));
+        assert_eq!(parse_tts_client_name("kokoro-tts"), Some(TtsClient::KokoroTts));
+        assert_eq!(parse_tts_client_name("espeak"), Some(TtsClient::EspeakNg));
+        assert_eq!(parse_tts_client_name("piper"), Some(TtsClient::Piper));
+        assert_eq!(parse_tts_client_name("unknown-thing"), None);
+    }
+
+    #[test]
+    fn test_host_provider_to_tts_client_roundtrip() {
+        // Verify roundtrip for key providers
+        let providers = [
+            HostTtsProvider::Say,
+            HostTtsProvider::ESpeak,
+            HostTtsProvider::Piper,
+            HostTtsProvider::KokoroTts,
+            HostTtsProvider::EchoGarden,
+        ];
+        for provider in providers {
+            let client = host_provider_to_tts_client(provider).unwrap();
+            let back = tts_client_to_host_provider(client).unwrap();
+            assert_eq!(back, provider);
+        }
     }
 }

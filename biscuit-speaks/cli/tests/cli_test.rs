@@ -301,15 +301,15 @@ fn test_cli_help_shows_gender_option() {
 }
 
 #[test]
-fn test_cli_list_providers_flag() {
+fn test_cli_list_providers_subcommand() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--list-providers"])
+        .args(["run", "-p", "biscuit-speaks-cli", "--", "list-providers"])
         .output()
         .expect("Failed to execute");
 
     assert!(
         output.status.success(),
-        "CLI should accept --list-providers flag"
+        "CLI should accept list-providers subcommand"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -320,7 +320,7 @@ fn test_cli_list_providers_flag() {
 }
 
 #[test]
-fn test_cli_help_shows_list_providers_option() {
+fn test_cli_help_shows_list_providers_subcommand() {
     let output = Command::new("cargo")
         .args(["run", "-p", "biscuit-speaks-cli", "--", "--help"])
         .output()
@@ -328,8 +328,8 @@ fn test_cli_help_shows_list_providers_option() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("--list-providers"),
-        "Help should document --list-providers flag"
+        stdout.contains("list-providers"),
+        "Help should document list-providers subcommand"
     );
 }
 
@@ -598,14 +598,13 @@ fn test_cli_help_shows_background_option() {
 }
 
 #[test]
-fn test_cli_background_conflicts_with_list_providers() {
+fn test_cli_old_list_providers_flag_rejected() {
     let output = Command::new("cargo")
         .args([
             "run",
             "-p",
             "biscuit-speaks-cli",
             "--",
-            "--background",
             "--list-providers",
         ])
         .output()
@@ -613,19 +612,18 @@ fn test_cli_background_conflicts_with_list_providers() {
 
     assert!(
         !output.status.success(),
-        "CLI should reject --background with --list-providers"
+        "CLI should reject old --list-providers flag (now a subcommand)"
     );
 }
 
 #[test]
-fn test_cli_background_conflicts_with_list_voices() {
+fn test_cli_old_list_voices_flag_rejected() {
     let output = Command::new("cargo")
         .args([
             "run",
             "-p",
             "biscuit-speaks-cli",
             "--",
-            "--background",
             "--list-voices",
         ])
         .output()
@@ -633,12 +631,12 @@ fn test_cli_background_conflicts_with_list_voices() {
 
     assert!(
         !output.status.success(),
-        "CLI should reject --background with --list-voices"
+        "CLI should reject old --list-voices flag (now a subcommand)"
     );
 }
 
 #[test]
-fn test_cli_background_conflicts_with_refresh_cache() {
+fn test_cli_background_with_refresh_cache_is_allowed() {
     let output = Command::new("cargo")
         .args([
             "run",
@@ -647,12 +645,14 @@ fn test_cli_background_conflicts_with_refresh_cache() {
             "--",
             "--background",
             "--refresh-cache",
+            "test",
         ])
         .output()
         .expect("Failed to execute");
 
+    // --background with --refresh-cache is now allowed (background refresh)
     assert!(
-        !output.status.success(),
-        "CLI should reject --background with --refresh-cache"
+        output.status.success(),
+        "CLI should allow --background with --refresh-cache"
     );
 }
