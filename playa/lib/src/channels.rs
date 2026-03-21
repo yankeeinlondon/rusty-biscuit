@@ -1,8 +1,19 @@
 #[cfg(feature = "sfx-native")]
+use std::sync::mpsc;
+#[cfg(feature = "sfx-native")]
+use std::time::Duration;
+
+#[cfg(feature = "sfx-native")]
 use rodio::cpal::{
     self,
     traits::{DeviceTrait, HostTrait},
 };
+
+/// Maximum time to wait for any audio device operation (enumeration, probing).
+/// If CoreAudio (or the platform audio subsystem) doesn't respond within this
+/// window, it's likely hung and we should bail out rather than blocking forever.
+#[cfg(feature = "sfx-native")]
+const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Information about a native output channel (audio device).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,8 +49,32 @@ pub(crate) fn slugify(s: &str) -> String {
 /// Indicates which channel is the default for general audio and which is the
 /// default for sound effects. On macOS, these can be different if configured
 /// in System Settings.
+///
+/// This function is guarded by a timeout to prevent hanging when the platform
+/// audio subsystem (e.g., CoreAudio on macOS) is unresponsive.
 #[cfg(feature = "sfx-native")]
 pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::Error>> {
+    let (tx, rx) = mpsc::channel::<Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>>>();
+
+    std::thread::spawn(move || {
+        let _ = tx.send(get_output_channels_inner());
+    });
+
+    match rx.recv_timeout(DEVICE_PROBE_TIMEOUT) {
+        Ok(result) => result.map_err(|e| e as Box<dyn std::error::Error>),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "audio device enumeration timed out after {}s — audio subsystem may be unresponsive",
+            DEVICE_PROBE_TIMEOUT.as_secs()
+        )
+        .into()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("audio device enumeration thread panicked".into())
+        }
+    }
+}
+
+#[cfg(feature = "sfx-native")]
+fn get_output_channels_inner() -> Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>> {
     let host = cpal::default_host();
     let default_output = host.default_output_device();
     let default_audio_name = default_output
@@ -58,7 +93,9 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
     let mut channels = Vec::new();
     let mut name_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
-    let devices = host.output_devices()?;
+    let devices = host
+        .output_devices()
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
 
     for device in devices {
         if let Ok(desc) = device.description() {
@@ -90,8 +127,33 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
 }
 
 /// Finds an output device by its slugified id or exact name.
+///
+/// Guarded by a timeout to prevent hanging when the audio subsystem is
+/// unresponsive. Returns `None` on timeout (caller should fall back to
+/// the default device or host player).
 #[cfg(feature = "sfx-native")]
 pub fn find_device_by_id_or_name(id_or_name: &str) -> Option<rodio::Device> {
+    let name = id_or_name.to_string();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let _ = tx.send(find_device_by_id_or_name_inner(&name));
+    });
+
+    match rx.recv_timeout(DEVICE_PROBE_TIMEOUT) {
+        Ok(result) => result,
+        Err(_) => {
+            eprintln!(
+                "playa: audio device lookup timed out after {}s",
+                DEVICE_PROBE_TIMEOUT.as_secs()
+            );
+            None
+        }
+    }
+}
+
+#[cfg(feature = "sfx-native")]
+fn find_device_by_id_or_name_inner(id_or_name: &str) -> Option<rodio::Device> {
     let host = cpal::default_host();
     if let Ok(devices) = host.output_devices() {
         let mut name_counts: std::collections::HashMap<String, usize> =

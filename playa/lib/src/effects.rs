@@ -1369,10 +1369,18 @@ impl SoundEffect {
         // Try native playback first when available.
         #[cfg(feature = "sfx-native")]
         {
-            if crate::sfx_player::play_sfx(self.bytes(), options).is_ok() {
-                return Ok(());
+            match crate::sfx_player::play_sfx(self.bytes(), options) {
+                Ok(()) => return Ok(()),
+                Err(crate::sfx_player::SfxPlaybackError::Timeout(_)) => {
+                    // Audio device timed out — host players will also hang.
+                    return Err(crate::PlaybackError::AudioDeviceUnavailable(
+                        "audio device timed out — audio subsystem may be unresponsive".into(),
+                    ));
+                }
+                Err(_) => {
+                    // Decode/stream error — fall through to host player
+                }
             }
-            // Fall through to host player on error.
         }
 
         let playa = crate::Playa::from_bytes(self.as_bytes().to_vec())

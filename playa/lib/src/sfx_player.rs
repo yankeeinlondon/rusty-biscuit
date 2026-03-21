@@ -30,6 +30,7 @@
 //! PulseAudio is not available (e.g., ALSA-only systems).
 
 use std::io::Cursor;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -41,6 +42,9 @@ use crate::types::PlaybackOptions;
 /// giving up. This prevents the process from hanging indefinitely when
 /// an audio device becomes unresponsive.
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum time to wait for an audio device to open.
+const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors from native SFX playback.
 #[derive(Debug, Error)]
@@ -94,7 +98,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         // Fall through to default rodio path on error.
     }
 
-    let mut stream = open_sfx_stream(options)?;
+    let mut stream = open_sfx_stream_with_timeout(options)?;
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
@@ -131,6 +135,37 @@ fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlayba
         std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
+}
+
+/// Open an SFX audio stream with a timeout to prevent hanging.
+///
+/// Spawns `open_sfx_stream` on a background thread and waits up to
+/// `DEVICE_OPEN_TIMEOUT`. Returns a `Timeout` error if the device
+/// doesn't respond in time.
+fn open_sfx_stream_with_timeout(
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    let options = options.clone();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let result = open_sfx_stream(&options);
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(DEVICE_OPEN_TIMEOUT) {
+        Ok(result) => Ok(result.map_err(SfxPlaybackError::Stream)?),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            eprintln!(
+                "playa: SFX audio device did not respond within {}s",
+                DEVICE_OPEN_TIMEOUT.as_secs()
+            );
+            Err(SfxPlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(SfxPlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
+        }
+    }
 }
 
 /// Open an audio output stream targeting the OS sound effects channel.

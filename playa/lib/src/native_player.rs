@@ -10,6 +10,7 @@
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -19,9 +20,14 @@ use crate::audio::AudioData;
 use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions};
 
 /// Maximum time to wait for native audio playback to complete.
-/// Files longer than this should use a host player (mpv, ffplay, etc.)
-/// which manages its own timeouts.
-const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(600);
+/// Most audio files finish well within 5 minutes; anything longer
+/// should use a host player (mpv, ffplay, etc.).
+const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Maximum time to wait for an audio device to open.
+/// If the device doesn't respond within this window, it's likely
+/// hung and we should fall back to a host player.
+const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors from native audio playback.
 #[derive(Debug, Error)]
@@ -116,20 +122,52 @@ fn play_from_file(
     play_source(source, options)
 }
 
+/// Open an audio output device with a timeout.
+///
+/// Spawns the blocking `open_default_sink()` (or device-specific open) on a
+/// background thread and waits up to `DEVICE_OPEN_TIMEOUT`. If the device
+/// doesn't respond in time, returns a `Timeout` error so the caller can fall
+/// back to a host player instead of hanging indefinitely.
+fn open_device_with_timeout(
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, NativePlaybackError> {
+    let channel = options.channel.clone();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let result = if let Some(channel_name) = &channel {
+            if let Some(device) = crate::channels::find_device_by_id_or_name(channel_name) {
+                DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+            } else {
+                DeviceSinkBuilder::open_default_sink()
+            }
+        } else {
+            DeviceSinkBuilder::open_default_sink()
+        };
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(DEVICE_OPEN_TIMEOUT) {
+        Ok(result) => Ok(result?),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            eprintln!(
+                "playa: audio device did not respond within {}s — falling back to host player",
+                DEVICE_OPEN_TIMEOUT.as_secs()
+            );
+            Err(NativePlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(NativePlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
+        }
+    }
+}
+
 /// Play a decoded audio source through the specified or default output device.
 fn play_source(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
-    let stream = if let Some(channel_name) = &options.channel {
-        if let Some(device) = crate::channels::find_device_by_id_or_name(channel_name) {
-            DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())?
-        } else {
-            DeviceSinkBuilder::open_default_sink()?
-        }
-    } else {
-        DeviceSinkBuilder::open_default_sink()?
-    };
+    let stream = open_device_with_timeout(options)?;
     let player = Player::connect_new(stream.mixer());
 
     if let Some(vol) = options.volume {

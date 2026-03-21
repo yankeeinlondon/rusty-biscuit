@@ -74,7 +74,7 @@ pub fn playa_with_player_and_options(
 
     // Poll the child process with a timeout so we don't hang indefinitely
     // if the player or audio device becomes unresponsive.
-    let timeout = Duration::from_secs(600);
+    let timeout = Duration::from_secs(300);
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -197,7 +197,7 @@ pub async fn playa_with_player_and_options_async(
         .spawn()
         .map_err(|source| PlaybackError::Spawn { player, source })?;
 
-    let timeout = Duration::from_secs(600);
+    let timeout = Duration::from_secs(300);
     match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => {
             if !status.success() {
