@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::PadRight;
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::RenderableContent;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::JustfileInfo;
@@ -24,6 +28,7 @@ pub fn render_just_text(
     justfiles: &[JustfileInfo],
     verbose: u8,
     with_recipe: Option<&str>,
+    grouped: bool,
 ) -> String {
     let term = Terminal::default();
 
@@ -32,7 +37,11 @@ pub fn render_just_text(
     }
 
     let output = if let Some(recipe) = with_recipe {
-        render_with_recipe_filter(justfiles, verbose, recipe, &term)
+        if grouped {
+            render_grouped_by_hash(justfiles, verbose, recipe, &term)
+        } else {
+            render_with_recipe_filter(justfiles, verbose, recipe, &term)
+        }
     } else {
         render_justfile_list(justfiles, verbose, &term)
     };
@@ -90,7 +99,7 @@ fn render_with_recipe_filter(
 
         let mut list = UnorderedList::empty();
         for jf in &with {
-            list.add(render_justfile_item(jf, 0, term));
+            list.add(render_justfile_item_inner(jf, 0, false, term));
         }
 
         format!("{}\n{}", header, list.render(term))
@@ -113,7 +122,7 @@ fn render_with_recipe_filter(
         } else {
             let mut with_list = UnorderedList::empty();
             for jf in &with {
-                with_list.add(render_justfile_item(jf, verbose, term));
+                with_list.add(render_justfile_item_inner(jf, verbose, false, term));
             }
             out.push_str(&with_list.render(term));
         }
@@ -144,26 +153,146 @@ fn render_with_recipe_filter(
     }
 }
 
+/// Render justfiles grouped by recipe hash when `--with <recipe> --grouped` is active.
+///
+/// Justfiles containing the recipe are grouped by matching hash values, so
+/// justfiles whose recipe bodies are identical appear together. Each group
+/// is a top-level list item with a nested list of justfile paths underneath.
+/// Justfiles without the recipe are listed separately at the end (verbose only).
+fn render_grouped_by_hash(
+    justfiles: &[JustfileInfo],
+    verbose: u8,
+    recipe: &str,
+    term: &Terminal,
+) -> String {
+    let (with, without): (Vec<_>, Vec<_>) = justfiles
+        .iter()
+        .partition(|jf| jf.recipes.iter().any(|r| r.name == recipe));
+
+    if with.is_empty() {
+        return Prose::new(format!(
+            "<dim>No justfiles contain the </dim><purple-500>{}</purple-500><dim> recipe.</dim>",
+            recipe
+        ))
+        .render(term);
+    }
+
+    // Group justfiles by the hash of the matching recipe
+    let mut groups: BTreeMap<u64, Vec<&JustfileInfo>> = BTreeMap::new();
+    for jf in &with {
+        if let Some(r) = jf.recipes.iter().find(|r| r.name == recipe) {
+            groups.entry(r.hash).or_default().push(jf);
+        }
+    }
+
+    let mut out = String::new();
+
+    let header = Prose::new(format!(
+        "<b>Justfiles</b> with <purple-500>{}</purple-500> <dim>({} justfiles, {} unique)</dim>",
+        recipe,
+        with.len(),
+        groups.len()
+    ))
+    .render(term);
+    out.push_str(&header);
+    out.push('\n');
+
+    let mut outer_list = UnorderedList::empty();
+
+    for (hash, members) in &groups {
+        // Get description from the first member's matching recipe
+        let description = members
+            .first()
+            .and_then(|jf| jf.recipes.iter().find(|r| r.name == recipe))
+            .and_then(|r| r.description.as_deref())
+            .unwrap_or("(no description)");
+
+        let count_suffix = if members.len() > 1 {
+            format!(" <dim>({}×)</dim>", members.len())
+        } else {
+            String::new()
+        };
+
+        let group_label = format!(
+            "<b>#{:016x}</b>{}\n\n<dim><i>{}</i></dim>",
+            hash, count_suffix, description
+        );
+
+        // Add the group label as a Prose component so markup is rendered
+        outer_list.add(RenderableContent::Component(Rc::new(Prose::new(group_label))));
+
+        // Add nested list of justfile paths
+        let mut inner_list = UnorderedList::empty();
+        for jf in members {
+            inner_list.add(render_justfile_item_inner(jf, verbose, false, term));
+        }
+        outer_list.add(RenderableContent::Component(Rc::new(inner_list)));
+    }
+
+    out.push_str(&outer_list.render(term));
+
+    // In verbose mode, also show justfiles without the recipe
+    if verbose > 0 && !without.is_empty() {
+        out.push('\n');
+        let without_header = Prose::new(format!(
+            "<b>Without</b> <purple-500>{}</purple-500> <dim>({})</dim>",
+            recipe,
+            without.len()
+        ))
+        .render(term);
+        out.push_str(&without_header);
+        out.push('\n');
+
+        let mut without_list = UnorderedList::empty();
+        for jf in &without {
+            without_list.add(render_justfile_item(jf, verbose, term));
+        }
+        out.push_str(&without_list.render(term));
+    }
+
+    out
+}
+
 /// Render a single justfile as an UnorderedList item.
 ///
 /// Returns a Prose-rendered string. In non-verbose mode, just the file path
 /// and recipe count. In verbose mode, appends the recipe list underneath.
+/// When `show_counts` is false, the recipe count suffix is omitted (used
+/// with `--with` filtering where counts aren't relevant).
 fn render_justfile_item(jf: &JustfileInfo, verbose: u8, term: &Terminal) -> String {
+    render_justfile_item_inner(jf, verbose, true, term)
+}
+
+fn render_justfile_item_inner(
+    jf: &JustfileInfo,
+    verbose: u8,
+    show_counts: bool,
+    term: &Terminal,
+) -> String {
     let abs_path = jf.path.display();
-    let public_count = jf.recipes.iter().filter(|r| !r.private).count();
-    let private_count = jf.recipes.iter().filter(|r| r.private).count();
 
-    let private_suffix = if private_count > 0 {
-        format!(", <i>{} private</i>", private_count)
+    let summary = if show_counts {
+        let public_count = jf.recipes.iter().filter(|r| !r.private).count();
+        let private_count = jf.recipes.iter().filter(|r| r.private).count();
+
+        let private_suffix = if private_count > 0 {
+            format!(", <i>{} private</i>", private_count)
+        } else {
+            String::new()
+        };
+
+        Prose::new(format!(
+            "<a href=\"file://{}\">{}</a> <dim>({} recipes{})</dim>",
+            abs_path, jf.relative, public_count, private_suffix
+        ))
+        .render(term)
     } else {
-        String::new()
+        Prose::new(format!(
+            "<a href=\"file://{}\">{}</a>",
+            abs_path, jf.relative
+        ))
+        .render(term)
     };
-
-    let summary = Prose::new(format!(
-        "<a href=\"file://{}\">{}</a> <dim>({} recipes{})</dim>",
-        abs_path, jf.relative, public_count, private_suffix
-    ))
-    .render(term);
 
     if verbose == 0 {
         return summary;

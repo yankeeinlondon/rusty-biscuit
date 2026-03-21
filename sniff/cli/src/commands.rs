@@ -76,7 +76,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Handle just mode separately (doesn't use SniffResult)
-        if let Commands::Just { filter, with } = cmd {
+        if let Commands::Just {
+            filter,
+            with,
+            grouped,
+        } = cmd
+        {
             let base = cli
                 .base
                 .clone()
@@ -87,7 +92,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string_pretty(&filtered)?);
             } else {
                 let rendered =
-                    output::render_just_text(&justfiles, cli.verbose, with.as_deref());
+                    output::render_just_text(&justfiles, cli.verbose, with.as_deref(), *grouped);
                 output::emit_text(&rendered, cli.plain);
             }
             return Ok(());

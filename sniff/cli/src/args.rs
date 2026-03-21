@@ -357,6 +357,9 @@ pub enum Commands {
         /// Filter to justfiles containing a specific recipe
         #[arg(long, value_name = "RECIPE")]
         with: Option<String>,
+        /// Group justfiles that share identical recipe bodies (requires --with)
+        #[arg(long, requires = "with")]
+        grouped: bool,
     },
 }
 
