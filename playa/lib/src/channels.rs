@@ -13,7 +13,7 @@ use rodio::cpal::{
 /// If CoreAudio (or the platform audio subsystem) doesn't respond within this
 /// window, it's likely hung and we should bail out rather than blocking forever.
 #[cfg(feature = "sfx-native")]
-const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Information about a native output channel (audio device).
 #[derive(Debug, Clone, PartialEq, Eq)]

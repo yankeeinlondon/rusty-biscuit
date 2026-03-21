@@ -30,7 +30,8 @@
 //! PulseAudio is not available (e.g., ALSA-only systems).
 
 use std::io::Cursor;
-use std::sync::mpsc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -45,6 +46,38 @@ const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum time to wait for an audio device to open.
 const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Watchdog that terminates the process if an audio device open hangs.
+///
+/// CoreAudio requires a run loop on the calling thread, so we can't move
+/// device-opening calls to a background thread. Instead, we run them on the
+/// main thread and spawn a watchdog that will abort the process if the call
+/// doesn't complete in time.
+struct DeviceOpenWatchdog {
+    disarmed: Arc<AtomicBool>,
+}
+
+impl DeviceOpenWatchdog {
+    fn start(timeout: Duration) -> Self {
+        let disarmed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&disarmed);
+        let secs = timeout.as_secs();
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if !flag.load(Ordering::Relaxed) {
+                eprintln!(
+                    "playa: audio device did not respond within {secs}s — aborting"
+                );
+                std::process::exit(1);
+            }
+        });
+        Self { disarmed }
+    }
+
+    fn disarm(self) {
+        self.disarmed.store(true, Ordering::Relaxed);
+    }
+}
 
 /// Errors from native SFX playback.
 #[derive(Debug, Error)]
@@ -98,7 +131,9 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         // Fall through to default rodio path on error.
     }
 
-    let mut stream = open_sfx_stream_with_timeout(options)?;
+    let guard = DeviceOpenWatchdog::start(DEVICE_OPEN_TIMEOUT);
+    let mut stream = open_sfx_stream(options).map_err(SfxPlaybackError::Stream)?;
+    guard.disarm();
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
@@ -135,37 +170,6 @@ fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlayba
         std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
-}
-
-/// Open an SFX audio stream with a timeout to prevent hanging.
-///
-/// Spawns `open_sfx_stream` on a background thread and waits up to
-/// `DEVICE_OPEN_TIMEOUT`. Returns a `Timeout` error if the device
-/// doesn't respond in time.
-fn open_sfx_stream_with_timeout(
-    options: &PlaybackOptions,
-) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
-    let options = options.clone();
-    let (tx, rx) = mpsc::channel();
-
-    std::thread::spawn(move || {
-        let result = open_sfx_stream(&options);
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(DEVICE_OPEN_TIMEOUT) {
-        Ok(result) => Ok(result.map_err(SfxPlaybackError::Stream)?),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            eprintln!(
-                "playa: SFX audio device did not respond within {}s",
-                DEVICE_OPEN_TIMEOUT.as_secs()
-            );
-            Err(SfxPlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            Err(SfxPlaybackError::Timeout(DEVICE_OPEN_TIMEOUT.as_secs()))
-        }
-    }
 }
 
 /// Open an audio output stream targeting the OS sound effects channel.

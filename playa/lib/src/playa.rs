@@ -148,26 +148,15 @@ impl Playa {
 
         // Try native playback first (non-URL, non-forced-host)
         #[cfg(feature = "native-playback")]
-        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
-            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
-                Ok(()) => {
-                    if self.show_meta {
-                        self.print_native_meta(format);
-                    }
-                    return Ok(());
-                }
-                Err(crate::native_player::NativePlaybackError::Timeout(_)) => {
-                    // Audio device timed out — the entire audio subsystem is
-                    // likely unresponsive. Host players (afplay, mpv, etc.)
-                    // will also hang, so bail immediately.
-                    return Err(PlaybackError::AudioDeviceUnavailable(
-                        "audio device timed out — audio subsystem may be unresponsive".into(),
-                    ));
-                }
-                Err(_) => {
-                    // Format/decode/IO error — fall through to host player
-                }
+        if !self.force_host
+            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
+            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
+                .is_ok()
+        {
+            if self.show_meta {
+                self.print_native_meta(format);
             }
+            return Ok(());
         }
 
         // Host player fallback
@@ -208,29 +197,18 @@ impl Playa {
 
         // Try native playback first (non-URL, non-forced-host)
         #[cfg(feature = "native-playback")]
-        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
-            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
-                Ok(()) => {
-                    if self.show_meta {
-                        self.print_native_meta(format);
-                    }
-                    if let Some(guard) = guard {
-                        guard.restore().await;
-                    }
-                    return Ok(());
-                }
-                Err(crate::native_player::NativePlaybackError::Timeout(_)) => {
-                    if let Some(guard) = guard {
-                        guard.restore().await;
-                    }
-                    return Err(PlaybackError::AudioDeviceUnavailable(
-                        "audio device timed out — audio subsystem may be unresponsive".into(),
-                    ));
-                }
-                Err(_) => {
-                    // Format/decode/IO error — fall through to host player
-                }
+        if !self.force_host
+            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
+            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
+                .is_ok()
+        {
+            if self.show_meta {
+                self.print_native_meta(format);
             }
+            if let Some(guard) = guard {
+                guard.restore().await;
+            }
+            return Ok(());
         }
 
         // Host player fallback

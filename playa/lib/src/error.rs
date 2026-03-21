@@ -103,10 +103,6 @@ pub enum PlaybackError {
     /// Resume was requested but audio is not paused.
     #[error("audio is not currently paused")]
     NotPaused,
-    /// The audio subsystem is unresponsive — native and host players will
-    /// both fail. No point in trying further.
-    #[error("audio device unavailable: {0}")]
-    AudioDeviceUnavailable(String),
     /// A generic IO failure occurred.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
