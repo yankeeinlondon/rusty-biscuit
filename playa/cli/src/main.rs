@@ -521,25 +521,14 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
             None
         };
 
-        match playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()) {
-            Ok(()) => {
-                #[cfg(feature = "audio-ducking")]
-                if let Some(guard) = guard {
-                    guard.restore().await;
-                }
-                return;
+        if playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok() {
+            #[cfg(feature = "audio-ducking")]
+            if let Some(guard) = guard {
+                guard.restore().await;
             }
-            Err(playa::sfx_player::SfxPlaybackError::Timeout(_)) => {
-                #[cfg(feature = "audio-ducking")]
-                if let Some(guard) = guard {
-                    guard.restore().await;
-                }
-                error_exit("audio device unavailable", 1);
-            }
-            Err(_) => {
-                // Decode/stream error — fall through to Playa builder path
-            }
+            return;
         }
+        // Fall through to Playa builder path on error
     }
 
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
@@ -583,16 +572,10 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
 
     // Use native SFX playback when available.
     #[cfg(feature = "sfx-native")]
-    if !opts.force_host {
-        match playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()) {
-            Ok(()) => return,
-            Err(playa::sfx_player::SfxPlaybackError::Timeout(_)) => {
-                error_exit("audio device unavailable", 1);
-            }
-            Err(_) => {
-                // Decode/stream error — fall through to host player
-            }
-        }
+    if !opts.force_host
+        && playa::sfx_player::play_sfx(effect.bytes(), &opts.to_lib_options()).is_ok()
+    {
+        return;
     }
 
     let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
