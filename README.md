@@ -32,6 +32,9 @@ Everyone knows that _naming_ is hard but no one talks about how _grouping_ is eq
 
 - [homelab](./homelab/README.md) - integrations with popular automation platforms and standards as well as some AV equipment for those with universal remotes.
 - [tabby](./tabby/README.md)
+- [queue](./queue/README.md) - a TUI for queuing work to start later
+
+> **Note:** it was pointed out the _convention_ would have had us use the `other` category name but then our well made point about naming and grouping being so hard would have fallen on deaf ears.
 
 ## Usage
 
