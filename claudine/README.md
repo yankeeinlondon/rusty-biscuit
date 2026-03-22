@@ -98,11 +98,7 @@ One of the newer and cooler features provided by Claudine is what Claudine' call
 
 #### The `compose` Variant
 
-##### What
-
 The `compose` variant allows you to reference a Markdown file as a prompt for your Agent.
-
-##### How
 
 - it is available in two syntaxes:
     - `claudine <agent> --compose <file-ref>`, and
@@ -115,7 +111,7 @@ The `compose` variant allows you to reference a Markdown file as a prompt for yo
     - once composed this prompt will be passed to the `claude` agent harness for execution of a non-interactive session (using `-i` CLI switch would have used an interactive session)
     - once the non-interactive session has completed the appropriate exit code is returned based on a successful or unsuccessful outcome
 
-##### Why
+Why use a compose prompt?
 
 - we all know a "better prompt" provides a "better answer"
 - but how can we allocate the time to build better prompts?
@@ -138,8 +134,6 @@ For more details on the **compose** variant, read the [Compose Prompting](./docs
 
 While the `compose` variant used the frontmatter and body of Markdown file to create a high quality _prompt_ on the fly and then pass that into an Agent. With the _inline composition_ variant we will leverage the frontmatter of a document to create or update the body of the same document.
 
-##### How
-
 The inline composition variant is available in two syntaxes:
 
 - `claudine <agent> --inline-composition <file-ref>`
@@ -149,8 +143,6 @@ The inline composition variant is available in two syntaxes:
         - `--fp`
     - use whichever cognitively makes the most sense to you
 - `claudine inline-compose <file-ref>`; lazily resolves which agent to use
-
-##### What
 
 In order to pull off inline composition in a compact CLI surface we will rely on some conventions:
 
@@ -184,8 +176,6 @@ When you run an inline composition the following steps are executed:
 - **Agent Failure** - _if we detect that the Agent believes it has failed then we will immediately stop and return an error message_
 - **Task Failure** - _if the agent believes it has succeeded but the document's body has not changed or is empty then we will report this as an error_
 - **Frontmatter Check** - _the Agent will have been told not to update the Frontmatter but if they do anyway, we'll report this as a warning but convert the frontmatter back to it's original/intended state_
-
-##### Why
 
 This form of composition provide a self-contained way of keeping a document up-to-date and is often used for research and avoiding documentation drift.
 
@@ -246,11 +236,9 @@ claudine init # brings you through a short interactive interview
 ```
 
 
-
-
 ## Supported Providers
 
-::shell claudine providers
+::shell claudine providers --plain
 
 
 
