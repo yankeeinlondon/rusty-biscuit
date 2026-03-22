@@ -504,7 +504,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         yolo_enabled = false;
     }
 
-    if non_interactive_requested {
+    // Composition pipelines (--prompt-file, --frontmatter-prompt, --compose)
+    // deliver the prompt to child_args themselves, then call apply_non_interactive.
+    // Only run the early call for passthrough prompts (bare positional args).
+    let has_composition_prompt = args.prompt_file.is_some()
+        || args.frontmatter_prompt.is_some()
+        || args.compose.is_some();
+
+    if non_interactive_requested && !has_composition_prompt {
         profile.apply_non_interactive(&mut child_args)?;
         // Only apply default model if the user didn't pass --model explicitly
         // (apply_model handles it below when args.model is Some).
@@ -621,8 +628,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for prompt-file composition (unless --interactive)
-        if !interactive_requested && !non_interactive_requested {
+        // Force non-interactive for prompt-file composition (unless --interactive).
+        // The early apply_non_interactive block is skipped for composition pipelines,
+        // so this is the only call site when a composition switch is used.
+        if !interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
@@ -684,8 +693,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for inline composition (unless --interactive)
-        if !interactive_requested && !non_interactive_requested {
+        // Force non-interactive for inline composition (unless --interactive).
+        // The early apply_non_interactive block is skipped for composition pipelines,
+        // so this is the only call site when a composition switch is used.
+        if !interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
@@ -719,8 +730,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             !interactive_requested, // non-interactive unless --interactive
         )?;
 
-        // Force non-interactive for chained composition (unless --interactive)
-        if !interactive_requested && !non_interactive_requested {
+        // Force non-interactive for chained composition (unless --interactive).
+        // The early apply_non_interactive block is skipped for composition pipelines,
+        // so this is the only call site when a composition switch is used.
+        if !interactive_requested {
             profile.apply_non_interactive(&mut child_args)?;
             profile.apply_non_interactive_defaults(&mut child_args);
         }
