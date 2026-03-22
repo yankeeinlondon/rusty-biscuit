@@ -738,15 +738,21 @@ impl LinkMarkdownMetadataPackage {
 fn parse_html_link(input: &str) -> Result<Link, LinkError> {
     let input = input.trim();
 
-    if !input.starts_with("<a ") && !input.starts_with("<a>") {
+    if !is_anchor_opening_tag(input) {
         return Err(LinkError::MalformedHtml(
-            "link must start with '<a ' or '<a>'".to_string(),
+            "link must start with an opening '<a>' tag".to_string(),
         ));
     }
 
-    if !input.ends_with("</a>") {
+    let Some(closing_tag_start) = input.rfind('<') else {
         return Err(LinkError::MalformedHtml(
-            "link must end with '</a>'".to_string(),
+            "link must end with a closing '</a>' tag".to_string(),
+        ));
+    };
+
+    if !is_anchor_closing_tag(&input[closing_tag_start..]) {
+        return Err(LinkError::MalformedHtml(
+            "link must end with a closing '</a>' tag".to_string(),
         ));
     }
 
@@ -758,7 +764,7 @@ fn parse_html_link(input: &str) -> Result<Link, LinkError> {
 
     let opening_tag = &input[..tag_end];
     let display_start = tag_end + 1;
-    let display_end = input.len() - 4;
+    let display_end = closing_tag_start;
 
     if display_start > display_end {
         return Err(LinkError::MalformedHtml("empty display text".to_string()));
@@ -822,6 +828,39 @@ fn parse_html_link(input: &str) -> Result<Link, LinkError> {
     }
 
     Ok(link)
+}
+
+fn is_anchor_opening_tag(input: &str) -> bool {
+    let Some(rest) = input.strip_prefix('<') else {
+        return false;
+    };
+
+    let mut chars = rest.chars();
+    let Some(tag_name) = chars.next() else {
+        return false;
+    };
+
+    if !tag_name.eq_ignore_ascii_case(&'a') {
+        return false;
+    }
+
+    match chars.next() {
+        Some('>') => true,
+        Some(ch) if ch.is_ascii_whitespace() => true,
+        _ => false,
+    }
+}
+
+fn is_anchor_closing_tag(input: &str) -> bool {
+    let trimmed = input.trim();
+    let Some(rest) = trimmed.strip_prefix("</") else {
+        return false;
+    };
+    let Some(rest) = rest.strip_suffix('>') else {
+        return false;
+    };
+
+    rest.trim().eq_ignore_ascii_case("a")
 }
 
 fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
@@ -1644,6 +1683,42 @@ mod tests {
         assert_eq!(link.title(), Some("Go"));
         assert_eq!(link.data().get("id"), Some(&"123".to_string()));
         assert!(link.style().is_some());
+    }
+
+    #[test]
+    fn parse_html_link_accepts_uppercase_tags() {
+        let link = Link::try_from(r#"<A HREF="https://example.com">Text</A>"#)
+            .expect("uppercase html link should parse");
+
+        assert_eq!(link.display(), "Text");
+        assert_eq!(link.href(), "https://example.com");
+    }
+
+    #[test]
+    fn parse_html_link_accepts_double_space_after_tag_name() {
+        let link = Link::try_from(r#"<a  href="https://example.com">Text</a>"#)
+            .expect("double-space html link should parse");
+
+        assert_eq!(link.display(), "Text");
+        assert_eq!(link.href(), "https://example.com");
+    }
+
+    #[test]
+    fn parse_html_link_accepts_tab_after_tag_name() {
+        let link = Link::try_from("<a\thref=\"https://example.com\">Text</a>")
+            .expect("tab-separated html link should parse");
+
+        assert_eq!(link.display(), "Text");
+        assert_eq!(link.href(), "https://example.com");
+    }
+
+    #[test]
+    fn parse_html_link_accepts_mixed_case_closing_tag() {
+        let link = Link::try_from(r#"<A href="https://example.com">text</a>"#)
+            .expect("mixed-case html link should parse");
+
+        assert_eq!(link.display(), "text");
+        assert_eq!(link.href(), "https://example.com");
     }
 
     #[test]
