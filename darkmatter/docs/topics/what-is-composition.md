@@ -26,12 +26,11 @@ All of the operations we've mentioned so far are in the _inline mutation_ catego
 
 Transclusion operations include:
 
-- [Block Transclusion]
-- [Frontmatter Transclusion]
-- [Code Block Transclusion]
-- [Prompt Expansion]
-- and more
+- [Block Transclusion](../transclusion/block-transclusion.md)
+- [Frontmatter Transclusion](../transclusion/fm-transclusion.md)
+- [Code Block Transclusion](../transclusion/code-transclusion.md)
+- [Consolidation Transclusion](../transclusion/consolidation.md)
+- [Summary Transclusion](../transclusion/summary.md)
+- _and more_
 
 Review the [Darkmatter Pipeline](../darkmatter-pipeline.md) for a full list of operations.
- 
-
