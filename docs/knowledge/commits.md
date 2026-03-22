@@ -15,3 +15,5 @@
 - When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
 
 - Using `git commit -- path/to/file` does NOT limit the commit to only those paths if other files are also staged. Git will commit ALL staged files. To commit only specific files, ensure ONLY those files are staged (not using `git add` broadly) or use `git commit -m "message" -- path1 path2` with explicit paths when you are certain only those files are staged
+
+- When files are renamed and staged as renames (e.g., `old.md -> new.md`), specifying explicit paths to `git commit -m "..." -- new.md` may not include all intended files if the rename detection in the index is incomplete. If a planned commit appears to omit files, check whether those files are rename targets that need to be committed separately or verify the full rename is reflected in `git diff --staged --name-status`

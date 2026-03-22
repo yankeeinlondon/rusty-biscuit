@@ -2,7 +2,7 @@
 
 <img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 200px; right: 0; top: 0; opacity: 0.75"></img>
 
-> A set of tools of deterministic tools for a non-deterministic world
+> A set of deterministic tools for a non-deterministic world
 
 ## Package Areas
 
@@ -40,7 +40,7 @@ Everyone knows that _naming_ is hard but no one talks about how _grouping_ is eq
 
 - We have not yet pushed any of these packages to `crates.io` (though that is the eventual plan)
 - For many of the CLI's we also _plan_ on publishing to the **npm** package manager too
-- For now, however, if you want to use the libraries or CLI's in this monorepo you'll need to clone it:
+- For now, however, if you want to use the libraries or CLI's in this monorepo you'll need to clone this monorepo:
 
     ```sh
     git clone https://github.com/yankeeinlondon/rusty-biscuit
@@ -76,7 +76,7 @@ uv tool install rust-just
 </details>
 <br><p>
 
-Once installed you should run `just init` from the repo's root which will:
+Once installed run `just init` from the repo's root which will:
 
 - ensure you have all necessary build tools for you operating system
 - install some core CLI's from this monorepo to make sure all your `justfile` configurations will work with full fidelity
@@ -91,33 +91,6 @@ At this point you're ready to explore, install, test, whatever you like.
     - documentation drift
     - skill generation
     - _and more_
-
-> **Notes:**
-> 
-> - **TTS**
->     - we use TTS messages to communicate successful or failing recipes (_typically those which are long running_)
->     - this leverages the `biscuit-speaks` library which in turn leverages what you have installed on your host computer
->     - most computer's will have _some_ TTS software we support but the quality of the TTS can vary widely
->     - run `so-you-say list-providers` to see which TTS providers we can use on your system
->         - on macOS the built-in `say` TTS is not bad but it's quality varies on how you've configured it
->         - on Windows the built-in `XXX` TTS is decent as well
->         - on Linux there is more variance but something like `espeak`/`espeak-ng` is most common. These voices are low quality (but the do have a TON of languages).
->     - if you want better voices, it's a safe bet that installing `kokoro_tts` will be a big improvement:
->         - run `sniff tts-clients install kokoro_tts` to install
-> 
->     **Note:** when running `just init` you'll be automatically prompted to install one of the recognized TTS 
->     solutions if the host currently has none. You may also be "recommended" to upgrade if all you have is 
->     the **espeak** solution (common on Linux).
-> 
-> - **Audio Playback**
->     - several of the just recipes will play sound effects when certain events take place
->     - in addition, some TTS providers, rely on the `playa` library to play their voice audio
->     - We support native audio on macOS, Linux, and Windows
->     - In most cases this is all you'll need but we will fallback to any headless audio players detected on the host which meet the requirements if the native solution can't perform the particular audio task.
->     - You can check what headless audio players exist on your host by running `playa players`
->     - You can install any which are missing with `playa install`
-
-
 
 
 ## License
