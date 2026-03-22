@@ -204,7 +204,6 @@ doctest *args="":
             if grep -qx "$area" <<< "$all_pkgs"; then
                 pkg_args="$pkg_args -p $area"
             else
-                # Area name doesn't match a package; expand to all packages with that prefix
                 matched=$(echo "$all_pkgs" | grep "^${area}-" || true)
                 if [[ -n "$matched" ]]; then
                     while IFS= read -r pkg; do
@@ -217,6 +216,14 @@ doctest *args="":
         done
         cargo test --doc $pkg_args
     fi
+
+# install the Claudine CLI
+install_claudine:
+    @just -f claudine/justfile install
+
+# install the Claudine CLI
+install_darkmatter:
+    @just -f claudine/darkmatter install
 
 # install binaries from all areas that have an install target
 install:
