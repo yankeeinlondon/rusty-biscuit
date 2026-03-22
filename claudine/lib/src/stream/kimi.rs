@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
+use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::summary::{ContextUsage, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -63,7 +63,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_content(&mut self, obj: &Value) -> Option<String> {
+    fn handle_content(&mut self, obj: &Value) -> Option<StreamChunk> {
         // Try content array with text parts
         if let Some(content) = obj.get("content").and_then(|c| c.as_array()) {
             let mut text_parts = String::new();
@@ -74,7 +74,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             }
             if !text_parts.is_empty() {
                 self.assistant_text.push_str(&text_parts);
-                return Some(super::ensure_message_newline(text_parts));
+                return Some(StreamChunk::Text(super::ensure_message_newline(text_parts)));
             }
         }
 
@@ -83,7 +83,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(super::ensure_message_newline(text.to_string()));
+            return Some(StreamChunk::Text(super::ensure_message_newline(text.to_string())));
         }
 
         // Try content as string
@@ -91,7 +91,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(super::ensure_message_newline(text.to_string()));
+            return Some(StreamChunk::Text(super::ensure_message_newline(text.to_string())));
         }
 
         None
@@ -183,7 +183,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
 }
 
 impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {

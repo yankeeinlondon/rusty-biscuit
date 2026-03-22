@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
+use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -72,7 +72,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_message(&mut self, obj: &Value) -> Option<String> {
+    fn handle_message(&mut self, obj: &Value) -> Option<StreamChunk> {
         let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("");
         if role != "assistant" {
             return None;
@@ -100,7 +100,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             return None;
         }
         self.assistant_text.push_str(&text);
-        Some(super::ensure_message_newline(text))
+        Some(StreamChunk::Text(super::ensure_message_newline(text)))
     }
 
     fn handle_result(&mut self, obj: &Value) {
@@ -249,7 +249,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
 }
 
 impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
@@ -345,14 +345,14 @@ mod tests {
                 r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Hello from ","delta":true}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Hello from \n".into()));
+        assert_eq!(text, Some(StreamChunk::Text("Hello from \n".into())));
 
         let text2 = parser
             .feed_line(
                 r#"{"type":"message","timestamp":"2026-03-16T12:00:01Z","role":"assistant","content":"Gemini","delta":true}"#,
             )
             .unwrap();
-        assert_eq!(text2, Some("Gemini\n".into()));
+        assert_eq!(text2, Some(StreamChunk::Text("Gemini\n".into())));
 
         // Real result with stats object
         parser
@@ -484,6 +484,6 @@ mod tests {
                 r#"{"type":"message","role":"assistant","content":[{"text":"Array format"}]}"#,
             )
             .unwrap();
-        assert_eq!(text, Some("Array format\n".into()));
+        assert_eq!(text, Some(StreamChunk::Text("Array format\n".into())));
     }
 }

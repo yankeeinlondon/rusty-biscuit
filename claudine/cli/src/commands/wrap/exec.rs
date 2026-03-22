@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Instant;
 
 use biscuit_terminal::terminal::Terminal;
-use claudine::stream::parser::{StreamParseError, StreamParser};
+use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
@@ -134,6 +134,59 @@ impl StreamTextRenderer {
             let _ = out.write_all(text.as_bytes());
         }
         let _ = out.flush();
+    }
+}
+
+/// Renders streamed thinking/reasoning text dimmed to stderr.
+///
+/// Accumulates thinking text and emits it with ANSI dim styling so it is
+/// visually distinct from assistant text. A leading "Thinking..." label is
+/// printed when the first thinking chunk arrives.
+struct StreamThinkingRenderer {
+    buffer: String,
+    active: bool,
+}
+
+impl StreamThinkingRenderer {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+            active: false,
+        }
+    }
+
+    fn push<W: Write>(&mut self, out: &mut W, text: &str) {
+        if !self.active {
+            // Emit a dim "Thinking..." header on first thinking chunk
+            let _ = write!(out, "\x1b[2m\x1b[3m⟡ Thinking...\x1b[0m\n");
+            let _ = out.flush();
+            self.active = true;
+        }
+        self.buffer.push_str(text);
+
+        // Emit complete lines immediately (dimmed)
+        while let Some(newline_pos) = self.buffer.find('\n') {
+            let line = self.buffer[..=newline_pos].to_string();
+            self.buffer.drain(..=newline_pos);
+            let _ = write!(out, "\x1b[2m{line}\x1b[0m");
+        }
+        let _ = out.flush();
+    }
+
+    /// Flush remaining thinking text and reset state when switching to
+    /// assistant text or finishing the stream.
+    fn flush_if_active<W: Write>(&mut self, out: &mut W) {
+        if !self.active {
+            return;
+        }
+        if !self.buffer.is_empty() {
+            let remaining = std::mem::take(&mut self.buffer);
+            let _ = write!(out, "\x1b[2m{remaining}\x1b[0m\n");
+        }
+        // Blank line to separate thinking from assistant text
+        let _ = writeln!(out);
+        let _ = out.flush();
+        self.active = false;
     }
 }
 
@@ -559,9 +612,11 @@ pub(crate) fn run_child_stream(
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout_pipe);
         let mut out = std::io::stdout().lock();
+        let mut err = std::io::stderr().lock();
         let mut parser = parser;
         let mut fallback_mode = false;
         let mut renderer = StreamTextRenderer::new();
+        let mut thinking_renderer = StreamThinkingRenderer::new();
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -573,8 +628,12 @@ pub(crate) fn run_child_stream(
             }
 
             match parser.feed_line(&line) {
-                Ok(Some(text)) => {
+                Ok(Some(StreamChunk::Text(text))) => {
+                    thinking_renderer.flush_if_active(&mut err);
                     renderer.push(&mut out, &text);
+                }
+                Ok(Some(StreamChunk::Thinking(text))) => {
+                    thinking_renderer.push(&mut err, &text);
                 }
                 Ok(None) => {
                     // Metadata-only line
@@ -586,6 +645,7 @@ pub(crate) fn run_child_stream(
                 }
                 Err(StreamParseError::Fatal(_)) => {
                     // Fall back to raw forwarding
+                    thinking_renderer.flush_if_active(&mut err);
                     renderer.flush_remaining(&mut out);
                     fallback_mode = true;
                     let _ = writeln!(out, "{line}");
@@ -593,6 +653,7 @@ pub(crate) fn run_child_stream(
             }
         }
 
+        thinking_renderer.flush_if_active(&mut err);
         renderer.flush_remaining(&mut out);
         parser
     });
@@ -765,7 +826,7 @@ struct ErrorParser {
 }
 
 impl StreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) -> std::result::Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, _line: &str) -> std::result::Result<Option<StreamChunk>, StreamParseError> {
         Ok(None)
     }
 

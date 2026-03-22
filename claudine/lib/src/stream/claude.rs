@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
+use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -82,7 +82,7 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_assistant_message(&mut self, obj: &Value) -> Option<String> {
+    fn handle_assistant_message(&mut self, obj: &Value) -> Option<StreamChunk> {
         // Extract text from content array.
         // Claude Code wraps it as {"message":{"content":[...]}} while the
         // simplified test format uses {"content":[...]} at the top level.
@@ -103,17 +103,24 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             return None;
         }
         self.assistant_text.push_str(&text_parts);
-        Some(super::ensure_message_newline(text_parts))
+        Some(StreamChunk::Text(super::ensure_message_newline(text_parts)))
     }
 
-    fn handle_content_block_delta(&mut self, obj: &Value) -> Option<String> {
+    fn handle_content_block_delta(&mut self, obj: &Value) -> Option<StreamChunk> {
         let delta = obj.get("delta")?;
-        if delta.get("type").and_then(|t| t.as_str()) == Some("text_delta") {
-            let text = delta.get("text").and_then(|t| t.as_str())?;
-            self.assistant_text.push_str(text);
-            return Some(text.to_string());
+        let delta_type = delta.get("type").and_then(|t| t.as_str())?;
+        match delta_type {
+            "text_delta" => {
+                let text = delta.get("text").and_then(|t| t.as_str())?;
+                self.assistant_text.push_str(text);
+                Some(StreamChunk::Text(text.to_string()))
+            }
+            "thinking_delta" => {
+                let text = delta.get("thinking").and_then(|t| t.as_str())?;
+                Some(StreamChunk::Thinking(text.to_string()))
+            }
+            _ => None,
         }
-        None
     }
 
     fn handle_error(&mut self, obj: &Value) {
@@ -222,7 +229,7 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
 }
 
 impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
@@ -247,12 +254,12 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             }
             "assistant" => {
                 // Full assistant message with content array
-                let text = self.handle_assistant_message(&obj);
-                Ok(text)
+                let chunk = self.handle_assistant_message(&obj);
+                Ok(chunk)
             }
             "content_block_delta" => {
-                let text = self.handle_content_block_delta(&obj);
-                Ok(text)
+                let chunk = self.handle_content_block_delta(&obj);
+                Ok(chunk)
             }
             "error" | "assistant.error" => {
                 self.handle_error(&obj);
@@ -384,7 +391,10 @@ mod tests {
 
         // Assistant message
         let msg = r#"{"type":"assistant","content":[{"type":"text","text":"Hello, world!"}]}"#;
-        assert_eq!(parser.feed_line(msg).unwrap(), Some("Hello, world!\n".into()));
+        assert_eq!(
+            parser.feed_line(msg).unwrap(),
+            Some(StreamChunk::Text("Hello, world!\n".into()))
+        );
 
         // Result
         let result = r#"{"type":"result","duration_ms":12345,"duration_api_ms":11000,"num_turns":1,"stop_reason":"end_turn","cost_usd":0.0042,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}"#;
@@ -474,7 +484,7 @@ mod tests {
         let msg = r#"{"type":"assistant","content":[{"type":"text","text":"After recovery"}]}"#;
         assert_eq!(
             parser.feed_line(msg).unwrap(),
-            Some("After recovery\n".into())
+            Some(StreamChunk::Text("After recovery\n".into()))
         );
 
         let summary = parser.finish(0);
@@ -565,11 +575,17 @@ mod tests {
 
         let delta1 =
             r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}"#;
-        assert_eq!(parser.feed_line(delta1).unwrap(), Some("Hello".into()));
+        assert_eq!(
+            parser.feed_line(delta1).unwrap(),
+            Some(StreamChunk::Text("Hello".into()))
+        );
 
         let delta2 =
             r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}"#;
-        assert_eq!(parser.feed_line(delta2).unwrap(), Some(" world".into()));
+        assert_eq!(
+            parser.feed_line(delta2).unwrap(),
+            Some(StreamChunk::Text(" world".into()))
+        );
 
         let summary = parser.finish(0);
         assert_eq!(summary.assistant_text, "Hello world");
@@ -586,8 +602,52 @@ mod tests {
     #[test]
     fn unknown_event_types_skipped() {
         let mut parser = make_parser();
-        let unknown = r#"{"type":"reasoning_delta","text":"thinking..."}"#;
+        let unknown = r#"{"type":"some_unknown_event","text":"ignored"}"#;
         assert_eq!(parser.feed_line(unknown).unwrap(), None);
+    }
+
+    #[test]
+    fn thinking_delta_emits_thinking_chunk() {
+        let mut parser = make_parser();
+
+        let init =
+            r#"{"type":"init","session_id":"sess-think","model":"claude-opus-4-6"}"#;
+        parser.feed_line(init).unwrap();
+
+        let thinking = r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Let me analyze this..."}}"#;
+        assert_eq!(
+            parser.feed_line(thinking).unwrap(),
+            Some(StreamChunk::Thinking("Let me analyze this...".into()))
+        );
+
+        // Thinking should NOT accumulate into assistant_text
+        let summary = parser.finish(0);
+        assert_eq!(summary.assistant_text, "");
+    }
+
+    #[test]
+    fn thinking_and_text_deltas_interleaved() {
+        let mut parser = make_parser();
+
+        let init =
+            r#"{"type":"init","session_id":"sess-mix","model":"claude-opus-4-6"}"#;
+        parser.feed_line(init).unwrap();
+
+        let thinking = r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Reasoning..."}}"#;
+        assert_eq!(
+            parser.feed_line(thinking).unwrap(),
+            Some(StreamChunk::Thinking("Reasoning...".into()))
+        );
+
+        let text = r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"Here is the answer."}}"#;
+        assert_eq!(
+            parser.feed_line(text).unwrap(),
+            Some(StreamChunk::Text("Here is the answer.".into()))
+        );
+
+        // Only text_delta should be in assistant_text
+        let summary = parser.finish(0);
+        assert_eq!(summary.assistant_text, "Here is the answer.");
     }
 
     #[test]
@@ -634,8 +694,10 @@ mod tests {
         let msg = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"The sky is blue because of Rayleigh scattering."}],"role":"assistant"}}"#;
         let result = parser.feed_line(msg).unwrap();
         assert_eq!(
-            result.as_deref(),
-            Some("The sky is blue because of Rayleigh scattering.\n")
+            result,
+            Some(StreamChunk::Text(
+                "The sky is blue because of Rayleigh scattering.\n".into()
+            ))
         );
 
         let summary = parser.finish(0);

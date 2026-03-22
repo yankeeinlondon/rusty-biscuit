@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
+use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -65,7 +65,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_text(&mut self, obj: &Value) -> Option<String> {
+    fn handle_text(&mut self, obj: &Value) -> Option<StreamChunk> {
         // Real format: {"type":"text","part":{"text":"hello",...}}
         // Legacy format: {"type":"text","text":"hello"}
         let text = obj
@@ -78,7 +78,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
             return None;
         }
         self.assistant_text.push_str(text);
-        Some(text.to_string())
+        Some(StreamChunk::Text(text.to_string()))
     }
 
     fn handle_step_start(&mut self, obj: &Value) {
@@ -177,7 +177,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
 }
 
 impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
@@ -362,7 +362,7 @@ mod tests {
 
         let text = r#"{"type":"text","timestamp":1773725438532,"sessionID":"ses_abc123","part":{"id":"prt_2","sessionID":"ses_abc123","messageID":"msg_1","type":"text","text":"hello"}}"#;
         let result = parser.feed_line(text).unwrap();
-        assert_eq!(result.as_deref(), Some("hello"));
+        assert_eq!(result, Some(StreamChunk::Text("hello".into())));
 
         let step_finish = r#"{"type":"step_finish","timestamp":1773725438789,"sessionID":"ses_abc123","part":{"id":"prt_3","sessionID":"ses_abc123","messageID":"msg_1","type":"step-finish","reason":"stop","cost":0.0205797,"tokens":{"total":54665,"input":150,"output":23,"reasoning":0,"cache":{"read":0,"write":54492}}}}"#;
         parser.feed_line(step_finish).unwrap();

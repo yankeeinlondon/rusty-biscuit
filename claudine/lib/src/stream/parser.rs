@@ -10,6 +10,18 @@ pub struct EventMeta {
     pub extra: HashMap<String, Value>,
 }
 
+/// A chunk of text produced by stream parsing.
+///
+/// Distinguishes assistant text (displayed on stdout) from thinking/reasoning
+/// text (displayed dimmed on stderr) so the renderer can style them differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamChunk {
+    /// Regular assistant text — rendered to stdout.
+    Text(String),
+    /// Thinking/reasoning text — rendered dimmed to stderr.
+    Thinking(String),
+}
+
 /// Callback interface for coarse events discovered during stream parsing.
 ///
 /// Implementors receive normalized events suitable for dispatch.
@@ -36,10 +48,10 @@ impl StreamEventSink for NullSink {}
 pub trait StreamParser: Send {
     /// Process one line of provider output.
     ///
-    /// Returns `Ok(Some(text))` when the line contributes assistant text
-    /// that should be emitted to stdout. Returns `Ok(None)` for metadata-only
-    /// lines. Returns `Err` only for fatal parse failures.
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError>;
+    /// Returns `Ok(Some(chunk))` when the line contributes text that should
+    /// be displayed. Returns `Ok(None)` for metadata-only lines. Returns
+    /// `Err` only for fatal parse failures.
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError>;
 
     /// Finalize parsing and return the accumulated summary.
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary;

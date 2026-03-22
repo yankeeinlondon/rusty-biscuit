@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::parser::{EventMeta, StreamEventSink, StreamParseError, StreamParser};
+use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -249,7 +249,7 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         }
     }
 
-    fn handle_item_completed(&mut self, obj: &Value) -> Option<String> {
+    fn handle_item_completed(&mut self, obj: &Value) -> Option<StreamChunk> {
         let Some(item) = obj.get("item") else {
             return None;
         };
@@ -285,7 +285,7 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
 }
 
 impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<Option<String>, StreamParseError> {
+    fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
