@@ -1,7 +1,7 @@
 //! Engine helpers for transclusion insertion and heading handling.
 
-use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::normalize::HeadingLevel;
 use pulldown_cmark::{Event, HeadingLevel as PulldownHeadingLevel, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone)]
@@ -31,10 +31,7 @@ pub fn find_preceding_heading_level(content: &str, offset: usize) -> Option<Head
 }
 
 /// Re-levels markdown content and gracefully degrades H6 overflow to bold text.
-pub fn relevel_with_overflow(
-    content: &str,
-    target: HeadingLevel,
-) -> (String, Vec<ComposeWarning>) {
+pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Vec<ComposeWarning>) {
     let headings = extract_headings(content);
     if headings.is_empty() {
         return (content.to_string(), Vec::new());

@@ -44,7 +44,7 @@ impl From<ConditionError> for TransclusionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::{EffectiveStateBuilder, ComposeContext};
+    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
     use serde_json::json;
     use std::collections::HashMap;
 

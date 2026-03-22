@@ -1,7 +1,7 @@
 //! Path and URL resolution for transclusion references.
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
-use crate::markdown::compose::{TransclusionOptions, ComposeSource};
+use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
 
@@ -265,13 +265,8 @@ mod tests {
 
     #[test]
     fn relative_requires_source_context() {
-        let err = resolve_path(
-            "./child.md",
-            &default_options(),
-            &ComposeSource::Unknown,
-            2,
-        )
-        .unwrap_err();
+        let err =
+            resolve_path("./child.md", &default_options(), &ComposeSource::Unknown, 2).unwrap_err();
         assert!(matches!(
             err,
             TransclusionError::MissingSourceContext { .. }
