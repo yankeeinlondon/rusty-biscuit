@@ -227,7 +227,7 @@ fn run_list(args: ListArgs, json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let mut table = base_table(vec![
         TableColumn::new("MCP server"),
         TableColumn::new("Aliases"),
@@ -946,14 +946,14 @@ fn render_reentry_help(repo_root: Option<&Path>) {
         user_path.display()
     );
     log::data("MCP mode is already initialized.");
-    log::data(&Prose::new(format!("User defaults: {user_link}")).render(&Terminal::new()));
+    log::data(&Prose::new(format!("User defaults: {user_link}")).render(&crate::log::terminal()));
     if let Some(repo_path) = repo_path {
         let repo_link = format!(
             r#"<a href="file://{}">{}</a>"#,
             repo_path.display(),
             repo_path.display()
         );
-        log::data(&Prose::new(format!("Repo defaults: {repo_link}")).render(&Terminal::new()));
+        log::data(&Prose::new(format!("Repo defaults: {repo_link}")).render(&crate::log::terminal()));
     }
     log::data("Management commands:");
     log::data("  claudine mcp");
@@ -1042,7 +1042,7 @@ fn styled_server_name(
 
     if user_defaults.contains(&server.id) || repo_defaults.contains(&server.id) {
         let _ = term;
-        Prose::new(format!("<bold>{label}</bold>")).render_optimistic(None)
+        Prose::new(format!("<bold>{label}</bold>")).render(&crate::log::optimistic_terminal(None))
     } else {
         label
     }

@@ -6,7 +6,6 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin, WordWrap};
 use claudine::actions::{HookAction, LogTarget, ReportFormat};
 use claudine::config::{AgentConfigurator, detect_agents};
@@ -56,7 +55,7 @@ const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
 fn bold(label: &str) -> String {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
-    Prose::new(format!("<bold>{label}</bold>")).render_optimistic(None)
+    Prose::new(format!("<bold>{label}</bold>")).render(&crate::log::optimistic_terminal(None))
 }
 
 fn provider_column() -> TableColumn {
@@ -235,7 +234,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 
     log::data("");
     let header = Prose::new("{{yellow}}{{bold}}⚠ Invalid sound effects:{{reset}}");
-    log::data(&format!(" {}", header.render_optimistic(Some(100))));
+    log::data(&format!(" {}", header.render(&crate::log::optimistic_terminal(Some(100)))));
 
     let mut has_fixable = false;
     for effect in &invalid_effects {
@@ -254,7 +253,7 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
         };
         log::data(&format!(
             " {}",
-            Prose::new(msg).render_optimistic(Some(100))
+            Prose::new(msg).render(&crate::log::optimistic_terminal(Some(100)))
         ));
     }
 
@@ -263,12 +262,12 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
         let hint = Prose::new(
             "{{dim}}Edit {{blue}}~/.claudine/config.json{{reset}}{{dim}} to apply suggested fixes{{reset}}",
         );
-        log::data(&format!(" {}", hint.render_optimistic(Some(100))));
+        log::data(&format!(" {}", hint.render(&crate::log::optimistic_terminal(Some(100)))));
     }
     let hint = Prose::new(
         "{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}",
     );
-    log::data(&format!(" {}", hint.render_optimistic(Some(100))));
+    log::data(&format!(" {}", hint.render(&crate::log::optimistic_terminal(Some(100)))));
 
     invalid_effects
 }
@@ -488,7 +487,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 
 /// Show detailed event/action configuration for a specific provider.
 fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let clients = InstalledAiClients::new();
     let installed = clients.is_installed(provider.sniff_ai_cli());
 
@@ -846,19 +845,19 @@ fn run_simple(
 
                 // Use Prose to render the colored output
                 let text = formatted.join(", ");
-                Prose::new(text).render_optimistic(None).into()
+                Prose::new(text).render(&crate::log::optimistic_terminal(None)).into()
             }
         };
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
         let provider_cell: TableCellContent =
-            Prose::new(provider_link).render_optimistic(None).into();
+            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
 
         table.add_row(vec![provider_cell, bool_indicator(installed), hooks_cell]);
     }
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let table = table.prefer_cursor_alignment();
 
     let rendered = table.render(&term);
@@ -881,7 +880,7 @@ fn run_simple(
             "{{{{dim}}}}- Legend: {}{{{{reset}}}}",
             legend_parts.join(", ")
         ));
-        log::data(&format!(" {}", legend.render_optimistic(Some(120))));
+        log::data(&format!(" {}", legend.render(&crate::log::optimistic_terminal(Some(120)))));
     }
 
     // Show hints about available flags
@@ -896,7 +895,7 @@ fn run_simple(
     for hint in hints {
         log::data(&format!(
             " {}",
-            Prose::new(hint).render_optimistic(Some(100))
+            Prose::new(hint).render(&crate::log::optimistic_terminal(Some(100)))
         ));
     }
 
@@ -937,7 +936,7 @@ fn run_verbose(
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
         let provider_cell: TableCellContent =
-            Prose::new(provider_link).render_optimistic(None).into();
+            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -963,7 +962,7 @@ fn run_verbose(
         table.add_row(row);
     }
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let rendered = table.render(&term);
     log::data(&format!("\n{}", rendered));
 
@@ -1012,7 +1011,7 @@ const NO_SUPPORT: &str = "❌";
 /// - ⛔️ NonHook: Event requires wrapper/proxy (not yet implemented)
 /// - ❌ NotSupported: Event is not available from this provider
 fn run_support() -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let matrix = event_support_matrix(&ALL_PROVIDERS);
 
     // Build columns: Event name (left-aligned), then one per provider (centered)
@@ -1058,7 +1057,7 @@ fn run_support() -> Result<()> {
 ///
 /// Splits providers into two tables to fit width-constrained terminals.
 fn run_mapping() -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     for provider_group in ALL_PROVIDERS.chunks(4) {
         let table = build_mapping_table(provider_group).prefer_cursor_alignment();
@@ -1070,7 +1069,7 @@ fn run_mapping() -> Result<()> {
     log::data("");
     let legend =
         Prose::new("{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}");
-    log::data(&format!(" {}", legend.render_optimistic(Some(100))));
+    log::data(&format!(" {}", legend.render(&crate::log::optimistic_terminal(Some(100)))));
 
     Ok(())
 }
@@ -1115,7 +1114,7 @@ fn run_describe() -> Result<()> {
         TableColumn::new(bold("Description")),
     ];
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let mut table = Table::new().with_columns(columns).alternate_text_color();
     table.layout_mut().left_margin = Margin::Chars(1);
 
@@ -1151,7 +1150,7 @@ fn run_describe() -> Result<()> {
 /// Uses `TemplateVariable::all()` as the single source of truth - adding new
 /// variables to the enum automatically updates this display.
 fn run_variables() -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     let header = Prose::new("{{bold}}Template Variables{{reset}}");
     log::data(&format!("\n {}", header.render(&term)));

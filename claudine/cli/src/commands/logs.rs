@@ -379,7 +379,7 @@ fn render_sync_summary(summary: &SyncSummary) {
 }
 
 fn render_daily_summary(summary: &DailySummary, error_hint: Option<&str>) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     log::data("");
     log::data(
@@ -458,7 +458,7 @@ fn render_daily_summary(summary: &DailySummary, error_hint: Option<&str>) {
 }
 
 fn render_sessions_report(report: &SessionsReport) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     log::data("");
     log::data(
         &Prose::new(format!(
@@ -517,7 +517,7 @@ fn render_sessions_report(report: &SessionsReport) {
 fn render_session_detail(report: &SessionDetailReport) {
     use claudine::events::AgenticEvent;
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let session = &report.session;
     let p = |markup: &str| Prose::new(markup).render(&term);
 
@@ -717,17 +717,17 @@ fn render_session_detail(report: &SessionDetailReport) {
             if let Some(error) = &event.error {
                 detail_parts.push(
                     Prose::new(format!("<red>{}</red>", truncate_str(error, 80)))
-                        .render_optimistic(None),
+                        .render(&crate::log::optimistic_terminal(None)),
                 );
             } else if let Some(prompt) = &event.prompt {
                 detail_parts.push(
                     Prose::new(format!("<dim>\"{}\"</dim>", truncate_str(prompt, 80)))
-                        .render_optimistic(None),
+                        .render(&crate::log::optimistic_terminal(None)),
                 );
             } else if let Some(msg) = &event.notification_message {
                 detail_parts.push(
                     Prose::new(format!("<dim>{}</dim>", truncate_str(msg, 80)))
-                        .render_optimistic(None),
+                        .render(&crate::log::optimistic_terminal(None)),
                 );
             }
 
@@ -796,11 +796,11 @@ fn format_event_label(event: &claudine::events::AgenticEvent) -> String {
         AgenticEvent::BeforeCompact => format!("<yellow>{label}</yellow>"),
         _ => format!("<dim>{label}</dim>"),
     };
-    Prose::new(markup).render_optimistic(None)
+    Prose::new(markup).render(&crate::log::optimistic_terminal(None))
 }
 
 fn render_tools_report(report: &ToolsReport) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     log::data("");
     log::data(
         &Prose::new(format!(
@@ -838,7 +838,7 @@ fn render_tools_report(report: &ToolsReport) {
 }
 
 fn render_errors_report(report: &ErrorsReport) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     log::data("");
     log::data(
         &Prose::new(format!(
@@ -896,7 +896,7 @@ fn render_errors_report(report: &ErrorsReport) {
 }
 
 fn render_repos_report(report: &ReposReport) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     log::data("");
     log::data(
         &Prose::new(format!(
@@ -931,7 +931,7 @@ fn render_repos_report(report: &ReposReport) {
 }
 
 fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let compact_repos = term.width() < 150;
     log::data("");
     log::data(
@@ -1087,9 +1087,9 @@ fn render_provider_link(provider: &Provider, had_error: bool) -> String {
             } else {
                 format!("<a href=\"{url}\">{provider}</a>")
             };
-            Prose::new(markup).render_optimistic(None)
+            Prose::new(markup).render(&crate::log::optimistic_terminal(None))
         }
-        None if had_error => Prose::new(format!("<red>{provider}</red>")).render_optimistic(None),
+        None if had_error => Prose::new(format!("<red>{provider}</red>")).render(&crate::log::optimistic_terminal(None)),
         None => provider.to_string(),
     }
 }
@@ -1097,16 +1097,16 @@ fn render_provider_link(provider: &Provider, had_error: bool) -> String {
 fn format_errors(count: u64) -> String {
     let text = count.to_string();
     if count == 0 {
-        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+        Prose::new(format!("<dim>{text}</dim>")).render(&crate::log::optimistic_terminal(None))
     } else {
-        Prose::new(format!("<red>{text}</red>")).render_optimistic(None)
+        Prose::new(format!("<red>{text}</red>")).render(&crate::log::optimistic_terminal(None))
     }
 }
 
 fn format_dim_zero(count: u64) -> String {
     let text = count.to_string();
     if count == 0 {
-        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+        Prose::new(format!("<dim>{text}</dim>")).render(&crate::log::optimistic_terminal(None))
     } else {
         text
     }
@@ -1115,7 +1115,7 @@ fn format_dim_zero(count: u64) -> String {
 fn format_percent(value: f64) -> String {
     let text = format!("{value:.0}%");
     if value <= 0.0 {
-        Prose::new(format!("<dim>{text}</dim>")).render_optimistic(None)
+        Prose::new(format!("<dim>{text}</dim>")).render(&crate::log::optimistic_terminal(None))
     } else {
         text
     }
@@ -1136,7 +1136,7 @@ fn render_repos(repos: &[String], compact: bool) -> String {
 fn render_repo_entry(repo: &str, compact: bool) -> String {
     match repo.split_once('/') {
         Some((_org, name)) if compact => name.to_string(),
-        Some((org, name)) => Prose::new(format!("<dim>{org}/</dim>{name}")).render_optimistic(None),
+        Some((org, name)) => Prose::new(format!("<dim>{org}/</dim>{name}")).render(&crate::log::optimistic_terminal(None)),
         None => repo.to_string(),
     }
 }

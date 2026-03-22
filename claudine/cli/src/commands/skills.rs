@@ -83,7 +83,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         return Ok(());
     }
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     // Header
     let header = Prose::new("<blue><b>Skills</b></blue>").render(&term);

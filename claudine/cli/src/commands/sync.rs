@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Margin;
 use clap::Args;
 use color_eyre::eyre::Result;
@@ -181,7 +180,7 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
 
 /// Re-sync hook registrations with detected agents.
 pub async fn run(args: SyncArgs) -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     // Load current config from user/repo locations
     // If config is missing, treat as "remove all hooks" operation

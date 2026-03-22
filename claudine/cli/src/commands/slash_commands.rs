@@ -80,7 +80,7 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
         return Ok(());
     }
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     let header = Prose::new("<blue><b>Slash Commands</b></blue>").render(&term);
     log::data("");

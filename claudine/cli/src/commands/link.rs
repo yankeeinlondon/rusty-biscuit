@@ -270,7 +270,7 @@ fn render_link_strategy(
     attention: &BTreeSet<String>,
     total_apply: ApplySummary,
 ) {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let mode = if args.apply { "apply" } else { "dry-run" };
     let header = Prose::new(format!(
         "{{{{bold}}}}Link Strategy Analysis{{{{reset}}}} {{{{dim}}}}(scope: {}, mode: {}){{{{reset}}}}",
@@ -545,7 +545,7 @@ fn reference_details(reference: &ResourceReference, detailed: bool) -> String {
 
 /// Show provider resource support matrix.
 fn run_support() -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let clients = InstalledAiClients::new();
 
     // Build columns: Provider, Installed, then one per resource type
@@ -568,7 +568,7 @@ fn run_support() -> Result<()> {
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
         let provider_cell: TableCellContent =
-            Prose::new(provider_link).render_optimistic(None).into();
+            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -621,7 +621,7 @@ fn format_support_cell(level: SupportLevel, format: Option<ResourceFormat>) -> T
 
 /// Show detailed capabilities for a specific provider.
 fn run_provider_detail(provider: Provider) -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
     let clients = InstalledAiClients::new();
     let installed = clients.is_installed(provider.sniff_ai_cli());
     let caps = capabilities_for(provider);

@@ -306,9 +306,9 @@ fn run_provider_composition(
     match prepared.mode {
         CompositionMode::ChainedDocument => {
             if captured.exit_code == 0 {
-                print!("{}", parsed_stdout);
+                print!("{}", crate::log::maybe_strip(&parsed_stdout));
             } else if !captured.stderr.is_empty() {
-                eprintln!("{}", captured.stderr);
+                eprintln!("{}", crate::log::maybe_strip(&captured.stderr));
             }
             Ok(captured.exit_code)
         }
@@ -335,11 +335,11 @@ fn run_provider_composition(
                         "<green>\u{2713}</green> Updated {}",
                         source.resolved_path.display()
                     ))
-                    .render_optimistic(None);
+                    .render(&crate::log::optimistic_terminal(None));
                     eprintln!("  {msg}");
                 }
             } else if !captured.stderr.is_empty() {
-                eprintln!("{}", captured.stderr);
+                eprintln!("{}", crate::log::maybe_strip(&captured.stderr));
             }
             Ok(captured.exit_code)
         }

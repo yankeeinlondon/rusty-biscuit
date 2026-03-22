@@ -3,7 +3,6 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::{LinkableResource, capabilities_for};
@@ -34,7 +33,7 @@ fn supported_hook_count(provider: Provider) -> usize {
 
 /// Show provider capabilities for skills, slash commands, agents, and hooks.
 pub fn run() -> Result<()> {
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     let columns = vec![
         TableColumn::new("Provider"),
@@ -50,7 +49,7 @@ pub fn run() -> Result<()> {
     for provider in PROVIDERS_DISPLAY_ORDER {
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
         let provider_cell: TableCellContent =
-            Prose::new(provider_link).render_optimistic(None).into();
+            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
 
         table.add_row(vec![
             provider_cell,

@@ -25,7 +25,7 @@ pub fn run(_args: ActionsArgs, verbose: bool) -> Result<()> {
         }
     };
 
-    let term = Terminal::new();
+    let term = crate::log::terminal();
 
     if verbose {
         run_verbose(&config, &term)
