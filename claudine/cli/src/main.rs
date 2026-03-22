@@ -15,7 +15,15 @@ use args::{Cli, Commands};
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
+    // Pre-scan for --plain to disable clap ANSI styling before parsing
+    let is_plain = std::env::args().any(|a| a == "--plain");
+    if is_plain {
+        // NO_COLOR is a well-established convention for disabling terminal colors
+        unsafe { std::env::set_var("NO_COLOR", "1") };
+    }
+
     let cli = Cli::parse();
+    log::set_plain(cli.plain);
 
     // Default levels come from -v/-vv and can be overridden by RUST_LOG/DEBUG.
     let env_filter = build_env_filter(cli.verbose);
