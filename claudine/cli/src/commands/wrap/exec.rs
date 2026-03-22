@@ -139,8 +139,8 @@ impl StreamTextRenderer {
 
 /// Renders streamed thinking/reasoning text dimmed to stderr.
 ///
-/// Accumulates thinking text and emits it with ANSI dim styling so it is
-/// visually distinct from assistant text. A leading "Thinking..." label is
+/// Accumulates thinking text and emits it via Prose dim+italic styling so it
+/// is visually distinct from assistant text. A leading "Thinking..." label is
 /// printed when the first thinking chunk arrives.
 ///
 /// Writes to stderr using short-lived locks to avoid blocking the separate
@@ -160,17 +160,19 @@ impl StreamThinkingRenderer {
 
     fn push(&mut self, text: &str) {
         if !self.active {
-            // Emit a dim "Thinking..." header on first thinking chunk
-            eprint!("\x1b[2m\x1b[3m⟡ Thinking...\x1b[0m\n");
+            // Emit a dim+italic "Thinking..." header on first thinking chunk
+            let header = Self::render_dim_italic("\u{27e1} Thinking...");
+            eprint!("{header}\n");
             self.active = true;
         }
         self.buffer.push_str(text);
 
         // Emit complete lines immediately (dimmed)
         while let Some(newline_pos) = self.buffer.find('\n') {
-            let line = self.buffer[..=newline_pos].to_string();
+            let line = self.buffer[..newline_pos].to_string();
             self.buffer.drain(..=newline_pos);
-            eprint!("\x1b[2m{line}\x1b[0m");
+            let rendered = Self::render_dim(&line);
+            eprint!("{rendered}\n");
         }
     }
 
@@ -182,11 +184,26 @@ impl StreamThinkingRenderer {
         }
         if !self.buffer.is_empty() {
             let remaining = std::mem::take(&mut self.buffer);
-            eprint!("\x1b[2m{remaining}\x1b[0m\n");
+            let rendered = Self::render_dim(&remaining);
+            eprint!("{rendered}\n");
         }
         // Blank line to separate thinking from assistant text
         eprintln!();
         self.active = false;
+    }
+
+    fn render_dim(text: &str) -> String {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::Renderable;
+        let safe = text.replace('<', "\\<");
+        Prose::new(format!("<dim>{safe}</dim>")).render_optimistic(None)
+    }
+
+    fn render_dim_italic(text: &str) -> String {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::Renderable;
+        let safe = text.replace('<', "\\<");
+        Prose::new(format!("<dim><i>{safe}</i></dim>")).render_optimistic(None)
     }
 }
 

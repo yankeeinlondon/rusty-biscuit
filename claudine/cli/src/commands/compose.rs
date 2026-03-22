@@ -329,10 +329,14 @@ fn run_provider_composition(
                 .map_err(|e| eyre!("failed to write: {e}"))?;
 
                 if !args.silent {
-                    eprintln!(
-                        "  \x1b[32m✓\x1b[0m Updated {}",
+                    use biscuit_terminal::components::prose::Prose;
+                    use biscuit_terminal::components::renderable::Renderable;
+                    let msg = Prose::new(format!(
+                        "<green>\u{2713}</green> Updated {}",
                         source.resolved_path.display()
-                    );
+                    ))
+                    .render_optimistic(None);
+                    eprintln!("  {msg}");
                 }
             } else if !captured.stderr.is_empty() {
                 eprintln!("{}", captured.stderr);

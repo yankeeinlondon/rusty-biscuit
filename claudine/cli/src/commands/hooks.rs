@@ -52,9 +52,11 @@ const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 /// Keep provider names from wrapping into multi-line labels in narrow terminals.
 const PROVIDER_COLUMN_MIN_WIDTH: usize = 11;
 
-/// Wrap a header label in bold ANSI escape codes.
+/// Wrap a header label in bold styling via Prose.
 fn bold(label: &str) -> String {
-    format!("\x1b[1m{}\x1b[22m", label)
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+    Prose::new(format!("<bold>{label}</bold>")).render_optimistic(None)
 }
 
 fn provider_column() -> TableColumn {
