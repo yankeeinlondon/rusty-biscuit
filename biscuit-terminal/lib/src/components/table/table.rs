@@ -2011,7 +2011,7 @@ impl Renderable for Table {
         } else {
             None
         };
-        if self.prefer_cursor_alignment {
+        if self.prefer_cursor_alignment && term.is_tty {
             self.render_with_cursor_positioning(width, stripe.as_ref(), text_tint.as_ref())
         } else {
             let available = self.layout.available_width(width);
