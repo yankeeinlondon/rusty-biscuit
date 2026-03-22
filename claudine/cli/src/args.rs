@@ -9,6 +9,10 @@ pub(crate) struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
 
+    /// Strip ANSI escape codes from all output.
+    #[arg(long, global = true)]
+    pub plain: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

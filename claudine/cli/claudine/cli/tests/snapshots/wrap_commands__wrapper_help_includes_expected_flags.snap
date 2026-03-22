@@ -13,7 +13,6 @@ Options:
   -v, --verbose...                   Increase verbosity (-v for verbose, -vv for debug)
   -y, --yolo                         Enable provider-specific YOLO/auto-approval mode
       --include <ENV_NAME>           Preserve this env var even when it matches sensitive-name filters
-      --plain                        Strip ANSI escape codes from all output
   -i, --interactive                  Force interactive mode even when a prompt string is provided
   -m, --model <MODEL>                Override the model used by the provider
   -o, --output <FORMAT>              Set the output format (json, text, stream)

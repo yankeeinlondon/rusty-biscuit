@@ -37,7 +37,7 @@ struct StreamTextRenderer {
 
 impl StreamTextRenderer {
     fn new() -> Self {
-        let term = std::io::stdout().is_terminal().then(Terminal::new);
+        let term = std::io::stdout().is_terminal().then(crate::log::terminal);
         let terminal_options = term.as_ref().map(|_| {
             use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
             let mut opts = TerminalOptions::default();
@@ -196,14 +196,14 @@ impl StreamThinkingRenderer {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render_optimistic(None)
+        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::optimistic_terminal(None))
     }
 
     fn render_dim_italic(text: &str) -> String {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render_optimistic(None)
+        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::optimistic_terminal(None))
     }
 }
 
@@ -297,6 +297,7 @@ pub(crate) fn run_child(
             .iter()
             .map(|s| s.to_string())
             .collect();
+        let plain = crate::log::is_plain();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut out = std::io::stdout().lock();
@@ -305,7 +306,12 @@ pub(crate) fn run_child(
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
                 }
-                let _ = writeln!(out, "{line}");
+                let stripped = if plain {
+                    biscuit_terminal::prelude::strip_escape_codes(&line)
+                } else {
+                    line
+                };
+                let _ = writeln!(out, "{stripped}");
             }
         }))
     } else {
@@ -319,6 +325,7 @@ pub(crate) fn run_child(
             .iter()
             .map(|s| s.to_string())
             .collect();
+        let plain = crate::log::is_plain();
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut err = std::io::stderr().lock();
@@ -327,7 +334,12 @@ pub(crate) fn run_child(
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
                 }
-                let _ = writeln!(err, "{line}");
+                let stripped = if plain {
+                    biscuit_terminal::prelude::strip_escape_codes(&line)
+                } else {
+                    line
+                };
+                let _ = writeln!(err, "{stripped}");
             }
         }))
     } else {
@@ -639,7 +651,7 @@ pub(crate) fn run_child_stream(
 
             if fallback_mode {
                 // Fatal parse error: forward remaining raw stdout
-                let _ = writeln!(out, "{line}");
+                let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
                 continue;
             }
 
@@ -664,7 +676,7 @@ pub(crate) fn run_child_stream(
                     thinking_renderer.flush_if_active();
                     renderer.flush_remaining(&mut out);
                     fallback_mode = true;
-                    let _ = writeln!(out, "{line}");
+                    let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
                 }
             }
         }
@@ -680,6 +692,7 @@ pub(crate) fn run_child_stream(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let plain = crate::log::is_plain();
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(pipe);
         let mut captured = String::new();
@@ -691,12 +704,17 @@ pub(crate) fn run_child_stream(
             // Format raw API error JSON into human-readable messages
             let formatted = crate::output::try_format_api_error(&line);
             let output_line = formatted.as_deref().unwrap_or(&line);
+            let output_line = if plain {
+                biscuit_terminal::prelude::strip_escape_codes(output_line)
+            } else {
+                output_line.to_string()
+            };
 
             if suppress_stderr_on_success {
                 if !captured.is_empty() {
                     captured.push('\n');
                 }
-                captured.push_str(output_line);
+                captured.push_str(&output_line);
             } else {
                 let mut err = std::io::stderr().lock();
                 let _ = writeln!(err, "{output_line}");

@@ -320,9 +320,8 @@ fn optimistic_terminal() -> Terminal {
         .ok()
         .or_else(|| std::env::var("COLUMNS").ok())
         .and_then(|value| value.parse::<u32>().ok())
-        .filter(|width| *width > 0)
-        .unwrap_or(80);
-    Terminal::new_optimistic(width)
+        .filter(|width| *width > 0);
+    crate::log::optimistic_terminal(width)
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -1478,11 +1477,13 @@ fn emit_stream_summary(
         };
         eprint!("{separator}");
         if let Some(markup) = primary_markup {
-            let rendered = Prose::new(markup).render_optimistic(None);
+            let term = crate::log::optimistic_terminal(None);
+            let rendered = Prose::new(markup).render(&term);
             eprint!("{rendered}\n");
         }
         if let Some(markup) = secondary_markup {
-            let rendered = Prose::new(markup).render_optimistic(None);
+            let term = crate::log::optimistic_terminal(None);
+            let rendered = Prose::new(markup).render(&term);
             eprint!("  {rendered}\n");
         }
     }
@@ -1512,13 +1513,15 @@ fn emit_stream_summary_no_separator(
 
     if verbosity != Verbosity::Silent {
         if let Some(markup) = format_summary_prose(summary) {
-            let rendered = Prose::new(markup).render_optimistic(None);
+            let term = crate::log::optimistic_terminal(None);
+            let rendered = Prose::new(markup).render(&term);
             eprintln!("{rendered}");
         }
     }
     if verbosity != Verbosity::Silent && verbose {
         if let Some(markup) = format_verbose_summary_details_prose(summary, details) {
-            let rendered = Prose::new(markup).render_optimistic(None);
+            let term = crate::log::optimistic_terminal(None);
+            let rendered = Prose::new(markup).render(&term);
             eprintln!("  {rendered}");
         }
     }
@@ -1834,8 +1837,8 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
 fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
     match provider {
         Provider::Gemini => find_gemini_prompt_location(args),
-        Provider::Codex => find_positional_prompt_location(args, 1),
-        Provider::OpenCode => find_positional_prompt_location(args, 1),
+        Provider::Codex => find_positional_prompt_location(args, 0),
+        Provider::OpenCode => find_positional_prompt_location(args, 0),
         _ => None,
     }
 }

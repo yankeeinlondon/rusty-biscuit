@@ -35,6 +35,5 @@ Commands:
 
 Options:
   -v, --verbose...  Increase verbosity (-v for verbose, -vv for debug)
-      --plain       Strip ANSI escape codes from all output
   -h, --help        Print help
   -V, --version     Print version
