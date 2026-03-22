@@ -28,6 +28,7 @@ mod string;
 pub mod terminal;
 
 pub use ast::as_ast;
+pub(crate) use ast::parse_mdast;
 pub use html::{HtmlOptions, as_html};
 pub use string::as_string;
 pub use terminal::{

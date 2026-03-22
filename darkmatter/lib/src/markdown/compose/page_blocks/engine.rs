@@ -94,7 +94,7 @@ fn render_body(
 mod tests {
     use super::*;
     use crate::markdown::compose::page_blocks::parser::parse_page_blocks;
-    use crate::markdown::compose::{EffectiveStateBuilder, ComposeContext};
+    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
     use serde_json::json;
     use std::collections::HashMap;
 

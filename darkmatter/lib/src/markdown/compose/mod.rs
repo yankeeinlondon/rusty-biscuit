@@ -45,8 +45,8 @@ pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    Stage1Stages, Stage2Stages, TransclusionOptions, ComposeContext, ComposeOptions,
-    ComposeReport, ComposeSource, ComposeWarning,
+    ComposeContext, ComposeOptions, ComposeReport, ComposeSource, ComposeWarning, Stage1Stages,
+    Stage2Stages, TransclusionOptions,
 };
 
 use super::Markdown;
@@ -132,10 +132,7 @@ impl Markdown {
     }
 
     /// Internal pipeline runner.
-    fn run_compose_pipeline(
-        &mut self,
-        options: ComposeOptions,
-    ) -> MarkdownResult<ComposeReport> {
+    fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         let mut runtime =
             shell_expansion::types::PipelineRuntime::new(options.transclusion.max_depth);
         self.run_compose_pipeline_internal(options, &mut runtime)
@@ -329,11 +326,7 @@ impl Markdown {
     ///
     /// Applies text replacements from the `replace` map in effective state.
     /// See [`replacement::apply_replacements`] for algorithm details.
-    fn run_replacement_stage(
-        &mut self,
-        state: &EffectiveState,
-        options: &ComposeOptions,
-    ) -> usize {
+    fn run_replacement_stage(&mut self, state: &EffectiveState, options: &ComposeOptions) -> usize {
         let (new_content, count) = if let Some(one_off) = &options.one_off_replace {
             let merged_replace = state::merge_replace_maps(state.get_replace_map(), Some(one_off));
             let mut frontmatter = HashMap::new();
@@ -462,10 +455,7 @@ impl Markdown {
         }
 
         // Warn for unknown options
-        fn warn_unknown_options(
-            region: &page_blocks::PageBlockRegion,
-            report: &mut ComposeReport,
-        ) {
+        fn warn_unknown_options(region: &page_blocks::PageBlockRegion, report: &mut ComposeReport) {
             for unknown in &region.options.unknown_options {
                 report.add_warning(
                     ComposeWarning::new(
@@ -1815,12 +1805,7 @@ Rounded: {{ round(pi) }}"#;
 
         assert!(composed.content().starts_with("Intro"));
         assert!(composed.content().contains("Body"));
-        assert!(
-            composed
-                .content()
-                .trim_end_matches('\n')
-                .ends_with("Outro")
-        );
+        assert!(composed.content().trim_end_matches('\n').ends_with("Outro"));
         assert_eq!(report.transclusions_applied, 2);
     }
 

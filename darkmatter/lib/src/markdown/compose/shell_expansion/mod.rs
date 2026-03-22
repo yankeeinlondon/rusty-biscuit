@@ -331,7 +331,7 @@ pub fn apply_replacements_in_reverse(
 mod integration_tests {
     use super::*;
     use crate::markdown::Markdown;
-    use crate::markdown::compose::{Stage1Stages, ComposeOptions};
+    use crate::markdown::compose::{ComposeOptions, Stage1Stages};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;

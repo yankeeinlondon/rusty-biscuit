@@ -3,6 +3,11 @@
 use crate::markdown::{Markdown, MarkdownError, MarkdownResult};
 use markdown::ParseOptions;
 
+pub(crate) fn parse_mdast(content: &str) -> MarkdownResult<markdown::mdast::Node> {
+    markdown::to_mdast(content, &ParseOptions::gfm())
+        .map_err(|e| MarkdownError::AstParse(e.to_string()))
+}
+
 /// Converts a Markdown document to an MDAST (Markdown Abstract Syntax Tree).
 ///
 /// The AST representation allows programmatic manipulation of the markdown
@@ -31,11 +36,7 @@ use markdown::ParseOptions;
 /// assert!(json.contains("heading"));
 /// ```
 pub fn as_ast(md: &Markdown) -> MarkdownResult<markdown::mdast::Node> {
-    // Use GFM options for full markdown feature support
-    let options = ParseOptions::gfm();
-
-    // Parse content to MDAST
-    markdown::to_mdast(md.content(), &options).map_err(|e| MarkdownError::AstParse(e.to_string()))
+    parse_mdast(md.content())
 }
 
 #[cfg(test)]

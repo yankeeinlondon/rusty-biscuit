@@ -39,8 +39,8 @@ pub fn render_toc_links(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::toc::MarkdownTocNode;
     use crate::markdown::compose::toc_linking::types::CleanupService;
+    use crate::markdown::toc::MarkdownTocNode;
 
     fn make_heading(level: u8, title: &str, slug: &str) -> MarkdownTocNode {
         MarkdownTocNode::new(level, title.to_string(), slug.to_string(), (0, 0), (0, 0))

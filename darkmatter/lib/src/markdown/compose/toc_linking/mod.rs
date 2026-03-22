@@ -30,7 +30,7 @@ pub use types::TocLinkingError;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion::resolve_path;
-use crate::markdown::compose::{TransclusionOptions, ComposeSource};
+use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
