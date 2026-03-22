@@ -340,7 +340,8 @@ commit:
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit )
     @claudine opencode --prompt-file "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
     @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff git 2>/dev/null || exit 0
+    @sniff repo git-status 2>/dev/null || exit 0
+    @echo
 
 # stages all files in package area and then commits and pushes
 cp:
