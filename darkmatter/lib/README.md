@@ -4,28 +4,6 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 
 ## Features
 
-```mermaid
-flowchart TD
-
-DM[Darkmatter Library]
-Render(Rendering)
-Composition(Composition)
-Utility(Utility)
-
-DM --> Render
-DM --> Composition
-DM --> Utility
-
-Composition --> MoreComposition(...)
-Composition --> Interpolation(Interpolation)
-Composition --> Transclusion(Transclusion)
-
-Transclusion --> Docs(Local Docs)
-Transclusion --> Shell(Shell Expansion)
-Transclusion --> Summarize(Summarization)
-Transclusion --> More(...)
-```
-
 - **Rendering**
     - **Multi-format output**: Terminal (ANSI), HTML, [MDAST](https://github.com/syntax-tree/mdast) JSON, and Regular or Enriched Markdown
     - **Syntax highlighting**: 200+ languages via `syntect` and `two-face` with curated theme pairs
@@ -153,29 +131,10 @@ This results in a document which:
 
 ## Composition Lifecycle
 
-If you want details on any stage of the composition lifecycle follow the links to the detailed documents below:
+- The [composition](../docs/topics/what-is-composition.md) lifecycle goes through three major **stages**: inline mutation, transclusion, and finally rendering. 
+- Each of these stages has numerous operations which are executed
+- These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) document.
 
-- [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) provides an overview of the steps -- _and the ordering of those steps_ - which are used to mutate every document in a composition graph.
-- For more details on any of the operations choose the operation links below:
-    - [**Cleaning**](../docs/preparation/cleaning.md):
-        - The [cleaning](../docs/preparation/cleaning.md) document covers the functionality and key symbols for cleaning up a Markdown document found in the library. 
-        - Alternatively if your interest is more focused on the CLI, you can read the [`clean`](../docs/cli/clean.md) subcommand documentation.
-    - **Normalization**:
-        - The [normalization and re-leveling](../docs/preparation/normalization-and-releveling.md) document goes into details about ensuring that the heading structure of a document is valid as well as how to "re-level" the document were needed.
-    - **Text Replacement**
-        - The "text replacement" functionality allows a caller to provide a key/value dictionary to do a full find-and-replace across the document graph of a composition. For more details read [Text Replacement](../docs/preparation/text-replacement.md)
-    - **Interpolation**:
-        - To able to _replace_ references to frontmatter properties, ENV variables, and "context" based properties in a body's page is what the **interpolate** operation provides. To get more information read the [Interpolation](../docs/preparation/interpolation.md) document.
-    - **TOC Linking**:
-        - Sometimes instead of hyperlinking to another Markdown document, it is useful instead to link to each (or a configured subset) of it's heading topics.
-        - Doing so is easy with the `::toc-linking` directive described in detail in [TOC Linking](../docs/preparation/toc-linking.md)
-    - **Shell Expansion**:
-        - Being able to inject the output of a shell command into a part of a Markdown document can be a powerful feature. 
-        - The [Shell Expansion](../docs/preparation/shell-expansion.md) document describes how to do this, what configuration is available, and how the built-in security model works.
-    - **Conditional Blocks**:
-        - The `::block` directive allows you to _conditionally_ render certain parts of a page based on frontmatter, ENV variables, and provided context variables.
-- Once the _prepatory_ steps are complete we move into **Transclusion**; there are many variants of this operation and you can get details from these links:
-    - j
 
 ### Rendering Details
 

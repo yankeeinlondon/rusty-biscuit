@@ -1,3 +1,11 @@
+---
+blast_radius:
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/render/mod.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+---
+
 # `Link` Struct
 
 The `Link` struct in `darkmatter` is a type-safe, multi-format hyperlink model that can:
@@ -133,6 +141,7 @@ assert_eq!(link.data().get("analytics-id"), Some(&"link-123".to_string()));
 
 Notable setters:
 
+- `with_display(impl Into<String>) -> Self`
 - `with_href(...) -> Result<Self, LinkError>`
 - `with_style(Stylesheet) -> Self`
 - `with_style_css(...) -> Result<Self, LinkError>`

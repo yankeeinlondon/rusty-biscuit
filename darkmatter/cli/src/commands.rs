@@ -759,8 +759,22 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
         .canonicalize()
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
 
-    let status = Command::new(&editor_cmd)
-        .arg(&canonical)
+    // Split editor command into binary + any pre-existing args (e.g., "code --new-window")
+    let mut parts = editor_cmd.split_whitespace();
+    let editor_bin = parts.next().unwrap_or(&editor_cmd);
+    let mut cmd = Command::new(editor_bin);
+    for arg in parts {
+        cmd.arg(arg);
+    }
+
+    // GUI editors exit immediately unless told to wait — inject the appropriate flag.
+    for flag in wait_args_for_editor(editor_bin) {
+        cmd.arg(flag);
+    }
+
+    cmd.arg(&canonical);
+
+    let status = cmd
         .status()
         .wrap_err_with(|| format!("Failed to launch editor: {}", editor_cmd))?;
 
@@ -829,6 +843,36 @@ fn resolve_editor_command() -> Result<String> {
     Err(eyre!(
         "No editor found. Set $EDITOR or $VISUAL, or install one of: nvim, vim, code, nano"
     ))
+}
+
+/// Returns the CLI flags needed to make a GUI editor block until the file is closed.
+///
+/// Terminal editors (vim, neovim, helix, nano, etc.) naturally block because they
+/// run in the foreground. GUI editors use a client-server model where the CLI wrapper
+/// exits immediately after handing off to the running instance. The `--wait` flag
+/// (or equivalent) tells the CLI wrapper to stay alive until the file tab is closed.
+///
+/// Returns an empty slice for terminal editors or unrecognized binaries.
+fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
+    match binary {
+        // VS Code / VS Codium
+        "code" | "codium" | "code-insiders" => &["--wait"],
+        // Sublime Text
+        "subl" => &["--wait"],
+        // Zed
+        "zed" => &["--wait"],
+        // TextMate
+        "mate" => &["--wait"],
+        // BBEdit
+        "bbedit" => &["--wait"],
+        // Kate
+        "kate" => &["--block"],
+        // JetBrains IDEs
+        "phpstorm" | "idea" | "pycharm" | "webstorm" | "clion" | "goland" | "rider" => {
+            &["--wait"]
+        }
+        _ => &[],
+    }
 }
 
 /// Hash a markdown document's frontmatter and/or body.

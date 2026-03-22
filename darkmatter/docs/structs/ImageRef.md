@@ -1,3 +1,14 @@
+---
+blast_radius:
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/render/mod.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+  - darkmatter/docs/structs/Markdown.md
+  - darkmatter/docs/structs/README.md
+  - darkmatter/design/smart-image.md
+---
+
 # `ImageRef` Struct
 
 The `ImageRef` struct -- defined in [`image_ref.rs`](../../lib/src/render/image_ref.rs) -- is meant to be a ergonomic and feature rich way of capturing, parsing, and transforming an image reference and outputting it multiple output targets. This functionality mirrors the functionality which the [`Link`](./Link.md) struct provides for hyperlinking and like it it supports the following input and output formats:

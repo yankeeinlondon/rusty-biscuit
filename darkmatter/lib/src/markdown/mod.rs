@@ -211,7 +211,7 @@ impl Markdown {
     /// The extraction path round-trips through markdown image parsing so `ImageRef`
     /// behaviors (such as width hints in alt text and metadata title payloads) are
     /// applied consistently with standalone `ImageRef::try_from`.
-    pub fn images(&self) -> Vec<ImageRef> {
+    pub fn image_references(&self) -> Vec<ImageRef> {
         let parser = Parser::new_ext(&self.content, markdown_parse_options());
 
         let mut images = Vec::new();
@@ -999,7 +999,7 @@ title: Test
     #[test]
     fn test_markdown_images_extract_width_hint() {
         let md: Markdown = "![Diagram|50%](./diagram.png)".into();
-        let images = md.images();
+        let images = md.image_references();
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].alt(), "Diagram");
@@ -1015,10 +1015,173 @@ title: Test
     #[test]
     fn test_markdown_images_preserve_inline_code_in_alt() {
         let md: Markdown = "![Use `cargo test` here](./diagram.png)".into();
-        let images = md.images();
+        let images = md.image_references();
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].alt(), "Use `cargo test` here");
+    }
+
+    // ============================================
+    // links() tests
+    // ============================================
+
+    #[test]
+    fn links_returns_empty_for_no_links() {
+        let md: Markdown = "# Heading\n\nJust plain text.".into();
+        assert!(md.links().is_empty());
+    }
+
+    #[test]
+    fn links_extracts_basic_link() {
+        let md: Markdown = "Check [Example](https://example.com) for details.".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display(), "Example");
+        assert_eq!(links[0].href(), "https://example.com");
+        assert!(links[0].title().is_none());
+    }
+
+    #[test]
+    fn links_extracts_multiple_links() {
+        let md: Markdown =
+            "[One](https://one.com) and [Two](https://two.com) and [Three](https://three.com)"
+                .into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].display(), "One");
+        assert_eq!(links[1].display(), "Two");
+        assert_eq!(links[2].display(), "Three");
+    }
+
+    #[test]
+    fn links_extracts_link_with_title() {
+        let md: Markdown = r#"[Docs](https://docs.rs "Official documentation")"#.into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].title(), Some("Official documentation"));
+    }
+
+    #[test]
+    fn links_preserves_inline_code_in_display() {
+        let md: Markdown = "[Use `cargo build`](https://doc.rust-lang.org)".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display(), "Use `cargo build`");
+    }
+
+    #[test]
+    fn links_preserves_bold_text_in_display() {
+        let md: Markdown = "[**Important** link](https://example.com)".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display(), "Important link");
+    }
+
+    #[test]
+    fn links_detects_file_vs_url_kind() {
+        let md: Markdown =
+            "[Local](./README.md) and [Remote](https://example.com)".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 2);
+        assert!(links[0].is_file());
+        assert!(links[1].is_url());
+    }
+
+    #[test]
+    fn links_skips_image_references() {
+        let md: Markdown =
+            "![An image](./photo.png) and [A link](https://example.com)".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display(), "A link");
+    }
+
+    #[test]
+    fn links_handles_links_across_multiple_paragraphs() {
+        let md: Markdown = "Paragraph one with [link1](https://one.com).\n\nParagraph two with [link2](https://two.com).".into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].href(), "https://one.com");
+        assert_eq!(links[1].href(), "https://two.com");
+    }
+
+    // ============================================
+    // image_references() tests
+    // ============================================
+
+    #[test]
+    fn image_references_returns_empty_for_no_images() {
+        let md: Markdown = "# Heading\n\nJust plain text with [a link](https://example.com).".into();
+        assert!(md.image_references().is_empty());
+    }
+
+    #[test]
+    fn image_references_extracts_basic_image() {
+        let md: Markdown = "![A photo](./photo.png)".into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].alt(), "A photo");
+        assert_eq!(images[0].src(), Some("./photo.png"));
+    }
+
+    #[test]
+    fn image_references_extracts_multiple_images() {
+        let md: Markdown =
+            "![First](./a.png)\n\n![Second](./b.png)\n\n![Third](./c.png)".into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 3);
+        assert_eq!(images[0].alt(), "First");
+        assert_eq!(images[1].alt(), "Second");
+        assert_eq!(images[2].alt(), "Third");
+    }
+
+    #[test]
+    fn image_references_extracts_title() {
+        let md: Markdown = r#"![Photo](./photo.png "A scenic view")"#.into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].title(), Some("A scenic view"));
+    }
+
+    #[test]
+    fn image_references_skips_hyperlinks() {
+        let md: Markdown =
+            "[Not an image](https://example.com) and ![An image](./photo.png)".into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].alt(), "An image");
+    }
+
+    #[test]
+    fn image_references_handles_images_across_paragraphs() {
+        let md: Markdown =
+            "Text with ![img1](./a.png).\n\nMore text with ![img2](./b.png).".into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].src(), Some("./a.png"));
+        assert_eq!(images[1].src(), Some("./b.png"));
+    }
+
+    #[test]
+    fn image_references_handles_url_with_special_chars() {
+        let md: Markdown = "![Logo](https://example.com/images/logo%20v2.png)".into();
+        let images = md.image_references();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].src(), Some("https://example.com/images/logo%20v2.png"));
     }
 
     // ============================================
