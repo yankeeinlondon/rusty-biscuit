@@ -28,6 +28,7 @@
 //! ```
 
 pub mod cleanup;
+pub mod compose;
 pub mod delta;
 pub mod dsl;
 mod frontmatter;
@@ -35,10 +36,10 @@ pub mod fs;
 pub mod hash;
 pub mod highlighting;
 pub mod inline;
+mod inline_html;
 pub mod normalize;
 pub mod output;
 pub mod toc;
-pub mod compose;
 mod types;
 
 pub use delta::{
@@ -260,6 +261,33 @@ impl Markdown {
         }
 
         images
+    }
+
+    /// Returns `true` if the document content contains any inline HTML.
+    ///
+    /// This is a fast, allocation-light check that can be used as a gate
+    /// before the heavier extraction methods. False positives are possible,
+    /// but false negatives are avoided where practical.
+    pub fn has_inline_html(&self) -> bool {
+        inline_html::has_inline_html(&self.content)
+    }
+
+    /// Extracts typed links from HTML `<a>` tags in the document content.
+    ///
+    /// Complements `links()`, which extracts Markdown-native links only.
+    /// Results are returned in source order without deduplication.
+    /// Malformed or unterminated anchors are silently skipped.
+    pub fn inline_html_links(&self) -> Vec<Link> {
+        inline_html::extract_inline_html_links(&self.content)
+    }
+
+    /// Extracts typed image references from HTML `<img>` tags in the document content.
+    ///
+    /// Complements `image_references()`, which extracts Markdown-native images only.
+    /// Results are returned in source order without deduplication.
+    /// Malformed image tags are silently skipped.
+    pub fn inline_html_image_references(&self) -> Vec<ImageRef> {
+        inline_html::extract_inline_html_images(&self.content)
     }
 
     /// Cleans up markdown content by normalizing formatting.
@@ -1084,8 +1112,7 @@ title: Test
 
     #[test]
     fn links_detects_file_vs_url_kind() {
-        let md: Markdown =
-            "[Local](./README.md) and [Remote](https://example.com)".into();
+        let md: Markdown = "[Local](./README.md) and [Remote](https://example.com)".into();
         let links = md.links();
 
         assert_eq!(links.len(), 2);
@@ -1095,8 +1122,7 @@ title: Test
 
     #[test]
     fn links_skips_image_references() {
-        let md: Markdown =
-            "![An image](./photo.png) and [A link](https://example.com)".into();
+        let md: Markdown = "![An image](./photo.png) and [A link](https://example.com)".into();
         let links = md.links();
 
         assert_eq!(links.len(), 1);
@@ -1119,7 +1145,8 @@ title: Test
 
     #[test]
     fn image_references_returns_empty_for_no_images() {
-        let md: Markdown = "# Heading\n\nJust plain text with [a link](https://example.com).".into();
+        let md: Markdown =
+            "# Heading\n\nJust plain text with [a link](https://example.com).".into();
         assert!(md.image_references().is_empty());
     }
 
@@ -1135,8 +1162,7 @@ title: Test
 
     #[test]
     fn image_references_extracts_multiple_images() {
-        let md: Markdown =
-            "![First](./a.png)\n\n![Second](./b.png)\n\n![Third](./c.png)".into();
+        let md: Markdown = "![First](./a.png)\n\n![Second](./b.png)\n\n![Third](./c.png)".into();
         let images = md.image_references();
 
         assert_eq!(images.len(), 3);
@@ -1166,8 +1192,7 @@ title: Test
 
     #[test]
     fn image_references_handles_images_across_paragraphs() {
-        let md: Markdown =
-            "Text with ![img1](./a.png).\n\nMore text with ![img2](./b.png).".into();
+        let md: Markdown = "Text with ![img1](./a.png).\n\nMore text with ![img2](./b.png).".into();
         let images = md.image_references();
 
         assert_eq!(images.len(), 2);
@@ -1181,7 +1206,10 @@ title: Test
         let images = md.image_references();
 
         assert_eq!(images.len(), 1);
-        assert_eq!(images[0].src(), Some("https://example.com/images/logo%20v2.png"));
+        assert_eq!(
+            images[0].src(),
+            Some("https://example.com/images/logo%20v2.png")
+        );
     }
 
     // ============================================

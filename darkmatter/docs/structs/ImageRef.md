@@ -17,6 +17,8 @@ The `ImageRef` struct -- defined in [`image_ref.rs`](../../lib/src/render/image_
 2. **Markdown** `![alt-text](image-url "optional-title")`
 3. **Terminal** - OSC8 link (with fallback) and allowing escape codes for formatting
 
+When images are embedded as raw HTML inside a markdown document, `Markdown::inline_html_image_references()` can extract them as `ImageRef` values without changing the behavior of `Markdown::image_references()`.
+
 ## Core State
 
 To fully represent an image reference we must look at our most feature rich output client -- the HTML `img` tag -- to understand the various attributes used to represent it's "state":

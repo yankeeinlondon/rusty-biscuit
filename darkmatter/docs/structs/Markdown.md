@@ -183,7 +183,7 @@ These methods parse the markdown body and return structured data.
 
 ### `links() -> Vec<Link>`
 
-Extracts all hyperlinks from the document as typed [`Link`](./Link.md) structs. Preserves inline formatting in display text (bold, code, line breaks) and parses metadata from the title attribute.
+Extracts Markdown-native hyperlinks from the document as typed [`Link`](./Link.md) structs. Preserves inline formatting in display text (bold, code, line breaks) and parses metadata from the title attribute.
 
 ```rust
 let links = md.links();
@@ -192,14 +192,46 @@ for link in &links {
 }
 ```
 
+### `has_inline_html() -> bool`
+
+Returns `true` when the markdown body appears to contain raw HTML. This is a cheap fast-path that can be used before calling the HTML-specific extraction helpers.
+
+```rust
+if md.has_inline_html() {
+    println!("document contains inline HTML");
+}
+```
+
+### `inline_html_links() -> Vec<Link>`
+
+Extracts HTML `<a>` tags from the markdown body as typed [`Link`](./Link.md) structs. This complements `links()`, which remains Markdown-syntax only.
+
+```rust
+let html_links = md.inline_html_links();
+for link in &html_links {
+    println!("{} -> {}", link.display(), link.href());
+}
+```
+
 ### `image_references() -> Vec<ImageRef>`
 
-Extracts all image references as typed [`ImageRef`](./ImageRef.md) structs. Handles width specifications in alt text (e.g., `![photo|50%](img.png)`).
+Extracts Markdown-native image references as typed [`ImageRef`](./ImageRef.md) structs. Handles width specifications in alt text (e.g., `![photo|50%](img.png)`).
 
 ```rust
 let images = md.image_references();
 for img in &images {
     println!("{} -> {}", img.alt(), img.src());
+}
+```
+
+### `inline_html_image_references() -> Vec<ImageRef>`
+
+Extracts HTML `<img>` tags from the markdown body as typed [`ImageRef`](./ImageRef.md) structs. This complements `image_references()`, which remains Markdown-syntax only.
+
+```rust
+let html_images = md.inline_html_image_references();
+for img in &html_images {
+    println!("{} -> {:?}", img.alt(), img.src());
 }
 ```
 

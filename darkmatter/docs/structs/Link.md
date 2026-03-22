@@ -14,6 +14,8 @@ The `Link` struct in `darkmatter` is a type-safe, multi-format hyperlink model t
 2. Render links for terminal (`OSC 8`), HTML, and Markdown
 3. Preserve rich metadata in Markdown using a lossless policy by default
 
+When links are embedded as raw HTML inside a markdown document, `Markdown::inline_html_links()` can extract them as `Link` values without changing the behavior of `Markdown::links()`.
+
 ## Overview
 
 `Link` stores visible text, destination, and optional metadata commonly used by HTML anchors.
