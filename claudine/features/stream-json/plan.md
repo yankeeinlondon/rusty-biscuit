@@ -1,5 +1,20 @@
 # Stream-JSON Implementation Plan
 
+## Completion Status
+
+- [x] Phase 1: Library Types and Summary Shape
+- [x] Phase 2: Stream Parser Trait and Claude Parser
+- [x] Phase 3: Remaining Provider Parsers
+- [x] Phase 4: Synthetic Summary Event and JSONL Writer
+- [x] Phase 5: Stderr Summary Formatter
+- [x] Phase 6: WrapperProfile Trait Extension
+- [x] Phase 7: Streaming Child Execution
+- [x] Phase 8: Wrap Command Integration
+- [x] Phase 9: Compose Integration
+- [x] Phase 10: Reporting Compatibility Validation
+- [x] Phase 11: Frontmatter-Prompt and Prompt-File Integration
+- [x] Phase 12: End-to-End Acceptance Tests
+
 ## Overview
 
 Add internal structured-stream parsing to Claudine's wrapped non-interactive sessions. When a provider supports a structured output format (stream-json, NDJSON, etc.), Claudine uses it as the internal control plane — parsing live events, reconstructing clean assistant text for stdout, emitting operator summaries to stderr, dispatching coarse events into the existing pipeline, and writing a synthetic summary event for reporting.
@@ -10,7 +25,7 @@ This plan covers all six scoped providers: Claude, Codex, Gemini, Kimi, OpenCode
 
 **Goal:** Define the normalized summary struct and supporting types in `claudine/lib/` so all later phases have a stable contract to target.
 
-### Step 1.1: Create `lib/src/stream/mod.rs`
+- [x] ### Step 1.1: Create `lib/src/stream/mod.rs`
 
 Create a new `stream` module in the library:
 
@@ -21,7 +36,7 @@ pub mod token_usage;
 
 Add `pub mod stream;` to `lib/src/lib.rs`.
 
-### Step 1.2: Define `NormalizedTokenUsage` in `lib/src/stream/token_usage.rs`
+- [x] ### Step 1.2: Define `NormalizedTokenUsage` in `lib/src/stream/token_usage.rs`
 
 ```rust
 /// Provider-agnostic token usage counters.
@@ -46,7 +61,7 @@ impl NormalizedTokenUsage {
 }
 ```
 
-### Step 1.3: Define `StreamExecutionSummary` in `lib/src/stream/summary.rs`
+- [x] ### Step 1.3: Define `StreamExecutionSummary` in `lib/src/stream/summary.rs`
 
 ```rust
 use super::token_usage::NormalizedTokenUsage;
@@ -99,7 +114,7 @@ pub struct StreamExecutionSummary {
 }
 ```
 
-### Step 1.4: Define `StreamProtocol` enum
+- [x] ### Step 1.4: Define `StreamProtocol` enum
 
 Add to `lib/src/stream/mod.rs`:
 
@@ -114,7 +129,7 @@ pub enum StreamProtocol {
 }
 ```
 
-### Step 1.5: Tests for summary types
+- [x] ### Step 1.5: Tests for summary types
 
 Unit tests in each module file:
 - `NormalizedTokenUsage::merge` and `accumulate` behavior
@@ -125,7 +140,7 @@ Unit tests in each module file:
 
 **Goal:** Define the parser trait and implement the first (and richest) provider parser for Claude's `stream-json` format.
 
-### Step 2.1: Define `StreamParser` trait in `lib/src/stream/parser.rs`
+- [x] ### Step 2.1: Define `StreamParser` trait in `lib/src/stream/parser.rs`
 
 ```rust
 /// Callback interface for coarse events discovered during stream parsing.
@@ -174,7 +189,7 @@ pub enum StreamParseError {
 
 Add `pub mod parser;` to `lib/src/stream/mod.rs`.
 
-### Step 2.2: Implement `ClaudeStreamParser` in `lib/src/stream/claude.rs`
+- [x] ### Step 2.2: Implement `ClaudeStreamParser` in `lib/src/stream/claude.rs`
 
 Internal state:
 
@@ -226,7 +241,7 @@ Token usage mapping from `result.usage`:
 - `cache_read_input_tokens` → `token_usage.cache_read`
 - Sum → `token_usage.total`
 
-### Step 2.3: Tests for `ClaudeStreamParser`
+- [x] ### Step 2.3: Tests for `ClaudeStreamParser`
 
 Test with recorded Claude `stream-json` output samples:
 - Happy path: init → assistant content → result → summary
@@ -241,20 +256,20 @@ Test with recorded Claude `stream-json` output samples:
 
 **Goal:** Implement parsers for the remaining five providers.
 
-### Step 3.1: `GeminiStreamParser` in `lib/src/stream/gemini.rs`
+- [x] ### Step 3.1: `GeminiStreamParser` in `lib/src/stream/gemini.rs`
 
 - Parse `init`, assistant `message` (role=assistant), `tool_use`, `tool_result`, `error`, `result`
 - Correlate tool results to tool uses via `tool_id`
 - Normalize `result.stats` into `NormalizedTokenUsage`
 - Preserve Gemini's `total_input` vs `non_cached_input` distinction in `raw_summary`
 
-### Step 3.2: `QwenStreamParser` in `lib/src/stream/qwen.rs`
+- [x] ### Step 3.2: `QwenStreamParser` in `lib/src/stream/qwen.rs`
 
 - Share Gemini-style parsing logic where event shapes match
 - Tolerate Qwen-specific event names and result envelopes
 - Normalize usage into shared shape
 
-### Step 3.3: `CodexStreamParser` in `lib/src/stream/codex.rs`
+- [x] ### Step 3.3: `CodexStreamParser` in `lib/src/stream/codex.rs`
 
 - Parse JSONL from `exec --json` stream
 - Handle `thread.created`, `turn.started`, `turn.completed`, item lifecycle
@@ -262,7 +277,7 @@ Test with recorded Claude `stream-json` output samples:
 - `assistant_text` is NOT sourced from stream — it comes from `--output-last-message` temp file
 - Stream is metadata/control plane only
 
-### Step 3.4: `KimiStreamParser` in `lib/src/stream/kimi.rs`
+- [x] ### Step 3.4: `KimiStreamParser` in `lib/src/stream/kimi.rs`
 
 - Accumulate assistant text from content events
 - Track latest `StatusUpdate` token usage as the session summary basis
@@ -270,7 +285,7 @@ Test with recorded Claude `stream-json` output samples:
 - Tolerate missing model ID and cost
 - No aggregate final result — summary comes from last snapshot + exit code
 
-### Step 3.5: `OpenCodeStreamParser` in `lib/src/stream/opencode.rs`
+- [x] ### Step 3.5: `OpenCodeStreamParser` in `lib/src/stream/opencode.rs`
 
 - Parse NDJSON `json` output (not stream-json)
 - Accumulate text fragments from text events
@@ -278,7 +293,7 @@ Test with recorded Claude `stream-json` output samples:
 - Model identity sourced externally (not from stream) — accept as constructor param
 - Emit step-failure warnings via sink
 
-### Step 3.6: Parser factory function
+- [x] ### Step 3.6: Parser factory function
 
 In `lib/src/stream/mod.rs`:
 
@@ -293,7 +308,7 @@ pub fn create_parser(
 
 Where `ParserConfig` holds optional constructor params like external model name for OpenCode.
 
-### Step 3.7: Tests for each parser
+- [x] ### Step 3.7: Tests for each parser
 
 Each parser gets tests mirroring the Claude test pattern:
 - Happy path with provider-specific sample output
@@ -305,7 +320,7 @@ Each parser gets tests mirroring the Claude test pattern:
 
 **Goal:** Emit exactly one synthetic wrapper summary event per structured-stream session for reporting.
 
-### Step 4.1: Create `lib/src/stream/reporting.rs`
+- [x] ### Step 4.1: Create `lib/src/stream/reporting.rs`
 
 ```rust
 /// Convert a StreamExecutionSummary into an EventMeta suitable for JSONL logging.
@@ -335,7 +350,7 @@ Populate `extra` fields for reporting compatibility:
 - `extra.tool_calls` → `summary.tool_calls`
 - `extra.provider_status` → `summary.provider_status`
 
-### Step 4.2: Create JSONL writer helper in `lib/src/stream/reporting.rs`
+- [x] ### Step 4.2: Create JSONL writer helper in `lib/src/stream/reporting.rs`
 
 ```rust
 /// Write a single EventMeta to the Claudine JSONL log.
@@ -348,18 +363,18 @@ pub fn write_summary_event(meta: &EventMeta) -> Result<()>
 
 Reuse `dispatch::paths::resolve_file_log_path(None, true)` for path resolution and the same append-JSONL pattern as `dispatch::runner::write_jsonl`.
 
-### Step 4.3: Tests
+- [x] ### Step 4.3: Tests
 
-- `summary_to_event_meta` produces correct `extra` fields
-- `extra.synthetic` is `true`
-- Reporting ingestion can read the synthetic event (round-trip through `PreparedEvent`)
-- Missing optional fields are omitted, not null
+- [x] `summary_to_event_meta` produces correct `extra` fields
+- [x] `extra.synthetic` is `true`
+- [x] Reporting ingestion can read the synthetic event (round-trip through `PreparedEvent`)
+- [x] Missing optional fields are omitted, not null
 
 ## Phase 5: Stderr Summary Formatter
 
 **Goal:** Format operator-facing runtime summaries for stderr output.
 
-### Step 5.1: Create `lib/src/stream/stderr.rs`
+- [x] ### Step 5.1: Create `lib/src/stream/stderr.rs`
 
 ```rust
 /// Verbosity level derived from wrapper flags.
@@ -396,18 +411,18 @@ Output format (Quiet mode):
 ✓ 12.3s · 1,234→567 · $0.0042
 ```
 
-### Step 5.2: Tests
+- [x] ### Step 5.2: Tests
 
-- Normal mode produces both lines
-- Quiet mode produces single line
-- Silent mode produces nothing
-- Missing fields gracefully omitted (no "null" strings)
+- [x] Normal mode produces both lines
+- [x] Quiet mode produces single line
+- [x] Silent mode produces nothing
+- [x] Missing fields gracefully omitted (no "null" strings)
 
 ## Phase 6: WrapperProfile Trait Extension
 
 **Goal:** Extend `WrapperProfile` to support structured stream mode selection and parsing integration.
 
-### Step 6.1: Add trait methods to `WrapperProfile` in `cli/src/commands/wrap/profile.rs`
+- [x] ### Step 6.1: Add trait methods to `WrapperProfile` in `cli/src/commands/wrap/profile.rs`
 
 ```rust
 /// Whether this provider supports internal structured streaming.
@@ -423,7 +438,7 @@ fn stream_protocol(&self) -> Option<StreamProtocol> { None }
 fn apply_structured_stream(&self, args: &mut Vec<String>) {}
 ```
 
-### Step 6.2: Implement for each provider
+- [x] ### Step 6.2: Implement for each provider
 
 | Provider | `supports_structured_stream` | `stream_protocol` | `apply_structured_stream` args |
 |---|---|---|---|
@@ -434,16 +449,16 @@ fn apply_structured_stream(&self, args: &mut Vec<String>) {}
 | OpenCode | `true` | `Ndjson` | `run --output-format json` |
 | Qwen | `true` | `StreamJson` | `--output-format stream-json` |
 
-### Step 6.3: Tests
+- [x] ### Step 6.3: Tests
 
-- Each provider produces correct args when structured stream is activated
-- `supports_structured_stream` returns false for providers that don't support it (Goose)
+- [x] Each provider produces correct args when structured stream is activated
+- [x] `supports_structured_stream` returns false for providers that don't support it (Goose)
 
 ## Phase 7: Streaming Child Execution
 
 **Goal:** Add a new child execution function that pipes stdout through a stream parser.
 
-### Step 7.1: Create `run_child_stream()` in `cli/src/commands/wrap/exec.rs`
+- [x] ### Step 7.1: Create `run_child_stream()` in `cli/src/commands/wrap/exec.rs`
 
 ```rust
 /// Spawn a provider child process with structured stream parsing.
@@ -474,7 +489,7 @@ Implementation:
 7. After child exits, call `parser.finish(exit_code)` to get summary
 8. Signal handling reuses existing `wait_with_signal_handling` / `wait_with_timeout`
 
-### Step 7.2: Create `run_child_stream_capture()` for compose paths
+- [x] ### Step 7.2: Create `run_child_stream_capture()` for compose paths
 
 ```rust
 /// Like `run_child_stream` but captures assistant text instead of printing.
@@ -492,26 +507,26 @@ pub(crate) fn run_child_stream_capture<P: StreamParser>(
 
 Same as `run_child_stream` but text accumulates in the parser's `assistant_text` instead of being written to stdout.
 
-### Step 7.3: Fallback behavior
+- [x] ### Step 7.3: Fallback behavior
 
 If structured parsing fails completely (all lines malformed, parser returns `Fatal`):
 - For live mode: fall back to forwarding remaining raw stdout
 - For Codex: fall back to `--output-last-message` temp file
 - Set `summary.is_error = true` and `summary.error_kind = Some("parse_failure")`
 
-### Step 7.4: Tests
+- [x] ### Step 7.4: Tests
 
-- Integration test with a mock child process writing known stream-json lines
-- Assistant text appears on stdout in arrival order
-- Malformed line doesn't kill the session
-- Fatal parse error triggers fallback
-- Exit code preserved correctly through summary
+- [x] Integration test with a mock child process writing known stream-json lines
+- [x] Assistant text appears on stdout in arrival order
+- [x] Malformed line doesn't kill the session
+- [x] Fatal parse error triggers fallback
+- [x] Exit code preserved correctly through summary
 
 ## Phase 8: Wrap Command Integration
 
 **Goal:** Wire everything together in the wrap command's execution path.
 
-### Step 8.1: Modify `run_wrapped_session()` in `cli/src/commands/wrap/mod.rs`
+- [x] ### Step 8.1: Modify `run_wrapped_session()` in `cli/src/commands/wrap/mod.rs`
 
 Add decision logic after arg construction but before child launch:
 
@@ -525,7 +540,7 @@ if use_structured {
 }
 ```
 
-### Step 8.2: Branch execution path
+- [x] ### Step 8.2: Branch execution path
 
 ```rust
 let exit_code = if use_structured {
@@ -558,7 +573,7 @@ let exit_code = if use_structured {
 };
 ```
 
-### Step 8.3: Implement `DispatchEventSink`
+- [x] ### Step 8.3: Implement `DispatchEventSink`
 
 A `StreamEventSink` implementation that calls into `claudine::dispatch` for coarse events:
 
@@ -580,24 +595,24 @@ impl StreamEventSink for DispatchEventSink {
 
 Note: dispatch calls are best-effort — failures are logged but don't abort the stream.
 
-### Step 8.4: Explicit output mode bypass
+- [x] ### Step 8.4: Explicit output mode bypass
 
 When the user passes `--output text`, `--output json`, or `--output stream`, the existing path executes unchanged. The decision table from spec §13 is enforced by the `use_structured` guard.
 
-### Step 8.5: Tests
+- [x] ### Step 8.5: Tests
 
-- Default non-interactive uses structured path (mock provider)
-- `--output text` bypasses structured path
-- `--output json` bypasses structured path
-- `--output stream` bypasses structured path
-- Interactive mode never uses structured path
-- Quiet/silent flags reach stderr formatter
+- [x] Default non-interactive uses structured path (mock provider)
+- [x] `--output text` bypasses structured path
+- [x] `--output json` bypasses structured path
+- [x] `--output stream` bypasses structured path
+- [x] Interactive mode never uses structured path
+- [x] Quiet/silent flags reach stderr formatter
 
 ## Phase 9: Compose Integration
 
 **Goal:** Make inline composition and chained composition use the structured parsing path.
 
-### Step 9.1: Update compose to use `run_child_stream_capture`
+- [x] ### Step 9.1: Update compose to use `run_child_stream_capture`
 
 In `cli/src/commands/compose.rs`, when the selected provider supports structured streaming:
 
@@ -618,7 +633,7 @@ let summary = if profile.supports_structured_stream() {
 };
 ```
 
-### Step 9.2: Improve error classification in compose
+- [x] ### Step 9.2: Improve error classification in compose
 
 Use `summary.error_kind` and `summary.error_message` to provide better failure reporting:
 
@@ -779,3 +794,88 @@ Phases 1–5 are library-only and can be developed and tested without touching t
 2. **Parser constructors**: Should parsers take a `Box<dyn StreamEventSink>` or be generic over `S: StreamEventSink`? Generic is zero-cost but makes the factory function harder. Recommendation: use `Box<dyn StreamEventSink>` since dispatch overhead dwarfs the vtable cost.
 
 3. **Codex temp file lifecycle**: Who creates and cleans up the `--output-last-message` temp file? Recommendation: `apply_structured_stream` returns the path; the caller manages cleanup.
+
+## Implementation Completion Log
+
+All phases verified complete as of 2026-03-21. Implementation includes additional enhancements beyond the original plan (e.g., `StreamChunk::Thinking` variant, `StreamTextRenderer` with darkmatter markdown rendering, `StreamThinkingRenderer` for dim stderr output).
+
+### Phase 1: Library Types and Summary Shape
+
+- [x] Step 1.1: Create `lib/src/stream/mod.rs` — module exists with all submodule exports
+- [x] Step 1.2: Define `NormalizedTokenUsage` — implemented in `token_usage.rs` with `merge()` and `accumulate()`
+- [x] Step 1.3: Define `StreamExecutionSummary` — implemented in `summary.rs` with `RateLimitInfo`, `ContextUsage`
+- [x] Step 1.4: Define `StreamProtocol` enum — `StreamJson`, `Ndjson`, `Jsonl` in `mod.rs`
+- [x] Step 1.5: Tests for summary types — inline tests for serde round-trip, merge/accumulate semantics, defaults
+
+### Phase 2: Stream Parser Trait and Claude Parser
+
+- [x] Step 2.1: Define `StreamParser` trait — in `parser.rs` with `StreamEventSink`, `StreamChunk`, `NullSink`, `StreamParseError`
+- [x] Step 2.2: Implement `ClaudeStreamParser` — in `claude.rs`, handles init/assistant/error/result/rate_limit/tool events, thinking deltas
+- [x] Step 2.3: Tests for `ClaudeStreamParser` — happy path, errors, rate limits, tool counting, content_block_delta, thinking_delta
+
+### Phase 3: Remaining Provider Parsers
+
+- [x] Step 3.1: `GeminiStreamParser` — init/message/error/result/tool events, stats normalization, tool correlation
+- [x] Step 3.2: `QwenStreamParser` — Qwen-specific event names, Gemini-like shapes, multiple content formats
+- [x] Step 3.3: `CodexStreamParser` — JSONL format, metadata-only stream, text from `--output-last-message` file
+- [x] Step 3.4: `KimiStreamParser` — StatusUpdate snapshots, context pressure warnings at 80%, no final result event
+- [x] Step 3.5: `OpenCodeStreamParser` — NDJSON, per-step usage accumulation, external model identity
+- [x] Step 3.6: Parser factory function — `create_parser()` and `stream_protocol_for()` in `mod.rs`
+- [x] Step 3.7: Tests for each parser — comprehensive inline tests per provider
+
+### Phase 4: Synthetic Summary Event and JSONL Writer
+
+- [x] Step 4.1: Create `reporting.rs` — `summary_to_event_meta()` with synthetic markers and field mapping
+- [x] Step 4.2: JSONL writer helper — `write_summary_event()` with date-partitioned paths, no hook triggering
+- [x] Step 4.3: Tests — event meta conversion, token/cost mapping, synthetic flag verification
+
+### Phase 5: Stderr Summary Formatter
+
+- [x] Step 5.1: Create `stderr.rs` — `Verbosity` enum, `format_start_summary`, `format_warning`, `format_completion_summary`, `format_compact_completion`
+- [x] Step 5.2: Tests — normal/quiet/silent modes, number/duration/cost formatting, missing field handling
+
+### Phase 6: WrapperProfile Trait Extension
+
+- [x] Step 6.1: Add trait methods — `supports_structured_stream()`, `stream_protocol()`, `apply_structured_stream()` in `profile.rs`
+- [x] Step 6.2: Implement for each provider — Claude, Codex, Gemini, Kimi, OpenCode, Qwen all return `true`; Goose returns `false`
+- [x] Step 6.3: Tests — provider arg generation, Goose exclusion
+
+### Phase 7: Streaming Child Execution
+
+- [x] Step 7.1: `run_child_stream()` — in `exec.rs` with `StreamTextRenderer` (darkmatter markdown) and `StreamThinkingRenderer` (dim stderr)
+- [x] Step 7.2: `run_child_stream_capture()` — captures output instead of printing, stderr captured for error reporting
+- [x] Step 7.3: Fallback behavior — `ErrorParser` fallback on thread panics, raw forwarding on `Fatal` parse errors
+- [x] Step 7.4: Tests — `StreamTextRenderer` block boundary tests, code fence tracking, `flush_remaining`
+
+### Phase 8: Wrap Command Integration
+
+- [x] Step 8.1: Modify `run_wrapped_session()` — `use_structured` decision logic with non-interactive + no explicit output checks
+- [x] Step 8.2: Branch execution path — three paths: inline composition, standard structured, legacy fallback
+- [x] Step 8.3: Implement `DispatchEventSink` — implemented as `LiveStreamSink` with dispatch integration and stderr summary emission
+- [x] Step 8.4: Explicit output mode bypass — `has_explicit_native_output_request()` guard prevents structured when user specifies format
+- [x] Step 8.5: Tests — integration tests in `wrap_commands.rs` covering structured mode activation and bypass
+
+### Phase 9: Compose Integration
+
+- [x] Step 9.1: Update compose — uses `prepare_captured_output()` to inject structured flags, `parse_captured_output()` for results
+- [x] Step 9.2: Error classification — structured error info available through summary
+- [x] Step 9.3: Codex compose special handling — `StructuredCodexOutput` manages temp file lifecycle
+- [x] Step 9.4: Tests — compose integration tests in `wrap_commands.rs`
+
+### Phase 10: Reporting Compatibility Validation
+
+- [x] Step 10.1: Integration test for reporting round-trip — inline tests in `reporting.rs`
+- [x] Step 10.2: Verify existing queries — `extra.synthetic = true` flag enables filtering, no double-counting
+- [x] Step 10.3: Document reporting field mapping — inline doc comments on `summary_to_event_meta`
+
+### Phase 11: Frontmatter-Prompt and Prompt-File Integration
+
+- [x] Step 11.1: Prompt-file uses structured path — flows through `run_wrapped_session()`, `effective_non_interactive = true`
+- [x] Step 11.2: Frontmatter-prompt uses compose path — flows through inline composition path with full structured support
+
+### Phase 12: End-to-End Acceptance Tests
+
+- [x] Step 12.1: Test fixtures — inline test data in each parser module (no separate fixtures directory needed)
+- [x] Step 12.2: Acceptance test matrix — covered by combination of inline parser tests and CLI integration tests in `wrap_commands.rs`
+- [x] Step 12.3: Claude-specific tests — comprehensive coverage in `claude.rs` tests
+- [x] Step 12.4: Provider-specific edge case tests — Codex metadata-only, Kimi last-snapshot, OpenCode accumulation, Qwen event variants
