@@ -993,3 +993,74 @@ fn read_from_stdin() -> Result<Markdown> {
         .wrap_err("Failed to read from stdin")?;
     Ok(buffer.into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_args_vscode_returns_wait() {
+        assert_eq!(wait_args_for_editor("code"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_codium_returns_wait() {
+        assert_eq!(wait_args_for_editor("codium"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_code_insiders_returns_wait() {
+        assert_eq!(wait_args_for_editor("code-insiders"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_sublime_returns_wait() {
+        assert_eq!(wait_args_for_editor("subl"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_zed_returns_wait() {
+        assert_eq!(wait_args_for_editor("zed"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_kate_returns_block() {
+        assert_eq!(wait_args_for_editor("kate"), &["--block"]);
+    }
+
+    #[test]
+    fn wait_args_jetbrains_ides_return_wait() {
+        for ide in ["phpstorm", "idea", "pycharm", "webstorm", "clion", "goland", "rider"] {
+            assert_eq!(
+                wait_args_for_editor(ide),
+                &["--wait"],
+                "expected --wait for {ide}"
+            );
+        }
+    }
+
+    #[test]
+    fn wait_args_textmate_returns_wait() {
+        assert_eq!(wait_args_for_editor("mate"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_bbedit_returns_wait() {
+        assert_eq!(wait_args_for_editor("bbedit"), &["--wait"]);
+    }
+
+    #[test]
+    fn wait_args_terminal_editors_return_empty() {
+        for editor in ["nvim", "vim", "vi", "hx", "nano", "micro", "kak", "emacs"] {
+            assert!(
+                wait_args_for_editor(editor).is_empty(),
+                "expected no wait args for {editor}"
+            );
+        }
+    }
+
+    #[test]
+    fn wait_args_unknown_binary_returns_empty() {
+        assert!(wait_args_for_editor("my-custom-editor").is_empty());
+    }
+}
