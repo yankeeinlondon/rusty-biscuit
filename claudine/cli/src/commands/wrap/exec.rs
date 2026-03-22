@@ -142,6 +142,9 @@ impl StreamTextRenderer {
 /// Accumulates thinking text and emits it with ANSI dim styling so it is
 /// visually distinct from assistant text. A leading "Thinking..." label is
 /// printed when the first thinking chunk arrives.
+///
+/// Writes to stderr using short-lived locks to avoid blocking the separate
+/// stderr processing thread.
 struct StreamThinkingRenderer {
     buffer: String,
     active: bool,
@@ -155,11 +158,10 @@ impl StreamThinkingRenderer {
         }
     }
 
-    fn push<W: Write>(&mut self, out: &mut W, text: &str) {
+    fn push(&mut self, text: &str) {
         if !self.active {
             // Emit a dim "Thinking..." header on first thinking chunk
-            let _ = write!(out, "\x1b[2m\x1b[3m⟡ Thinking...\x1b[0m\n");
-            let _ = out.flush();
+            eprint!("\x1b[2m\x1b[3m⟡ Thinking...\x1b[0m\n");
             self.active = true;
         }
         self.buffer.push_str(text);
@@ -168,24 +170,22 @@ impl StreamThinkingRenderer {
         while let Some(newline_pos) = self.buffer.find('\n') {
             let line = self.buffer[..=newline_pos].to_string();
             self.buffer.drain(..=newline_pos);
-            let _ = write!(out, "\x1b[2m{line}\x1b[0m");
+            eprint!("\x1b[2m{line}\x1b[0m");
         }
-        let _ = out.flush();
     }
 
     /// Flush remaining thinking text and reset state when switching to
     /// assistant text or finishing the stream.
-    fn flush_if_active<W: Write>(&mut self, out: &mut W) {
+    fn flush_if_active(&mut self) {
         if !self.active {
             return;
         }
         if !self.buffer.is_empty() {
             let remaining = std::mem::take(&mut self.buffer);
-            let _ = write!(out, "\x1b[2m{remaining}\x1b[0m\n");
+            eprint!("\x1b[2m{remaining}\x1b[0m\n");
         }
         // Blank line to separate thinking from assistant text
-        let _ = writeln!(out);
-        let _ = out.flush();
+        eprintln!();
         self.active = false;
     }
 }
@@ -612,7 +612,6 @@ pub(crate) fn run_child_stream(
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout_pipe);
         let mut out = std::io::stdout().lock();
-        let mut err = std::io::stderr().lock();
         let mut parser = parser;
         let mut fallback_mode = false;
         let mut renderer = StreamTextRenderer::new();
@@ -629,11 +628,11 @@ pub(crate) fn run_child_stream(
 
             match parser.feed_line(&line) {
                 Ok(Some(StreamChunk::Text(text))) => {
-                    thinking_renderer.flush_if_active(&mut err);
+                    thinking_renderer.flush_if_active();
                     renderer.push(&mut out, &text);
                 }
                 Ok(Some(StreamChunk::Thinking(text))) => {
-                    thinking_renderer.push(&mut err, &text);
+                    thinking_renderer.push(&text);
                 }
                 Ok(None) => {
                     // Metadata-only line
@@ -645,7 +644,7 @@ pub(crate) fn run_child_stream(
                 }
                 Err(StreamParseError::Fatal(_)) => {
                     // Fall back to raw forwarding
-                    thinking_renderer.flush_if_active(&mut err);
+                    thinking_renderer.flush_if_active();
                     renderer.flush_remaining(&mut out);
                     fallback_mode = true;
                     let _ = writeln!(out, "{line}");
@@ -653,7 +652,7 @@ pub(crate) fn run_child_stream(
             }
         }
 
-        thinking_renderer.flush_if_active(&mut err);
+        thinking_renderer.flush_if_active();
         renderer.flush_remaining(&mut out);
         parser
     });
