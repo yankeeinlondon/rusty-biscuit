@@ -23,11 +23,6 @@ struct HtmlFragment<'a> {
     kind: HtmlFragmentKind,
 }
 
-pub(crate) struct InlineHtmlExtraction {
-    pub links: Vec<Link>,
-    pub images: Vec<ImageRef>,
-}
-
 pub(crate) fn has_inline_html(content: &str) -> bool {
     let mut fence_marker = None;
 
@@ -57,8 +52,11 @@ pub(crate) fn extract_inline_html_links(content: &str) -> Vec<Link> {
         return Vec::new();
     }
 
-    match extract_inline_html(content) {
-        Ok(extraction) => extraction.links,
+    match output::parse_mdast(content) {
+        Ok(root) => {
+            let fragments = collect_html_fragments(&root, content);
+            extract_links_from_fragments(content, &fragments)
+        }
         Err(error) => {
             trace!("falling back to pulldown-cmark link extraction: {error}");
             fallback_extract_links(content)
@@ -71,23 +69,16 @@ pub(crate) fn extract_inline_html_images(content: &str) -> Vec<ImageRef> {
         return Vec::new();
     }
 
-    match extract_inline_html(content) {
-        Ok(extraction) => extraction.images,
+    match output::parse_mdast(content) {
+        Ok(root) => {
+            let fragments = collect_html_fragments(&root, content);
+            extract_images_from_fragments(&fragments)
+        }
         Err(error) => {
             trace!("falling back to pulldown-cmark image extraction: {error}");
             fallback_extract_images(content)
         }
     }
-}
-
-fn extract_inline_html(content: &str) -> crate::markdown::MarkdownResult<InlineHtmlExtraction> {
-    let root = output::parse_mdast(content)?;
-    let fragments = collect_html_fragments(&root, content);
-
-    Ok(InlineHtmlExtraction {
-        links: extract_links_from_fragments(content, &fragments),
-        images: extract_images_from_fragments(&fragments),
-    })
 }
 
 fn extract_links_from_fragments(content: &str, fragments: &[HtmlFragment<'_>]) -> Vec<Link> {
@@ -184,10 +175,10 @@ fn classify_fragment(value: &str) -> HtmlFragmentKind {
         (false, rest)
     };
 
-    let tag_name = rest
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
-        .collect::<String>();
+    let tag_end = rest
+        .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
+        .unwrap_or(rest.len());
+    let tag_name = &rest[..tag_end];
 
     if tag_name.is_empty() {
         return HtmlFragmentKind::Other;
@@ -257,11 +248,46 @@ fn normalize_inline_html_link_display(raw: &str) -> String {
         }
 
         let next_tag = remaining.find('<').unwrap_or(remaining.len());
-        normalized.push_str(&remaining[..next_tag]);
+        let text = &remaining[..next_tag];
+        normalized.push_str(&strip_markdown_inline_markers(text));
         idx += next_tag;
     }
 
     decode_html_entities(normalized.trim()).into_owned()
+}
+
+/// Strips Markdown inline formatting markers (`**`, `__`, `*`, `_`, `~~`)
+/// from text, leaving the visible content intact.
+fn strip_markdown_inline_markers(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        match chars[i] {
+            '*' | '_' => {
+                let marker = chars[i];
+                if i + 1 < len && chars[i + 1] == marker {
+                    // Skip double marker (`**` or `__`)
+                    i += 2;
+                } else {
+                    // Skip single marker (`*` or `_`)
+                    i += 1;
+                }
+            }
+            '~' if i + 1 < len && chars[i + 1] == '~' => {
+                // Skip strikethrough (`~~`)
+                i += 2;
+            }
+            ch => {
+                result.push(ch);
+                i += 1;
+            }
+        }
+    }
+
+    result
 }
 
 fn fallback_extract_links(content: &str) -> Vec<Link> {
@@ -477,10 +503,10 @@ fn tag_name_eq(tag: &str, expected: &str) -> bool {
         .strip_prefix('/')
         .unwrap_or(rest)
         .trim_start_matches(|ch: char| ch.is_ascii_whitespace());
-    let name = rest
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
-        .collect::<String>();
+    let name_end = rest
+        .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
+        .unwrap_or(rest.len());
+    let name = &rest[..name_end];
     !name.is_empty() && name.eq_ignore_ascii_case(expected)
 }
 
@@ -575,7 +601,7 @@ fn extract_complete_anchor_candidates<'a>(html: &'a str) -> Vec<&'a str> {
 mod tests {
     use super::*;
     use crate::markdown::Markdown;
-    use crate::render::{ImageLoading, LinkTarget};
+    use crate::render::{FetchPriority, ImageDecoding, ImageLoading, LinkTarget};
 
     #[test]
     fn has_inline_html_returns_false_for_plain_markdown() {
@@ -754,5 +780,97 @@ mod tests {
         assert_eq!(fragments.len(), 2);
         assert_eq!(fragments[0].value, r#"<a href="https://x.com">"#);
         assert_eq!(fragments[1].value, "</a>");
+    }
+
+    #[test]
+    fn inline_html_links_preserve_data_prompt() {
+        let md: Markdown =
+            r#"<a href="https://x.com" data-prompt="Summarize this page">Click</a>"#.into();
+        let links = md.inline_html_links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].href(), "https://x.com");
+        assert_eq!(links[0].prompt(), Some("Summarize this page"));
+    }
+
+    #[test]
+    fn inline_html_image_references_preserve_extended_attributes() {
+        let md: Markdown = concat!(
+            r#"<img src="./photo.png" alt="Photo" "#,
+            r#"decoding="async" fetchpriority="high" "#,
+            r#"sizes="(max-width: 600px) 100vw, 50vw" "#,
+            r#"width="800" height="600" "#,
+            r#"data-caption="A nice photo" />"#,
+        )
+        .into();
+        let images = md.inline_html_image_references();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].src(), Some("./photo.png"));
+        assert_eq!(images[0].decoding(), ImageDecoding::Async);
+        assert_eq!(images[0].fetch_priority(), FetchPriority::High);
+        assert_eq!(
+            images[0].sizes(),
+            Some("(max-width: 600px) 100vw, 50vw")
+        );
+        assert_eq!(images[0].width(), Some(800));
+        assert_eq!(images[0].height(), Some(600));
+        assert_eq!(
+            images[0].data().get("caption"),
+            Some(&"A nice photo".to_string())
+        );
+    }
+
+    #[test]
+    fn inline_html_methods_ignore_html_looking_frontmatter() {
+        let md: Markdown = concat!(
+            "---\n",
+            "title: \"See <a href='https://example.com'>this</a>\"\n",
+            "icon: \"<img src='icon.png' />\"\n",
+            "---\n",
+            "\n",
+            "Just plain text content.\n",
+        )
+        .into();
+
+        assert!(md.inline_html_links().is_empty());
+        assert!(md.inline_html_image_references().is_empty());
+    }
+
+    #[test]
+    fn inline_html_links_normalize_markdown_formatting_in_anchor_body() {
+        let bold: Markdown = r#"<a href="https://x.com">**Bold**</a>"#.into();
+        let bold_links = bold.inline_html_links();
+        assert_eq!(bold_links.len(), 1);
+        assert_eq!(bold_links[0].display(), "Bold");
+
+        let italic: Markdown = r#"<a href="https://x.com">*italic*</a>"#.into();
+        let italic_links = italic.inline_html_links();
+        assert_eq!(italic_links.len(), 1);
+        assert_eq!(italic_links[0].display(), "italic");
+
+        let strikethrough: Markdown = r#"<a href="https://x.com">~~old~~</a>"#.into();
+        let strike_links = strikethrough.inline_html_links();
+        assert_eq!(strike_links.len(), 1);
+        assert_eq!(strike_links[0].display(), "old");
+    }
+
+    #[test]
+    fn strip_markdown_inline_markers_preserves_plain_text() {
+        assert_eq!(strip_markdown_inline_markers("hello world"), "hello world");
+        assert_eq!(strip_markdown_inline_markers(""), "");
+    }
+
+    #[test]
+    fn strip_markdown_inline_markers_removes_formatting() {
+        assert_eq!(strip_markdown_inline_markers("**bold**"), "bold");
+        assert_eq!(strip_markdown_inline_markers("*italic*"), "italic");
+        assert_eq!(strip_markdown_inline_markers("__bold__"), "bold");
+        assert_eq!(strip_markdown_inline_markers("_italic_"), "italic");
+        assert_eq!(strip_markdown_inline_markers("~~struck~~"), "struck");
+        assert_eq!(
+            strip_markdown_inline_markers("**bold** and *italic*"),
+            "bold and italic"
+        );
     }
 }
