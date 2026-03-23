@@ -1718,6 +1718,7 @@ dependencies = [
  "markdown",
  "pulldown-cmark",
  "pulldown-cmark-to-cmark",
+ "rayon",
  "regex",
  "reqwest 0.13.2",
  "serde",
