@@ -80,6 +80,39 @@ impl DocumentSnapshotManifest {
     }
 }
 
+/// Manifest for an individual operation result (code transclusion, TOC linking).
+///
+/// Caches the core output of a single operation before parent-specific
+/// transforms (wrappers like quotation/disclosure) are applied.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationResultManifest {
+    /// Cache format version for forward compatibility.
+    pub cache_version: u16,
+    /// Combined cache key for this entry.
+    pub entry_key: u64,
+    /// Operation kind identifier (e.g., "code", "toc-linking").
+    pub op_kind: String,
+    /// Hash of the operation's own content + variant parameters.
+    pub self_hash: u64,
+    /// xxHash of the result content blob.
+    pub payload_blob_hash: u64,
+    /// xxHash of the source file identifier.
+    pub source_id_hash: u64,
+    /// When this artifact was created.
+    pub created_at: SystemTime,
+    /// When this artifact was last read from cache.
+    pub last_accessed_at: SystemTime,
+}
+
+#[allow(dead_code)]
+impl OperationResultManifest {
+    /// Updates the last-accessed timestamp to now.
+    pub fn touch(&mut self) {
+        self.last_accessed_at = SystemTime::now();
+    }
+}
+
 impl ComposedDocumentManifest {
     /// Updates the last-accessed timestamp to now.
     pub fn touch(&mut self) {

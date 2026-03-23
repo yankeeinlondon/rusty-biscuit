@@ -1,8 +1,9 @@
 //! Run-local in-memory cache with single-flight deduplication.
 //!
 //! `RunLocalCache` replaces the old `PipelineCache` and adds single-flight
-//! behavior for child compose operations: when multiple rayon threads request
-//! the same document simultaneously, only one computes while others wait.
+//! behavior for child compose operations and individual operations (code
+//! transclusion, TOC linking): when multiple rayon threads request the same
+//! result simultaneously, only one computes while others wait.
 
 use super::hashing::{compose_cache_key, raw_bytes_hash};
 use super::store::FileStore;
@@ -16,19 +17,19 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// State of a single-flight slot for a compose result.
-enum SlotState {
+/// State of a single-flight slot for a cached result.
+enum SlotState<T> {
     /// Computation is in progress — waiters should block on the condvar.
     InFlight,
     /// Computation completed successfully.
-    Ready(Arc<ComposeResult>),
+    Ready(Arc<T>),
     /// Computation failed — waiters should recompute or propagate.
     Failed(String),
 }
 
 /// A single-flight slot protected by a mutex and condvar.
-struct SingleFlightSlot {
-    state: Mutex<SlotState>,
+struct SingleFlightSlot<T> {
+    state: Mutex<SlotState<T>>,
     ready: Condvar,
 }
 
@@ -38,6 +39,12 @@ pub(crate) struct ComposeResult {
     pub content: String,
     /// The compose report from the child pipeline.
     pub report: ComposeReport,
+}
+
+/// The cached result of an individual operation (code transclusion, TOC linking).
+pub(crate) struct OperationResult {
+    /// The core operation output (before parent-specific wrappers).
+    pub content: String,
 }
 
 /// Timeout for waiting on an in-flight computation before falling back
@@ -55,7 +62,8 @@ const INFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) struct RunLocalCache {
     markdown_documents: Arc<Mutex<HashMap<String, Markdown>>>,
     toc_headings: Arc<Mutex<HashMap<String, Vec<MarkdownTocNode>>>>,
-    compose_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot>>>>,
+    compose_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<ComposeResult>>>>>,
+    operation_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<OperationResult>>>>>,
     stats: Arc<Mutex<CacheStats>>,
     access_mode: CacheAccessMode,
     /// Optional persistent file-backed cache store.
@@ -84,6 +92,7 @@ impl RunLocalCache {
             markdown_documents: Arc::new(Mutex::new(HashMap::new())),
             toc_headings: Arc::new(Mutex::new(HashMap::new())),
             compose_results: Arc::new(Mutex::new(HashMap::new())),
+            operation_results: Arc::new(Mutex::new(HashMap::new())),
             stats: Arc::new(Mutex::new(CacheStats::default())),
             access_mode,
             persistent: None,
@@ -196,7 +205,7 @@ impl RunLocalCache {
                             let slot = Arc::clone(existing);
                             drop(state);
                             drop(map);
-                            return self.wait_for_slot(key, &slot, compute);
+                            return self.wait_for_compose_slot(key, &slot, compute);
                         }
                         SlotState::Failed(_) => {
                             // Previous attempt failed — we'll recompute below
@@ -255,15 +264,89 @@ impl RunLocalCache {
         }
     }
 
+    /// Single-flight get-or-compute for individual operation results.
+    ///
+    /// Same deduplication pattern as compose results, but for cheaper
+    /// operations like code transclusion and TOC linking. No persistent
+    /// cache integration yet (run-local only).
+    pub fn get_or_compute_operation<F>(
+        &self,
+        key: &str,
+        compute: F,
+    ) -> MarkdownResult<Arc<OperationResult>>
+    where
+        F: FnOnce() -> MarkdownResult<OperationResult>,
+    {
+        if self.access_mode == CacheAccessMode::Off {
+            let result = compute()?;
+            return Ok(Arc::new(result));
+        }
+
+        let slot = {
+            let mut map = self.operation_results.lock().unwrap();
+
+            if self.access_mode != CacheAccessMode::Refresh {
+                if let Some(existing) = map.get(key) {
+                    let state = existing.state.lock().unwrap();
+                    match &*state {
+                        SlotState::Ready(result) => {
+                            self.record_hit();
+                            return Ok(Arc::clone(result));
+                        }
+                        SlotState::InFlight => {
+                            let slot = Arc::clone(existing);
+                            drop(state);
+                            drop(map);
+                            return self.wait_for_operation_slot(key, &slot, compute);
+                        }
+                        SlotState::Failed(_) => {
+                            // Previous attempt failed — recompute below
+                        }
+                    }
+                }
+            }
+
+            let slot = Arc::new(SingleFlightSlot {
+                state: Mutex::new(SlotState::InFlight),
+                ready: Condvar::new(),
+            });
+            map.insert(key.to_string(), Arc::clone(&slot));
+            slot
+        };
+
+        self.record_miss();
+
+        match compute() {
+            Ok(result) => {
+                let arc_result = Arc::new(result);
+                {
+                    let mut state = slot.state.lock().unwrap();
+                    *state = SlotState::Ready(Arc::clone(&arc_result));
+                }
+                slot.ready.notify_all();
+                self.record_write();
+                Ok(arc_result)
+            }
+            Err(err) => {
+                {
+                    let mut state = slot.state.lock().unwrap();
+                    *state = SlotState::Failed(err.to_string());
+                }
+                slot.ready.notify_all();
+                Err(err)
+            }
+        }
+    }
+
     /// Takes a snapshot of the current cache stats.
     pub fn stats(&self) -> CacheStats {
         self.stats.lock().unwrap().clone()
     }
 
-    fn wait_for_slot<F>(
+    fn wait_for_compose_slot<F>(
         &self,
         key: &str,
-        slot: &Arc<SingleFlightSlot>,
+        slot: &Arc<SingleFlightSlot<ComposeResult>>,
         fallback_compute: F,
     ) -> MarkdownResult<Arc<ComposeResult>>
     where
@@ -278,7 +361,6 @@ impl RunLocalCache {
             .unwrap();
 
         if timeout_result.timed_out() {
-            // Deadlock mitigation: fall back to duplicate computation
             self.record_error();
             drop(state);
             let result = fallback_compute()?;
@@ -292,13 +374,11 @@ impl RunLocalCache {
                 Ok(Arc::clone(result))
             }
             SlotState::Failed(msg) => {
-                // The original computation failed — try again ourselves
                 let msg = msg.clone();
                 drop(state);
                 self.record_miss();
                 let result = fallback_compute()?;
                 let arc_result = Arc::new(result);
-                // Update the slot for future waiters
                 {
                     let map = self.compose_results.lock().unwrap();
                     if let Some(existing) = map.get(key) {
@@ -312,7 +392,63 @@ impl RunLocalCache {
                 Ok(arc_result)
             }
             SlotState::InFlight => {
-                // Shouldn't happen after wait_timeout_while, but handle gracefully
+                self.record_error();
+                drop(state);
+                let result = fallback_compute()?;
+                Ok(Arc::new(result))
+            }
+        }
+    }
+
+    fn wait_for_operation_slot<F>(
+        &self,
+        key: &str,
+        slot: &Arc<SingleFlightSlot<OperationResult>>,
+        fallback_compute: F,
+    ) -> MarkdownResult<Arc<OperationResult>>
+    where
+        F: FnOnce() -> MarkdownResult<OperationResult>,
+    {
+        let state = slot.state.lock().unwrap();
+        let (state, timeout_result) = slot
+            .ready
+            .wait_timeout_while(state, INFLIGHT_TIMEOUT, |s| {
+                matches!(s, SlotState::InFlight)
+            })
+            .unwrap();
+
+        if timeout_result.timed_out() {
+            self.record_error();
+            drop(state);
+            let result = fallback_compute()?;
+            return Ok(Arc::new(result));
+        }
+
+        match &*state {
+            SlotState::Ready(result) => {
+                self.record_hit();
+                self.record_inflight_wait();
+                Ok(Arc::clone(result))
+            }
+            SlotState::Failed(msg) => {
+                let msg = msg.clone();
+                drop(state);
+                self.record_miss();
+                let result = fallback_compute()?;
+                let arc_result = Arc::new(result);
+                {
+                    let map = self.operation_results.lock().unwrap();
+                    if let Some(existing) = map.get(key) {
+                        let mut s = existing.state.lock().unwrap();
+                        if matches!(&*s, SlotState::Failed(m) if *m == msg) {
+                            *s = SlotState::Ready(Arc::clone(&arc_result));
+                        }
+                    }
+                }
+                self.record_write();
+                Ok(arc_result)
+            }
+            SlotState::InFlight => {
                 self.record_error();
                 drop(state);
                 let result = fallback_compute()?;
@@ -575,6 +711,7 @@ mod tests {
             markdown_documents: Arc::clone(&cache.markdown_documents),
             toc_headings: Arc::clone(&cache.toc_headings),
             compose_results: Arc::clone(&cache.compose_results),
+            operation_results: Arc::clone(&cache.operation_results),
             stats: Arc::clone(&cache.stats),
             persistent: cache.persistent.clone(),
         };
@@ -589,5 +726,131 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.content, "refreshed");
+    }
+
+    // ── Operation result tests ───────────────────────────────────────
+
+    #[test]
+    fn operation_cache_off_always_computes() {
+        let cache = RunLocalCache::new(CacheAccessMode::Off);
+        let mut call_count = 0;
+
+        for _ in 0..3 {
+            let result = cache
+                .get_or_compute_operation("op-key1", || {
+                    call_count += 1;
+                    Ok(OperationResult {
+                        content: format!("op-{}", call_count),
+                    })
+                })
+                .unwrap();
+            assert!(result.content.starts_with("op-"));
+        }
+
+        assert_eq!(call_count, 3);
+    }
+
+    #[test]
+    fn operation_cache_hit_on_second_request() {
+        let cache = RunLocalCache::new(CacheAccessMode::ReadWrite);
+        let call_count = std::sync::atomic::AtomicUsize::new(0);
+
+        let result1 = cache
+            .get_or_compute_operation("op-key1", || {
+                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(OperationResult {
+                    content: "code-block".to_string(),
+                })
+            })
+            .unwrap();
+
+        let result2 = cache
+            .get_or_compute_operation("op-key1", || {
+                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(OperationResult {
+                    content: "should not compute".to_string(),
+                })
+            })
+            .unwrap();
+
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(result1.content, "code-block");
+        assert_eq!(result2.content, "code-block");
+
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.writes, 1);
+    }
+
+    #[test]
+    fn operation_single_flight_contention() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Barrier;
+
+        let cache = RunLocalCache::new(CacheAccessMode::ReadWrite);
+        let compute_count = Arc::new(AtomicUsize::new(0));
+        let thread_count = 8;
+        let barrier = Arc::new(Barrier::new(thread_count));
+
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            for _ in 0..thread_count {
+                let cache = cache.clone();
+                let compute_count = Arc::clone(&compute_count);
+                let barrier = Arc::clone(&barrier);
+
+                handles.push(s.spawn(move || {
+                    barrier.wait();
+                    cache
+                        .get_or_compute_operation("contested-op", || {
+                            compute_count.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(Duration::from_millis(50));
+                            Ok(OperationResult {
+                                content: "shared-op".to_string(),
+                            })
+                        })
+                        .unwrap()
+                }));
+            }
+
+            for handle in handles {
+                let result = handle.join().unwrap();
+                assert_eq!(result.content, "shared-op");
+            }
+        });
+
+        let count = compute_count.load(Ordering::SeqCst);
+        assert!(
+            count <= 2,
+            "Expected at most 2 computations with single-flight, got {}",
+            count
+        );
+    }
+
+    #[test]
+    fn operation_and_compose_keys_are_independent() {
+        let cache = RunLocalCache::new(CacheAccessMode::ReadWrite);
+
+        // Same key string, different namespaces
+        cache
+            .get_or_compute_compose("shared-key", || {
+                Ok(ComposeResult {
+                    content: "compose-content".to_string(),
+                    report: ComposeReport::new(),
+                })
+            })
+            .unwrap();
+
+        let op_result = cache
+            .get_or_compute_operation("shared-key", || {
+                Ok(OperationResult {
+                    content: "operation-content".to_string(),
+                })
+            })
+            .unwrap();
+
+        // Operation should NOT hit the compose cache
+        assert_eq!(op_result.content, "operation-content");
     }
 }

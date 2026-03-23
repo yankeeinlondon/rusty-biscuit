@@ -1101,8 +1101,17 @@ impl Markdown {
                 path,
                 directive_options,
             } => {
-                let content =
-                    self.render_code_transclusion(&path, &directive_options, state, options)?;
+                let cache_handle = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.cache.clone()
+                };
+                let content = self.render_code_transclusion(
+                    &path,
+                    &directive_options,
+                    state,
+                    options,
+                    &cache_handle,
+                )?;
                 let mut code_report = ComposeReport::new();
                 code_report.transclusions_applied = 1;
                 Ok(ResolvedTransclusion {
@@ -1124,18 +1133,35 @@ impl Markdown {
                         &options.source,
                         &transclusion_opts,
                     )? {
-                    let headings = {
+                    let (cache_handle, headings) = {
                         let runtime = runtime_mutex.lock().unwrap();
-                        runtime
+                        let cache = runtime.cache.clone();
+                        let hdgs = runtime
                             .load_toc_headings(&path)
-                            .map_err(toc_linking::TocLinkingError::Io)?
+                            .map_err(toc_linking::TocLinkingError::Io)?;
+                        (cache, hdgs)
                     };
-                    toc_linking::render_resolved_directive(
-                        &display_target,
-                        &headings,
+
+                    let cache_key = cache::TocLinkingOperation::cache_key_string(
+                        &path,
                         &directive.options,
-                        directive.line,
-                    )?
+                    );
+                    let line = directive.line;
+                    let options_clone = directive.options.clone();
+                    let display_clone = display_target.clone();
+
+                    let cached = cache_handle.get_or_compute_operation(&cache_key, || {
+                        let content = toc_linking::render_resolved_directive(
+                            &display_clone,
+                            &headings,
+                            &options_clone,
+                            line,
+                        )
+                        .map_err(|e| crate::markdown::types::MarkdownError::TocLinking(e))?;
+                        Ok(cache::OperationResult { content })
+                    })?;
+
+                    cached.content.clone()
                 } else {
                     directive.options.empty_text.clone().unwrap_or_default()
                 };
@@ -1242,22 +1268,13 @@ impl Markdown {
 
     fn render_code_transclusion(
         &self,
-        path: &PathBuf,
+        path: &Path,
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
         options: &ComposeOptions,
+        cache_handle: &cache::RunLocalCache,
     ) -> MarkdownResult<String> {
-        let raw = match std::fs::read_to_string(path) {
-            Ok(content) => content,
-            Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
-                return Err(transclusion::TransclusionError::NonTextCodeSource {
-                    path: path.clone(),
-                }
-                .into());
-            }
-            Err(err) => return Err(err.into()),
-        };
-
+        // Compute variant params (needed for both cache key and core)
         let base_map = state.get_replace_map().cloned().unwrap_or_default();
         let effective_map = match &directive_options.replace {
             transclusion::ReplaceOption::InheritDefault => base_map,
@@ -1266,17 +1283,46 @@ impl Markdown {
                 state::merge_replace_maps(Some(&base_map), Some(one_off))
             }
         };
-
-        let replaced = if effective_map.is_empty() {
-            raw
-        } else {
-            self.apply_replace_map(&raw, &effective_map, options)
-        };
-
         let language = transclusion::infer_language(path, &options.code_fallback_language);
-        let fenced = transclusion::wrap_in_code_block(&replaced, &language);
-        let spaced = transclusion::ensure_vertical_spacing(&fenced);
-        Ok(self.apply_wrappers(spaced, directive_options))
+
+        // Cache key from source identity + variant params
+        let cache_key = cache::code_cache_key(path, &effective_map, &language);
+
+        // Core computation (cacheable via single-flight)
+        let path_buf = path.to_path_buf();
+        let context = options.context().clone();
+        let cached = cache_handle.get_or_compute_operation(&cache_key, || {
+            let raw = match std::fs::read_to_string(&path_buf) {
+                Ok(content) => content,
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                    return Err(transclusion::TransclusionError::NonTextCodeSource {
+                        path: path_buf.clone(),
+                    }
+                    .into());
+                }
+                Err(err) => return Err(err.into()),
+            };
+
+            let replaced = if effective_map.is_empty() {
+                raw
+            } else {
+                let mut frontmatter = HashMap::new();
+                frontmatter.insert("replace".to_string(), Value::Object(effective_map.clone()));
+                let temp_state = EffectiveStateBuilder::new()
+                    .with_frontmatter(frontmatter)
+                    .with_context(context.clone())
+                    .build();
+                let (replaced, _) = replacement::apply_replacements(&raw, &temp_state);
+                replaced
+            };
+
+            let fenced = transclusion::wrap_in_code_block(&replaced, &language);
+            let spaced = transclusion::ensure_vertical_spacing(&fenced);
+            Ok(cache::OperationResult { content: spaced })
+        })?;
+
+        // Post: apply wrappers (cheap, directive-specific)
+        Ok(self.apply_wrappers(cached.content.clone(), directive_options))
     }
 
     fn apply_wrappers(
@@ -1298,23 +1344,6 @@ impl Markdown {
         }
 
         content
-    }
-
-    fn apply_replace_map(
-        &self,
-        content: &str,
-        map: &Map<String, Value>,
-        options: &ComposeOptions,
-    ) -> String {
-        let mut frontmatter = HashMap::new();
-        frontmatter.insert("replace".to_string(), Value::Object(map.clone()));
-
-        let state = EffectiveStateBuilder::new()
-            .with_frontmatter(frontmatter)
-            .with_context(options.context().clone())
-            .build();
-        let (replaced, _) = replacement::apply_replacements(content, &state);
-        replaced
     }
 
     fn build_child_external_state(&self, state: &EffectiveState) -> Value {

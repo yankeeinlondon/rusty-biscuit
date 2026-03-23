@@ -201,6 +201,21 @@ pub(crate) fn compose_entry_key(
     xx_hash_bytes(&data)
 }
 
+// ── Operation entry key ──────────────────────────────────────────────
+
+/// Computes a cache key for an operation result.
+///
+/// Combines the operation kind, source identity, and variant parameter
+/// hash into a single lookup key.
+pub(crate) fn operation_entry_key(op_kind: &str, source_id: u64, variant_hash: u64) -> u64 {
+    let mut data = Vec::new();
+    data.extend_from_slice(op_kind.as_bytes());
+    data.push(0); // separator
+    data.extend_from_slice(&source_id.to_le_bytes());
+    data.extend_from_slice(&variant_hash.to_le_bytes());
+    xx_hash_bytes(&data)
+}
+
 // ── Helpers ────────────────────────────────────────────────────────
 
 /// Produces a canonical JSON string with recursively sorted object keys.
@@ -374,5 +389,33 @@ mod tests {
         assert_ne!(base, compose_entry_key(1, 2, 99, 4, 5)); // state
         assert_ne!(base, compose_entry_key(1, 2, 3, 99, 5)); // context
         assert_ne!(base, compose_entry_key(1, 2, 3, 4, 99)); // options
+    }
+
+    #[test]
+    fn operation_entry_key_deterministic() {
+        let k1 = operation_entry_key("code", 123, 456);
+        let k2 = operation_entry_key("code", 123, 456);
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn operation_entry_key_sensitive_to_kind() {
+        let code = operation_entry_key("code", 123, 456);
+        let toc = operation_entry_key("toc-linking", 123, 456);
+        assert_ne!(code, toc);
+    }
+
+    #[test]
+    fn operation_entry_key_sensitive_to_source() {
+        let k1 = operation_entry_key("code", 100, 456);
+        let k2 = operation_entry_key("code", 200, 456);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn operation_entry_key_sensitive_to_variant() {
+        let k1 = operation_entry_key("code", 123, 100);
+        let k2 = operation_entry_key("code", 123, 200);
+        assert_ne!(k1, k2);
     }
 }
