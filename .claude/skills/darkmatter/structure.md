@@ -16,7 +16,7 @@ darkmatter_lib/
 │   ├── delta/              # Structural diff analysis
 │   ├── toc/                # Table of contents extraction
 │   ├── normalize/          # Heading normalization/releveling
-│   ├── compose/            # Stage 1 + Stage 2 pipeline
+│   ├── compose/            # Inline Pre + Transclusion + Inline Post pipeline
 │   └── dsl/                # Code block metadata parsing
 ├── diff/
 │   └── visual/             # Markdown-agnostic visual diff utilities

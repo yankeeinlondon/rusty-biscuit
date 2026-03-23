@@ -11,11 +11,11 @@ The darkmatter compose pipeline provides document preparation through three phas
 3. **Interpolation** - `{{ variable }}` expressions expand to values
 4. **Shell Expansion** - `::shell` directives execute commands
 
-**Transclusion** (concurrent via Rayon):
+**Transclusion** (prepared serially, resolved concurrently via Rayon):
 
 - `::file ./doc.md` - Include markdown with recursive processing
 - `::code ./main.rs` - Include as fenced code block
-- `::toc-linking` - Generate heading link lists from external documents
+- `::toc-linking` - Generate heading link lists from external documents' raw source headings
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
@@ -167,6 +167,13 @@ pub struct ComposeReport {
     pub replacements_applied: usize,
     pub interpolations_applied: usize,
     pub toc_links_generated: usize,
+    pub shell_expansions_applied: usize,
+    pub shell_approvals_used: usize,
+    pub page_blocks_rendered: usize,
+    pub page_blocks_skipped: usize,
+    pub transclusions_applied: usize,
+    pub transclusions_skipped: usize,
+    pub max_transclusion_depth: usize,
     pub cleanup_changed: bool,
     pub normalization_report: Option<NormalizationReport>,
     pub warnings: Vec<ComposeWarning>,
@@ -183,16 +190,18 @@ if report.has_changes() {
 With `fail_fast: false` (default):
 - Parse errors leave original `{{ expression }}` in place
 - Evaluation errors leave original in place
+- TOC-linking and non-structural transclusion failures are downgraded to warnings
+- Structural transclusion errors (cycles, max depth) still return immediately
 - Warnings recorded in report
 
 With `fail_fast: true`:
-- Parse errors logged and continue
-- Evaluation errors logged and continue
-- (Future: may return errors)
+- Interpolation parse/evaluation errors return immediately
+- TOC-linking and other non-structural transclusion failures return immediately
+- Structural transclusion errors still return immediately
 
-## Stage 2: Transclusion
+## Transclusion
 
-Stage 2 runs after Stage 1 when a source file path is provided. It resolves file-based includes.
+The transclusion phase runs after Inline Pre when a source file path is provided. It resolves file-based includes.
 
 ### Block Directives
 
@@ -221,9 +230,10 @@ epilogue: ./footer.md
 
 ### Safety Features
 
-- **Cycle detection**: Prevents infinite recursion from circular includes
+- **Cycle detection**: Prevents infinite recursion from ancestry repetition while allowing shared DAG dependencies
 - **Max depth limits**: Configurable depth for nested transclusion
 - **Heading re-leveling**: Included markdown headings are adjusted to fit the nesting context (H6 overflow handled gracefully)
+- **TOC linking source model**: `::toc-linking` reads headings from the referenced file's raw source, not its recursively composed output
 
 ## Module Structure
 

@@ -14,7 +14,7 @@ Markdown parsing, rendering, and composition library. Part of the dockhand monor
 | Responsibility | Package |
 |----------------|---------|
 | Markdown parsing (CommonMark + GFM) | darkmatter |
-| Compose pipeline (Stage 1 + Stage 2 transclusion) | darkmatter |
+| Compose pipeline (Inline Pre + Transclusion + Inline Post) | darkmatter |
 | Syntax highlighting | darkmatter (syntect) |
 | Frontmatter extraction | darkmatter |
 | HTML output | darkmatter |
@@ -34,19 +34,24 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 
 ## Compose Pipeline
 
-Two-stage pipeline for document preparation:
+Three-phase pipeline for document preparation:
 
-**Stage 1** (in-memory transforms):
+**Inline Pre** (serial):
 1. **Text Replacement** - `replace:` frontmatter replaces literal strings
-2. **Interpolation** - `{{ variable }}` expressions expand to values
-3. **Cleanup** - Normalizes formatting (spacing, tables)
-4. **Normalization** - Adjusts heading levels
+2. **Page Blocks** - `::block` / `::end-block` conditional regions
+3. **Interpolation** - `{{ variable }}` expressions expand to values
+4. **Shell Expansion** - `::shell` directives execute approved commands
 
-**Stage 2** (file-based transclusion):
+**Transclusion** (prepared serially, resolved concurrently):
 - `::file ./doc.md` - Markdown transclusion with recursive processing
 - `::code ./main.rs` - Code/text transclusion with fenced block generation
+- `::toc-linking ./doc.md` - Linked heading lists from another document's raw source headings
 - `prologue` / `epilogue` - Frontmatter-driven transclusion
-- `when="..."` conditions, cycle detection, depth limits
+- `when="..."` conditions, ancestry-based cycle detection, depth limits
+
+**Inline Post** (serial):
+1. **Cleanup** - Normalizes formatting (spacing, tables)
+2. **Normalization** - Adjusts heading levels
 
 ```rust
 use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
