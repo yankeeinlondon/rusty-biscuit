@@ -600,13 +600,7 @@ fn test_cli_help_shows_background_option() {
 #[test]
 fn test_cli_old_list_providers_flag_rejected() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--list-providers",
-        ])
+        .args(["run", "-p", "biscuit-speaks-cli", "--", "--list-providers"])
         .output()
         .expect("Failed to execute");
 
@@ -619,13 +613,7 @@ fn test_cli_old_list_providers_flag_rejected() {
 #[test]
 fn test_cli_old_list_voices_flag_rejected() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "biscuit-speaks-cli",
-            "--",
-            "--list-voices",
-        ])
+        .args(["run", "-p", "biscuit-speaks-cli", "--", "--list-voices"])
         .output()
         .expect("Failed to execute");
 

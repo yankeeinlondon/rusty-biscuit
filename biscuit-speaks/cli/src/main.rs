@@ -898,8 +898,8 @@ fn run_init() {
     println!();
 
     // Check if user only has low-quality providers (espeak-only)
-    let only_espeak = available.len() == 1
-        && matches!(available[0], TtsProvider::Host(HostTtsProvider::ESpeak));
+    let only_espeak =
+        available.len() == 1 && matches!(available[0], TtsProvider::Host(HostTtsProvider::ESpeak));
     let has_high_quality = available.iter().any(|p| {
         matches!(
             p,
@@ -957,10 +957,7 @@ fn run_init() {
             );
         }
     } else {
-        println!(
-            "  {} Your TTS setup looks good!",
-            "✓".green().bold()
-        );
+        println!("  {} Your TTS setup looks good!", "✓".green().bold());
     }
 }
 
@@ -977,7 +974,10 @@ fn run_install(pkg: Option<&str>) {
             Some(c) => c,
             None => {
                 eprintln!("Error: Unknown TTS provider '{}'", pkg_name);
-                eprintln!("Use {} to see installable providers.", "so-you-say install".bold());
+                eprintln!(
+                    "Use {} to see installable providers.",
+                    "so-you-say install".bold()
+                );
                 std::process::exit(1);
             }
         };
@@ -1027,7 +1027,11 @@ fn run_install(pkg: Option<&str>) {
             println!("{}", "Installed TTS providers:".bold());
             println!();
             for client in &installed_clients {
-                println!("  {} {}", "✓".green().bold(), tts_client_display_name(*client));
+                println!(
+                    "  {} {}",
+                    "✓".green().bold(),
+                    tts_client_display_name(*client)
+                );
             }
             println!();
         }
@@ -1069,7 +1073,10 @@ fn run_install(pkg: Option<&str>) {
         match Select::new("Select a TTS provider to install", options).prompt() {
             Ok(selection) => {
                 println!();
-                println!("Installing {}...", tts_client_display_name(selection.client));
+                println!(
+                    "Installing {}...",
+                    tts_client_display_name(selection.client)
+                );
                 match installed.install(selection.client) {
                     Ok(()) => {
                         println!(
@@ -2001,7 +2008,10 @@ mod tests {
     #[test]
     fn test_parse_tts_client_name() {
         assert_eq!(parse_tts_client_name("kokoro"), Some(TtsClient::KokoroTts));
-        assert_eq!(parse_tts_client_name("kokoro-tts"), Some(TtsClient::KokoroTts));
+        assert_eq!(
+            parse_tts_client_name("kokoro-tts"),
+            Some(TtsClient::KokoroTts)
+        );
         assert_eq!(parse_tts_client_name("espeak"), Some(TtsClient::EspeakNg));
         assert_eq!(parse_tts_client_name("piper"), Some(TtsClient::Piper));
         assert_eq!(parse_tts_client_name("unknown-thing"), None);
