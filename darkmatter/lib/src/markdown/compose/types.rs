@@ -7,6 +7,7 @@
 //! - `ComposeContext` - Runtime context captured at compose start
 //! - `ComposeReport` - Results and diagnostics from compose execution
 
+use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 use super::super::normalize::NormalizationReport;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -328,6 +329,25 @@ pub struct ComposeOptions {
     /// during cleanup. Default: 4.
     pub indent_size: usize,
 
+    // ── Caching ───────────────────────────────────────────────────
+    /// Controls whether and how caching is used during compose.
+    /// Default: `ReadWrite` (full caching with single-flight dedup).
+    pub cache_access_mode: CacheAccessMode,
+
+    /// Controls staleness tolerance for persistent cache entries.
+    /// Default: `Strict` (only accept entries whose closure hash matches).
+    pub cache_freshness_mode: CacheFreshnessMode,
+
+    /// Root directory for persistent cache storage.
+    /// When `None`, persistent caching is disabled. Set to a path
+    /// (typically `<workspace>/.darkmatter/cache/v1/`) to enable.
+    pub cache_root: Option<PathBuf>,
+
+    /// Namespace for cache isolation (e.g., branch name, profile).
+    /// When set, cache entries are stored under this namespace to
+    /// prevent cross-contamination between different contexts.
+    pub cache_namespace: Option<String>,
+
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
     /// environment variables).
@@ -371,6 +391,10 @@ impl std::fmt::Debug for ComposeOptions {
             )
             .field("list_spacing", &self.list_spacing)
             .field("indent_size", &self.indent_size)
+            .field("cache_access_mode", &self.cache_access_mode)
+            .field("cache_freshness_mode", &self.cache_freshness_mode)
+            .field("cache_root", &self.cache_root)
+            .field("cache_namespace", &self.cache_namespace)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("context", &self.context)
@@ -404,6 +428,10 @@ impl ComposeOptions {
             shell_approval_handler: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
             indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
+            cache_access_mode: CacheAccessMode::default(),
+            cache_freshness_mode: CacheFreshnessMode::default(),
+            cache_root: None,
+            cache_namespace: None,
             context: ComposeContext::capture(),
             replace_parent_wins: false,
             one_off_replace: None,
@@ -473,6 +501,34 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_indent_size(mut self, size: usize) -> Self {
         self.indent_size = size.max(1);
+        self
+    }
+
+    /// Sets the cache access mode.
+    #[must_use]
+    pub fn with_cache_access_mode(mut self, mode: CacheAccessMode) -> Self {
+        self.cache_access_mode = mode;
+        self
+    }
+
+    /// Sets the cache freshness mode for persistent cache.
+    #[must_use]
+    pub fn with_cache_freshness_mode(mut self, mode: CacheFreshnessMode) -> Self {
+        self.cache_freshness_mode = mode;
+        self
+    }
+
+    /// Sets the persistent cache root directory, enabling persistent caching.
+    #[must_use]
+    pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.cache_root = Some(root.into());
+        self
+    }
+
+    /// Sets the cache namespace for isolation.
+    #[must_use]
+    pub fn with_cache_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.cache_namespace = Some(namespace.into());
         self
     }
 
@@ -843,6 +899,9 @@ pub struct ComposeReport {
 
     /// Warnings generated during compose (non-fatal issues).
     pub warnings: Vec<ComposeWarning>,
+
+    /// Cache statistics from this compose run.
+    pub cache_stats: Option<CacheStats>,
 }
 
 impl ComposeReport {
@@ -932,6 +991,15 @@ impl ComposeReport {
             parts.push(format!("normalization: {}", norm.summary()));
         }
 
+        if let Some(ref stats) = self.cache_stats
+            && stats.has_activity()
+        {
+            parts.push(format!(
+                "cache: {} hit(s), {} miss(es)",
+                stats.hits, stats.misses
+            ));
+        }
+
         parts.join(", ")
     }
 
@@ -961,6 +1029,13 @@ impl ComposeReport {
         }
 
         self.warnings.append(&mut other.warnings);
+
+        // Merge cache stats
+        match (&mut self.cache_stats, other.cache_stats) {
+            (Some(self_stats), Some(ref other_stats)) => self_stats.merge(other_stats),
+            (None, Some(other_stats)) => self.cache_stats = Some(other_stats),
+            _ => {}
+        }
     }
 }
 

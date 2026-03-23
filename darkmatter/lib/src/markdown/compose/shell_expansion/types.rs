@@ -448,23 +448,26 @@ pub enum BlacklistRule {
 pub(crate) struct PipelineRuntime {
     pub transclusion: crate::markdown::compose::transclusion::TransclusionRuntime,
     pub shell: ShellExpansionRuntime,
-    cache: PipelineCache,
-}
-
-#[derive(Debug, Clone, Default)]
-struct PipelineCache {
-    markdown_documents: Arc<std::sync::Mutex<std::collections::HashMap<String, Markdown>>>,
-    toc_headings: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<MarkdownTocNode>>>>,
+    pub cache: crate::markdown::compose::cache::RunLocalCache,
 }
 
 impl PipelineRuntime {
-    pub fn new(max_depth: usize) -> Self {
+    pub fn new(
+        max_depth: usize,
+        cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
+        cache_root: Option<std::path::PathBuf>,
+    ) -> Self {
+        let mut cache =
+            crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
+        if let Some(root) = cache_root {
+            cache = cache.with_persistent(root);
+        }
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
             ),
             shell: ShellExpansionRuntime::new(),
-            cache: PipelineCache::default(),
+            cache,
         }
     }
 
@@ -484,50 +487,15 @@ impl PipelineRuntime {
     }
 
     pub fn load_markdown(&self, path: &std::path::Path) -> MarkdownResult<Markdown> {
-        let key = cache_key_for_path(path);
-        {
-            let cache = self.cache.markdown_documents.lock().unwrap();
-            if let Some(markdown) = cache.get(&key) {
-                return Ok(markdown.clone());
-            }
-        }
-
-        let markdown = Markdown::try_from(path)?;
-        let mut cache = self.cache.markdown_documents.lock().unwrap();
-        Ok(cache.entry(key).or_insert_with(|| markdown.clone()).clone())
+        self.cache.load_markdown(path)
     }
 
     pub fn load_toc_headings(
         &self,
         path: &std::path::Path,
     ) -> std::io::Result<Vec<MarkdownTocNode>> {
-        let key = cache_key_for_path(path);
-        {
-            let cache = self.cache.toc_headings.lock().unwrap();
-            if let Some(headings) = cache.get(&key) {
-                return Ok(headings.clone());
-            }
-        }
-
-        let content = std::fs::read_to_string(path)?;
-        let markdown: Markdown = content.into();
-        let headings = markdown
-            .toc()
-            .all_headings()
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let mut cache = self.cache.toc_headings.lock().unwrap();
-        Ok(cache.entry(key).or_insert_with(|| headings.clone()).clone())
+        self.cache.load_toc_headings(path)
     }
-}
-
-fn cache_key_for_path(path: &std::path::Path) -> String {
-    std::fs::canonicalize(path)
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
 }
 
 #[cfg(test)]

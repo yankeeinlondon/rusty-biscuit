@@ -38,6 +38,7 @@
 //! let report = md.compose_with(options).unwrap();
 //! ```
 
+pub(crate) mod cache;
 mod conditions;
 pub(crate) mod parse_utils;
 mod state;
@@ -50,6 +51,7 @@ pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
 
+pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use shell_expansion::ShellExpansionError;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
@@ -196,9 +198,22 @@ impl Markdown {
 
     /// Internal pipeline runner.
     fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
-        let mut runtime =
-            shell_expansion::types::PipelineRuntime::new(options.max_transclusion_depth);
-        self.run_compose_pipeline_internal(options, &mut runtime)
+        // Resolve persistent cache root if configured
+        let persistent_root = options.cache_root.as_ref().map(|root| {
+            cache::FileStore::resolve_cache_root(
+                Some(root),
+                options.cache_namespace.as_deref(),
+            )
+        });
+
+        let mut runtime = shell_expansion::types::PipelineRuntime::new(
+            options.max_transclusion_depth,
+            options.cache_access_mode,
+            persistent_root,
+        );
+        let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
+        report.cache_stats = Some(runtime.cache.stats());
+        Ok(report)
     }
 
     /// Internal recursive pipeline runner shared by root and child documents.
@@ -1148,25 +1163,43 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
+        // ── Core compose (cacheable via single-flight) ─────────────
+        let cache_key = cache::compose_cache_key_for_path(path);
+        // Clone the cache handle so the closure doesn't borrow runtime.
+        let cache_handle = runtime.cache.clone();
+
         let inherited = self.build_child_external_state(state);
-        let mut child_options = options
-            .clone()
-            .with_replace_parent_wins(matches!(
-                directive_options.replace,
-                transclusion::ReplaceOption::ParentWins
-            ))
-            .with_one_off_replace(match &directive_options.replace {
-                transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
-                _ => None,
-            });
-        child_options.external_state = Some(inherited);
-        child_options.source = ComposeSource::File(path.to_path_buf());
+        let replace_parent_wins = matches!(
+            directive_options.replace,
+            transclusion::ReplaceOption::ParentWins
+        );
+        let one_off = match &directive_options.replace {
+            transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
+            _ => None,
+        };
+        let path_buf = path.to_path_buf();
 
-        let mut child = runtime.load_markdown(path)?;
-        let child_report = child.run_compose_pipeline_internal(child_options, runtime)?;
-        report.merge(child_report);
+        let cached = cache_handle.get_or_compute_compose(&cache_key, || {
+            let mut child_options = options
+                .clone()
+                .with_replace_parent_wins(replace_parent_wins)
+                .with_one_off_replace(one_off.clone());
+            child_options.external_state = Some(inherited.clone());
+            child_options.source = ComposeSource::File(path_buf.clone());
 
-        let mut content = child.content().to_string();
+            let mut child = runtime.load_markdown(path)?;
+            let child_report = child.run_compose_pipeline_internal(child_options, runtime)?;
+
+            Ok(cache::ComposeResult {
+                content: child.content().to_string(),
+                report: child_report,
+            })
+        })?;
+
+        report.merge(cached.report.clone());
+
+        // ── Post-cache transforms (parent-specific, cheap) ─────────
+        let mut content = cached.content.clone();
 
         // Apply exclude patterns to remove heading sections from the child.
         if !directive_options.exclude.is_empty() {
