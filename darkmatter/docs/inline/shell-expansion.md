@@ -126,4 +126,4 @@ Sometimes we'll want to run a shell expansion command that _can_ return an error
 
 --- 
 
-> Return to [Darkmatter Pipeline](../darkmatter-pipeline.md)
+> Return to [Darkmatter Pipeline](../darkmatter-compose-pipeline.md)

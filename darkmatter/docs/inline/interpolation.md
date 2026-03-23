@@ -6,7 +6,7 @@ The Darkmatter DSL provides a mechanism for _interpolation_ of frontmatter into 
 - when the Markdown pipeline is run with `.transform()`:
     - the document is first transformed with the [Text Replacement](./text-replacement.md) functionality
     - but immediately afterward we replace all `{{variable}}` segments with their frontmatter value throughout the document
-    - see the [pipeline](./darkmatter-pipeline.md) for an overview of all items in the pipeline.
+    - see the [pipeline](./darkmatter-compose-pipeline.md) for an overview of all items in the pipeline.
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:

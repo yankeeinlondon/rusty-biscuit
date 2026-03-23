@@ -29,7 +29,7 @@ the **Text Replacement** feature is
 - run as the first step of the Darkmatter, and
 - immediately _before_ the [Frontmatter Interpolation](./interpolation.md)
 
-Refer to the [Darkmatter Pipeline](./darkmatter-pipeline.md) document for a full overview of sequencing.
+Refer to the [Darkmatter Pipeline](./darkmatter-compose-pipeline.md) document for a full overview of sequencing.
 
 
 ## Technical Design Options

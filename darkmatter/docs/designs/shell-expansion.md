@@ -118,7 +118,7 @@ Proposed Stage 1 order:
 5. cleanup
 6. normalization
 
-This keeps shell expansion in the same Stage 1 slot already documented in `darkmatter/docs/darkmatter-pipeline.md`.
+This keeps shell expansion in the same Stage 1 slot already documented in `darkmatter/docs/darkmatter-compose-pipeline.md`.
 
 Rationale:
 
