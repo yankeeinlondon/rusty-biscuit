@@ -1,3 +1,0 @@
-# Darkmatter Render Pipeline
-
-
