@@ -33,4 +33,4 @@ Transclusion operations include:
 - [Summary Transclusion](../transclusion/summary.md)
 - _and more_
 
-Review the [Darkmatter Pipeline](../darkmatter-pipeline.md) for a full list of operations.
+Review the [Darkmatter Pipeline](../darkmatter-compose-pipeline.md) for a full list of operations.
