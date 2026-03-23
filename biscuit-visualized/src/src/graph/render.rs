@@ -417,7 +417,10 @@ impl GraphDiagram {
 
     fn cache_key(&self, request: &RenderRequest) -> String {
         let theme_key = self.color_theme.as_ref().map(|t| {
-            format!("{}/{}/{}/{}/{}", t.node_color, t.node_fill, t.font_color, t.edge_color, t.font_family)
+            format!(
+                "{}/{}/{}/{}/{}",
+                t.node_color, t.node_fill, t.font_color, t.edge_color, t.font_family
+            )
         });
         let options_json = serde_json::to_string(&serde_json::json!({
             "syntax": self.syntax.as_str(),
