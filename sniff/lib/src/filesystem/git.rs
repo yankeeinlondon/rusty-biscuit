@@ -528,6 +528,9 @@ pub struct GitInfo {
     pub branches: Vec<LocalBranchInfo>,
     /// Whether the current path is inside a worktree (vs main repository).
     pub in_worktree: bool,
+    /// Absolute path to the base repository root (only set when inside a worktree).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_repo_root: Option<PathBuf>,
     /// Recent commits from HEAD (last 10 commits).
     pub recent: Vec<CommitInfo>,
     /// Working tree status.
@@ -738,6 +741,12 @@ pub struct WorktreeInfo {
     pub sha: String,
     /// Whether the worktree has uncommitted changes.
     pub dirty: bool,
+    /// Number of commits ahead of the base branch.
+    pub ahead: usize,
+    /// Number of commits behind the base branch.
+    pub behind: usize,
+    /// The base branch used for ahead/behind comparison (e.g., "main").
+    pub base_branch: String,
 }
 
 /// A file with uncommitted changes (staged or unstaged).
@@ -910,6 +919,14 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
 
     let in_worktree = repo.is_worktree();
 
+    // When inside a worktree, resolve the base repository root from commondir.
+    // commondir points to the base repo's .git directory; its parent is the workdir.
+    let base_repo_root = if in_worktree {
+        repo.commondir().parent().map(Path::to_path_buf)
+    } else {
+        None
+    };
+
     if deep {
         refresh_remote_tracking_refs(&repo);
     }
@@ -939,6 +956,7 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
         current_branch,
         branches,
         in_worktree,
+        base_repo_root,
         recent,
         status,
         remotes,
@@ -1689,7 +1707,8 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
 ///
 /// Returns a HashMap keyed by branch name. Anonymous worktrees (without a name)
 /// are filtered out. For each worktree, opens it as a Repository to access
-/// HEAD commit and dirty status.
+/// HEAD commit, dirty status, and ahead/behind counts relative to the base
+/// repository's default branch.
 fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
     let mut worktrees = HashMap::new();
 
@@ -1697,6 +1716,10 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         Ok(names) => names,
         Err(_) => return worktrees,
     };
+
+    // Resolve the base branch name and its commit OID for ahead/behind calculations.
+    // Try the base repo's HEAD first; fall back to "main" then "master".
+    let (base_branch, base_oid) = resolve_base_branch(repo);
 
     for name in worktree_names.iter().flatten() {
         let worktree = match repo.find_worktree(name) {
@@ -1717,13 +1740,15 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .and_then(|h| h.shorthand().map(String::from))
             .unwrap_or_else(|| name.to_string());
 
-        // Get HEAD commit SHA
-        let sha = worktree_repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_commit().ok())
-            .map(|c| c.id().to_string())
-            .unwrap_or_default();
+        // Get HEAD commit SHA and OID
+        let head_commit = worktree_repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let sha = head_commit.as_ref().map(|c| c.id().to_string()).unwrap_or_default();
+
+        // Compute ahead/behind relative to base branch
+        let (ahead, behind) = base_oid
+            .zip(head_commit.as_ref())
+            .and_then(|(base, wt_commit)| repo.graph_ahead_behind(wt_commit.id(), base).ok())
+            .unwrap_or((0, 0));
 
         // Check if worktree is dirty
         let dirty =
@@ -1736,11 +1761,50 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
                 filepath: worktree_path.to_path_buf(),
                 sha,
                 dirty,
+                ahead,
+                behind,
+                base_branch: base_branch.clone(),
             },
         );
     }
 
     worktrees
+}
+
+/// Resolves the base branch name and its commit OID for ahead/behind calculations.
+///
+/// When the repo is a worktree, finds the base repo's current branch. Otherwise
+/// uses the current HEAD branch. Falls back to "main" or "master" if HEAD is
+/// detached or unavailable.
+fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
+    // If we're in a worktree, open the base repo to get its HEAD branch
+    let base_repo = if repo.is_worktree() {
+        repo.commondir()
+            .parent()
+            .and_then(|p| Repository::open(p).ok())
+    } else {
+        None
+    };
+    let effective_repo = base_repo.as_ref().unwrap_or(repo);
+
+    // Try the base repo's current HEAD branch
+    if let Ok(head) = effective_repo.head() {
+        if let Some(name) = head.shorthand() {
+            let oid = head.peel_to_commit().ok().map(|c| c.id());
+            return (name.to_string(), oid);
+        }
+    }
+
+    // Fallback: try "main", then "master"
+    for candidate in &["main", "master"] {
+        let refname = format!("refs/heads/{candidate}");
+        if let Ok(reference) = repo.find_reference(&refname) {
+            let oid = reference.peel_to_commit().ok().map(|c| c.id());
+            return (candidate.to_string(), oid);
+        }
+    }
+
+    ("main".to_string(), None)
 }
 
 /// Kind of change a file underwent in a commit.
@@ -2769,6 +2833,9 @@ mod tests {
             filepath: PathBuf::from("/path/to/worktree"),
             sha: "abc123def456".to_string(),
             dirty: true,
+            ahead: 3,
+            behind: 1,
+            base_branch: "main".to_string(),
         };
 
         let json = serde_json::to_string(&worktree).unwrap();
