@@ -1158,7 +1158,7 @@ impl Markdown {
                             &options_clone,
                             line,
                         )
-                        .map_err(|e| crate::markdown::types::MarkdownError::TocLinking(e))?;
+                        .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                         Ok(cache::OperationResult { content })
                     })?;
 

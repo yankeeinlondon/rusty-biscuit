@@ -315,23 +315,12 @@ pub struct ShellExpansionRuntime {
     pub approvals_used: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
     allow_once: HashSet<String>,
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
-}
-
-impl Default for SharedShellExpansionRuntime {
-    fn default() -> Self {
-        Self {
-            allow_once: HashSet::new(),
-            whitelist: ShellRuleSet::default(),
-            user_blacklist: ShellRuleSet::default(),
-            policy_paths: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
