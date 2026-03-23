@@ -510,7 +510,7 @@ fn tag_name_eq(tag: &str, expected: &str) -> bool {
     !name.is_empty() && name.eq_ignore_ascii_case(expected)
 }
 
-fn extract_image_candidates<'a>(html: &'a str) -> Vec<&'a str> {
+fn extract_image_candidates(html: &str) -> Vec<&str> {
     let mut candidates = Vec::new();
     let mut idx = 0usize;
 
@@ -535,7 +535,7 @@ fn extract_image_candidates<'a>(html: &'a str) -> Vec<&'a str> {
     candidates
 }
 
-fn extract_complete_anchor_candidates<'a>(html: &'a str) -> Vec<&'a str> {
+fn extract_complete_anchor_candidates(html: &str) -> Vec<&str> {
     let mut candidates = Vec::new();
     let mut idx = 0usize;
 
