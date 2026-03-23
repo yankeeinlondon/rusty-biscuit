@@ -760,6 +760,7 @@ impl Markdown {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_block_transclusions(
         &self,
         directives: &[transclusion::BlockDirective],
@@ -1194,6 +1195,14 @@ impl Markdown {
         // Clone the cache handle so the closure doesn't borrow runtime.
         let cache_handle = runtime.cache.clone();
 
+        // Build persistent context for multi-dimensional cache key
+        let persistent_ctx = cache::PersistentContext {
+            source_id: cache::hashing::source_id_hash(&cache_key),
+            state_hash: cache::hashing::effective_state_hash(state),
+            context_hash: cache::hashing::context_hash(state.context()),
+            options_hash: cache::hashing::options_hash(options),
+        };
+
         let inherited = self.build_child_external_state(state);
         let replace_parent_wins = matches!(
             directive_options.replace,
@@ -1205,7 +1214,7 @@ impl Markdown {
         };
         let path_buf = path.to_path_buf();
 
-        let cached = cache_handle.get_or_compute_compose(&cache_key, || {
+        let cached = cache_handle.get_or_compute_compose(&cache_key, Some(&persistent_ctx), || {
             let mut child_options = options
                 .clone()
                 .with_replace_parent_wins(replace_parent_wins)

@@ -186,10 +186,11 @@ impl FileStore {
 
         // Persist atomically via rename
         temp.persist(target).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to persist cache file {}: {}", target.display(), e),
-            )
+            io::Error::other(format!(
+                "failed to persist cache file {}: {}",
+                target.display(),
+                e
+            ))
         })?;
 
         Ok(())
