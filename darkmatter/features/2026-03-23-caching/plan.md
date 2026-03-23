@@ -416,6 +416,7 @@ Extend `RunLocalCache` with operation result slots. Same pattern as compose resu
 ## Verification
 
 After each phase:
+
 1. `just test` in `darkmatter/` -- all existing tests pass
 2. `just lint` in `darkmatter/` -- no new warnings
 3. Phase-specific integration tests confirm cache behavior
