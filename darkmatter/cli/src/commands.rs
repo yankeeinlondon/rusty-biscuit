@@ -6,10 +6,10 @@ use crate::output::{
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::cleanup::ListSpacingMode;
+use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme,
 };
-use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
@@ -868,9 +868,7 @@ fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
         // Kate
         "kate" => &["--block"],
         // JetBrains IDEs
-        "phpstorm" | "idea" | "pycharm" | "webstorm" | "clion" | "goland" | "rider" => {
-            &["--wait"]
-        }
+        "phpstorm" | "idea" | "pycharm" | "webstorm" | "clion" | "goland" | "rider" => &["--wait"],
         _ => &[],
     }
 }
@@ -1030,7 +1028,9 @@ mod tests {
 
     #[test]
     fn wait_args_jetbrains_ides_return_wait() {
-        for ide in ["phpstorm", "idea", "pycharm", "webstorm", "clion", "goland", "rider"] {
+        for ide in [
+            "phpstorm", "idea", "pycharm", "webstorm", "clion", "goland", "rider",
+        ] {
             assert_eq!(
                 wait_args_for_editor(ide),
                 &["--wait"],
