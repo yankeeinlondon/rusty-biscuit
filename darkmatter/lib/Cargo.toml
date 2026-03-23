@@ -26,6 +26,9 @@ biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "file-refe
 # Error handling
 thiserror = "2.0"
 
+# Parallelism
+rayon = "1.10"
+
 # Utilities
 lazy_static = "1.5"
 regex = "1.11"

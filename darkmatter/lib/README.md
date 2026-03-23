@@ -133,7 +133,7 @@ This results in a document which:
 
 - The [composition](../docs/topics/what-is-composition.md) lifecycle goes through three major **stages**: inline mutation, transclusion, and finally rendering. 
 - Each of these stages has numerous operations which are executed
-- These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-pipeline.md) document.
+- These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-compose-pipeline.md) document.
 
 
 ### Rendering Details
