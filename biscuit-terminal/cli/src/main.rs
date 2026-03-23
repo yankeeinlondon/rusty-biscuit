@@ -550,9 +550,8 @@ pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
     use std::sync::OnceLock;
 
     static FONTS: OnceLock<Vec<String>> = OnceLock::new();
-    let fonts = FONTS.get_or_init(
-        biscuit_terminal::components::graph_expression::available_font_families,
-    );
+    let fonts =
+        FONTS.get_or_init(biscuit_terminal::components::graph_expression::available_font_families);
 
     let prefix = current.to_str().unwrap_or("");
     let prefix_lower = prefix.to_lowercase();

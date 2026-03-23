@@ -141,8 +141,8 @@ impl GraphExpression {
             GraphColorTheme::light()
         };
 
-        let diagram = biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?
-            .with_color_theme(theme);
+        let diagram =
+            biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?.with_color_theme(theme);
 
         Ok(Self {
             diagram,
@@ -331,8 +331,7 @@ mod tests {
 
     #[test]
     fn test_fallback_code_block_uses_dot_info_string_for_dot_input() {
-        let graph =
-            GraphExpression::parse("digraph { A -> B; }", GraphInputSyntax::Dot).unwrap();
+        let graph = GraphExpression::parse("digraph { A -> B; }", GraphInputSyntax::Dot).unwrap();
         let output = graph.fallback_code_block();
         assert!(output.starts_with("```dot\n"));
         assert!(output.contains("digraph { A -> B; }"));

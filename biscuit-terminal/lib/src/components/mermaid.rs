@@ -416,7 +416,10 @@ impl MermaidDiagram {
     /// Uses inverted colors (solid background with opposite theme).
     pub fn inverted(mut self, is_dark_mode: bool) -> Self {
         let theme = MermaidTheme::for_color_mode(is_dark_mode).inverse();
-        self.renderer = self.renderer.with_theme(theme).with_transparent_background(false);
+        self.renderer = self
+            .renderer
+            .with_theme(theme)
+            .with_transparent_background(false);
         self
     }
 
@@ -466,7 +469,10 @@ impl MermaidDiagram {
     ///     }
     /// }
     /// ```
-    pub fn try_render(&self, term: &crate::terminal::Terminal) -> Result<MermaidRenderResult, MermaidRenderError> {
+    pub fn try_render(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit) = self.render_to_image(term)?;
         let output = self.layout.apply_layout(&output, term.width());
 
@@ -650,10 +656,8 @@ mod tests {
 
     #[test]
     fn diagram_clone() {
-        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
-            .with_title("Clone Test");
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B").with_title("Clone Test");
         let cloned = diagram.clone();
         assert_eq!(diagram.instructions(), cloned.instructions());
     }
-
 }
