@@ -49,17 +49,21 @@ Two-stage pipeline for document preparation:
 - `when="..."` conditions, cycle detection, depth limits
 
 ```rust
-use darkmatter::markdown::{Markdown, compose::ComposeOptions};
+use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
 
-// Stage 1 only
+// All operations (default)
 let mut md: Markdown = content.into();
 let report = md.compose_mut()?;
 
-// Stage 1 + Stage 2 (requires source file path)
+// Full pipeline with transclusion (requires source file path)
 let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
 let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
 let (composed, report) = md.compose_with(options)?;
+
+// Only specific operations
+let options = ComposeOptions::new()
+    .only(&[ComposeOperation::Interpolation, ComposeOperation::Cleanup]);
 ```
 
 ### Interpolation Expressions

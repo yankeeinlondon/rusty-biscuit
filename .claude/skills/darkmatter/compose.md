@@ -1,44 +1,54 @@
 # Compose Pipeline
 
-The darkmatter compose pipeline provides document preparation through two stages.
+The darkmatter compose pipeline provides document preparation through three phases.
 
 ## Pipeline Overview
 
-**Stage 1** (in-memory transforms — 5 sub-stages):
+**Inline Pre** (serial):
 
 1. **Text Replacement** - `replace:` frontmatter replaces literal strings
-2. **Interpolation** - `{{ variable }}` expressions expand to values
-3. **TOC Linking** - `::toc-linking` directives expand to heading link lists
-4. **Cleanup** - Normalizes markdown formatting
-5. **Normalization** - Adjusts heading levels
+2. **Page Blocks** - `::block`/`::end-block` conditional regions
+3. **Interpolation** - `{{ variable }}` expressions expand to values
+4. **Shell Expansion** - `::shell` directives execute commands
 
-**Stage 2** (file-based transclusion):
+**Transclusion** (concurrent via Rayon):
 
 - `::file ./doc.md` - Include markdown with recursive processing
 - `::code ./main.rs` - Include as fenced code block
+- `::toc-linking` - Generate heading link lists from external documents
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
 
+**Inline Post** (serial):
+
+- **Cleanup** - Normalizes markdown formatting
+- **Normalization** - Adjusts heading levels
+
 ## API
 
 ```rust
-use darkmatter::markdown::{Markdown, compose::{ComposeOptions, Stage1Stages}};
+use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
 
-// Stage 1 only (compose with defaults)
+// Compose with all operations enabled (default)
 let (composed, report) = md.compose()?;
 
-// Stage 1 with options
+// Only run specific operations
 let options = ComposeOptions::new()
+    .only(&[ComposeOperation::Interpolation])
     .with_external_state(json!({"key": "value"}))
-    .with_stages(Stage1Stages::only_interpolation())
     .with_fail_fast(true);
 let (composed, report) = md.compose_with(options)?;
+
+// Disable specific operations
+let options = ComposeOptions::new()
+    .disable(ComposeOperation::Cleanup)
+    .disable(ComposeOperation::Normalization);
 
 // In-place mutation (no clone)
 let report = md.compose_mut()?;
 
-// Stage 1 + Stage 2 (requires source file path for transclusion)
+// Full pipeline with transclusion (requires source file path)
 let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
 let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
@@ -220,7 +230,7 @@ epilogue: ./footer.md
 ```
 darkmatter/lib/src/markdown/compose/
 ├── mod.rs           # Public API, pipeline orchestration
-├── types.rs         # ComposeOptions, ComposeReport, etc.
+├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
 ├── state.rs         # EffectiveState, merge logic
 ├── replacement.rs   # Text replacement engine
 └── interpolation/
