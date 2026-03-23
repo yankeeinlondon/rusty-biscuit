@@ -765,7 +765,6 @@ impl Commands {
             _ => None,
         }
     }
-
 }
 
 /// Filter options for the docs subcommand.
@@ -1584,7 +1583,6 @@ mod tests {
                 panic!("Expected repo remote");
             }
         }
-
     }
 
     mod repo_action_normalization {
@@ -1633,6 +1631,5 @@ mod tests {
                 _ => panic!("Expected GitStatus action"),
             }
         }
-
     }
 }

@@ -4,8 +4,8 @@ use std::rc::Rc;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::PadRight;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::RenderableContent;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::RenderableContent;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::JustfileInfo;
 
@@ -60,11 +60,8 @@ fn render_justfile_list(justfiles: &[JustfileInfo], verbose: u8, term: &Terminal
         list.add(render_justfile_item(jf, verbose, term));
     }
 
-    let header = Prose::new(format!(
-        "<b>Justfiles</b> <dim>({})</dim>",
-        justfiles.len()
-    ))
-    .render(term);
+    let header =
+        Prose::new(format!("<b>Justfiles</b> <dim>({})</dim>", justfiles.len())).render(term);
 
     format!("{}\n{}", header, list.render(term))
 }
@@ -219,7 +216,9 @@ fn render_grouped_by_hash(
         );
 
         // Add the group label as a Prose component so markup is rendered
-        outer_list.add(RenderableContent::Component(Rc::new(Prose::new(group_label))));
+        outer_list.add(RenderableContent::Component(Rc::new(Prose::new(
+            group_label,
+        ))));
 
         // Add nested list of justfile paths
         let mut inner_list = UnorderedList::empty();
@@ -414,10 +413,7 @@ fn render_recipe_line(
 
     let line = if let Some(ref desc) = recipe.description {
         // Use PadRight to align descriptions
-        let padded = PadRight::new(
-            Prose::new(&name_and_params),
-            pad_width,
-        );
+        let padded = PadRight::new(Prose::new(&name_and_params), pad_width);
         let padded_str = padded.render(term);
         let desc_str = Prose::new(format!("<dim>{}</dim>", desc)).render(term);
         format!("{}{}", padded_str, desc_str)

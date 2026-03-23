@@ -125,10 +125,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
     // Normalize to RepoAction for unified dispatch
-    let repo_action = cli
-        .command
-        .as_ref()
-        .and_then(|cmd| cmd.to_repo_action());
+    let repo_action = cli.command.as_ref().and_then(|cmd| cmd.to_repo_action());
 
     // Handle RepoAction variants that don't need full detection as early returns
     if let Some(ref action) = repo_action {
@@ -295,10 +292,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::AudioDevices => {
             config = config.skip_os().skip_network().skip_filesystem();
         }
-        OutputFilter::Repo
-        | OutputFilter::Language
-        | OutputFilter::Files
-        | OutputFilter::Docs => {
+        OutputFilter::Repo | OutputFilter::Language | OutputFilter::Files | OutputFilter::Docs => {
             config = config.skip_os().skip_hardware().skip_network();
         }
         OutputFilter::All => {

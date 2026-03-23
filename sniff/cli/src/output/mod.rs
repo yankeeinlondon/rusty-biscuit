@@ -545,7 +545,9 @@ pub fn render_text(
         | OutputFilter::AiClients
         | OutputFilter::Services
         | OutputFilter::Just => {
-            unreachable!("Programs, Services, Just, and Remote filters should be handled separately")
+            unreachable!(
+                "Programs, Services, Just, and Remote filters should be handled separately"
+            )
         }
     }
 
