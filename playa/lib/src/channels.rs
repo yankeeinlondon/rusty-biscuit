@@ -54,7 +54,8 @@ pub(crate) fn slugify(s: &str) -> String {
 /// audio subsystem (e.g., CoreAudio on macOS) is unresponsive.
 #[cfg(feature = "sfx-native")]
 pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::Error>> {
-    let (tx, rx) = mpsc::channel::<Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>>>();
+    let (tx, rx) =
+        mpsc::channel::<Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>>>();
 
     std::thread::spawn(move || {
         let _ = tx.send(get_output_channels_inner());
@@ -74,7 +75,8 @@ pub fn get_output_channels() -> Result<Vec<OutputChannel>, Box<dyn std::error::E
 }
 
 #[cfg(feature = "sfx-native")]
-fn get_output_channels_inner() -> Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>> {
+fn get_output_channels_inner()
+-> Result<Vec<OutputChannel>, Box<dyn std::error::Error + Send + Sync>> {
     let host = cpal::default_host();
     let default_output = host.default_output_device();
     let default_audio_name = default_output

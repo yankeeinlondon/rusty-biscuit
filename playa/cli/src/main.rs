@@ -7,10 +7,10 @@ use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
 
-use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::terminal::Terminal;
 use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
 
 use darkmatter::markdown::Markdown;
@@ -501,7 +501,9 @@ async fn play_file(path: &PathBuf, opts: &PlaybackOptions) {
 async fn play_effect(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
         error_exit(
-            &format!("unknown sound effect: {name}. Use `playa list-effects` to see available effects"),
+            &format!(
+                "unknown sound effect: {name}. Use `playa list-effects` to see available effects"
+            ),
             2,
         );
     };
@@ -565,7 +567,9 @@ fn play_file_sync(path: &PathBuf, opts: &PlaybackOptions) {
 fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
         error_exit(
-            &format!("unknown sound effect: {name}. Use `playa list-effects` to see available effects"),
+            &format!(
+                "unknown sound effect: {name}. Use `playa list-effects` to see available effects"
+            ),
             2,
         );
     };

@@ -46,9 +46,7 @@ impl DeviceOpenWatchdog {
         std::thread::spawn(move || {
             std::thread::sleep(timeout);
             if !flag.load(Ordering::Relaxed) {
-                eprintln!(
-                    "playa: audio device did not respond within {secs}s — aborting"
-                );
+                eprintln!("playa: audio device did not respond within {secs}s — aborting");
                 std::process::exit(1);
             }
         });
