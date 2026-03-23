@@ -1,7 +1,7 @@
-//! Stage 2 transclusion support.
+//! Transclusion-phase support.
 //!
 //! This module provides parsing, resolution, condition evaluation, and content
-//! formatting helpers used by the compose pipeline's Stage 2 transclusion
+//! formatting helpers used by the compose pipeline's transclusion-phase
 //! engine.
 
 mod code;

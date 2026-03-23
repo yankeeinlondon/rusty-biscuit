@@ -9,11 +9,11 @@
 //! 3. **Interpolation** - Expand `{{variable}}` expressions
 //! 4. **Shell Expansion** - Execute `::shell` directives with security controls
 //!
-//! **Transclusion** (serial):
-//! 5. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
-//! 6. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 7. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 8. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! **Transclusion** (concurrent execution after serial preparation):
+//! 5. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 6. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 7. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 8. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
 //! 9. **Cleanup** - Normalize markdown formatting
@@ -55,8 +55,8 @@ pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOperation, ComposeOptions, ComposePhase, ComposeReport, ComposeSource,
-    ComposeWarning,
+    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePhase,
+    ComposeReport, ComposeSource, ComposeWarning,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -71,6 +71,59 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use shell_expansion::{apply_replacements_in_reverse, execute_directive};
+
+#[derive(Clone)]
+enum PreparedTransclusion {
+    FixedReplace {
+        order: usize,
+        span: std::ops::Range<usize>,
+        replacement: String,
+        report: ComposeReport,
+    },
+    FixedSection {
+        order: usize,
+        slot: SectionSlot,
+        content: Option<String>,
+        report: ComposeReport,
+    },
+    Markdown {
+        order: usize,
+        target: ApplyTarget,
+        path: PathBuf,
+        directive_options: transclusion::BlockOptions,
+        insertion_context: Option<(usize, usize)>,
+    },
+    Code {
+        order: usize,
+        span: std::ops::Range<usize>,
+        path: PathBuf,
+        directive_options: transclusion::BlockOptions,
+    },
+    Toc {
+        order: usize,
+        span: std::ops::Range<usize>,
+        directive: toc_linking::TocLinkingDirective,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum SectionSlot {
+    Prologue(usize),
+    Epilogue(usize),
+}
+
+#[derive(Clone)]
+enum ApplyTarget {
+    Replace(std::ops::Range<usize>),
+    Section(SectionSlot),
+}
+
+struct ResolvedTransclusion {
+    order: usize,
+    target: ApplyTarget,
+    content: Option<String>,
+    report: ComposeReport,
+}
 
 // Re-export HeadingLevel for tests
 #[cfg(test)]
@@ -152,8 +205,8 @@ impl Markdown {
     ///
     /// Executes operations in three phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion
-    /// 2. **Transclusion** (serial for now): BlockTransclusion, FrontmatterTransclusion,
-    ///    CodeTransclusion, TocLinking
+    /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
+    ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
@@ -220,80 +273,94 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .build();
 
-            // ── Phase 1: Inline Pre (serial) ──────────────────────────────
+            let mut transclusion_ran = false;
+            for operation in ComposeOperation::default_order() {
+                if !options.is_enabled(*operation) {
+                    continue;
+                }
 
-            // Text Replacement
-            if options.is_enabled(ComposeOperation::TextReplacement) {
-                let replacements = self.run_replacement_stage(&effective_state, &options);
-                report.replacements_applied = replacements;
-            }
-
-            // Page Blocks (conditional content regions)
-            if options.is_enabled(ComposeOperation::PageBlocks) {
-                self.run_page_blocks_stage(&effective_state, &mut report)?;
-            }
-
-            // Interpolation
-            if options.is_enabled(ComposeOperation::Interpolation) {
-                let interpolations = self.run_interpolation_stage(&effective_state, &options)?;
-                report.interpolations_applied = interpolations;
-            }
-
-            // Shell Expansion
-            if options.is_enabled(ComposeOperation::ShellExpansion) {
-                self.run_shell_expansion_stage(&options, runtime, &mut report)?;
-            }
-
-            // ── Phase 2: Transclusion (serial) ────────────────────────────
-
-            // TOC Linking
-            if options.is_enabled(ComposeOperation::TocLinking) {
-                let transclusion_opts = options.transclusion_options();
-                match toc_linking::process_toc_linking(
-                    &self.content,
-                    &options.source,
-                    &transclusion_opts,
-                    options.fail_fast,
-                ) {
-                    Ok((new_content, count)) => {
-                        if count > 0 {
-                            self.content = new_content;
+                match operation.phase() {
+                    ComposePhase::InlinePre => {
+                        self.run_inline_pre_operation(
+                            *operation,
+                            &effective_state,
+                            &options,
+                            runtime,
+                            &mut report,
+                        )?;
+                    }
+                    ComposePhase::Transclusion => {
+                        if transclusion_ran {
+                            continue;
                         }
-                        report.toc_links_generated = count;
+
+                        let enabled_transclusion_ops = ComposeOperation::default_order()
+                            .iter()
+                            .copied()
+                            .filter(|op| {
+                                op.phase() == ComposePhase::Transclusion && options.is_enabled(*op)
+                            })
+                            .collect::<Vec<_>>();
+
+                        self.run_transclusion_phase(
+                            &enabled_transclusion_ops,
+                            &effective_state,
+                            &options,
+                            runtime,
+                            &mut report,
+                        )?;
+                        transclusion_ran = true;
                     }
-                    Err(e) if !options.fail_fast => {
-                        report.add_warning(ComposeWarning::new("toc_linking", e.to_string()));
+                    ComposePhase::InlinePost => {
+                        self.run_inline_post_operation(*operation, &options, &mut report)?;
                     }
-                    Err(e) => return Err(e.into()),
                 }
             }
 
-            // Block Transclusion (::file, ::url) and Code Transclusion (::code)
-            if options.is_enabled(ComposeOperation::BlockTransclusion)
-                || options.is_enabled(ComposeOperation::CodeTransclusion)
-            {
-                self.run_block_transclusion_stage(
-                    &effective_state,
-                    &options,
-                    runtime,
-                    &mut report,
-                )?;
+            report.max_transclusion_depth = runtime.transclusion.deepest_seen;
+            Ok(report)
+        })();
+
+        if source_id.is_some() {
+            runtime.transclusion.exit();
+        }
+
+        result
+    }
+
+    fn run_inline_pre_operation(
+        &mut self,
+        operation: ComposeOperation,
+        state: &EffectiveState,
+        options: &ComposeOptions,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        match operation {
+            ComposeOperation::TextReplacement => {
+                report.replacements_applied = self.run_replacement_stage(state, options);
+                Ok(())
             }
-
-            // Frontmatter Transclusion (prologue/epilogue)
-            if options.is_enabled(ComposeOperation::FrontmatterTransclusion) {
-                self.run_frontmatter_transclusion_stage(
-                    &effective_state,
-                    &options,
-                    runtime,
-                    &mut report,
-                )?;
+            ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
+            ComposeOperation::Interpolation => {
+                report.interpolations_applied = self.run_interpolation_stage(state, options)?;
+                Ok(())
             }
+            ComposeOperation::ShellExpansion => {
+                self.run_shell_expansion_stage(options, runtime, report)
+            }
+            _ => Ok(()),
+        }
+    }
 
-            // ── Phase 3: Inline Post (serial) ─────────────────────────────
-
-            // Cleanup
-            if options.is_enabled(ComposeOperation::Cleanup) {
+    fn run_inline_post_operation(
+        &mut self,
+        operation: ComposeOperation,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        match operation {
+            ComposeOperation::Cleanup => {
                 let original_content = self.content.clone();
                 self.content = match options.list_spacing {
                     cleanup::ListSpacingMode::Normal => {
@@ -311,40 +378,215 @@ impl Markdown {
                     ),
                 };
                 report.cleanup_changed = self.content != original_content;
+                Ok(())
             }
-
-            // Normalization
-            if options.is_enabled(ComposeOperation::Normalization) {
-                match self.run_normalization_stage() {
-                    Ok(norm_report) => {
-                        if norm_report.has_changes() {
-                            report.normalization_report = Some(norm_report);
-                        }
+            ComposeOperation::Normalization => match self.run_normalization_stage() {
+                Ok(norm_report) => {
+                    if norm_report.has_changes() {
+                        report.normalization_report = Some(norm_report);
                     }
-                    Err(NormalizationError::LevelOverflow { .. }) if !options.fail_fast => {
-                        report.add_warning(ComposeWarning::new(
-                            "normalization",
-                            "Skipped normalization: would overflow H6",
-                        ));
-                    }
-                    Err(e) => {
-                        return Err(MarkdownError::Transform(format!(
-                            "Normalization failed: {}",
-                            e
-                        )));
-                    }
+                    Ok(())
                 }
-            }
+                Err(NormalizationError::LevelOverflow { .. }) if !options.fail_fast => {
+                    report.add_warning(ComposeWarning::new(
+                        "normalization",
+                        "Skipped normalization: would overflow H6",
+                    ));
+                    Ok(())
+                }
+                Err(e) => Err(MarkdownError::Transform(format!(
+                    "Normalization failed: {}",
+                    e
+                ))),
+            },
+            _ => Ok(()),
+        }
+    }
 
-            report.max_transclusion_depth = runtime.transclusion.deepest_seen;
-            Ok(report)
-        })();
+    fn run_transclusion_phase(
+        &mut self,
+        operations: &[ComposeOperation],
+        state: &EffectiveState,
+        options: &ComposeOptions,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        use rayon::prelude::*;
 
-        if source_id.is_some() {
-            runtime.transclusion.exit();
+        if operations.is_empty() {
+            return Ok(());
         }
 
-        result
+        let parsed_directives = if operations.iter().any(|op| {
+            matches!(
+                op,
+                ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
+            )
+        }) {
+            Some(transclusion::parse_directives(&self.content)?)
+        } else {
+            None
+        };
+
+        let frontmatter_refs = if operations.contains(&ComposeOperation::FrontmatterTransclusion) {
+            Some(transclusion::parse_frontmatter_refs(
+                self.frontmatter().as_map(),
+            )?)
+        } else {
+            None
+        };
+
+        let toc_directives = if operations.contains(&ComposeOperation::TocLinking) {
+            Some(toc_linking::parse_directives(&self.content)?)
+        } else {
+            None
+        };
+
+        let mut prepared = Vec::new();
+        let mut next_order = 0usize;
+
+        for operation in operations {
+            match operation {
+                ComposeOperation::BlockTransclusion => {
+                    if let Some(directives) = parsed_directives.as_ref() {
+                        self.prepare_block_transclusions(
+                            directives,
+                            transclusion::DirectiveKind::File,
+                            state,
+                            options,
+                            report,
+                            &mut prepared,
+                            &mut next_order,
+                        )?;
+                    }
+                }
+                ComposeOperation::FrontmatterTransclusion => {
+                    if let Some(refs) = frontmatter_refs.as_ref() {
+                        self.prepare_frontmatter_transclusions(
+                            refs,
+                            state,
+                            options,
+                            report,
+                            &mut prepared,
+                            &mut next_order,
+                        )?;
+                    }
+                }
+                ComposeOperation::CodeTransclusion => {
+                    if let Some(directives) = parsed_directives.as_ref() {
+                        self.prepare_block_transclusions(
+                            directives,
+                            transclusion::DirectiveKind::Code,
+                            state,
+                            options,
+                            report,
+                            &mut prepared,
+                            &mut next_order,
+                        )?;
+                    }
+                }
+                ComposeOperation::TocLinking => {
+                    if let Some(directives) = toc_directives.as_ref() {
+                        self.prepare_toc_transclusions(
+                            directives,
+                            report,
+                            &mut prepared,
+                            &mut next_order,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if prepared.is_empty() {
+            return Ok(());
+        }
+
+        let runtime_mutex = std::sync::Mutex::new(runtime);
+        let results = prepared
+            .into_par_iter()
+            .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
+            .collect::<Vec<_>>();
+
+        let mut replacements = Vec::new();
+        let prologue_count = frontmatter_refs
+            .as_ref()
+            .map_or(0, |refs| refs.prologue.len());
+        let epilogue_count = frontmatter_refs
+            .as_ref()
+            .map_or(0, |refs| refs.epilogue.len());
+        let mut prologue_sections = vec![None; prologue_count];
+        let mut epilogue_sections = vec![None; epilogue_count];
+
+        for result in results {
+            let resolved = match result {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    let is_structural = matches!(
+                        error,
+                        MarkdownError::Transclusion(
+                            transclusion::TransclusionError::CycleDetected { .. }
+                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                        )
+                    );
+                    if is_structural || options.fail_fast {
+                        return Err(error);
+                    }
+                    report.add_warning(ComposeWarning::new("transclusion", error.to_string()));
+                    continue;
+                }
+            };
+
+            report.merge(resolved.report);
+
+            match resolved.target {
+                ApplyTarget::Replace(span) => {
+                    replacements.push((resolved.order, span, resolved.content.unwrap_or_default()));
+                }
+                ApplyTarget::Section(SectionSlot::Prologue(index)) => {
+                    prologue_sections[index] = resolved.content;
+                }
+                ApplyTarget::Section(SectionSlot::Epilogue(index)) => {
+                    epilogue_sections[index] = resolved.content;
+                }
+            }
+        }
+
+        if !replacements.is_empty() {
+            replacements.sort_by(|left, right| {
+                right
+                    .1
+                    .start
+                    .cmp(&left.1.start)
+                    .then_with(|| right.0.cmp(&left.0))
+            });
+            let mut next = self.content.clone();
+            for (_, span, replacement) in replacements {
+                next.replace_range(span, &replacement);
+            }
+            self.content = next;
+        }
+
+        if prologue_count > 0 || epilogue_count > 0 {
+            let mut sections = Vec::new();
+            sections.extend(
+                prologue_sections
+                    .into_iter()
+                    .flatten()
+                    .filter(|part| !part.trim().is_empty()),
+            );
+            sections.push(self.content.clone());
+            sections.extend(
+                epilogue_sections
+                    .into_iter()
+                    .flatten()
+                    .filter(|part| !part.trim().is_empty()),
+            );
+            self.content = sections.join("\n\n");
+        }
+
+        Ok(())
     }
 
     /// Runs the text replacement stage.
@@ -451,8 +693,7 @@ impl Markdown {
         }
 
         let shell_opts = options.shell_options();
-        let policy_paths =
-            shell_expansion::resolve_policy_paths(&shell_opts, &options.source)?;
+        let policy_paths = shell_expansion::resolve_policy_paths(&shell_opts, &options.source)?;
         runtime.shell.ensure_loaded(&policy_paths)?;
 
         let mut replacements = Vec::new();
@@ -469,7 +710,7 @@ impl Markdown {
         Ok(())
     }
 
-    /// Runs Stage 2 page blocks (conditional content regions).
+    /// Runs page blocks (conditional content regions).
     fn run_page_blocks_stage(
         &mut self,
         state: &EffectiveState,
@@ -504,59 +745,25 @@ impl Markdown {
         Ok(())
     }
 
-    /// Runs block transclusion directives (::file, ::code, ::url) concurrently.
-    ///
-    /// Directives are parsed and filtered serially, then resolved concurrently
-    /// using Rayon. Results are applied in reverse source order to preserve
-    /// byte offsets.
-    fn run_block_transclusion_stage(
-        &mut self,
+    fn prepare_block_transclusions(
+        &self,
+        directives: &[transclusion::BlockDirective],
+        kind: transclusion::DirectiveKind,
         state: &EffectiveState,
         options: &ComposeOptions,
-        runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
     ) -> MarkdownResult<()> {
-        use rayon::prelude::*;
-
-        let directives = transclusion::parse_directives(&self.content)?;
-        if directives.is_empty() {
-            return Ok(());
-        }
-
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
 
-        // Phase 1: Filter and resolve targets serially (cheap operations,
-        // condition evaluation needs consistent state).
-        enum PreparedDirective {
-            /// Ready to resolve (render child document or code block).
-            Resolve {
-                directive: transclusion::BlockDirective,
-                resolved: transclusion::ResolvedTarget,
-            },
-            /// Already resolved to a fixed replacement (skipped, URL disabled, etc.).
-            Fixed {
-                span: std::ops::Range<usize>,
-                replacement: String,
-            },
-        }
-
-        let mut prepared: Vec<PreparedDirective> = Vec::new();
-
-        for directive in directives {
-            // Skip ::code directives if CodeTransclusion is disabled
-            if directive.kind == transclusion::DirectiveKind::Code
-                && !options.is_enabled(ComposeOperation::CodeTransclusion)
-            {
-                continue;
+        for directive in directives.iter().filter(|directive| match kind {
+            transclusion::DirectiveKind::Code => {
+                directive.kind == transclusion::DirectiveKind::Code
             }
-            // Skip ::file/::url directives if BlockTransclusion is disabled
-            if directive.kind != transclusion::DirectiveKind::Code
-                && !options.is_enabled(ComposeOperation::BlockTransclusion)
-            {
-                continue;
-            }
-
+            _ => directive.kind != transclusion::DirectiveKind::Code,
+        }) {
             for unknown in &directive.options.unknown_options {
                 report.add_warning(
                     ComposeWarning::new(
@@ -574,11 +781,15 @@ impl Markdown {
             if let Some(expr) = &directive.options.when_expr {
                 let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
                 if !should_include {
-                    report.transclusions_skipped += 1;
-                    prepared.push(PreparedDirective::Fixed {
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
                         span: directive.span.clone(),
                         replacement: String::new(),
+                        report: fixed_report,
                     });
+                    *next_order += 1;
                     continue;
                 }
             }
@@ -593,25 +804,49 @@ impl Markdown {
             ) {
                 Ok(resolved) => resolved,
                 Err(err) if ignore_invalid => {
-                    report.transclusions_skipped += 1;
-                    report.add_warning(
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    fixed_report.add_warning(
                         ComposeWarning::new("transclusion", err.to_string())
                             .at_line(directive.line),
                     );
-                    prepared.push(PreparedDirective::Fixed {
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
                         span: directive.span.clone(),
                         replacement: String::new(),
+                        report: fixed_report,
                     });
+                    *next_order += 1;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             };
 
-            // Handle URL transclusion (disabled by default — resolve immediately)
-            if let transclusion::ResolvedTarget::Url { ref url, .. } = resolved {
-                if ignore_invalid {
-                    report.transclusions_skipped += 1;
-                    report.add_warning(
+            match resolved {
+                transclusion::ResolvedTarget::File { path, .. } => {
+                    let item = if directive.kind == transclusion::DirectiveKind::Code {
+                        PreparedTransclusion::Code {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            path,
+                            directive_options: directive.options.clone(),
+                        }
+                    } else {
+                        PreparedTransclusion::Markdown {
+                            order: *next_order,
+                            target: ApplyTarget::Replace(directive.span.clone()),
+                            path,
+                            directive_options: directive.options.clone(),
+                            insertion_context: Some((directive.span.start, directive.line)),
+                        }
+                    };
+                    prepared.push(item);
+                    *next_order += 1;
+                }
+                transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
+                    let mut fixed_report = ComposeReport::new();
+                    fixed_report.transclusions_skipped = 1;
+                    fixed_report.add_warning(
                         ComposeWarning::new(
                             "transclusion",
                             format!(
@@ -621,248 +856,76 @@ impl Markdown {
                         )
                         .at_line(directive.line),
                     );
-                    prepared.push(PreparedDirective::Fixed {
+                    prepared.push(PreparedTransclusion::FixedReplace {
+                        order: *next_order,
                         span: directive.span.clone(),
                         replacement: String::new(),
+                        report: fixed_report,
                     });
-                    continue;
-                } else {
+                    *next_order += 1;
+                }
+                transclusion::ResolvedTarget::Url { url, .. } => {
                     return Err(transclusion::TransclusionError::UrlExecutionDisabled {
                         url: url.to_string(),
                     }
                     .into());
                 }
             }
-
-            prepared.push(PreparedDirective::Resolve {
-                directive,
-                resolved,
-            });
         }
 
-        if prepared.is_empty() {
-            return Ok(());
-        }
-
-        // Phase 2: Resolve directives concurrently with Rayon.
-        // Each resolution creates independent child Markdown documents.
-        let runtime_mutex = std::sync::Mutex::new(runtime);
-
-        struct TransclusionResult {
-            span: std::ops::Range<usize>,
-            replacement: String,
-            child_report: ComposeReport,
-            /// True if this was an actual resolution (not a pre-resolved skip).
-            is_resolved: bool,
-        }
-
-        let results: Vec<Result<TransclusionResult, MarkdownError>> = prepared
-            .into_par_iter()
-            .map(|item| match item {
-                PreparedDirective::Fixed { span, replacement } => Ok(TransclusionResult {
-                    span,
-                    replacement,
-                    child_report: ComposeReport::new(),
-                    is_resolved: false,
-                }),
-                PreparedDirective::Resolve {
-                    directive,
-                    resolved,
-                } => {
-                    let span = directive.span.clone();
-                    match (directive.kind, resolved) {
-                        (
-                            transclusion::DirectiveKind::File,
-                            transclusion::ResolvedTarget::File { path, .. },
-                        ) => {
-                            let mut child_runtime = {
-                                let rt = runtime_mutex.lock().unwrap();
-                                rt.clone_for_child()
-                            };
-                            let mut child_report = ComposeReport::new();
-                            let result = self.render_markdown_transclusion(
-                                &path,
-                                Some((directive.span.start, directive.line)),
-                                &directive.options,
-                                state,
-                                options,
-                                &mut child_runtime,
-                                &mut child_report,
-                            );
-                            {
-                                let mut rt = runtime_mutex.lock().unwrap();
-                                rt.merge_child(&child_runtime);
-                            }
-                            result.map(|s| TransclusionResult {
-                                span,
-                                replacement: s,
-                                child_report,
-                                is_resolved: true,
-                            })
-                        }
-                        (
-                            transclusion::DirectiveKind::Code,
-                            transclusion::ResolvedTarget::File { path, .. },
-                        ) => self
-                            .render_code_transclusion(
-                                &path,
-                                &directive.options,
-                                state,
-                                options,
-                            )
-                            .map(|s| TransclusionResult {
-                                span,
-                                replacement: s,
-                                child_report: ComposeReport::new(),
-                                is_resolved: true,
-                            }),
-                        (_, target) => {
-                            Err(transclusion::TransclusionError::UnsupportedReferenceType {
-                                reference: target.id().to_string(),
-                            }
-                            .into())
-                        }
-                    }
-                }
-            })
-            .collect();
-
-        // Phase 3: Apply results in reverse source order to preserve offsets.
-        let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
-
-        for result in results {
-            match result {
-                Ok(tr) => {
-                    if tr.is_resolved {
-                        report.transclusions_applied +=
-                            tr.child_report.transclusions_applied + 1;
-                    }
-                    report.transclusions_skipped += tr.child_report.transclusions_skipped;
-                    for warning in tr.child_report.warnings {
-                        report.add_warning(warning);
-                    }
-                    replacements.push((tr.span, tr.replacement));
-                }
-                Err(e) => {
-                    // Cycle detection and depth errors are always fatal
-                    // regardless of fail_fast setting.
-                    let is_structural = matches!(
-                        e,
-                        MarkdownError::Transclusion(
-                            transclusion::TransclusionError::CycleDetected { .. }
-                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                        )
-                    );
-                    if is_structural || options.fail_fast {
-                        return Err(e);
-                    }
-                    report.add_warning(ComposeWarning::new("transclusion", e.to_string()));
-                }
-            }
-        }
-
-        if replacements.is_empty() {
-            return Ok(());
-        }
-
-        replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
-        let mut next = self.content.clone();
-        for (span, replacement) in replacements {
-            next.replace_range(span, &replacement);
-        }
-        self.content = next;
         Ok(())
     }
 
-    /// Runs Stage 2 frontmatter transclusion (`prologue`, `epilogue`).
-    fn run_frontmatter_transclusion_stage(
-        &mut self,
-        state: &EffectiveState,
+    fn prepare_frontmatter_transclusions(
+        &self,
+        refs: &transclusion::FrontmatterRefs,
+        _state: &EffectiveState,
         options: &ComposeOptions,
-        runtime: &mut shell_expansion::types::PipelineRuntime,
-        report: &mut ComposeReport,
+        _report: &mut ComposeReport,
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
     ) -> MarkdownResult<()> {
-        let refs = transclusion::parse_frontmatter_refs(self.frontmatter().as_map())?;
-        if refs.prologue.is_empty() && refs.epilogue.is_empty() {
-            return Ok(());
-        }
-
-        let ignore_invalid = self.resolve_ignore_invalid(options);
-        let mut prologue_blocks = Vec::new();
-        let mut epilogue_blocks = Vec::new();
-
-        for reference in refs.prologue {
-            match self.render_frontmatter_reference(
-                &reference,
-                state,
+        for (index, reference) in refs.prologue.iter().enumerate() {
+            self.prepare_frontmatter_reference(
+                reference,
+                SectionSlot::Prologue(index),
                 options,
-                runtime,
-                report,
-                ignore_invalid,
-            )? {
-                Some(content) => {
-                    if transclusion::is_file_like_reference(&reference)
-                        || transclusion::is_url_like(&reference)
-                    {
-                        report.transclusions_applied += 1;
-                    }
-                    prologue_blocks.push(content);
-                }
-                None => {
-                    report.transclusions_skipped += 1;
-                }
-            }
+                prepared,
+                next_order,
+            )?;
         }
 
-        for reference in refs.epilogue {
-            match self.render_frontmatter_reference(
-                &reference,
-                state,
+        for (index, reference) in refs.epilogue.iter().enumerate() {
+            self.prepare_frontmatter_reference(
+                reference,
+                SectionSlot::Epilogue(index),
                 options,
-                runtime,
-                report,
-                ignore_invalid,
-            )? {
-                Some(content) => {
-                    if transclusion::is_file_like_reference(&reference)
-                        || transclusion::is_url_like(&reference)
-                    {
-                        report.transclusions_applied += 1;
-                    }
-                    epilogue_blocks.push(content);
-                }
-                None => {
-                    report.transclusions_skipped += 1;
-                }
-            }
+                prepared,
+                next_order,
+            )?;
         }
-
-        let mut sections = Vec::new();
-        sections.extend(prologue_blocks);
-        sections.push(self.content.clone());
-        sections.extend(epilogue_blocks);
-        self.content = sections
-            .into_iter()
-            .filter(|part| !part.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
 
         Ok(())
     }
 
-    fn render_frontmatter_reference(
+    fn prepare_frontmatter_reference(
         &self,
         reference: &str,
-        state: &EffectiveState,
+        slot: SectionSlot,
         options: &ComposeOptions,
-        runtime: &mut shell_expansion::types::PipelineRuntime,
-        report: &mut ComposeReport,
-        ignore_invalid: bool,
-    ) -> MarkdownResult<Option<String>> {
-        // Inline string content: not a URL, not a file path → use as-is.
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
+    ) -> MarkdownResult<()> {
         if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
         {
-            return Ok(Some(reference.to_string()));
+            prepared.push(PreparedTransclusion::FixedSection {
+                order: *next_order,
+                slot,
+                content: Some(reference.to_string()),
+                report: ComposeReport::new(),
+            });
+            *next_order += 1;
+            return Ok(());
         }
 
         let kind = if transclusion::is_url_like(reference) {
@@ -870,8 +933,9 @@ impl Markdown {
         } else {
             transclusion::DirectiveKind::File
         };
-
+        let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
+
         let resolved = match transclusion::resolve_target(
             kind,
             reference,
@@ -881,40 +945,194 @@ impl Markdown {
         ) {
             Ok(resolved) => resolved,
             Err(err) if ignore_invalid => {
-                report.add_warning(ComposeWarning::new("transclusion", err.to_string()));
-                return Ok(None);
+                let mut fixed_report = ComposeReport::new();
+                fixed_report.transclusions_skipped = 1;
+                fixed_report.add_warning(ComposeWarning::new("transclusion", err.to_string()));
+                prepared.push(PreparedTransclusion::FixedSection {
+                    order: *next_order,
+                    slot,
+                    content: None,
+                    report: fixed_report,
+                });
+                *next_order += 1;
+                return Ok(());
             }
             Err(err) => return Err(err.into()),
         };
 
         match resolved {
-            transclusion::ResolvedTarget::File { path, .. } => self
-                .render_markdown_transclusion(
+            transclusion::ResolvedTarget::File { path, .. } => {
+                prepared.push(PreparedTransclusion::Markdown {
+                    order: *next_order,
+                    target: ApplyTarget::Section(slot),
+                    path,
+                    directive_options: transclusion::BlockOptions::default(),
+                    insertion_context: None,
+                });
+                *next_order += 1;
+            }
+            transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
+                let mut fixed_report = ComposeReport::new();
+                fixed_report.transclusions_skipped = 1;
+                fixed_report.add_warning(ComposeWarning::new(
+                    "transclusion",
+                    format!(
+                        "Skipping URL transclusion '{}': remote execution disabled",
+                        url
+                    ),
+                ));
+                prepared.push(PreparedTransclusion::FixedSection {
+                    order: *next_order,
+                    slot,
+                    content: None,
+                    report: fixed_report,
+                });
+                *next_order += 1;
+            }
+            transclusion::ResolvedTarget::Url { url, .. } => {
+                return Err(transclusion::TransclusionError::UrlExecutionDisabled {
+                    url: url.to_string(),
+                }
+                .into());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn prepare_toc_transclusions(
+        &self,
+        directives: &[toc_linking::TocLinkingDirective],
+        _report: &mut ComposeReport,
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
+    ) {
+        for directive in directives {
+            prepared.push(PreparedTransclusion::Toc {
+                order: *next_order,
+                span: directive.span.clone(),
+                directive: directive.clone(),
+            });
+            *next_order += 1;
+        }
+    }
+
+    fn resolve_prepared_transclusion(
+        &self,
+        item: PreparedTransclusion,
+        state: &EffectiveState,
+        options: &ComposeOptions,
+        runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
+    ) -> MarkdownResult<ResolvedTransclusion> {
+        match item {
+            PreparedTransclusion::FixedReplace {
+                order,
+                span,
+                replacement,
+                report,
+            } => Ok(ResolvedTransclusion {
+                order,
+                target: ApplyTarget::Replace(span),
+                content: Some(replacement),
+                report,
+            }),
+            PreparedTransclusion::FixedSection {
+                order,
+                slot,
+                content,
+                report,
+            } => Ok(ResolvedTransclusion {
+                order,
+                target: ApplyTarget::Section(slot),
+                content,
+                report,
+            }),
+            PreparedTransclusion::Markdown {
+                order,
+                target,
+                path,
+                directive_options,
+                insertion_context,
+            } => {
+                let mut child_runtime = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.clone_for_child()
+                };
+                let mut child_report = ComposeReport::new();
+                let content = self.render_markdown_transclusion(
                     &path,
-                    None,
-                    &transclusion::BlockOptions::default(),
+                    insertion_context,
+                    &directive_options,
                     state,
                     options,
-                    runtime,
-                    report,
-                )
-                .map(Some),
-            transclusion::ResolvedTarget::Url { url, .. } => {
-                if ignore_invalid {
-                    report.add_warning(ComposeWarning::new(
-                        "transclusion",
-                        format!(
-                            "Skipping URL transclusion '{}': remote execution disabled",
-                            url
-                        ),
-                    ));
-                    Ok(None)
-                } else {
-                    Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                        url: url.to_string(),
-                    }
-                    .into())
+                    &mut child_runtime,
+                    &mut child_report,
+                )?;
+                child_report.transclusions_applied += 1;
+                {
+                    let mut runtime = runtime_mutex.lock().unwrap();
+                    runtime.merge_child(&child_runtime);
                 }
+                Ok(ResolvedTransclusion {
+                    order,
+                    target,
+                    content: Some(content),
+                    report: child_report,
+                })
+            }
+            PreparedTransclusion::Code {
+                order,
+                span,
+                path,
+                directive_options,
+            } => {
+                let content =
+                    self.render_code_transclusion(&path, &directive_options, state, options)?;
+                let mut code_report = ComposeReport::new();
+                code_report.transclusions_applied = 1;
+                Ok(ResolvedTransclusion {
+                    order,
+                    target: ApplyTarget::Replace(span),
+                    content: Some(content),
+                    report: code_report,
+                })
+            }
+            PreparedTransclusion::Toc {
+                order,
+                span,
+                directive,
+            } => {
+                let transclusion_opts = options.transclusion_options();
+                let replacement = if let Some((display_target, path)) =
+                    toc_linking::resolve_target_chain(
+                        &directive,
+                        &options.source,
+                        &transclusion_opts,
+                    )? {
+                    let headings = {
+                        let runtime = runtime_mutex.lock().unwrap();
+                        runtime
+                            .load_toc_headings(&path)
+                            .map_err(toc_linking::TocLinkingError::Io)?
+                    };
+                    toc_linking::render_resolved_directive(
+                        &display_target,
+                        &headings,
+                        &directive.options,
+                        directive.line,
+                    )?
+                } else {
+                    directive.options.empty_text.clone().unwrap_or_default()
+                };
+
+                let mut toc_report = ComposeReport::new();
+                toc_report.toc_links_generated = 1;
+                Ok(ResolvedTransclusion {
+                    order,
+                    target: ApplyTarget::Replace(span),
+                    content: Some(replacement),
+                    report: toc_report,
+                })
             }
         }
     }
@@ -944,14 +1162,9 @@ impl Markdown {
         child_options.external_state = Some(inherited);
         child_options.source = ComposeSource::File(path.to_path_buf());
 
-        let mut child = Markdown::try_from(path)?;
+        let mut child = runtime.load_markdown(path)?;
         let child_report = child.run_compose_pipeline_internal(child_options, runtime)?;
-
-        report.transclusions_applied += child_report.transclusions_applied;
-        report.transclusions_skipped += child_report.transclusions_skipped;
-        for warning in child_report.warnings {
-            report.add_warning(warning);
-        }
+        report.merge(child_report);
 
         let mut content = child.content().to_string();
 
@@ -1027,8 +1240,7 @@ impl Markdown {
             self.apply_replace_map(&raw, &effective_map, options)
         };
 
-        let language =
-            transclusion::infer_language(path, &options.code_fallback_language);
+        let language = transclusion::infer_language(path, &options.code_fallback_language);
         let fenced = transclusion::wrap_in_code_block(&replaced, &language);
         let spaced = transclusion::ensure_vertical_spacing(&fenced);
         Ok(self.apply_wrappers(spaced, directive_options))
@@ -1232,19 +1444,34 @@ mod tests {
 
     #[test]
     fn test_compose_stages_run_in_order() {
-        // This test verifies that stages run in the expected order
-        // by observing their effects
+        let content = "---\nshow: false\n---\nBefore\n\n::block when=\"show\"\n\n::shell echo hidden\n\n::end-block\n\n::code ./example.rs\nAfter";
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let code = dir.path().join("example.rs");
+        std::fs::write(&root, content).unwrap();
+        std::fs::write(&code, "fn main() {}\n").unwrap();
 
-        let content = "# Header\nParagraph";
-        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .with_source_file(&root)
+            .with_shell_policy_root(dir.path())
+            .only(&[
+                ComposeOperation::PageBlocks,
+                ComposeOperation::ShellExpansion,
+                ComposeOperation::CodeTransclusion,
+                ComposeOperation::Cleanup,
+            ]);
 
-        // Run all stages
-        let (_, report) = md.compose().unwrap();
+        let (composed, report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap();
 
-        // Verify stages ran (via report)
-        assert_eq!(report.replacements_applied, 0); // No replace map in frontmatter
-        assert_eq!(report.interpolations_applied, 0); // Stub (Phase 2)
-        // Cleanup should have run
+        assert!(!composed.content().contains("hidden"));
+        assert!(composed.content().contains("```rs"));
+        assert!(composed.content().contains("\n\n```rs"));
+        assert_eq!(report.page_blocks_skipped, 1);
+        assert_eq!(report.shell_expansions_applied, 0);
+        assert_eq!(report.transclusions_applied, 1);
         assert!(report.cleanup_changed);
     }
 
@@ -1790,8 +2017,10 @@ Hello :wave: {{ greeting }} :smile:"#;
 
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::TextReplacement, ComposeOperation::Interpolation]);
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::TextReplacement,
+            ComposeOperation::Interpolation,
+        ]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1865,6 +2094,44 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_duplicate_sibling_includes_are_not_treated_as_cycles() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(&root, "::file ./child.md\n\n::file ./child.md").unwrap();
+        std::fs::write(&child, "# Child").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content().matches("# Child").count(), 2);
+        assert_eq!(report.transclusions_applied, 2);
+    }
+
+    #[test]
+    fn test_stage2_diamond_dependency_graph_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let left = dir.path().join("left.md");
+        let right = dir.path().join("right.md");
+        let shared = dir.path().join("shared.md");
+
+        std::fs::write(&root, "::file ./left.md\n\n::file ./right.md").unwrap();
+        std::fs::write(&left, "## Left\n\n::file ./shared.md").unwrap();
+        std::fs::write(&right, "## Right\n\n::file ./shared.md").unwrap();
+        std::fs::write(&shared, "### Shared").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content().matches("### Shared").count(), 2);
+        assert_eq!(report.transclusions_applied, 4);
+    }
+
+    #[test]
     fn test_stage2_cycle_detection_fails() {
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a.md");
@@ -1920,6 +2187,23 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_repeated_code_includes_are_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let code = dir.path().join("main.rs");
+
+        std::fs::write(&root, "::code ./main.rs\n\n::code ./main.rs").unwrap();
+        std::fs::write(&code, "fn repeated() {}\n").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content().matches("fn repeated() {}").count(), 2);
+        assert_eq!(report.transclusions_applied, 2);
+    }
+
+    #[test]
     fn test_stage2_when_false_skips_directive() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");
@@ -1966,6 +2250,23 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_same_file_can_be_used_in_prologue_and_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let shared = dir.path().join("shared.md");
+
+        std::fs::write(&root, "---\nprologue: ./shared.md\n---\n::file ./shared.md").unwrap();
+        std::fs::write(&shared, "## Shared").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content().matches("## Shared").count(), 2);
+        assert_eq!(report.transclusions_applied, 2);
+    }
+
+    #[test]
     fn test_stage2_missing_source_context_for_relative_path() {
         let md: Markdown = "::file ./child.md".into();
         let err = md.compose().unwrap_err();
@@ -1975,6 +2276,43 @@ Rounded: {{ round(pi) }}"#;
                 transclusion::TransclusionError::MissingSourceContext { .. }
             )
         ));
+    }
+
+    #[test]
+    fn test_toc_linking_fail_fast_false_becomes_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        std::fs::write(&root, "::toc-linking ./missing.md").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new()
+            .with_source_file(&root)
+            .with_fail_fast(false);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content().trim_end(), "::toc-linking ./missing.md");
+        assert_eq!(report.toc_links_generated, 0);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("File not found"))
+        );
+    }
+
+    #[test]
+    fn test_toc_linking_fail_fast_true_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        std::fs::write(&root, "::toc-linking ./missing.md").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new()
+            .with_source_file(&root)
+            .with_fail_fast(true);
+        let err = md.compose_with(options).unwrap_err();
+
+        assert!(matches!(err, MarkdownError::TocLinking(_)));
     }
 
     #[test]
@@ -2528,8 +2866,7 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\nflag: true\n---\n\nbefore\n\n::block when=\"flag\"\n\nkept content\n\n::end-block\n\nafter\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
@@ -2553,8 +2890,7 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\nflag: false\n---\n\nbefore\n\n::block when=\"flag\"\n\nremoved\n\n::end-block\n\nafter\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
@@ -2569,18 +2905,19 @@ Rounded: {{ round(pi) }}"#;
 
     #[test]
     fn page_block_coexists_with_interpolation() {
-        // Stage 1 interpolation output should be visible to page block conditions
         let content =
             "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::Interpolation, ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::Interpolation,
+            ComposeOperation::PageBlocks,
+        ]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
             composed.content().contains("Shown: true"),
-            "Interpolation should run before page blocks, got:\n{}",
+            "Page blocks and interpolation should both apply, got:\n{}",
             composed.content()
         );
         assert_eq!(report.page_blocks_rendered, 1);
@@ -2592,8 +2929,7 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\na: true\nb: false\n---\n\n::block when=\"a\" unknown=\"x\"\n\nA\n\n::end-block\n\n::block when=\"b\"\n\nB\n\n::end-block\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::PageBlocks]);
+        let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
         let (_, report) = md.compose_with(options).unwrap();
         assert_eq!(report.page_blocks_rendered, 1);
@@ -2612,8 +2948,7 @@ Rounded: {{ round(pi) }}"#;
         let content = "::block when=\"x\"\nbody\n::end-block\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new()
-            .only(&[]);
+        let options = ComposeOptions::new().only(&[]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(

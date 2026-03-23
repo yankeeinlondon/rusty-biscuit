@@ -9,7 +9,6 @@
 
 use super::super::normalize::NormalizationReport;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use url::Url;
 
@@ -62,6 +61,71 @@ pub enum ComposeOperation {
     Normalization,
 }
 
+/// Fixed-size operation set keyed by [`ComposeOperation`] discriminants.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ComposeOperationSet {
+    enabled: [bool; ComposeOperation::COUNT],
+}
+
+impl ComposeOperationSet {
+    /// Creates an empty operation set.
+    pub fn empty() -> Self {
+        Self {
+            enabled: [false; ComposeOperation::COUNT],
+        }
+    }
+
+    /// Creates a set containing every operation.
+    pub fn all() -> Self {
+        ComposeOperation::default_order().iter().copied().collect()
+    }
+
+    /// Enables an operation.
+    pub fn insert(&mut self, op: ComposeOperation) {
+        self.enabled[op.index()] = true;
+    }
+
+    /// Disables an operation.
+    pub fn remove(&mut self, op: ComposeOperation) {
+        self.enabled[op.index()] = false;
+    }
+
+    /// Returns `true` when the operation is enabled.
+    pub fn contains(&self, op: ComposeOperation) -> bool {
+        self.enabled[op.index()]
+    }
+
+    /// Iterates enabled operations in canonical enum order.
+    pub fn iter(&self) -> impl Iterator<Item = ComposeOperation> + '_ {
+        ComposeOperation::default_order()
+            .iter()
+            .copied()
+            .filter(|op| self.contains(*op))
+    }
+}
+
+impl std::fmt::Debug for ComposeOperationSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl Default for ComposeOperationSet {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl FromIterator<ComposeOperation> for ComposeOperationSet {
+    fn from_iter<T: IntoIterator<Item = ComposeOperation>>(iter: T) -> Self {
+        let mut set = Self::empty();
+        for op in iter {
+            set.insert(op);
+        }
+        set
+    }
+}
+
 /// The execution phase an operation belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComposePhase {
@@ -74,6 +138,25 @@ pub enum ComposePhase {
 }
 
 impl ComposeOperation {
+    /// Total number of compose operations.
+    pub const COUNT: usize = 10;
+
+    /// Stable discriminant index for fixed-size operation sets.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::TextReplacement => 0,
+            Self::PageBlocks => 1,
+            Self::Interpolation => 2,
+            Self::ShellExpansion => 3,
+            Self::BlockTransclusion => 4,
+            Self::FrontmatterTransclusion => 5,
+            Self::CodeTransclusion => 6,
+            Self::TocLinking => 7,
+            Self::Cleanup => 8,
+            Self::Normalization => 9,
+        }
+    }
+
     /// Returns the default phase this operation belongs to.
     pub fn phase(&self) -> ComposePhase {
         match self {
@@ -111,8 +194,8 @@ impl ComposeOperation {
     }
 
     /// Returns the set of all operations.
-    pub fn all() -> HashSet<ComposeOperation> {
-        Self::default_order().iter().copied().collect()
+    pub fn all() -> ComposeOperationSet {
+        ComposeOperationSet::all()
     }
 }
 
@@ -146,22 +229,19 @@ impl ComposeOperation {
 #[derive(Clone)]
 pub struct ComposeOptions {
     // ── Operation control ──────────────────────────────────────────
-
     /// Set of operations to execute.
     ///
     /// Defaults to all operations. Use `disable()` or `only()` to
     /// restrict which operations run.
-    pub enabled_operations: HashSet<ComposeOperation>,
+    pub enabled_operations: ComposeOperationSet,
 
     // ── Error handling ─────────────────────────────────────────────
-
     /// When `true`, the pipeline returns an error on the first failure.
     /// When `false` (default), failures are recorded as warnings and
     /// the pipeline continues with remaining operations.
     pub fail_fast: bool,
 
     // ── Source context ─────────────────────────────────────────────
-
     /// Source location of the document being composed.
     ///
     /// Required for transclusion to resolve relative `::file` paths.
@@ -169,7 +249,6 @@ pub struct ComposeOptions {
     pub source: ComposeSource,
 
     // ── State and data ─────────────────────────────────────────────
-
     /// External state merged with frontmatter for interpolation and
     /// replacement. Missing or null frontmatter keys are filled from
     /// this value using deep-merge semantics.
@@ -182,7 +261,6 @@ pub struct ComposeOptions {
     pub set_overrides: Option<serde_json::Value>,
 
     // ── Transclusion ───────────────────────────────────────────────
-
     /// Maximum recursive transclusion depth before the pipeline
     /// returns an error. Prevents infinite `::file` chains.
     /// Default: 16.
@@ -218,7 +296,6 @@ pub struct ComposeOptions {
     pub resolve_repo_root: bool,
 
     // ── Shell expansion ────────────────────────────────────────────
-
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
     pub shell_timeout: std::time::Duration,
@@ -239,10 +316,10 @@ pub struct ComposeOptions {
     ///
     /// When set, commands that require approval call this handler
     /// before execution. When `None`, unapproved commands are skipped.
-    pub shell_approval_handler: Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
+    pub shell_approval_handler:
+        Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
 
     // ── Cleanup ────────────────────────────────────────────────────
-
     /// Controls how blank lines between list items are handled
     /// during the cleanup operation. Default: `Normal`.
     pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
@@ -252,7 +329,6 @@ pub struct ComposeOptions {
     pub indent_size: usize,
 
     // ── Internal (crate-private) ───────────────────────────────────
-
     /// Runtime context captured at construction time (timestamps,
     /// environment variables).
     context: ComposeContext,
@@ -342,7 +418,7 @@ impl ComposeOptions {
     /// Disables a single operation.
     #[must_use]
     pub fn disable(mut self, op: ComposeOperation) -> Self {
-        self.enabled_operations.remove(&op);
+        self.enabled_operations.remove(op);
         self
     }
 
@@ -355,7 +431,7 @@ impl ComposeOptions {
 
     /// Returns true if the given operation is enabled.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
-        self.enabled_operations.contains(&op)
+        self.enabled_operations.contains(op)
     }
 
     /// Sets the compose source as a file path.
@@ -414,6 +490,86 @@ impl ComposeOptions {
         self.shell_policy_root = shell.policy_root;
         self.shell_working_directory = shell.working_directory;
         self.shell_approval_handler = shell.approval_handler;
+        self
+    }
+
+    /// Sets the shell command timeout directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.shell_timeout = timeout;
+        self
+    }
+
+    /// Sets the shell policy root directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_policy_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.shell_policy_root = Some(path.into());
+        self
+    }
+
+    /// Sets the shell working directory directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_working_directory(mut self, path: impl Into<PathBuf>) -> Self {
+        self.shell_working_directory = Some(path.into());
+        self
+    }
+
+    /// Sets the shell approval handler directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_approval_handler(
+        mut self,
+        handler: std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>,
+    ) -> Self {
+        self.shell_approval_handler = Some(handler);
+        self
+    }
+
+    /// Sets whether remote transclusion is allowed.
+    #[must_use]
+    pub fn with_allow_remote_transclusion(mut self, allow: bool) -> Self {
+        self.allow_remote_transclusion = allow;
+        self
+    }
+
+    /// Sets whether local markdown transclusion is allowed.
+    #[must_use]
+    pub fn with_allow_local_markdown(mut self, allow: bool) -> Self {
+        self.allow_local_markdown = allow;
+        self
+    }
+
+    /// Sets whether local code transclusion is allowed.
+    #[must_use]
+    pub fn with_allow_local_code(mut self, allow: bool) -> Self {
+        self.allow_local_code = allow;
+        self
+    }
+
+    /// Sets the maximum recursive transclusion depth.
+    #[must_use]
+    pub fn with_max_transclusion_depth(mut self, max_depth: usize) -> Self {
+        self.max_transclusion_depth = max_depth.max(1);
+        self
+    }
+
+    /// Sets how invalid transclusion references are handled.
+    #[must_use]
+    pub fn with_ignore_invalid_references(mut self, ignore: Option<bool>) -> Self {
+        self.ignore_invalid_references = ignore;
+        self
+    }
+
+    /// Sets whether `@` paths resolve relative to the repository root.
+    #[must_use]
+    pub fn with_resolve_repo_root(mut self, enabled: bool) -> Self {
+        self.resolve_repo_root = enabled;
+        self
+    }
+
+    /// Sets the fallback language for code transclusion.
+    #[must_use]
+    pub fn with_code_fallback_language(mut self, language: impl Into<String>) -> Self {
+        self.code_fallback_language = language.into();
         self
     }
 
@@ -477,7 +633,6 @@ impl Default for ComposeOptions {
         Self::new()
     }
 }
-
 
 /// Source context for compose execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -784,6 +939,29 @@ impl ComposeReport {
     pub fn add_warning(&mut self, warning: ComposeWarning) {
         self.warnings.push(warning);
     }
+
+    /// Merges another report into this one.
+    pub fn merge(&mut self, mut other: ComposeReport) {
+        self.replacements_applied += other.replacements_applied;
+        self.interpolations_applied += other.interpolations_applied;
+        self.toc_links_generated += other.toc_links_generated;
+        self.shell_expansions_applied += other.shell_expansions_applied;
+        self.shell_approvals_used += other.shell_approvals_used;
+        self.cleanup_changed |= other.cleanup_changed;
+        self.page_blocks_rendered += other.page_blocks_rendered;
+        self.page_blocks_skipped += other.page_blocks_skipped;
+        self.transclusions_applied += other.transclusions_applied;
+        self.transclusions_skipped += other.transclusions_skipped;
+        self.max_transclusion_depth = self
+            .max_transclusion_depth
+            .max(other.max_transclusion_depth);
+
+        if self.normalization_report.is_none() {
+            self.normalization_report = other.normalization_report.take();
+        }
+
+        self.warnings.append(&mut other.warnings);
+    }
 }
 
 /// A warning generated during compose processing.
@@ -851,10 +1029,7 @@ mod tests {
     fn test_transclusion_options_defaults() {
         let options = ComposeOptions::new();
         assert_eq!(options.max_transclusion_depth, 16);
-        assert!(matches!(
-            options.source,
-            ComposeSource::Unknown
-        ));
+        assert!(matches!(options.source, ComposeSource::Unknown));
         assert_eq!(options.code_fallback_language, "txt");
     }
 
@@ -862,7 +1037,10 @@ mod tests {
     fn test_compose_options_builder_pattern() {
         let mut options = ComposeOptions::new()
             .disable(ComposeOperation::Cleanup)
-            .only(&[ComposeOperation::BlockTransclusion, ComposeOperation::CodeTransclusion])
+            .only(&[
+                ComposeOperation::BlockTransclusion,
+                ComposeOperation::CodeTransclusion,
+            ])
             .with_fail_fast(true)
             .with_external_state(serde_json::json!({"key": "value"}));
 
@@ -900,9 +1078,67 @@ mod tests {
     }
 
     #[test]
+    fn test_compose_operation_default_order_exact() {
+        assert_eq!(
+            ComposeOperation::default_order(),
+            &[
+                ComposeOperation::TextReplacement,
+                ComposeOperation::PageBlocks,
+                ComposeOperation::Interpolation,
+                ComposeOperation::ShellExpansion,
+                ComposeOperation::BlockTransclusion,
+                ComposeOperation::FrontmatterTransclusion,
+                ComposeOperation::CodeTransclusion,
+                ComposeOperation::TocLinking,
+                ComposeOperation::Cleanup,
+                ComposeOperation::Normalization,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_compose_operation_phase_mapping_is_complete() {
+        let expectations = [
+            (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
+            (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
+            (ComposeOperation::Interpolation, ComposePhase::InlinePre),
+            (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
+            (
+                ComposeOperation::BlockTransclusion,
+                ComposePhase::Transclusion,
+            ),
+            (
+                ComposeOperation::FrontmatterTransclusion,
+                ComposePhase::Transclusion,
+            ),
+            (
+                ComposeOperation::CodeTransclusion,
+                ComposePhase::Transclusion,
+            ),
+            (ComposeOperation::TocLinking, ComposePhase::Transclusion),
+            (ComposeOperation::Cleanup, ComposePhase::InlinePost),
+            (ComposeOperation::Normalization, ComposePhase::InlinePost),
+        ];
+
+        for (operation, expected_phase) in expectations {
+            assert_eq!(operation.phase(), expected_phase, "{operation:?}");
+        }
+    }
+
+    #[test]
+    fn test_compose_operation_all_is_complete_and_ordered() {
+        let all = ComposeOperation::all();
+        let collected = all.iter().collect::<Vec<_>>();
+        assert_eq!(collected, ComposeOperation::default_order());
+        assert_eq!(collected.len(), ComposeOperation::COUNT);
+    }
+
+    #[test]
     fn test_compose_options_only() {
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::TextReplacement, ComposeOperation::Interpolation]);
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::TextReplacement,
+            ComposeOperation::Interpolation,
+        ]);
 
         assert!(options.is_enabled(ComposeOperation::TextReplacement));
         assert!(options.is_enabled(ComposeOperation::Interpolation));
@@ -918,6 +1154,42 @@ mod tests {
         assert!(!options.is_enabled(ComposeOperation::TextReplacement));
         assert!(!options.is_enabled(ComposeOperation::Cleanup));
         assert!(!options.is_enabled(ComposeOperation::BlockTransclusion));
+    }
+
+    #[test]
+    fn test_compose_options_flat_builders() {
+        let handler: std::sync::Arc<dyn super::super::shell_expansion::ShellApprovalHandler> =
+            std::sync::Arc::new(TestApprovalHandler);
+        let options = ComposeOptions::new()
+            .with_shell_timeout(std::time::Duration::from_secs(3))
+            .with_shell_policy_root("/tmp/policy")
+            .with_shell_working_directory("/tmp/work")
+            .with_shell_approval_handler(handler)
+            .with_allow_remote_transclusion(true)
+            .with_allow_local_markdown(false)
+            .with_allow_local_code(false)
+            .with_max_transclusion_depth(4)
+            .with_ignore_invalid_references(Some(true))
+            .with_resolve_repo_root(false)
+            .with_code_fallback_language("md");
+
+        assert_eq!(options.shell_timeout, std::time::Duration::from_secs(3));
+        assert_eq!(
+            options.shell_policy_root,
+            Some(PathBuf::from("/tmp/policy"))
+        );
+        assert_eq!(
+            options.shell_working_directory,
+            Some(PathBuf::from("/tmp/work"))
+        );
+        assert!(options.shell_approval_handler.is_some());
+        assert!(options.allow_remote_transclusion);
+        assert!(!options.allow_local_markdown);
+        assert!(!options.allow_local_code);
+        assert_eq!(options.max_transclusion_depth, 4);
+        assert_eq!(options.ignore_invalid_references, Some(true));
+        assert!(!options.resolve_repo_root);
+        assert_eq!(options.code_fallback_language, "md");
     }
 
     #[test]
@@ -1004,5 +1276,19 @@ mod tests {
 
         assert_eq!(report.warnings.len(), 1);
         assert_eq!(report.warnings[0].message, "test warning");
+    }
+
+    struct TestApprovalHandler;
+
+    impl super::super::shell_expansion::ShellApprovalHandler for TestApprovalHandler {
+        fn approve(
+            &self,
+            _request: super::super::shell_expansion::ShellApprovalRequest,
+        ) -> Result<
+            super::super::shell_expansion::ShellApprovalDecision,
+            super::super::ShellExpansionError,
+        > {
+            Ok(super::super::shell_expansion::ShellApprovalDecision::Deny)
+        }
     }
 }

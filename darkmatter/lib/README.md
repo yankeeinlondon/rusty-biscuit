@@ -33,7 +33,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Hashing:** context aware hashing of both frontmatter and markdown prose
     - **Delta:** semantic and visual diff'ing tools for Markdown documents
     - **Cleaning:** cleanup a Markdown file to ensure standard based, and consistently using indentation, vertical spacing, etc.
-    - **Link Validation:** validate that all links (both file and images) are pointing at valid and accessible locations
+    - **Link Validation (planned):** validate that all links (both file and images) are pointing at valid and accessible locations
     - **Graph Visualizer:** view the full compositional graph of files from a specified base document
 
 ## Quick Start
@@ -58,12 +58,13 @@ Composition is probably the most powerful feature that Darkmatter has to offer. 
 
 The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
 
-- **Prepare** the document by mutating the body based on "state" or some external and measurable property
-    - _this includes operations like "text replacement", "interpolation", "TOC linking", "normalization" and more_
+- **Inline Pre** prepares the document by mutating the body based on "state" or some external and measurable property
+    - _this includes operations like text replacement, page blocks, interpolation, and shell expansion_
 - Perform **Transclusions**
     - _there are many types of transclusions a document can employ with directives_
     - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
         - If the base document, transcludes documents A, B, and C then all three documents can in turn transclude their own set of external resources.
+- **Inline Post** normalizes the fully combined markdown
 - and **Render** the combined document parts as a single document
     - by default rendering during the **compose** operation will return regular Markdown as plain text (no ANSI escape codes, no HTML/CSS, minimal to no inline HTML)
     - but of course that plain text Markdown can then be immediately transformed into any of the other output formats by leveraging Darkmatter's 

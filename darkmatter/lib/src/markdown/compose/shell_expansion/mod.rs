@@ -92,6 +92,7 @@ pub fn execute_directive(
 ) -> Result<String, ShellExpansionError> {
     // Resolve alias if the executable is not found on PATH
     let (effective, alias_name) = resolve_or_passthrough(directive);
+    let runtime_snapshot = shell_runtime.snapshot();
 
     let normalized = normalize_command(&effective.executable, &effective.args);
 
@@ -106,7 +107,7 @@ pub fn execute_directive(
 
     // 2. Check user blacklist (against resolved command)
     if check_user_blacklist(
-        &shell_runtime.user_blacklist,
+        &runtime_snapshot.user_blacklist,
         &effective.executable,
         &effective.args,
         &normalized,
@@ -119,12 +120,16 @@ pub fn execute_directive(
     }
 
     // 3. Check whitelist (against resolved command)
-    if check_whitelist(&shell_runtime.whitelist, &effective.executable, &normalized) {
+    if check_whitelist(
+        &runtime_snapshot.whitelist,
+        &effective.executable,
+        &normalized,
+    ) {
         return execute_and_handle_errors(&effective, options, &directive.error_handling);
     }
 
     // 4. Check allow-once
-    if shell_runtime.allow_once.contains(&normalized) {
+    if runtime_snapshot.allow_once.contains(&normalized) {
         return execute_and_handle_errors(&effective, options, &directive.error_handling);
     }
 
@@ -145,23 +150,16 @@ pub fn execute_directive(
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
                 store::append_whitelist_exact(policy_paths, &normalized)?;
-                shell_runtime
-                    .whitelist
-                    .entries
-                    .push(types::ShellRuleEntry::Exact(normalized));
+                shell_runtime.persist_whitelist_exact(normalized);
                 execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::AllowCommandPersist => {
                 store::append_whitelist_prefix(policy_paths, &effective.executable)?;
-                shell_runtime
-                    .whitelist
-                    .entries
-                    .push(types::ShellRuleEntry::Prefix(effective.executable.clone()));
+                shell_runtime.persist_whitelist_prefix(effective.executable.clone());
                 execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::AllowOnce => {
-                shell_runtime.allow_once.insert(normalized);
-                shell_runtime.approvals_used += 1;
+                shell_runtime.allow_once(normalized);
                 execute_and_handle_errors(&effective, options, &directive.error_handling)
             }
             ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
@@ -170,10 +168,7 @@ pub fn execute_directive(
             }),
             ShellApprovalDecision::BlacklistPersist => {
                 store::append_blacklist_exact(policy_paths, &normalized)?;
-                shell_runtime
-                    .user_blacklist
-                    .entries
-                    .push(types::ShellRuleEntry::Exact(normalized));
+                shell_runtime.persist_blacklist_exact(normalized);
                 Err(ShellExpansionError::Blacklisted {
                     command: display_command(directive, alias_name.as_deref()),
                     reason: "user blacklisted".to_string(),
@@ -535,7 +530,10 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .only(&[ComposeOperation::Interpolation, ComposeOperation::ShellExpansion])
+            .only(&[
+                ComposeOperation::Interpolation,
+                ComposeOperation::ShellExpansion,
+            ])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -565,13 +563,14 @@ name: world
         let handler = Arc::new(CountingApprovalHandler::new(
             ShellApprovalDecision::AllowOnce,
         ));
-        let options = ComposeOptions::new()
-            .with_source_file(&root)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                approval_handler: Some(handler.clone()),
-                ..Default::default()
-            });
+        let options =
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(handler.clone()),
+                    ..Default::default()
+                });
 
         let (composed, report) = Markdown::try_from(root.as_path())
             .unwrap()
@@ -581,6 +580,72 @@ name: world
         assert_eq!(handler.approvals(), 1);
         assert_eq!(report.shell_approvals_used, 1);
         assert_eq!(composed.content().matches("hello").count(), 2);
+    }
+
+    #[test]
+    fn allow_once_persists_across_sibling_transclusions() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("root.md");
+        let child_a = temp_dir.path().join("child-a.md");
+        let child_b = temp_dir.path().join("child-b.md");
+
+        std::fs::write(&root, "::file ./child-a.md\n\n::file ./child-b.md\n").unwrap();
+        std::fs::write(&child_a, "## A\n\n::shell echo hello\n").unwrap();
+        std::fs::write(&child_b, "## B\n\n::shell echo hello\n").unwrap();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+        let options =
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(handler.clone()),
+                    ..Default::default()
+                });
+
+        let (composed, report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap();
+
+        assert_eq!(handler.approvals(), 1);
+        assert_eq!(report.shell_approvals_used, 1);
+        assert_eq!(composed.content().matches("hello").count(), 2);
+    }
+
+    #[test]
+    fn shell_approval_counts_aggregate_from_multiple_children() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("root.md");
+        let child_a = temp_dir.path().join("child-a.md");
+        let child_b = temp_dir.path().join("child-b.md");
+
+        std::fs::write(&root, "::file ./child-a.md\n\n::file ./child-b.md\n").unwrap();
+        std::fs::write(&child_a, "## A\n\n::shell echo alpha\n").unwrap();
+        std::fs::write(&child_b, "## B\n\n::shell echo beta\n").unwrap();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+        let options =
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(handler.clone()),
+                    ..Default::default()
+                });
+
+        let (_composed, report) = Markdown::try_from(root.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap();
+
+        assert_eq!(handler.approvals(), 2);
+        assert_eq!(report.shell_approvals_used, 2);
+        assert_eq!(report.shell_expansions_applied, 2);
     }
 
     /// Regression test: when the source file is a bare filename (no directory

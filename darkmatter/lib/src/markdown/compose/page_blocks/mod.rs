@@ -1,8 +1,8 @@
 //! Page block conditional content regions.
 //!
 //! This module provides `::block when="..."` / `::end-block` paired directives
-//! that conditionally include or exclude document regions during Stage 2
-//! composition.
+//! that conditionally include or exclude document regions during the Inline Pre
+//! phase of composition.
 
 pub mod engine;
 pub mod parser;

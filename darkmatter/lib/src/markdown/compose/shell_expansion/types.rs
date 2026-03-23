@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::toc::MarkdownTocNode;
+use crate::markdown::types::MarkdownResult;
 
 /// Parsed `::shell` directive with raw command, executable, args, span, and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,13 +309,36 @@ impl ShellRuleSet {
 }
 
 /// Runtime state for shell expansion across recursive document composition.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShellExpansionRuntime {
+    shared: Arc<std::sync::Mutex<SharedShellExpansionRuntime>>,
+    pub approvals_used: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SharedShellExpansionRuntime {
+    allow_once: HashSet<String>,
+    whitelist: ShellRuleSet,
+    user_blacklist: ShellRuleSet,
+    policy_paths: Option<ShellPolicyPaths>,
+}
+
+impl Default for SharedShellExpansionRuntime {
+    fn default() -> Self {
+        Self {
+            allow_once: HashSet::new(),
+            whitelist: ShellRuleSet::default(),
+            user_blacklist: ShellRuleSet::default(),
+            policy_paths: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ShellRuntimeSnapshot {
     pub allow_once: HashSet<String>,
     pub whitelist: ShellRuleSet,
     pub user_blacklist: ShellRuleSet,
-    pub policy_paths: Option<ShellPolicyPaths>,
-    pub approvals_used: usize,
 }
 
 impl Default for ShellExpansionRuntime {
@@ -324,10 +350,7 @@ impl Default for ShellExpansionRuntime {
 impl ShellExpansionRuntime {
     pub fn new() -> Self {
         Self {
-            allow_once: HashSet::new(),
-            whitelist: ShellRuleSet::default(),
-            user_blacklist: ShellRuleSet::default(),
-            policy_paths: None,
+            shared: Arc::new(std::sync::Mutex::new(SharedShellExpansionRuntime::default())),
             approvals_used: 0,
         }
     }
@@ -336,10 +359,7 @@ impl ShellExpansionRuntime {
     /// blacklist state so that approvals persist across recursive transclusion.
     pub fn clone_for_child(&self) -> Self {
         Self {
-            allow_once: self.allow_once.clone(),
-            whitelist: self.whitelist.clone(),
-            user_blacklist: self.user_blacklist.clone(),
-            policy_paths: self.policy_paths.clone(),
+            shared: Arc::clone(&self.shared),
             approvals_used: 0,
         }
     }
@@ -353,13 +373,53 @@ impl ShellExpansionRuntime {
 
     /// Ensures policy files are loaded (loads on first call, skips subsequent calls).
     pub fn ensure_loaded(&mut self, paths: &ShellPolicyPaths) -> Result<(), ShellExpansionError> {
-        if self.policy_paths.is_some() {
+        let mut shared = self.shared.lock().unwrap();
+        if shared.policy_paths.is_some() {
             return Ok(());
         }
-        self.whitelist = super::store::load_ruleset(&paths.whitelist)?;
-        self.user_blacklist = super::store::load_ruleset(&paths.blacklist)?;
-        self.policy_paths = Some(paths.clone());
+        shared.whitelist = super::store::load_ruleset(&paths.whitelist)?;
+        shared.user_blacklist = super::store::load_ruleset(&paths.blacklist)?;
+        shared.policy_paths = Some(paths.clone());
         Ok(())
+    }
+
+    pub(crate) fn snapshot(&self) -> ShellRuntimeSnapshot {
+        let shared = self.shared.lock().unwrap();
+        ShellRuntimeSnapshot {
+            allow_once: shared.allow_once.clone(),
+            whitelist: shared.whitelist.clone(),
+            user_blacklist: shared.user_blacklist.clone(),
+        }
+    }
+
+    pub(crate) fn allow_once(&mut self, normalized: String) {
+        let mut shared = self.shared.lock().unwrap();
+        shared.allow_once.insert(normalized);
+        self.approvals_used += 1;
+    }
+
+    pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
+        let mut shared = self.shared.lock().unwrap();
+        shared
+            .whitelist
+            .entries
+            .push(ShellRuleEntry::Exact(normalized));
+    }
+
+    pub(crate) fn persist_whitelist_prefix(&mut self, executable: String) {
+        let mut shared = self.shared.lock().unwrap();
+        shared
+            .whitelist
+            .entries
+            .push(ShellRuleEntry::Prefix(executable));
+    }
+
+    pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {
+        let mut shared = self.shared.lock().unwrap();
+        shared
+            .user_blacklist
+            .entries
+            .push(ShellRuleEntry::Exact(normalized));
     }
 }
 
@@ -388,6 +448,13 @@ pub enum BlacklistRule {
 pub(crate) struct PipelineRuntime {
     pub transclusion: crate::markdown::compose::transclusion::TransclusionRuntime,
     pub shell: ShellExpansionRuntime,
+    cache: PipelineCache,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PipelineCache {
+    markdown_documents: Arc<std::sync::Mutex<std::collections::HashMap<String, Markdown>>>,
+    toc_headings: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<MarkdownTocNode>>>>,
 }
 
 impl PipelineRuntime {
@@ -397,6 +464,7 @@ impl PipelineRuntime {
                 max_depth,
             ),
             shell: ShellExpansionRuntime::new(),
+            cache: PipelineCache::default(),
         }
     }
 
@@ -406,6 +474,7 @@ impl PipelineRuntime {
         Self {
             transclusion: self.transclusion.clone_for_child(),
             shell: self.shell.clone_for_child(),
+            cache: self.cache.clone(),
         }
     }
 
@@ -413,6 +482,52 @@ impl PipelineRuntime {
     pub fn merge_child(&mut self, child: &Self) {
         self.transclusion.merge_child(&child.transclusion);
     }
+
+    pub fn load_markdown(&self, path: &std::path::Path) -> MarkdownResult<Markdown> {
+        let key = cache_key_for_path(path);
+        {
+            let cache = self.cache.markdown_documents.lock().unwrap();
+            if let Some(markdown) = cache.get(&key) {
+                return Ok(markdown.clone());
+            }
+        }
+
+        let markdown = Markdown::try_from(path)?;
+        let mut cache = self.cache.markdown_documents.lock().unwrap();
+        Ok(cache.entry(key).or_insert_with(|| markdown.clone()).clone())
+    }
+
+    pub fn load_toc_headings(
+        &self,
+        path: &std::path::Path,
+    ) -> std::io::Result<Vec<MarkdownTocNode>> {
+        let key = cache_key_for_path(path);
+        {
+            let cache = self.cache.toc_headings.lock().unwrap();
+            if let Some(headings) = cache.get(&key) {
+                return Ok(headings.clone());
+            }
+        }
+
+        let content = std::fs::read_to_string(path)?;
+        let markdown: Markdown = content.into();
+        let headings = markdown
+            .toc()
+            .all_headings()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut cache = self.cache.toc_headings.lock().unwrap();
+        Ok(cache.entry(key).or_insert_with(|| headings.clone()).clone())
+    }
+}
+
+fn cache_key_for_path(path: &std::path::Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
 }
 
 #[cfg(test)]

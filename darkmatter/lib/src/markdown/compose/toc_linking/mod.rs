@@ -1,11 +1,10 @@
 //! `::toc-linking` directive — generates markdown links to headings in
 //! referenced files.
 //!
-//! This is a Stage 1 (Preparation) compose step that runs between interpolation
-//! and cleanup. It scans the document for `::toc-linking` directives, reads
-//! the referenced markdown file(s), extracts their TOC, applies level/glob
-//! filtering and text cleanup, and replaces the directive with a bullet list
-//! of markdown links.
+//! This is a transclusion-phase compose step. It scans the document for
+//! `::toc-linking` directives, reads the referenced markdown file(s), extracts
+//! their TOC from raw source content, applies level/glob filtering and text
+//! cleanup, and replaces the directive with a bullet list of markdown links.
 //!
 //! ## Examples
 //!
@@ -27,17 +26,67 @@ mod render;
 mod types;
 
 pub use types::TocLinkingError;
+pub(crate) use types::{TocLinkingDirective, TocLinkingOptions};
 
+#[cfg(test)]
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion::resolve_path;
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
+use crate::markdown::toc::MarkdownTocNode;
 use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
 
+/// Parses all `::toc-linking` directives from document content.
+pub(crate) fn parse_directives(content: &str) -> Result<Vec<TocLinkingDirective>, TocLinkingError> {
+    parse_toc_linking_directives(content)
+}
+
+/// Resolves the first existing file in a toc-linking fallback chain.
+pub(crate) fn resolve_target_chain(
+    directive: &TocLinkingDirective,
+    source: &ComposeSource,
+    transclusion_options: &TransclusionOptions,
+) -> Result<Option<(String, std::path::PathBuf)>, TocLinkingError> {
+    for target in &directive.targets {
+        match resolve_file(target, transclusion_options, source, directive.line) {
+            Ok(path) => return Ok(Some((target.clone(), path))),
+            Err(_) => continue,
+        }
+    }
+
+    if directive.suppress_not_found || directive.targets.is_empty() {
+        Ok(None)
+    } else {
+        Err(TocLinkingError::FileNotFound {
+            path: directive.targets.join(", "),
+            line: directive.line,
+        })
+    }
+}
+
+/// Renders the markdown replacement for one resolved toc-linking directive.
+pub(crate) fn render_resolved_directive(
+    display_target: &str,
+    headings: &[MarkdownTocNode],
+    options: &TocLinkingOptions,
+    line: usize,
+) -> Result<String, TocLinkingError> {
+    let heading_filter =
+        HeadingFilter::new(&options.keep_patterns, &options.filter_patterns, line)?;
+    let heading_refs: Vec<&MarkdownTocNode> = headings.iter().collect();
+    Ok(render_toc_links(
+        &heading_refs,
+        display_target,
+        options,
+        &heading_filter,
+    ))
+}
+
 /// Processes all `::toc-linking` directives in the content.
 ///
 /// Returns the composed content and the number of directives expanded.
+#[cfg(test)]
 pub(crate) fn process_toc_linking(
     content: &str,
     source: &ComposeSource,
@@ -52,48 +101,23 @@ pub(crate) fn process_toc_linking(
     let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
 
     for directive in &directives {
-        let heading_filter = HeadingFilter::new(
-            &directive.options.keep_patterns,
-            &directive.options.filter_patterns,
-            directive.line,
-        )?;
+        if let Some((target, path)) = resolve_target_chain(directive, source, transclusion_options)?
+        {
+            let file_content = std::fs::read_to_string(&path)?;
+            let md: Markdown = file_content.as_str().into();
+            let headings = md
+                .toc()
+                .all_headings()
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>();
 
-        let mut found = false;
-
-        for target in &directive.targets {
-            match resolve_file(target, transclusion_options, source, directive.line) {
-                Ok(path) => {
-                    let file_content = std::fs::read_to_string(&path)?;
-                    let md: Markdown = file_content.as_str().into();
-                    let toc = md.toc();
-                    let headings = toc.all_headings();
-
-                    let replacement =
-                        render_toc_links(&headings, target, &directive.options, &heading_filter);
-
-                    replacements.push((directive.span.clone(), replacement));
-                    found = true;
-                    break;
-                }
-                Err(_) => {
-                    // Try next fallback in chain
-                    continue;
-                }
-            }
-        }
-
-        if !found {
-            if directive.suppress_not_found || directive.targets.is_empty() {
-                // Suppress: replace with empty_text or empty string
-                let replacement = directive.options.empty_text.clone().unwrap_or_default();
-                replacements.push((directive.span.clone(), replacement));
-            } else {
-                let paths = directive.targets.join(", ");
-                return Err(TocLinkingError::FileNotFound {
-                    path: paths,
-                    line: directive.line,
-                });
-            }
+            let replacement =
+                render_resolved_directive(&target, &headings, &directive.options, directive.line)?;
+            replacements.push((directive.span.clone(), replacement));
+        } else {
+            let replacement = directive.options.empty_text.clone().unwrap_or_default();
+            replacements.push((directive.span.clone(), replacement));
         }
     }
 

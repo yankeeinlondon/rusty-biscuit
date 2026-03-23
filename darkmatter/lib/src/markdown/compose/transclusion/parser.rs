@@ -29,7 +29,10 @@ pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, Transclusi
         let line = &content[line_start..line_end];
         let trimmed = line.trim();
 
-        if trimmed.starts_with("::") {
+        if trimmed.starts_with("::file")
+            || trimmed.starts_with("::code")
+            || trimmed.starts_with("::url")
+        {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
                 let (kind, raw_target, options) = parse_directive_line(trimmed, line_number)?;

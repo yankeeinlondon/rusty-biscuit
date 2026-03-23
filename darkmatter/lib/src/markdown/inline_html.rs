@@ -809,10 +809,7 @@ mod tests {
         assert_eq!(images[0].src(), Some("./photo.png"));
         assert_eq!(images[0].decoding(), ImageDecoding::Async);
         assert_eq!(images[0].fetch_priority(), FetchPriority::High);
-        assert_eq!(
-            images[0].sizes(),
-            Some("(max-width: 600px) 100vw, 50vw")
-        );
+        assert_eq!(images[0].sizes(), Some("(max-width: 600px) 100vw, 50vw"));
         assert_eq!(images[0].width(), Some(800));
         assert_eq!(images[0].height(), Some(600));
         assert_eq!(
