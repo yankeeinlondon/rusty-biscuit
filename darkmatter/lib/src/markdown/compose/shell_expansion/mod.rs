@@ -129,9 +129,9 @@ pub fn execute_directive(
     }
 
     // 5. Request approval or fail
-    if let Some(ref handler) = options.shell.approval_handler {
+    if let Some(ref handler) = options.shell_approval_handler {
         let request = ShellApprovalRequest {
-            source: options.transclusion.source.clone(),
+            source: options.source.clone(),
             line: directive.line,
             raw_command: effective.raw_command.clone(),
             executable: effective.executable.clone(),
@@ -201,7 +201,8 @@ fn execute_and_handle_errors(
     options: &ComposeOptions,
     error_handling: &types::ErrorHandling,
 ) -> Result<String, ShellExpansionError> {
-    let result = executor::execute_command(effective, &options.shell, &options.transclusion.source);
+    let shell_opts = options.shell_options();
+    let result = executor::execute_command(effective, &shell_opts, &options.source);
 
     // Fast path: no error handling configured or command succeeded
     if error_handling.is_empty() || result.is_ok() {
@@ -331,7 +332,7 @@ pub fn apply_replacements_in_reverse(
 mod integration_tests {
     use super::*;
     use crate::markdown::Markdown;
-    use crate::markdown::compose::{ComposeOptions, Stage1Stages};
+    use crate::markdown::compose::{ComposeOperation, ComposeOptions};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
@@ -384,10 +385,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -418,10 +416,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -445,10 +440,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -470,10 +462,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: None,
@@ -496,10 +485,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: None, // No handler needed - whitelisted
@@ -520,10 +506,7 @@ mod integration_tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -552,11 +535,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                interpolation: true,
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::Interpolation, ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -588,10 +567,6 @@ name: world
         ));
         let options = ComposeOptions::new()
             .with_source_file(&root)
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::default()
-            })
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(handler.clone()),
@@ -622,10 +597,7 @@ name: world
 
         let options = ComposeOptions::new()
             .with_source_file(&file_path)
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -647,10 +619,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -671,10 +640,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -699,10 +665,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -727,10 +690,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -753,10 +713,7 @@ name: world
 
         let options = ComposeOptions::new()
             .with_fail_fast(false)
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -777,10 +734,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -804,10 +758,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -834,10 +785,7 @@ name: world
         let md: Markdown = content.as_str().into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -863,10 +811,7 @@ name: world
         let md: Markdown = content.as_str().into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -893,10 +838,7 @@ name: world
         let md: Markdown = content.as_str().into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -917,10 +859,7 @@ name: world
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -947,10 +886,7 @@ name: world
         let md: Markdown = content.as_str().into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
@@ -977,10 +913,7 @@ name: world
         let md: Markdown = content.as_str().into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                shell_expansion: true,
-                ..Stage1Stages::none()
-            })
+            .only(&[ComposeOperation::ShellExpansion])
             .with_shell(ShellExpansionOptions {
                 policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {

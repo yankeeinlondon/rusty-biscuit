@@ -90,15 +90,24 @@ pub struct DependencyNode {
 }
 
 /// Runtime state for recursive transclusion.
+///
+/// Tracks recursion depth and cycle detection across potentially
+/// concurrent transclusion resolution. The `active` set is shared
+/// via `Arc<Mutex>` so that concurrent children can detect cycles
+/// against siblings and ancestors.
 #[derive(Debug, Clone)]
 pub struct TransclusionRuntime {
+    /// Per-branch call stack for depth tracking.
     stack: Vec<DependencyNode>,
 
     /// Maximum recursion depth allowed.
     pub max_depth: usize,
 
-    /// Deepest depth observed.
+    /// Deepest depth observed across all branches.
     pub deepest_seen: usize,
+
+    /// Active source IDs for cycle detection (shared across threads).
+    active: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl TransclusionRuntime {
@@ -108,17 +117,36 @@ impl TransclusionRuntime {
             stack: Vec::new(),
             max_depth,
             deepest_seen: 0,
+            active: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
         }
     }
 
     /// Enters a dependency node and validates cycle/depth constraints.
     pub fn enter(&mut self, id: String) -> Result<(), TransclusionError> {
+        // Check local stack for cycle (provides chain for error message)
         if let Some(idx) = self.stack.iter().position(|n| n.id == id) {
             let mut chain: Vec<String> = self.stack[idx..].iter().map(|n| n.id.clone()).collect();
             chain.push(id);
             return Err(TransclusionError::CycleDetected { chain });
         }
 
+        // Check shared active set for cross-thread cycle detection
+        {
+            let active = self.active.lock().unwrap();
+            if active.contains(&id) {
+                return Err(TransclusionError::CycleDetected {
+                    chain: vec![id],
+                });
+            }
+        }
+
+        // Register in both local stack and shared active set
+        {
+            let mut active = self.active.lock().unwrap();
+            active.insert(id.clone());
+        }
         self.stack.push(DependencyNode { id });
         self.deepest_seen = self.deepest_seen.max(self.stack.len());
 
@@ -133,12 +161,31 @@ impl TransclusionRuntime {
 
     /// Exits the current dependency node.
     pub fn exit(&mut self) {
-        let _ = self.stack.pop();
+        if let Some(node) = self.stack.pop() {
+            let mut active = self.active.lock().unwrap();
+            active.remove(&node.id);
+        }
     }
 
     /// Current recursion depth.
     pub fn depth(&self) -> usize {
         self.stack.len()
+    }
+
+    /// Creates a child runtime sharing cycle detection but with an
+    /// independent depth counter starting one level deeper.
+    pub fn clone_for_child(&self) -> Self {
+        Self {
+            stack: self.stack.clone(),
+            max_depth: self.max_depth,
+            deepest_seen: self.deepest_seen,
+            active: self.active.clone(),
+        }
+    }
+
+    /// Merges a child's stats back into this runtime.
+    pub fn merge_child(&mut self, child: &Self) {
+        self.deepest_seen = self.deepest_seen.max(child.deepest_seen);
     }
 }
 

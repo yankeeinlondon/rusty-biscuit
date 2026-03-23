@@ -38,7 +38,7 @@ use render::render_toc_links;
 /// Processes all `::toc-linking` directives in the content.
 ///
 /// Returns the composed content and the number of directives expanded.
-pub fn process_toc_linking(
+pub(crate) fn process_toc_linking(
     content: &str,
     source: &ComposeSource,
     transclusion_options: &TransclusionOptions,
@@ -246,11 +246,11 @@ mod tests {
             .into();
         let options = ComposeOptions::new()
             .with_source_file(&source_path)
-            .with_stages(crate::markdown::compose::Stage1Stages {
-                toc_linking: false,
-                ..Default::default()
-            })
-            .with_stage2(crate::markdown::compose::Stage2Stages::none());
+            .disable(crate::markdown::compose::ComposeOperation::TocLinking)
+            .disable(crate::markdown::compose::ComposeOperation::PageBlocks)
+            .disable(crate::markdown::compose::ComposeOperation::BlockTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
         let (result, report) = md.compose_with(options).unwrap();
         // Directive should remain in content when stage is disabled
@@ -270,7 +270,10 @@ mod tests {
             .into();
         let options = ComposeOptions::new()
             .with_source_file(&source_path)
-            .with_stage2(crate::markdown::compose::Stage2Stages::none());
+            .disable(crate::markdown::compose::ComposeOperation::PageBlocks)
+            .disable(crate::markdown::compose::ComposeOperation::BlockTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
+            .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
         let (_, report) = md.compose_with(options).unwrap();
         assert!(report.toc_links_generated > 0);

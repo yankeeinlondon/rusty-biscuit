@@ -6,7 +6,7 @@ use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
 
 /// Resolves a directive target into a canonical local path or URL.
-pub fn resolve_target(
+pub(crate) fn resolve_target(
     kind: DirectiveKind,
     raw_target: &str,
     options: &TransclusionOptions,
@@ -49,7 +49,7 @@ fn resolve_url_target(
 /// `vault:`, `%` (recursive), and `{{ENV}}` interpolation references.
 /// Relative paths are resolved from the source file's directory (not CWD)
 /// since transclusion context is file-relative.
-pub fn resolve_path(
+pub(crate) fn resolve_path(
     raw_target: &str,
     options: &TransclusionOptions,
     source: &ComposeSource,

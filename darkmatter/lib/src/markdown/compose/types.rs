@@ -1,21 +1,125 @@
 //! Type definitions for the compose pipeline.
 //!
 //! This module contains the core types used by the compose pipeline:
+//! - `ComposeOperation` - Enumeration of every discrete pipeline operation
+//! - `ComposePhase` - Execution phase grouping for operations
 //! - `ComposeOptions` - Configuration for compose execution
 //! - `ComposeContext` - Runtime context captured at compose start
 //! - `ComposeReport` - Results and diagnostics from compose execution
-//! - `Stage1Stages` - Toggle flags for Stage 1 preparation stages
-//! - `Stage2Stages` - Toggle flags for Stage 2 transclusion stages
 
 use super::super::normalize::NormalizationReport;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use url::Url;
 
-/// Configuration options for the compose pipeline.
+/// Every discrete operation in the compose pipeline.
 ///
-/// This struct controls which stages run and provides external state
-/// for interpolation and replacement operations.
+/// Operations are grouped into three phases for execution:
+/// - **Inline Pre**: serial, runs before transclusion
+/// - **Transclusion**: concurrent, recursive document inclusion
+/// - **Inline Post**: serial, runs after transclusion
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeOperation {
+    /// Applies the frontmatter `replace` map to substitute text
+    /// patterns throughout the document body.
+    TextReplacement,
+
+    /// Evaluates `::block when="..."` / `::end-block` conditional
+    /// regions and removes blocks whose conditions are false.
+    PageBlocks,
+
+    /// Expands `{{variable}}` handlebars expressions using frontmatter,
+    /// environment variables, and context variables.
+    Interpolation,
+
+    /// Executes approved `::shell` directives and replaces them
+    /// with the command's stdout output.
+    ShellExpansion,
+
+    /// Resolves `::file` and `::url` directives by including the
+    /// referenced markdown document (recursively composed).
+    BlockTransclusion,
+
+    /// Resolves `prologue` and `epilogue` frontmatter references
+    /// by prepending/appending the referenced documents.
+    FrontmatterTransclusion,
+
+    /// Resolves `::code` directives by including file content
+    /// as a fenced code block.
+    CodeTransclusion,
+
+    /// Expands `::toc-linking` directives by generating a linked
+    /// table of contents from an external document's headings.
+    TocLinking,
+
+    /// Normalizes markdown formatting: injects blank lines between
+    /// block elements and aligns table columns.
+    Cleanup,
+
+    /// Adjusts heading levels to ensure a valid hierarchy
+    /// (e.g., no H3 before an H2).
+    Normalization,
+}
+
+/// The execution phase an operation belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposePhase {
+    /// Serial operations before transclusion.
+    InlinePre,
+    /// Concurrent recursive document inclusion.
+    Transclusion,
+    /// Serial operations after transclusion.
+    InlinePost,
+}
+
+impl ComposeOperation {
+    /// Returns the default phase this operation belongs to.
+    pub fn phase(&self) -> ComposePhase {
+        match self {
+            Self::TextReplacement
+            | Self::PageBlocks
+            | Self::Interpolation
+            | Self::ShellExpansion => ComposePhase::InlinePre,
+
+            Self::BlockTransclusion
+            | Self::FrontmatterTransclusion
+            | Self::CodeTransclusion
+            | Self::TocLinking => ComposePhase::Transclusion,
+
+            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+        }
+    }
+
+    /// Returns all operations in their default execution order.
+    pub fn default_order() -> &'static [ComposeOperation] {
+        &[
+            // Inline Pre (serial)
+            Self::TextReplacement,
+            Self::PageBlocks,
+            Self::Interpolation,
+            Self::ShellExpansion,
+            // Transclusion (concurrent)
+            Self::BlockTransclusion,
+            Self::FrontmatterTransclusion,
+            Self::CodeTransclusion,
+            Self::TocLinking,
+            // Inline Post (serial)
+            Self::Cleanup,
+            Self::Normalization,
+        ]
+    }
+
+    /// Returns the set of all operations.
+    pub fn all() -> HashSet<ComposeOperation> {
+        Self::default_order().iter().copied().collect()
+    }
+}
+
+/// Configuration for the compose pipeline.
+///
+/// Controls which operations run, how transclusion resolves references,
+/// and provides external state for interpolation and replacement.
 ///
 /// ## Construction
 ///
@@ -25,79 +129,172 @@ use url::Url;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::ComposeOptions;
+/// use darkmatter::markdown::compose::{ComposeOptions, ComposeOperation};
 ///
-/// // Default options with all stages enabled
+/// // Default: all operations enabled
 /// let options = ComposeOptions::new();
 ///
-/// // Disable cleanup stage
+/// // Disable cleanup and normalization
 /// let options = ComposeOptions::new()
-///     .with_stages(darkmatter::markdown::compose::Stage1Stages {
-///         cleanup: false,
-///         ..Default::default()
-///     });
+///     .disable(ComposeOperation::Cleanup)
+///     .disable(ComposeOperation::Normalization);
+///
+/// // Only run specific operations
+/// let options = ComposeOptions::new()
+///     .only(&[ComposeOperation::TextReplacement, ComposeOperation::Interpolation]);
 /// ```
 #[derive(Clone)]
 pub struct ComposeOptions {
-    /// Controls which Stage 1 stages are enabled.
-    pub stages: Stage1Stages,
+    // ── Operation control ──────────────────────────────────────────
 
-    /// Controls which Stage 2 stages are enabled.
-    pub stage2: Stage2Stages,
-
-    /// Stage 2 transclusion options.
-    pub transclusion: TransclusionOptions,
-
-    /// Shell expansion options.
-    pub shell: super::shell_expansion::ShellExpansionOptions,
-
-    /// External state to merge with frontmatter for interpolation/replacement.
+    /// Set of operations to execute.
     ///
-    /// When present, this state is merged with document frontmatter using
-    /// deep merge semantics in the effective state builder.
-    pub external_state: Option<serde_json::Value>,
+    /// Defaults to all operations. Use `disable()` or `only()` to
+    /// restrict which operations run.
+    pub enabled_operations: HashSet<ComposeOperation>,
 
-    /// Override values that overwrite existing frontmatter keys.
-    ///
-    /// Unlike `external_state` which only fills in missing/null keys,
-    /// these values unconditionally overwrite frontmatter properties.
-    pub set_overrides: Option<serde_json::Value>,
+    // ── Error handling ─────────────────────────────────────────────
 
-    /// Controls how blank lines between list items are handled during cleanup.
-    pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
-
-    /// Indentation width (spaces per nesting level) for list cleanup.
-    /// Defaults to `DEFAULT_INDENT` (4 spaces).
-    pub indent_size: usize,
-
-    /// If true, the pipeline returns an error on first failure.
-    /// If false, failures are recorded as warnings and the pipeline continues.
+    /// When `true`, the pipeline returns an error on the first failure.
+    /// When `false` (default), failures are recorded as warnings and
+    /// the pipeline continues with remaining operations.
     pub fail_fast: bool,
 
-    /// Internal flag: when true, external `replace` keys override document
-    /// `replace` keys for this compose invocation only.
+    // ── Source context ─────────────────────────────────────────────
+
+    /// Source location of the document being composed.
+    ///
+    /// Required for transclusion to resolve relative `::file` paths.
+    /// Set via `with_source_file()` or `with_source_url()`.
+    pub source: ComposeSource,
+
+    // ── State and data ─────────────────────────────────────────────
+
+    /// External state merged with frontmatter for interpolation and
+    /// replacement. Missing or null frontmatter keys are filled from
+    /// this value using deep-merge semantics.
+    pub external_state: Option<serde_json::Value>,
+
+    /// Override values that unconditionally overwrite frontmatter keys.
+    ///
+    /// Unlike `external_state` which only fills missing/null keys,
+    /// these values always win regardless of what the frontmatter says.
+    pub set_overrides: Option<serde_json::Value>,
+
+    // ── Transclusion ───────────────────────────────────────────────
+
+    /// Maximum recursive transclusion depth before the pipeline
+    /// returns an error. Prevents infinite `::file` chains.
+    /// Default: 16.
+    pub max_transclusion_depth: usize,
+
+    /// Whether `::url` remote transclusion is allowed.
+    ///
+    /// Disabled by default for security. When false, `::url` directives
+    /// are skipped (or error if `fail_fast` is true).
+    pub allow_remote_transclusion: bool,
+
+    /// Whether `::file` can include local markdown documents.
+    /// Default: true.
+    pub allow_local_markdown: bool,
+
+    /// Whether `::code` can include local text files as code blocks.
+    /// Default: true.
+    pub allow_local_code: bool,
+
+    /// Language tag applied to `::code` blocks when the file extension
+    /// is unknown or unmapped. Default: `"txt"`.
+    pub code_fallback_language: String,
+
+    /// Overrides the default behavior for invalid transclusion references.
+    ///
+    /// - `None`: use the document's frontmatter `ignore_invalid` setting
+    /// - `Some(true)`: silently skip invalid references
+    /// - `Some(false)`: treat invalid references as errors
+    pub ignore_invalid_references: Option<bool>,
+
+    /// Whether `@`-prefixed paths resolve to the git repository root.
+    /// Default: true.
+    pub resolve_repo_root: bool,
+
+    // ── Shell expansion ────────────────────────────────────────────
+
+    /// Maximum execution time for a single `::shell` command.
+    /// Default: 10 seconds.
+    pub shell_timeout: std::time::Duration,
+
+    /// Root directory for shell expansion policy files.
+    ///
+    /// When set, only commands matching an approval policy in this
+    /// directory (or its ancestors) are allowed to execute.
+    pub shell_policy_root: Option<PathBuf>,
+
+    /// Working directory for `::shell` command execution.
+    ///
+    /// When `None`, commands run in the directory of the source file
+    /// (if known) or the current working directory.
+    pub shell_working_directory: Option<PathBuf>,
+
+    /// Callback for interactive shell command approval.
+    ///
+    /// When set, commands that require approval call this handler
+    /// before execution. When `None`, unapproved commands are skipped.
+    pub shell_approval_handler: Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
+
+    // ── Cleanup ────────────────────────────────────────────────────
+
+    /// Controls how blank lines between list items are handled
+    /// during the cleanup operation. Default: `Normal`.
+    pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
+
+    /// Number of spaces per nesting level for list indentation
+    /// during cleanup. Default: 4.
+    pub indent_size: usize,
+
+    // ── Internal (crate-private) ───────────────────────────────────
+
+    /// Runtime context captured at construction time (timestamps,
+    /// environment variables).
+    context: ComposeContext,
+
+    /// When true, external `replace` keys override document `replace`
+    /// keys (used during recursive transclusion to inherit parent
+    /// replacements).
     pub(crate) replace_parent_wins: bool,
 
-    /// Internal one-off replace map applied only to this document's
-    /// replacement stage (never propagated to children).
+    /// One-off replace map applied only to this document's replacement
+    /// stage, never propagated to children.
     pub(crate) one_off_replace: Option<serde_json::Map<String, serde_json::Value>>,
-
-    /// Runtime context captured at construction time.
-    context: ComposeContext,
 }
 
 impl std::fmt::Debug for ComposeOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComposeOptions")
-            .field("stages", &self.stages)
-            .field("stage2", &self.stage2)
-            .field("transclusion", &self.transclusion)
-            .field("shell", &self.shell)
+            .field("enabled_operations", &self.enabled_operations)
+            .field("fail_fast", &self.fail_fast)
+            .field("source", &self.source)
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
+            .field("max_transclusion_depth", &self.max_transclusion_depth)
+            .field("allow_remote_transclusion", &self.allow_remote_transclusion)
+            .field("allow_local_markdown", &self.allow_local_markdown)
+            .field("allow_local_code", &self.allow_local_code)
+            .field("code_fallback_language", &self.code_fallback_language)
+            .field("ignore_invalid_references", &self.ignore_invalid_references)
+            .field("resolve_repo_root", &self.resolve_repo_root)
+            .field("shell_timeout", &self.shell_timeout)
+            .field("shell_policy_root", &self.shell_policy_root)
+            .field("shell_working_directory", &self.shell_working_directory)
+            .field(
+                "shell_approval_handler",
+                if self.shell_approval_handler.is_some() {
+                    &"Some(..)"
+                } else {
+                    &"None"
+                },
+            )
             .field("list_spacing", &self.list_spacing)
             .field("indent_size", &self.indent_size)
-            .field("fail_fast", &self.fail_fast)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("context", &self.context)
@@ -106,25 +303,34 @@ impl std::fmt::Debug for ComposeOptions {
 }
 
 impl ComposeOptions {
-    /// Creates new compose options with default stages and captured context.
+    /// Creates new compose options with all operations enabled and captured context.
     ///
     /// This is the only way to construct `ComposeOptions` because the
     /// runtime context must be captured at a known point in time for
     /// deterministic output.
     pub fn new() -> Self {
         Self {
-            stages: Stage1Stages::default(),
-            stage2: Stage2Stages::default(),
-            transclusion: TransclusionOptions::default(),
-            shell: super::shell_expansion::ShellExpansionOptions::default(),
+            enabled_operations: ComposeOperation::all(),
+            fail_fast: false,
+            source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
+            max_transclusion_depth: 16,
+            allow_remote_transclusion: false,
+            allow_local_markdown: true,
+            allow_local_code: true,
+            code_fallback_language: "txt".to_string(),
+            ignore_invalid_references: None,
+            resolve_repo_root: true,
+            shell_timeout: std::time::Duration::from_secs(10),
+            shell_policy_root: None,
+            shell_working_directory: None,
+            shell_approval_handler: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
             indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
-            fail_fast: false,
+            context: ComposeContext::capture(),
             replace_parent_wins: false,
             one_off_replace: None,
-            context: ComposeContext::capture(),
         }
     }
 
@@ -133,45 +339,36 @@ impl ComposeOptions {
         &self.context
     }
 
-    /// Sets the stages configuration.
+    /// Disables a single operation.
     #[must_use]
-    pub fn with_stages(mut self, stages: Stage1Stages) -> Self {
-        self.stages = stages;
+    pub fn disable(mut self, op: ComposeOperation) -> Self {
+        self.enabled_operations.remove(&op);
         self
     }
 
-    /// Sets the Stage 2 stages configuration.
+    /// Enables only the specified operations, disabling everything else.
     #[must_use]
-    pub fn with_stage2(mut self, stage2: Stage2Stages) -> Self {
-        self.stage2 = stage2;
+    pub fn only(mut self, ops: &[ComposeOperation]) -> Self {
+        self.enabled_operations = ops.iter().copied().collect();
         self
     }
 
-    /// Sets transclusion options.
-    #[must_use]
-    pub fn with_transclusion(mut self, transclusion: TransclusionOptions) -> Self {
-        self.transclusion = transclusion;
-        self
-    }
-
-    /// Sets shell expansion options.
-    #[must_use]
-    pub fn with_shell(mut self, shell: super::shell_expansion::ShellExpansionOptions) -> Self {
-        self.shell = shell;
-        self
+    /// Returns true if the given operation is enabled.
+    pub fn is_enabled(&self, op: ComposeOperation) -> bool {
+        self.enabled_operations.contains(&op)
     }
 
     /// Sets the compose source as a file path.
     #[must_use]
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.transclusion.source = ComposeSource::File(path.into());
+        self.source = ComposeSource::File(path.into());
         self
     }
 
     /// Sets the compose source as a URL.
     #[must_use]
     pub fn with_source_url(mut self, url: Url) -> Self {
-        self.transclusion.source = ComposeSource::Url(url);
+        self.source = ComposeSource::Url(url);
         self
     }
 
@@ -210,6 +407,46 @@ impl ComposeOptions {
         self
     }
 
+    /// Sets shell expansion options from a `ShellExpansionOptions` struct.
+    #[must_use]
+    pub fn with_shell(mut self, shell: super::shell_expansion::ShellExpansionOptions) -> Self {
+        self.shell_timeout = shell.timeout;
+        self.shell_policy_root = shell.policy_root;
+        self.shell_working_directory = shell.working_directory;
+        self.shell_approval_handler = shell.approval_handler;
+        self
+    }
+
+    /// Returns a `TransclusionOptions` view of the transclusion-related fields.
+    ///
+    /// Used internally to pass transclusion config to resolver and TOC linking
+    /// functions without coupling them to the full `ComposeOptions` type.
+    pub(crate) fn transclusion_options(&self) -> TransclusionOptions {
+        TransclusionOptions {
+            source: self.source.clone(),
+            max_depth: self.max_transclusion_depth,
+            allow_remote: self.allow_remote_transclusion,
+            allow_local_markdown: self.allow_local_markdown,
+            allow_local_code_text: self.allow_local_code,
+            code_fallback_language: self.code_fallback_language.clone(),
+            ignore_invalid: self.ignore_invalid_references,
+            resolve_repo_root: self.resolve_repo_root,
+        }
+    }
+
+    /// Returns a `ShellExpansionOptions` view of the shell-related fields.
+    ///
+    /// Used internally to pass shell config to executor and policy functions
+    /// without coupling them to the full `ComposeOptions` type.
+    pub(crate) fn shell_options(&self) -> super::shell_expansion::ShellExpansionOptions {
+        super::shell_expansion::ShellExpansionOptions {
+            timeout: self.shell_timeout,
+            policy_root: self.shell_policy_root.clone(),
+            working_directory: self.shell_working_directory.clone(),
+            approval_handler: self.shell_approval_handler.clone(),
+        }
+    }
+
     /// Internal builder: toggles parent-wins behavior for the `replace` map.
     #[must_use]
     pub(crate) fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
@@ -241,163 +478,6 @@ impl Default for ComposeOptions {
     }
 }
 
-/// Controls which Stage 1 stages are enabled.
-///
-/// By default, all stages are enabled. Disable individual stages
-/// for partial processing or debugging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Stage1Stages {
-    /// Text replacement stage (frontmatter `replace` map).
-    pub replacement: bool,
-
-    /// Frontmatter interpolation stage (`{{variable}}` expansion).
-    pub interpolation: bool,
-
-    /// TOC linking stage (`::toc-linking` directive expansion).
-    pub toc_linking: bool,
-
-    /// Shell expansion stage (`::shell` directive execution).
-    pub shell_expansion: bool,
-
-    /// Markdown cleanup stage (formatting normalization).
-    pub cleanup: bool,
-
-    /// Heading normalization stage (level adjustment).
-    pub normalization: bool,
-}
-
-impl Default for Stage1Stages {
-    fn default() -> Self {
-        Self {
-            replacement: true,
-            interpolation: true,
-            toc_linking: true,
-            shell_expansion: true,
-            cleanup: true,
-            normalization: true,
-        }
-    }
-}
-
-impl Stage1Stages {
-    /// Creates stages with all disabled.
-    pub fn none() -> Self {
-        Self {
-            replacement: false,
-            interpolation: false,
-            toc_linking: false,
-            shell_expansion: false,
-            cleanup: false,
-            normalization: false,
-        }
-    }
-
-    /// Creates stages with only the specified stages enabled.
-    pub fn only_replacement() -> Self {
-        Self {
-            replacement: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only interpolation enabled.
-    pub fn only_interpolation() -> Self {
-        Self {
-            interpolation: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only toc_linking enabled.
-    pub fn only_toc_linking() -> Self {
-        Self {
-            toc_linking: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only shell_expansion enabled.
-    pub fn only_shell_expansion() -> Self {
-        Self {
-            shell_expansion: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only cleanup enabled.
-    pub fn only_cleanup() -> Self {
-        Self {
-            cleanup: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only normalization enabled.
-    pub fn only_normalization() -> Self {
-        Self {
-            normalization: true,
-            ..Self::none()
-        }
-    }
-}
-
-/// Controls which Stage 2 transclusion stages are enabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Stage2Stages {
-    /// Page block conditional regions (`::block` / `::end-block`).
-    pub page_blocks: bool,
-
-    /// Block directive transclusion (`::file`, `::code`, `::url`).
-    pub block_transclusion: bool,
-
-    /// Frontmatter transclusion (`prologue`, `epilogue`).
-    pub fm_transclusion: bool,
-}
-
-impl Default for Stage2Stages {
-    fn default() -> Self {
-        Self {
-            page_blocks: true,
-            block_transclusion: true,
-            fm_transclusion: true,
-        }
-    }
-}
-
-impl Stage2Stages {
-    /// Creates stages with all disabled.
-    pub fn none() -> Self {
-        Self {
-            page_blocks: false,
-            block_transclusion: false,
-            fm_transclusion: false,
-        }
-    }
-
-    /// Creates stages with only page blocks enabled.
-    pub fn only_page_blocks() -> Self {
-        Self {
-            page_blocks: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only block transclusion enabled.
-    pub fn only_block() -> Self {
-        Self {
-            block_transclusion: true,
-            ..Self::none()
-        }
-    }
-
-    /// Creates stages with only frontmatter transclusion enabled.
-    pub fn only_frontmatter() -> Self {
-        Self {
-            fm_transclusion: true,
-            ..Self::none()
-        }
-    }
-}
 
 /// Source context for compose execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,9 +497,14 @@ impl ComposeSource {
     }
 }
 
-/// Transclusion-specific options for Stage 2.
+/// Transclusion-specific options (internal convenience type).
+///
+/// These fields are mirrored on `ComposeOptions` for the public API.
+/// This struct exists so internal functions (resolver, toc_linking) can
+/// receive only the transclusion-related fields without coupling to
+/// the full `ComposeOptions` type.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransclusionOptions {
+pub(crate) struct TransclusionOptions {
     /// Source context of the document being composed.
     pub source: ComposeSource,
 
@@ -754,44 +839,39 @@ mod tests {
     fn test_compose_options_default_stages() {
         let options = ComposeOptions::new();
 
-        assert!(options.stages.replacement);
-        assert!(options.stages.interpolation);
-        assert!(options.stages.cleanup);
-        assert!(options.stages.normalization);
-        assert!(options.stage2.block_transclusion);
-        assert!(options.stage2.fm_transclusion);
+        assert!(options.is_enabled(ComposeOperation::TextReplacement));
+        assert!(options.is_enabled(ComposeOperation::Interpolation));
+        assert!(options.is_enabled(ComposeOperation::Cleanup));
+        assert!(options.is_enabled(ComposeOperation::Normalization));
+        assert!(options.is_enabled(ComposeOperation::BlockTransclusion));
+        assert!(options.is_enabled(ComposeOperation::FrontmatterTransclusion));
     }
 
     #[test]
     fn test_transclusion_options_defaults() {
         let options = ComposeOptions::new();
-        assert_eq!(options.transclusion.max_depth, 16);
+        assert_eq!(options.max_transclusion_depth, 16);
         assert!(matches!(
-            options.transclusion.source,
+            options.source,
             ComposeSource::Unknown
         ));
-        assert_eq!(options.transclusion.code_fallback_language, "txt");
+        assert_eq!(options.code_fallback_language, "txt");
     }
 
     #[test]
     fn test_compose_options_builder_pattern() {
-        let options = ComposeOptions::new()
-            .with_stages(Stage1Stages {
-                cleanup: false,
-                ..Default::default()
-            })
-            .with_stage2(Stage2Stages::only_block())
-            .with_transclusion(TransclusionOptions {
-                max_depth: 8,
-                ..Default::default()
-            })
+        let mut options = ComposeOptions::new()
+            .disable(ComposeOperation::Cleanup)
+            .only(&[ComposeOperation::BlockTransclusion, ComposeOperation::CodeTransclusion])
             .with_fail_fast(true)
             .with_external_state(serde_json::json!({"key": "value"}));
 
-        assert!(!options.stages.cleanup);
-        assert!(options.stage2.block_transclusion);
-        assert!(!options.stage2.fm_transclusion);
-        assert_eq!(options.transclusion.max_depth, 8);
+        options.max_transclusion_depth = 8;
+
+        assert!(!options.is_enabled(ComposeOperation::Cleanup));
+        assert!(options.is_enabled(ComposeOperation::BlockTransclusion));
+        assert!(!options.is_enabled(ComposeOperation::FrontmatterTransclusion));
+        assert_eq!(options.max_transclusion_depth, 8);
         assert!(options.fail_fast);
         assert!(options.external_state.is_some());
     }
@@ -806,53 +886,38 @@ mod tests {
     }
 
     #[test]
-    fn test_stage1_stages_default_all_enabled() {
-        let stages = Stage1Stages::default();
+    fn test_compose_options_enable_disable() {
+        let mut options = ComposeOptions::new();
 
-        assert!(stages.replacement);
-        assert!(stages.interpolation);
-        assert!(stages.cleanup);
-        assert!(stages.normalization);
+        // All operations enabled by default
+        assert!(options.is_enabled(ComposeOperation::TextReplacement));
+        assert!(options.is_enabled(ComposeOperation::Cleanup));
+
+        // Disable cleanup
+        options = options.disable(ComposeOperation::Cleanup);
+        assert!(!options.is_enabled(ComposeOperation::Cleanup));
+        assert!(options.is_enabled(ComposeOperation::TextReplacement));
     }
 
     #[test]
-    fn test_stage1_stages_none() {
-        let stages = Stage1Stages::none();
+    fn test_compose_options_only() {
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::TextReplacement, ComposeOperation::Interpolation]);
 
-        assert!(!stages.replacement);
-        assert!(!stages.interpolation);
-        assert!(!stages.cleanup);
-        assert!(!stages.normalization);
+        assert!(options.is_enabled(ComposeOperation::TextReplacement));
+        assert!(options.is_enabled(ComposeOperation::Interpolation));
+        assert!(!options.is_enabled(ComposeOperation::Cleanup));
+        assert!(!options.is_enabled(ComposeOperation::Normalization));
+        assert!(!options.is_enabled(ComposeOperation::BlockTransclusion));
     }
 
     #[test]
-    fn test_stage1_stages_only_methods() {
-        let r = Stage1Stages::only_replacement();
-        assert!(r.replacement && !r.interpolation && !r.cleanup && !r.normalization);
+    fn test_compose_options_only_empty() {
+        let options = ComposeOptions::new().only(&[]);
 
-        let i = Stage1Stages::only_interpolation();
-        assert!(!i.replacement && i.interpolation && !i.cleanup && !i.normalization);
-
-        let c = Stage1Stages::only_cleanup();
-        assert!(!c.replacement && !c.interpolation && c.cleanup && !c.normalization);
-
-        let n = Stage1Stages::only_normalization();
-        assert!(!n.replacement && !n.interpolation && !n.cleanup && n.normalization);
-    }
-
-    #[test]
-    fn test_stage2_stages_only_methods() {
-        let none = Stage2Stages::none();
-        assert!(!none.block_transclusion);
-        assert!(!none.fm_transclusion);
-
-        let block = Stage2Stages::only_block();
-        assert!(block.block_transclusion);
-        assert!(!block.fm_transclusion);
-
-        let fm = Stage2Stages::only_frontmatter();
-        assert!(!fm.block_transclusion);
-        assert!(fm.fm_transclusion);
+        assert!(!options.is_enabled(ComposeOperation::TextReplacement));
+        assert!(!options.is_enabled(ComposeOperation::Cleanup));
+        assert!(!options.is_enabled(ComposeOperation::BlockTransclusion));
     }
 
     #[test]

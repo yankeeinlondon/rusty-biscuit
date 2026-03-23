@@ -1,30 +1,40 @@
-//! Stage 1 compose pipeline for markdown document preparation.
+//! Compose pipeline for markdown document preparation and transclusion.
 //!
 //! This module provides the `compose()` family of methods on `Markdown`
-//! for running preparation compositions in a fixed order:
+//! for running operations in three phases:
 //!
+//! **Inline Pre** (serial):
 //! 1. **Text Replacement** - Replace literal strings from frontmatter `replace` map
-//! 2. **Interpolation** - Expand `{{variable}}` expressions
-//! 3. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 2. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
+//! 3. **Interpolation** - Expand `{{variable}}` expressions
 //! 4. **Shell Expansion** - Execute `::shell` directives with security controls
-//! 5. **Cleanup** - Normalize markdown formatting
-//! 6. **Normalization** - Adjust heading levels
+//!
+//! **Transclusion** (serial):
+//! 5. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 6. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 7. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 8. **Code Transclusion** - Include `::code` file content as fenced blocks
+//!
+//! **Inline Post** (serial):
+//! 9. **Cleanup** - Normalize markdown formatting
+//! 10. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
 //! ```
 //! use darkmatter::markdown::Markdown;
-//! use darkmatter::markdown::compose::ComposeOptions;
+//! use darkmatter::markdown::compose::{ComposeOptions, ComposeOperation};
 //!
 //! let content = "# Hello\nWorld";
 //! let mut md: Markdown = content.into();
 //!
-//! // Transform with default options
+//! // Transform with default options (all operations enabled)
 //! let report = md.compose_mut().unwrap();
 //!
-//! // Transform with custom options
+//! // Transform with specific operations disabled
 //! let options = ComposeOptions::new()
-//!     .with_fail_fast(true);
+//!     .disable(ComposeOperation::Cleanup)
+//!     .disable(ComposeOperation::Normalization);
 //! let report = md.compose_with(options).unwrap();
 //! ```
 
@@ -45,9 +55,12 @@ pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOptions, ComposeReport, ComposeSource, ComposeWarning, Stage1Stages,
-    Stage2Stages, TransclusionOptions,
+    ComposeContext, ComposeOperation, ComposeOptions, ComposePhase, ComposeReport, ComposeSource,
+    ComposeWarning,
 };
+
+// Internal re-exports for crate modules that still use TransclusionOptions
+pub(crate) use types::TransclusionOptions;
 
 use super::Markdown;
 use super::cleanup;
@@ -89,16 +102,13 @@ impl Markdown {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::compose::{ComposeOptions, Stage1Stages};
+    /// use darkmatter::markdown::compose::{ComposeOperation, ComposeOptions};
     ///
     /// let content = "# Test\nContent";
     /// let md: Markdown = content.into();
     ///
     /// let options = ComposeOptions::new()
-    ///     .with_stages(Stage1Stages {
-    ///         normalization: false,
-    ///         ..Default::default()
-    ///     });
+    ///     .disable(ComposeOperation::Normalization);
     ///
     /// let (composed, report) = md.compose_with(options).unwrap();
     /// ```
@@ -134,17 +144,23 @@ impl Markdown {
     /// Internal pipeline runner.
     fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         let mut runtime =
-            shell_expansion::types::PipelineRuntime::new(options.transclusion.max_depth);
+            shell_expansion::types::PipelineRuntime::new(options.max_transclusion_depth);
         self.run_compose_pipeline_internal(options, &mut runtime)
     }
 
     /// Internal recursive pipeline runner shared by root and child documents.
+    ///
+    /// Executes operations in three phases:
+    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion
+    /// 2. **Transclusion** (serial for now): BlockTransclusion, FrontmatterTransclusion,
+    ///    CodeTransclusion, TocLinking
+    /// 3. **Inline Post** (serial): Cleanup, Normalization
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
         options: ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
-        let source_id = match &options.transclusion.source {
+        let source_id = match &options.source {
             ComposeSource::Unknown => None,
             ComposeSource::File(path) => Some(
                 std::fs::canonicalize(path)
@@ -204,24 +220,39 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .build();
 
-            // Stage 1: Text Replacement
-            if options.stages.replacement {
+            // ── Phase 1: Inline Pre (serial) ──────────────────────────────
+
+            // Text Replacement
+            if options.is_enabled(ComposeOperation::TextReplacement) {
                 let replacements = self.run_replacement_stage(&effective_state, &options);
                 report.replacements_applied = replacements;
             }
 
-            // Stage 1: Interpolation
-            if options.stages.interpolation {
+            // Page Blocks (conditional content regions)
+            if options.is_enabled(ComposeOperation::PageBlocks) {
+                self.run_page_blocks_stage(&effective_state, &mut report)?;
+            }
+
+            // Interpolation
+            if options.is_enabled(ComposeOperation::Interpolation) {
                 let interpolations = self.run_interpolation_stage(&effective_state, &options)?;
                 report.interpolations_applied = interpolations;
             }
 
-            // Stage 1: TOC Linking
-            if options.stages.toc_linking {
+            // Shell Expansion
+            if options.is_enabled(ComposeOperation::ShellExpansion) {
+                self.run_shell_expansion_stage(&options, runtime, &mut report)?;
+            }
+
+            // ── Phase 2: Transclusion (serial) ────────────────────────────
+
+            // TOC Linking
+            if options.is_enabled(ComposeOperation::TocLinking) {
+                let transclusion_opts = options.transclusion_options();
                 match toc_linking::process_toc_linking(
                     &self.content,
-                    &options.transclusion.source,
-                    &options.transclusion,
+                    &options.source,
+                    &transclusion_opts,
                     options.fail_fast,
                 ) {
                     Ok((new_content, count)) => {
@@ -237,13 +268,32 @@ impl Markdown {
                 }
             }
 
-            // Stage 1: Shell Expansion
-            if options.stages.shell_expansion {
-                self.run_shell_expansion_stage(&options, runtime, &mut report)?;
+            // Block Transclusion (::file, ::url) and Code Transclusion (::code)
+            if options.is_enabled(ComposeOperation::BlockTransclusion)
+                || options.is_enabled(ComposeOperation::CodeTransclusion)
+            {
+                self.run_block_transclusion_stage(
+                    &effective_state,
+                    &options,
+                    runtime,
+                    &mut report,
+                )?;
             }
 
-            // Stage 1: Cleanup
-            if options.stages.cleanup {
+            // Frontmatter Transclusion (prologue/epilogue)
+            if options.is_enabled(ComposeOperation::FrontmatterTransclusion) {
+                self.run_frontmatter_transclusion_stage(
+                    &effective_state,
+                    &options,
+                    runtime,
+                    &mut report,
+                )?;
+            }
+
+            // ── Phase 3: Inline Post (serial) ─────────────────────────────
+
+            // Cleanup
+            if options.is_enabled(ComposeOperation::Cleanup) {
                 let original_content = self.content.clone();
                 self.content = match options.list_spacing {
                     cleanup::ListSpacingMode::Normal => {
@@ -263,8 +313,8 @@ impl Markdown {
                 report.cleanup_changed = self.content != original_content;
             }
 
-            // Stage 1: Normalization
-            if options.stages.normalization {
+            // Normalization
+            if options.is_enabled(ComposeOperation::Normalization) {
                 match self.run_normalization_stage() {
                     Ok(norm_report) => {
                         if norm_report.has_changes() {
@@ -284,31 +334,6 @@ impl Markdown {
                         )));
                     }
                 }
-            }
-
-            // Stage 2: page blocks (conditional content regions).
-            if options.stage2.page_blocks {
-                self.run_page_blocks_stage(&effective_state, &mut report)?;
-            }
-
-            // Stage 2: block transclusion directives.
-            if options.stage2.block_transclusion {
-                self.run_block_transclusion_stage(
-                    &effective_state,
-                    &options,
-                    runtime,
-                    &mut report,
-                )?;
-            }
-
-            // Stage 2: frontmatter prologue/epilogue transclusion.
-            if options.stage2.fm_transclusion {
-                self.run_frontmatter_transclusion_stage(
-                    &effective_state,
-                    &options,
-                    runtime,
-                    &mut report,
-                )?;
             }
 
             report.max_transclusion_depth = runtime.transclusion.deepest_seen;
@@ -425,8 +450,9 @@ impl Markdown {
             return Ok(());
         }
 
+        let shell_opts = options.shell_options();
         let policy_paths =
-            shell_expansion::resolve_policy_paths(&options.shell, &options.transclusion.source)?;
+            shell_expansion::resolve_policy_paths(&shell_opts, &options.source)?;
         runtime.shell.ensure_loaded(&policy_paths)?;
 
         let mut replacements = Vec::new();
@@ -478,7 +504,11 @@ impl Markdown {
         Ok(())
     }
 
-    /// Runs Stage 2 block transclusion directives.
+    /// Runs block transclusion directives (::file, ::code, ::url) concurrently.
+    ///
+    /// Directives are parsed and filtered serially, then resolved concurrently
+    /// using Rayon. Results are applied in reverse source order to preserve
+    /// byte offsets.
     fn run_block_transclusion_stage(
         &mut self,
         state: &EffectiveState,
@@ -486,15 +516,47 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
+        use rayon::prelude::*;
+
         let directives = transclusion::parse_directives(&self.content)?;
         if directives.is_empty() {
             return Ok(());
         }
 
         let ignore_invalid = self.resolve_ignore_invalid(options);
-        let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+        let transclusion_opts = options.transclusion_options();
+
+        // Phase 1: Filter and resolve targets serially (cheap operations,
+        // condition evaluation needs consistent state).
+        enum PreparedDirective {
+            /// Ready to resolve (render child document or code block).
+            Resolve {
+                directive: transclusion::BlockDirective,
+                resolved: transclusion::ResolvedTarget,
+            },
+            /// Already resolved to a fixed replacement (skipped, URL disabled, etc.).
+            Fixed {
+                span: std::ops::Range<usize>,
+                replacement: String,
+            },
+        }
+
+        let mut prepared: Vec<PreparedDirective> = Vec::new();
 
         for directive in directives {
+            // Skip ::code directives if CodeTransclusion is disabled
+            if directive.kind == transclusion::DirectiveKind::Code
+                && !options.is_enabled(ComposeOperation::CodeTransclusion)
+            {
+                continue;
+            }
+            // Skip ::file/::url directives if BlockTransclusion is disabled
+            if directive.kind != transclusion::DirectiveKind::Code
+                && !options.is_enabled(ComposeOperation::BlockTransclusion)
+            {
+                continue;
+            }
+
             for unknown in &directive.options.unknown_options {
                 report.add_warning(
                     ComposeWarning::new(
@@ -513,7 +575,10 @@ impl Markdown {
                 let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
                 if !should_include {
                     report.transclusions_skipped += 1;
-                    replacements.push((directive.span.clone(), String::new()));
+                    prepared.push(PreparedDirective::Fixed {
+                        span: directive.span.clone(),
+                        replacement: String::new(),
+                    });
                     continue;
                 }
             }
@@ -522,8 +587,8 @@ impl Markdown {
             let resolved = match transclusion::resolve_target(
                 directive.kind,
                 &target,
-                &options.transclusion,
-                &options.transclusion.source,
+                &transclusion_opts,
+                &options.source,
                 directive.line,
             ) {
                 Ok(resolved) => resolved,
@@ -533,63 +598,167 @@ impl Markdown {
                         ComposeWarning::new("transclusion", err.to_string())
                             .at_line(directive.line),
                     );
-                    replacements.push((directive.span.clone(), String::new()));
+                    prepared.push(PreparedDirective::Fixed {
+                        span: directive.span.clone(),
+                        replacement: String::new(),
+                    });
                     continue;
                 }
                 Err(err) => return Err(err.into()),
             };
 
-            let replacement = match (directive.kind, resolved) {
-                (
-                    transclusion::DirectiveKind::File,
-                    transclusion::ResolvedTarget::File { path, .. },
-                ) => self.render_markdown_transclusion(
-                    &path,
-                    Some((directive.span.start, directive.line)),
-                    &directive.options,
-                    state,
-                    options,
-                    runtime,
-                    report,
-                )?,
-                (
-                    transclusion::DirectiveKind::Code,
-                    transclusion::ResolvedTarget::File { path, .. },
-                ) => self.render_code_transclusion(&path, &directive.options, state, options)?,
-                (
-                    transclusion::DirectiveKind::Url,
-                    transclusion::ResolvedTarget::Url { url, .. },
-                ) => {
-                    if ignore_invalid {
-                        report.transclusions_skipped += 1;
-                        report.add_warning(
-                            ComposeWarning::new(
-                                "transclusion",
-                                format!(
-                                    "Skipping URL transclusion '{}': remote execution disabled",
-                                    url
-                                ),
-                            )
-                            .at_line(directive.line),
-                        );
-                        String::new()
-                    } else {
-                        return Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                            url: url.to_string(),
-                        }
-                        .into());
-                    }
-                }
-                (_, target) => {
-                    return Err(transclusion::TransclusionError::UnsupportedReferenceType {
-                        reference: target.id().to_string(),
+            // Handle URL transclusion (disabled by default — resolve immediately)
+            if let transclusion::ResolvedTarget::Url { ref url, .. } = resolved {
+                if ignore_invalid {
+                    report.transclusions_skipped += 1;
+                    report.add_warning(
+                        ComposeWarning::new(
+                            "transclusion",
+                            format!(
+                                "Skipping URL transclusion '{}': remote execution disabled",
+                                url
+                            ),
+                        )
+                        .at_line(directive.line),
+                    );
+                    prepared.push(PreparedDirective::Fixed {
+                        span: directive.span.clone(),
+                        replacement: String::new(),
+                    });
+                    continue;
+                } else {
+                    return Err(transclusion::TransclusionError::UrlExecutionDisabled {
+                        url: url.to_string(),
                     }
                     .into());
                 }
-            };
+            }
 
-            report.transclusions_applied += 1;
-            replacements.push((directive.span.clone(), replacement));
+            prepared.push(PreparedDirective::Resolve {
+                directive,
+                resolved,
+            });
+        }
+
+        if prepared.is_empty() {
+            return Ok(());
+        }
+
+        // Phase 2: Resolve directives concurrently with Rayon.
+        // Each resolution creates independent child Markdown documents.
+        let runtime_mutex = std::sync::Mutex::new(runtime);
+
+        struct TransclusionResult {
+            span: std::ops::Range<usize>,
+            replacement: String,
+            child_report: ComposeReport,
+            /// True if this was an actual resolution (not a pre-resolved skip).
+            is_resolved: bool,
+        }
+
+        let results: Vec<Result<TransclusionResult, MarkdownError>> = prepared
+            .into_par_iter()
+            .map(|item| match item {
+                PreparedDirective::Fixed { span, replacement } => Ok(TransclusionResult {
+                    span,
+                    replacement,
+                    child_report: ComposeReport::new(),
+                    is_resolved: false,
+                }),
+                PreparedDirective::Resolve {
+                    directive,
+                    resolved,
+                } => {
+                    let span = directive.span.clone();
+                    match (directive.kind, resolved) {
+                        (
+                            transclusion::DirectiveKind::File,
+                            transclusion::ResolvedTarget::File { path, .. },
+                        ) => {
+                            let mut child_runtime = {
+                                let rt = runtime_mutex.lock().unwrap();
+                                rt.clone_for_child()
+                            };
+                            let mut child_report = ComposeReport::new();
+                            let result = self.render_markdown_transclusion(
+                                &path,
+                                Some((directive.span.start, directive.line)),
+                                &directive.options,
+                                state,
+                                options,
+                                &mut child_runtime,
+                                &mut child_report,
+                            );
+                            {
+                                let mut rt = runtime_mutex.lock().unwrap();
+                                rt.merge_child(&child_runtime);
+                            }
+                            result.map(|s| TransclusionResult {
+                                span,
+                                replacement: s,
+                                child_report,
+                                is_resolved: true,
+                            })
+                        }
+                        (
+                            transclusion::DirectiveKind::Code,
+                            transclusion::ResolvedTarget::File { path, .. },
+                        ) => self
+                            .render_code_transclusion(
+                                &path,
+                                &directive.options,
+                                state,
+                                options,
+                            )
+                            .map(|s| TransclusionResult {
+                                span,
+                                replacement: s,
+                                child_report: ComposeReport::new(),
+                                is_resolved: true,
+                            }),
+                        (_, target) => {
+                            Err(transclusion::TransclusionError::UnsupportedReferenceType {
+                                reference: target.id().to_string(),
+                            }
+                            .into())
+                        }
+                    }
+                }
+            })
+            .collect();
+
+        // Phase 3: Apply results in reverse source order to preserve offsets.
+        let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+
+        for result in results {
+            match result {
+                Ok(tr) => {
+                    if tr.is_resolved {
+                        report.transclusions_applied +=
+                            tr.child_report.transclusions_applied + 1;
+                    }
+                    report.transclusions_skipped += tr.child_report.transclusions_skipped;
+                    for warning in tr.child_report.warnings {
+                        report.add_warning(warning);
+                    }
+                    replacements.push((tr.span, tr.replacement));
+                }
+                Err(e) => {
+                    // Cycle detection and depth errors are always fatal
+                    // regardless of fail_fast setting.
+                    let is_structural = matches!(
+                        e,
+                        MarkdownError::Transclusion(
+                            transclusion::TransclusionError::CycleDetected { .. }
+                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                        )
+                    );
+                    if is_structural || options.fail_fast {
+                        return Err(e);
+                    }
+                    report.add_warning(ComposeWarning::new("transclusion", e.to_string()));
+                }
+            }
         }
 
         if replacements.is_empty() {
@@ -702,11 +871,12 @@ impl Markdown {
             transclusion::DirectiveKind::File
         };
 
+        let transclusion_opts = options.transclusion_options();
         let resolved = match transclusion::resolve_target(
             kind,
             reference,
-            &options.transclusion,
-            &options.transclusion.source,
+            &transclusion_opts,
+            &options.source,
             0,
         ) {
             Ok(resolved) => resolved,
@@ -772,7 +942,7 @@ impl Markdown {
                 _ => None,
             });
         child_options.external_state = Some(inherited);
-        child_options.transclusion.source = ComposeSource::File(path.to_path_buf());
+        child_options.source = ComposeSource::File(path.to_path_buf());
 
         let mut child = Markdown::try_from(path)?;
         let child_report = child.run_compose_pipeline_internal(child_options, runtime)?;
@@ -858,7 +1028,7 @@ impl Markdown {
         };
 
         let language =
-            transclusion::infer_language(path, &options.transclusion.code_fallback_language);
+            transclusion::infer_language(path, &options.code_fallback_language);
         let fenced = transclusion::wrap_in_code_block(&replaced, &language);
         let spaced = transclusion::ensure_vertical_spacing(&fenced);
         Ok(self.apply_wrappers(spaced, directive_options))
@@ -913,7 +1083,7 @@ impl Markdown {
     }
 
     fn resolve_ignore_invalid(&self, options: &ComposeOptions) -> bool {
-        if let Some(value) = options.transclusion.ignore_invalid {
+        if let Some(value) = options.ignore_invalid_references {
             return value;
         }
 
@@ -972,11 +1142,9 @@ mod tests {
         let content = "# Hello\n\nWorld";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages {
-            cleanup: false,
-            normalization: false,
-            ..Default::default()
-        });
+        let options = ComposeOptions::new()
+            .disable(ComposeOperation::Cleanup)
+            .disable(ComposeOperation::Normalization);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -991,7 +1159,7 @@ mod tests {
         let content = "# Header\nParagraph";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_cleanup());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1005,7 +1173,7 @@ mod tests {
         let content = "# Hello\n\n## World";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_normalization());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Normalization]);
 
         let (_, report) = md.compose_with(options).unwrap();
 
@@ -1053,7 +1221,7 @@ mod tests {
         let content = "# Header\nParagraph";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::none());
+        let options = ComposeOptions::new().only(&[]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1138,7 +1306,7 @@ mod tests {
         let content = "---\nreplace:\n  foo: bar\n---\n# Hello foo\n\nContent with foo here.";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1153,7 +1321,7 @@ mod tests {
         let content = "---\nreplace:\n  foo: short\n  foobar: long\n---\nfoobar and foo";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1167,7 +1335,7 @@ mod tests {
         let content = "---\nreplace:\n  foo: foobar\n  foobar: baz\n---\nfoo";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1181,7 +1349,7 @@ mod tests {
         let content = "---\nreplace:\n  remove_me: null\n---\nHello remove_me world";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1194,7 +1362,7 @@ mod tests {
         let content = "---\nreplace:\n  VERSION: 42\n---\nVersion: VERSION";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1207,7 +1375,7 @@ mod tests {
         let content = "---\ntitle: Test\n---\n# Hello foo";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1223,7 +1391,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_replacement())
+            .only(&[ComposeOperation::TextReplacement])
             .with_external_state(serde_json::json!({
                 "replace": {"foo": "bar"}
             }));
@@ -1241,7 +1409,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_replacement())
+            .only(&[ComposeOperation::TextReplacement])
             .with_external_state(serde_json::json!({
                 "replace": {"foo": "from_external"}
             }));
@@ -1257,7 +1425,7 @@ mod tests {
         let content = "---\nreplace:\n  a: b\n---\na a a";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_replacement());
+        let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
         let (_, report) = md.compose_with(options).unwrap();
 
@@ -1273,14 +1441,8 @@ mod tests {
         let md: Markdown = content.into();
 
         // Enable both replacement and cleanup
-        let options = ComposeOptions::new().with_stages(Stage1Stages {
-            replacement: true,
-            interpolation: false,
-            toc_linking: false,
-            shell_expansion: false,
-            cleanup: true,
-            normalization: false,
-        });
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::TextReplacement, ComposeOperation::Cleanup]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1302,7 +1464,7 @@ mod tests {
         let content = "---\nname: Alice\n---\n# Hello {{ name }}!";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1315,7 +1477,7 @@ mod tests {
         let content = "---\nuser:\n  name: Bob\n---\nWelcome {{ user.name }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1328,7 +1490,7 @@ mod tests {
         let content = "---\ntitle: Test\n---\nHello {{ missing }}!";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1342,7 +1504,7 @@ mod tests {
         let content = "---\ntitle: Test\n---\nColor: {{ color | \"unknown\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1355,7 +1517,7 @@ mod tests {
         let content = "---\ncolor: blue\n---\nColor: {{ color | \"unknown\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1368,7 +1530,7 @@ mod tests {
         let content = "---\nactive: true\n---\nStatus: {{ active ? \"on\" : \"off\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1381,7 +1543,7 @@ mod tests {
         let content = "---\nactive: false\n---\nStatus: {{ active ? \"on\" : \"off\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1394,7 +1556,7 @@ mod tests {
         let content = "---\ncount: 5\n---\n{{ count == 5 ? \"five\" : \"other\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1407,7 +1569,7 @@ mod tests {
         let content = "---\ncount: 10\n---\n{{ count > 5 ? \"many\" : \"few\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1420,7 +1582,7 @@ mod tests {
         let content = "---\nfirst: Alice\nlast: Smith\n---\n{{ first }} {{ last }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1433,7 +1595,7 @@ mod tests {
         let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1447,7 +1609,7 @@ mod tests {
         let content = "---\nname: Alice\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1462,7 +1624,7 @@ mod tests {
         let content = "---\nname: Alice\n---\n# Just plain text";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1476,7 +1638,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_interpolation())
+            .only(&[ComposeOperation::Interpolation])
             .with_external_state(serde_json::json!({"name": "External"}));
 
         let (composed, report) = md.compose_with(options).unwrap();
@@ -1491,7 +1653,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_interpolation())
+            .only(&[ComposeOperation::Interpolation])
             .with_external_state(serde_json::json!({"name": "External"}));
 
         let (composed, report) = md.compose_with(options).unwrap();
@@ -1506,7 +1668,7 @@ mod tests {
         let content = "---\nbackup: second\n---\nValue: {{ missing | backup | \"default\" }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1521,7 +1683,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_interpolation())
+            .only(&[ComposeOperation::Interpolation])
             .with_fail_fast(false);
 
         let (composed, report) = md.compose_with(options).unwrap();
@@ -1537,7 +1699,7 @@ mod tests {
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::only_interpolation())
+            .only(&[ComposeOperation::Interpolation])
             .with_fail_fast(true);
 
         let err = md.compose_with(options).unwrap_err();
@@ -1563,7 +1725,7 @@ mod tests {
         let content = "---\na: 1\nb: 2\n---\n{{ a }} {{ b }}";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (_, report) = md.compose_with(options).unwrap();
 
@@ -1628,14 +1790,8 @@ Hello :wave: {{ greeting }} :smile:"#;
 
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages {
-            replacement: true,
-            interpolation: true,
-            toc_linking: false,
-            shell_expansion: false,
-            cleanup: false,
-            normalization: false,
-        });
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::TextReplacement, ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -1660,7 +1816,7 @@ Rounded: {{ round(pi) }}"#;
 
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages::only_interpolation());
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
         let (composed, report) = md.compose_with(options).unwrap();
 
@@ -2373,8 +2529,7 @@ Rounded: {{ round(pi) }}"#;
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::none())
-            .with_stage2(Stage2Stages::only_page_blocks());
+            .only(&[ComposeOperation::PageBlocks]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
@@ -2399,8 +2554,7 @@ Rounded: {{ round(pi) }}"#;
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::none())
-            .with_stage2(Stage2Stages::only_page_blocks());
+            .only(&[ComposeOperation::PageBlocks]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
@@ -2420,10 +2574,8 @@ Rounded: {{ round(pi) }}"#;
             "---\nshow: true\n---\n\n::block when=\"show\"\n\nShown: {{show}}\n\n::end-block\n";
         let md: Markdown = content.into();
 
-        let options = ComposeOptions::new().with_stages(Stage1Stages {
-            interpolation: true,
-            ..Stage1Stages::none()
-        });
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation, ComposeOperation::PageBlocks]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(
@@ -2441,8 +2593,7 @@ Rounded: {{ round(pi) }}"#;
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::none())
-            .with_stage2(Stage2Stages::only_page_blocks());
+            .only(&[ComposeOperation::PageBlocks]);
 
         let (_, report) = md.compose_with(options).unwrap();
         assert_eq!(report.page_blocks_rendered, 1);
@@ -2462,8 +2613,7 @@ Rounded: {{ round(pi) }}"#;
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
-            .with_stages(Stage1Stages::none())
-            .with_stage2(Stage2Stages::none());
+            .only(&[]);
 
         let (composed, report) = md.compose_with(options).unwrap();
         assert!(

@@ -332,6 +332,18 @@ impl ShellExpansionRuntime {
         }
     }
 
+    /// Creates a child runtime inheriting allow-once, whitelist, and
+    /// blacklist state so that approvals persist across recursive transclusion.
+    pub fn clone_for_child(&self) -> Self {
+        Self {
+            allow_once: self.allow_once.clone(),
+            whitelist: self.whitelist.clone(),
+            user_blacklist: self.user_blacklist.clone(),
+            policy_paths: self.policy_paths.clone(),
+            approvals_used: 0,
+        }
+    }
+
     /// Returns the number of approvals used since the last call and resets the counter.
     pub fn take_recent_approval_count(&mut self) -> usize {
         let count = self.approvals_used;
@@ -386,6 +398,20 @@ impl PipelineRuntime {
             ),
             shell: ShellExpansionRuntime::new(),
         }
+    }
+
+    /// Creates a child runtime sharing cycle detection and inheriting
+    /// shell expansion state (whitelists, allow-once, blacklists).
+    pub fn clone_for_child(&self) -> Self {
+        Self {
+            transclusion: self.transclusion.clone_for_child(),
+            shell: self.shell.clone_for_child(),
+        }
+    }
+
+    /// Merges a child runtime's stats back into this runtime.
+    pub fn merge_child(&mut self, child: &Self) {
+        self.transclusion.merge_child(&child.transclusion);
     }
 }
 
