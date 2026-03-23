@@ -203,7 +203,8 @@ impl StreamThinkingRenderer {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::optimistic_terminal(None))
+        Prose::new(format!("<dim><i>{safe}</i></dim>"))
+            .render(&crate::log::optimistic_terminal(None))
     }
 }
 
@@ -860,7 +861,10 @@ struct ErrorParser {
 }
 
 impl StreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) -> std::result::Result<Option<StreamChunk>, StreamParseError> {
+    fn feed_line(
+        &mut self,
+        _line: &str,
+    ) -> std::result::Result<Option<StreamChunk>, StreamParseError> {
         Ok(None)
     }
 

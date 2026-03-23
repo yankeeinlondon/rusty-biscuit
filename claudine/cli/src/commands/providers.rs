@@ -48,8 +48,9 @@ pub fn run() -> Result<()> {
 
     for provider in PROVIDERS_DISPLAY_ORDER {
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent =
-            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link)
+            .render(&crate::log::optimistic_terminal(None))
+            .into();
 
         table.add_row(vec![
             provider_cell,

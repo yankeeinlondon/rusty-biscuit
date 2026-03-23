@@ -102,9 +102,7 @@ pub(crate) fn log_wrapper_header(
         let available = term_width.saturating_sub(used);
         let truncated = truncate_args(&escaped, available);
         let prose_safe = truncated.replace('<', "\\<");
-        header_parts.push(
-            Prose::new(format!("<dim>{prose_safe}</dim>")).render(term),
-        );
+        header_parts.push(Prose::new(format!("<dim>{prose_safe}</dim>")).render(term));
     }
 
     log::message(&format!("\n{}\n", header_parts.join(" ")));

@@ -610,8 +610,7 @@ mod tests {
     fn thinking_delta_emits_thinking_chunk() {
         let mut parser = make_parser();
 
-        let init =
-            r#"{"type":"init","session_id":"sess-think","model":"claude-opus-4-6"}"#;
+        let init = r#"{"type":"init","session_id":"sess-think","model":"claude-opus-4-6"}"#;
         parser.feed_line(init).unwrap();
 
         let thinking = r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Let me analyze this..."}}"#;
@@ -629,8 +628,7 @@ mod tests {
     fn thinking_and_text_deltas_interleaved() {
         let mut parser = make_parser();
 
-        let init =
-            r#"{"type":"init","session_id":"sess-mix","model":"claude-opus-4-6"}"#;
+        let init = r#"{"type":"init","session_id":"sess-mix","model":"claude-opus-4-6"}"#;
         parser.feed_line(init).unwrap();
 
         let thinking = r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Reasoning..."}}"#;

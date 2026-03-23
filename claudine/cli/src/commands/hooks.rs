@@ -234,7 +234,10 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 
     log::data("");
     let header = Prose::new("{{yellow}}{{bold}}⚠ Invalid sound effects:{{reset}}");
-    log::data(&format!(" {}", header.render(&crate::log::optimistic_terminal(Some(100)))));
+    log::data(&format!(
+        " {}",
+        header.render(&crate::log::optimistic_terminal(Some(100)))
+    ));
 
     let mut has_fixable = false;
     for effect in &invalid_effects {
@@ -262,12 +265,18 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
         let hint = Prose::new(
             "{{dim}}Edit {{blue}}~/.claudine/config.json{{reset}}{{dim}} to apply suggested fixes{{reset}}",
         );
-        log::data(&format!(" {}", hint.render(&crate::log::optimistic_terminal(Some(100)))));
+        log::data(&format!(
+            " {}",
+            hint.render(&crate::log::optimistic_terminal(Some(100)))
+        ));
     }
     let hint = Prose::new(
         "{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}",
     );
-    log::data(&format!(" {}", hint.render(&crate::log::optimistic_terminal(Some(100)))));
+    log::data(&format!(
+        " {}",
+        hint.render(&crate::log::optimistic_terminal(Some(100)))
+    ));
 
     invalid_effects
 }
@@ -845,14 +854,17 @@ fn run_simple(
 
                 // Use Prose to render the colored output
                 let text = formatted.join(", ");
-                Prose::new(text).render(&crate::log::optimistic_terminal(None)).into()
+                Prose::new(text)
+                    .render(&crate::log::optimistic_terminal(None))
+                    .into()
             }
         };
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent =
-            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link)
+            .render(&crate::log::optimistic_terminal(None))
+            .into();
 
         table.add_row(vec![provider_cell, bool_indicator(installed), hooks_cell]);
     }
@@ -880,7 +892,10 @@ fn run_simple(
             "{{{{dim}}}}- Legend: {}{{{{reset}}}}",
             legend_parts.join(", ")
         ));
-        log::data(&format!(" {}", legend.render(&crate::log::optimistic_terminal(Some(120)))));
+        log::data(&format!(
+            " {}",
+            legend.render(&crate::log::optimistic_terminal(Some(120)))
+        ));
     }
 
     // Show hints about available flags
@@ -935,8 +950,9 @@ fn run_verbose(
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent =
-            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link)
+            .render(&crate::log::optimistic_terminal(None))
+            .into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 
@@ -1069,7 +1085,10 @@ fn run_mapping() -> Result<()> {
     log::data("");
     let legend =
         Prose::new("{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}");
-    log::data(&format!(" {}", legend.render(&crate::log::optimistic_terminal(Some(100)))));
+    log::data(&format!(
+        " {}",
+        legend.render(&crate::log::optimistic_terminal(Some(100)))
+    ));
 
     Ok(())
 }

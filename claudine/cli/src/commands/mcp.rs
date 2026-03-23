@@ -953,7 +953,9 @@ fn render_reentry_help(repo_root: Option<&Path>) {
             repo_path.display(),
             repo_path.display()
         );
-        log::data(&Prose::new(format!("Repo defaults: {repo_link}")).render(&crate::log::terminal()));
+        log::data(
+            &Prose::new(format!("Repo defaults: {repo_link}")).render(&crate::log::terminal()),
+        );
     }
     log::data("Management commands:");
     log::data("  claudine mcp");

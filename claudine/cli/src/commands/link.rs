@@ -567,8 +567,9 @@ fn run_support() -> Result<()> {
 
         // Create OSC8 hyperlink for provider name
         let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent =
-            Prose::new(provider_link).render(&crate::log::optimistic_terminal(None)).into();
+        let provider_cell: TableCellContent = Prose::new(provider_link)
+            .render(&crate::log::optimistic_terminal(None))
+            .into();
 
         let mut row: Vec<TableCellContent> = vec![provider_cell, bool_indicator(installed)];
 

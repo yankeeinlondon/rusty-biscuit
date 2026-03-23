@@ -1089,7 +1089,8 @@ fn render_provider_link(provider: &Provider, had_error: bool) -> String {
             };
             Prose::new(markup).render(&crate::log::optimistic_terminal(None))
         }
-        None if had_error => Prose::new(format!("<red>{provider}</red>")).render(&crate::log::optimistic_terminal(None)),
+        None if had_error => Prose::new(format!("<red>{provider}</red>"))
+            .render(&crate::log::optimistic_terminal(None)),
         None => provider.to_string(),
     }
 }
@@ -1136,7 +1137,8 @@ fn render_repos(repos: &[String], compact: bool) -> String {
 fn render_repo_entry(repo: &str, compact: bool) -> String {
     match repo.split_once('/') {
         Some((_org, name)) if compact => name.to_string(),
-        Some((org, name)) => Prose::new(format!("<dim>{org}/</dim>{name}")).render(&crate::log::optimistic_terminal(None)),
+        Some((org, name)) => Prose::new(format!("<dim>{org}/</dim>{name}"))
+            .render(&crate::log::optimistic_terminal(None)),
         None => repo.to_string(),
     }
 }

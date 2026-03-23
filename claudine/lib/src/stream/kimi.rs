@@ -83,7 +83,9 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(text.to_string())));
+            return Some(StreamChunk::Text(super::ensure_message_newline(
+                text.to_string(),
+            )));
         }
 
         // Try content as string
@@ -91,7 +93,9 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(text.to_string())));
+            return Some(StreamChunk::Text(super::ensure_message_newline(
+                text.to_string(),
+            )));
         }
 
         None

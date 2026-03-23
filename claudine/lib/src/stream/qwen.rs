@@ -93,7 +93,9 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(text.to_string())));
+            return Some(StreamChunk::Text(super::ensure_message_newline(
+                text.to_string(),
+            )));
         }
 
         None
@@ -335,7 +337,10 @@ mod tests {
             .feed_line(r#"{"type":"assistant","content":[{"text":"Hook design assistant event"}]}"#)
             .unwrap();
 
-        assert_eq!(text, Some(StreamChunk::Text("Hook design assistant event\n".into())));
+        assert_eq!(
+            text,
+            Some(StreamChunk::Text("Hook design assistant event\n".into()))
+        );
 
         let summary = parser.finish(0);
         assert_eq!(summary.session_id.as_deref(), Some("qw-2"));
@@ -348,6 +353,9 @@ mod tests {
         let text = parser
             .feed_line(r#"{"type":"message","role":"assistant","content":"Plain string content"}"#)
             .unwrap();
-        assert_eq!(text, Some(StreamChunk::Text("Plain string content\n".into())));
+        assert_eq!(
+            text,
+            Some(StreamChunk::Text("Plain string content\n".into()))
+        );
     }
 }

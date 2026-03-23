@@ -506,9 +506,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // Composition pipelines (--prompt-file, --frontmatter-prompt, --compose)
     // deliver the prompt to child_args themselves, then call apply_non_interactive.
     // Only run the early call for passthrough prompts (bare positional args).
-    let has_composition_prompt = args.prompt_file.is_some()
-        || args.frontmatter_prompt.is_some()
-        || args.compose.is_some();
+    let has_composition_prompt =
+        args.prompt_file.is_some() || args.frontmatter_prompt.is_some() || args.compose.is_some();
 
     if non_interactive_requested && !has_composition_prompt {
         profile.apply_non_interactive(&mut child_args)?;
@@ -1030,11 +1029,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     &term,
                 ));
                 log::message("");
-                crate::output::render_prompt_blockquote(
-                    &pf_info.body,
-                    &term,
-                    verbose_requested,
-                );
+                crate::output::render_prompt_blockquote(&pf_info.body, &term, verbose_requested);
             }
 
             // Frontmatter-prompt: show validation, file resolution, and prompt blockquote.
@@ -1059,11 +1054,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     ),
                     &term,
                 ));
-                crate::output::render_prompt_blockquote(
-                    &prepared.prompt,
-                    &term,
-                    verbose_requested,
-                );
+                crate::output::render_prompt_blockquote(&prepared.prompt, &term, verbose_requested);
             }
 
             // Blank line to separate preamble from execution output
@@ -1096,14 +1087,241 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    let exit_code = if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) =
-        inline_composition_source
-    {
-        // Inline composition: the agent is responsible for writing to the file.
-        // Capture structured assistant text so we can render it with terminal-aware
-        // wrapping before running validation checks and emitting the metadata line.
-        let (agent_exit, deferred_summary) = if use_structured {
+    let exit_code =
+        if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) = inline_composition_source {
+            // Inline composition: the agent is responsible for writing to the file.
+            // Capture structured assistant text so we can render it with terminal-aware
+            // wrapping before running validation checks and emitting the metadata line.
+            let (agent_exit, deferred_summary) = if use_structured {
+                let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+                let parser_config = claudine::stream::ParserConfig {
+                    model: args.model.clone(),
+                };
+                let parser = claudine::stream::create_parser(
+                    provider,
+                    LiveStreamSink::new(
+                        provider,
+                        env_context.clone(),
+                        stream_verbosity,
+                        summary_details.clone(),
+                    ),
+                    parser_config,
+                );
+                let mut summary = exec::run_child_stream(
+                    binary_path.as_path(),
+                    &child_args,
+                    &env_plan.env,
+                    child_cwd,
+                    args.timeout,
+                    stderr_noise,
+                    profile.suppress_structured_stderr_on_success(),
+                    stdin_seed.as_deref(),
+                    parser,
+                )?;
+                // Codex never emits text via feed_line; its accumulated text is
+                // fallback-only, so it doesn't count as "streamed to stdout".
+                let had_streamed_assistant =
+                    provider != Provider::Codex && !summary.assistant_text.trim().is_empty();
+                if let Some(codex_output) = structured_codex_output.as_ref() {
+                    codex_output.apply_to_summary(&mut summary);
+                }
+                if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
+                    let text = &summary.assistant_text;
+                    if std::io::stdout().is_terminal() {
+                        let rendered = crate::output::render_assistant_markdown(text, &term);
+                        std::io::stdout().write_all(rendered.as_bytes())?;
+                        if !rendered.ends_with('\n') {
+                            std::io::stdout().write_all(b"\n")?;
+                        }
+                    } else {
+                        std::io::stdout().write_all(text.as_bytes())?;
+                        if !text.ends_with('\n') {
+                            std::io::stdout().write_all(b"\n")?;
+                        }
+                    }
+                    std::io::stdout().flush()?;
+                }
+
+                // Warn if agent provided no summary text to stdout
+                if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
+                    log::warn(
+                        "the agent did not provide a summarized message on their completed work!",
+                    );
+                }
+
+                let exit = summary.exit_code;
+                let details = summary_details.lock().unwrap().clone();
+                (exit, Some((summary, details, had_streamed_assistant)))
+            } else {
+                // Legacy path: forward I/O to terminal
+                let exit = exec::run_child(
+                    binary_path.as_path(),
+                    &child_args,
+                    &env_plan.env,
+                    child_cwd,
+                    args.timeout,
+                    exec::ChildIoOptions {
+                        stdout_noise_prefixes: stdout_noise,
+                        stderr_noise_prefixes: stderr_noise,
+                        stdin_seed: stdin_seed.as_deref(),
+                    },
+                )?;
+                (exit, None)
+            };
+
+            // Post-execution validation: always check the file, even on agent error.
+            // The agent may have successfully updated the file before an API error occurred.
+            let mut final_exit = agent_exit;
+            let show_checks = !silent_requested && !quiet_requested;
+            let provider_name = crate::output::capitalize_provider(provider);
+            let should_separate_checks = deferred_summary
+                .as_ref()
+                .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+
+            if show_checks && should_separate_checks {
+                eprintln!();
+                eprintln!();
+            }
+
+            if agent_exit == 0 && show_checks {
+                log::message(&crate::output::fm_check_ok(
+                    &format!("{provider_name} agent completed successfully"),
+                    &term,
+                ));
+            } else if agent_exit != 0 && show_checks {
+                log::message(&crate::output::fm_check_fail(
+                    &format!("{provider_name} agent exited with error (code {agent_exit})"),
+                    &term,
+                ));
+            }
+
+            let display_path = source
+                .resolved_path
+                .strip_prefix(child_cwd)
+                .unwrap_or(&source.resolved_path)
+                .display();
+
+            // Read the file from disk to see what the agent did
+            match fs::read_to_string(source.resolved_path.as_path()) {
+                Ok(disk_text) => {
+                    let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
+                    // Check if the body was updated on disk
+                    let disk_body_hash = on_disk.hash_body(false);
+                    let body_updated = disk_body_hash != pre_body_hash;
+
+                    if body_updated {
+                        if show_checks {
+                            log::message(&crate::output::fm_check_ok(
+                                "Agent updated the target document's body",
+                                &term,
+                            ));
+                        }
+
+                        // Agent updated the file — if it also exited with an error,
+                        // the file update takes precedence (e.g. API error after writing).
+                        if agent_exit != 0 && show_checks {
+                            log::warn(
+                                "agent reported an error but the target file was updated; \
+                             treating as success",
+                            );
+                        }
+                        final_exit = 0;
+
+                        // Only check frontmatter when the agent actually did work
+                        let disk_fm_hash = on_disk.hash_frontmatter(false);
+                        let fm_tampered = disk_fm_hash != pre_fm_hash;
+                        if fm_tampered {
+                            if show_checks {
+                                log::message(&crate::output::fm_check_fail(
+                                    "Agent ignored instruction to leave frontmatter untouched \
+                                 (<i>we have reverted their changes</i>)",
+                                    &term,
+                                ));
+                            }
+                            // Restore original frontmatter but keep the agent's body content
+                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                            let doc_string = rewrite_markdown_preserving_frontmatter(
+                                &source.original_text,
+                                on_disk.content(),
+                                &today,
+                            )
+                            .map_err(|e| eyre!("failed to restore frontmatter: {e}"))?;
+                            claudine::config::atomic::atomic_write(
+                                &source.resolved_path,
+                                doc_string.as_bytes(),
+                            )
+                            .map_err(|e| eyre!("failed to write restored frontmatter: {e}"))?;
+                        } else {
+                            if show_checks {
+                                log::message(&crate::output::fm_check_ok(
+                                    "Agent left frontmatter untouched (<i>as instructed</i>)",
+                                    &term,
+                                ));
+                            }
+                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                            let doc_string = rewrite_markdown_preserving_frontmatter(
+                                &disk_text,
+                                on_disk.content(),
+                                &today,
+                            )
+                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+                            claudine::config::atomic::atomic_write(
+                                &source.resolved_path,
+                                doc_string.as_bytes(),
+                            )
+                            .map_err(|e| eyre!("failed to write last_updated: {e}"))?;
+                        }
+
+                        if show_checks {
+                            log::message(&crate::output::fm_check_ok(
+                                "Updated <bold>last_updated</bold> property to today's date",
+                                &term,
+                            ));
+                        }
+                    } else if agent_exit == 0 {
+                        // Agent reported success but didn't update the file
+                        if show_checks {
+                            log::message(&crate::output::fm_check_fail(
+                                &format!(
+                                    "the referenced file -- {display_path} -- did not get \
+                                 updated even though the Agent reported a successful outcome!"
+                                ),
+                                &term,
+                            ));
+                        }
+                        final_exit = 1;
+                    }
+                    // If agent errored AND body wasn't updated, no further checks —
+                    // the agent failed before completing its work.
+                }
+                Err(e) => {
+                    log::error(&format!(
+                        "failed to read {display_path} after agent completion: {e}"
+                    ));
+                    final_exit = 1;
+                }
+            }
+
+            // Emit the metadata summary line last, after validation checks.
+            // Blank line before metadata to visually separate from checks.
+            if let Some((summary, details, _)) = deferred_summary {
+                if stream_verbosity != Verbosity::Silent {
+                    eprintln!();
+                }
+                emit_stream_summary_no_separator(
+                    &summary,
+                    profile,
+                    &env_context,
+                    stream_verbosity,
+                    verbose_requested,
+                    &details,
+                );
+            }
+
+            Ok(final_exit)
+        } else if use_structured {
             let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+            // Normal execution with structured stream parsing
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
@@ -1128,14 +1346,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdin_seed.as_deref(),
                 parser,
             )?;
-            // Codex never emits text via feed_line; its accumulated text is
-            // fallback-only, so it doesn't count as "streamed to stdout".
-            let had_streamed_assistant = provider != Provider::Codex
-                && !summary.assistant_text.trim().is_empty();
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
             }
-            if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
+            // Codex never emits assistant text live (feed_line always returns None);
+            // the authoritative text comes from --output-last-message. Write it now.
+            if provider == Provider::Codex && !summary.assistant_text.is_empty() {
                 let text = &summary.assistant_text;
                 if std::io::stdout().is_terminal() {
                     let rendered = crate::output::render_assistant_markdown(text, &term);
@@ -1152,19 +1368,20 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 std::io::stdout().flush()?;
             }
 
-            // Warn if agent provided no summary text to stdout
-            if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
-                log::warn(
-                    "the agent did not provide a summarized message on their completed work!",
-                );
-            }
+            // Emit stderr summaries and write synthetic event
+            emit_stream_summary(
+                &summary,
+                profile,
+                &env_context,
+                stream_verbosity,
+                verbose_requested,
+                &summary_details.lock().unwrap().clone(),
+            );
 
-            let exit = summary.exit_code;
-            let details = summary_details.lock().unwrap().clone();
-            (exit, Some((summary, details, had_streamed_assistant)))
+            Ok(summary.exit_code)
         } else {
-            // Legacy path: forward I/O to terminal
-            let exit = exec::run_child(
+            // Normal execution: forward I/O to terminal (legacy path)
+            exec::run_child(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1175,235 +1392,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     stderr_noise_prefixes: stderr_noise,
                     stdin_seed: stdin_seed.as_deref(),
                 },
-            )?;
-            (exit, None)
+            )
         };
-
-        // Post-execution validation: always check the file, even on agent error.
-        // The agent may have successfully updated the file before an API error occurred.
-        let mut final_exit = agent_exit;
-        let show_checks = !silent_requested && !quiet_requested;
-        let provider_name = crate::output::capitalize_provider(provider);
-        let should_separate_checks = deferred_summary
-            .as_ref()
-            .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
-
-        if show_checks && should_separate_checks {
-            eprintln!();
-            eprintln!();
-        }
-
-        if agent_exit == 0 && show_checks {
-            log::message(&crate::output::fm_check_ok(
-                &format!("{provider_name} agent completed successfully"),
-                &term,
-            ));
-        } else if agent_exit != 0 && show_checks {
-            log::message(&crate::output::fm_check_fail(
-                &format!("{provider_name} agent exited with error (code {agent_exit})"),
-                &term,
-            ));
-        }
-
-        let display_path = source
-            .resolved_path
-            .strip_prefix(child_cwd)
-            .unwrap_or(&source.resolved_path)
-            .display();
-
-        // Read the file from disk to see what the agent did
-        match fs::read_to_string(source.resolved_path.as_path()) {
-            Ok(disk_text) => {
-                let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
-                // Check if the body was updated on disk
-                let disk_body_hash = on_disk.hash_body(false);
-                let body_updated = disk_body_hash != pre_body_hash;
-
-                if body_updated {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_ok(
-                            "Agent updated the target document's body",
-                            &term,
-                        ));
-                    }
-
-                    // Agent updated the file — if it also exited with an error,
-                    // the file update takes precedence (e.g. API error after writing).
-                    if agent_exit != 0 && show_checks {
-                        log::warn(
-                            "agent reported an error but the target file was updated; \
-                             treating as success",
-                        );
-                    }
-                    final_exit = 0;
-
-                    // Only check frontmatter when the agent actually did work
-                    let disk_fm_hash = on_disk.hash_frontmatter(false);
-                    let fm_tampered = disk_fm_hash != pre_fm_hash;
-                    if fm_tampered {
-                        if show_checks {
-                            log::message(&crate::output::fm_check_fail(
-                                "Agent ignored instruction to leave frontmatter untouched \
-                                 (<i>we have reverted their changes</i>)",
-                                &term,
-                            ));
-                        }
-                        // Restore original frontmatter but keep the agent's body content
-                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                        let doc_string = rewrite_markdown_preserving_frontmatter(
-                            &source.original_text,
-                            on_disk.content(),
-                            &today,
-                        )
-                        .map_err(|e| eyre!("failed to restore frontmatter: {e}"))?;
-                        claudine::config::atomic::atomic_write(
-                            &source.resolved_path,
-                            doc_string.as_bytes(),
-                        )
-                        .map_err(|e| eyre!("failed to write restored frontmatter: {e}"))?;
-                    } else {
-                        if show_checks {
-                            log::message(&crate::output::fm_check_ok(
-                                "Agent left frontmatter untouched (<i>as instructed</i>)",
-                                &term,
-                            ));
-                        }
-                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                        let doc_string = rewrite_markdown_preserving_frontmatter(
-                            &disk_text,
-                            on_disk.content(),
-                            &today,
-                        )
-                        .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                        claudine::config::atomic::atomic_write(
-                            &source.resolved_path,
-                            doc_string.as_bytes(),
-                        )
-                        .map_err(|e| eyre!("failed to write last_updated: {e}"))?;
-                    }
-
-                    if show_checks {
-                        log::message(&crate::output::fm_check_ok(
-                            "Updated <bold>last_updated</bold> property to today's date",
-                            &term,
-                        ));
-                    }
-                } else if agent_exit == 0 {
-                    // Agent reported success but didn't update the file
-                    if show_checks {
-                        log::message(&crate::output::fm_check_fail(
-                            &format!(
-                                "the referenced file -- {display_path} -- did not get \
-                                 updated even though the Agent reported a successful outcome!"
-                            ),
-                            &term,
-                        ));
-                    }
-                    final_exit = 1;
-                }
-                // If agent errored AND body wasn't updated, no further checks —
-                // the agent failed before completing its work.
-            }
-            Err(e) => {
-                log::error(&format!(
-                    "failed to read {display_path} after agent completion: {e}"
-                ));
-                final_exit = 1;
-            }
-        }
-
-        // Emit the metadata summary line last, after validation checks.
-        // Blank line before metadata to visually separate from checks.
-        if let Some((summary, details, _)) = deferred_summary {
-            if stream_verbosity != Verbosity::Silent {
-                eprintln!();
-            }
-            emit_stream_summary_no_separator(
-                &summary,
-                profile,
-                &env_context,
-                stream_verbosity,
-                verbose_requested,
-                &details,
-            );
-        }
-
-        Ok(final_exit)
-    } else if use_structured {
-        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        // Normal execution with structured stream parsing
-        let parser_config = claudine::stream::ParserConfig {
-            model: args.model.clone(),
-        };
-        let parser = claudine::stream::create_parser(
-            provider,
-            LiveStreamSink::new(
-                provider,
-                env_context.clone(),
-                stream_verbosity,
-                summary_details.clone(),
-            ),
-            parser_config,
-        );
-        let mut summary = exec::run_child_stream(
-            binary_path.as_path(),
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            args.timeout,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            stdin_seed.as_deref(),
-            parser,
-        )?;
-        if let Some(codex_output) = structured_codex_output.as_ref() {
-            codex_output.apply_to_summary(&mut summary);
-        }
-        // Codex never emits assistant text live (feed_line always returns None);
-        // the authoritative text comes from --output-last-message. Write it now.
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            let text = &summary.assistant_text;
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, &term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-
-        // Emit stderr summaries and write synthetic event
-        emit_stream_summary(
-            &summary,
-            profile,
-            &env_context,
-            stream_verbosity,
-            verbose_requested,
-            &summary_details.lock().unwrap().clone(),
-        );
-
-        Ok(summary.exit_code)
-    } else {
-        // Normal execution: forward I/O to terminal (legacy path)
-        exec::run_child(
-            binary_path.as_path(),
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            args.timeout,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed: stdin_seed.as_deref(),
-            },
-        )
-    };
 
     // MCP injector cleanup: remove temp files written during injection
     if let Some((injector, injection_result)) = mcp_cleanup
