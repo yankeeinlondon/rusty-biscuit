@@ -12,7 +12,7 @@ Define a detailed technical design for Stage 2 transclusion in Darkmatter's comp
 - `darkmatter/docs/block-transclusion.md`
 - `darkmatter/docs/code-transclusion.md`
 - `darkmatter/docs/fm-transclusion.md`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 
 This design is meant to be implementation-ready and aligned with the current Stage 1 compose code in `darkmatter/lib/src/markdown/compose/`.
 
