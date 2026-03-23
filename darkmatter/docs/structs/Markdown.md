@@ -177,7 +177,66 @@ md.fm_set_defaults(serde_json::json!({
 | `content_mut()` | `&mut String` | Mutable reference for direct manipulation |
 | `into_parts()` | `(Frontmatter, String)` | Consumes the struct, returning ownership of both parts |
 
-## Content Extraction
+## Document References
+
+A document can reference other external assets through the following means:
+
+- **Hyperlinks**
+
+    This includes both hyperlinks using Markdown syntax _and_ hyperlinks using inline HTML using the `<a>` tag
+
+- **Image References**
+
+    This includes Markdown syntax for image references as well as inline HTML using the `<img>` tag
+
+- **Transclusions**
+
+    Because Darkmatter's DSL includes _transclusions_ (aka, file references where the content isn't a _link_ but rather it will be directly included in the document during a "compose" operation )
+
+
+- **Inline Tags:**
+
+    - **Inline CSS and Imports**
+
+        Markdown in Darkmatter would **not** typically have CSS imports -- nor would it render in Markdown differently based on this -- but if some inline HTML with a CSS import were present then we'd want to preserve it and it could have a visual impact when we render to HTML.
+
+        ```rust
+        impl for Markdown {
+            pub fn has_inline_css(): bool;
+            pub fn has_css_imports(): bool;
+
+            /** returns a list of URLs */
+            pub fn get_css_imports(): Vec<String>;
+            /** returns blocks of inline CSS */
+            pub fn get_inline_css(): Vec<CssBlock>;
+            pub fn resolve_css_imports(): 
+        }
+        ```
+
+    - **Fonts** and **Scripts**
+
+        Similarly to how we treat CSS Imports, both font imports and script imports would NOT be expected in normal Markdown content but because inline 
+
+        ```rust
+        impl for Markdown {
+            pub fn has_inline_scripts(): bool;
+            pub fn has_script_imports(): bool;
+            pub fn has_font_imports(): bool;
+
+            pub fn get_script_imports(): Vec<String>;
+            pub fn get_inline_script_blocks(): Vec<String>;
+
+        }
+        ```
+
+    - **Meta** tags
+
+        Meta tags are uncommon in Markdown too but like the two prior sections we want to be able to detect and preserve these tags. However, in this case we want to add a couple of additional nuances:
+
+        - it would be good to be able to:
+            - convert meta tags to frontmatter key/values (part of builder interface)
+            - have a `get_meta_tags()` implementation which 
+
 
 These methods parse the markdown body and return structured data.
 
