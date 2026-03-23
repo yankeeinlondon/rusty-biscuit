@@ -6,7 +6,7 @@ plan: darkmatter/features/shell-expansion/plan.md
 review: darkmatter/features/shell-expansion/review.md
 implement_complete: false
 implementation_files: darkmatter/lib/src/markdown/compose/shell_expansion/types.rs, darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs, darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs, darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs, darkmatter/lib/src/markdown/compose/shell_expansion/store.rs, darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs, darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs, darkmatter/lib/src/markdown/compose/mod.rs, darkmatter/lib/src/markdown/compose/types.rs, darkmatter/lib/src/markdown/types.rs, darkmatter/cli/src/approval.rs, darkmatter/cli/src/commands.rs, darkmatter/cli/src/lib.rs
-reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,darkmatter/cli/tests/cli.rs,darkmatter/docs/darkmatter-pipeline.md,darkmatter/docs/designs/shell-expansion.md,darkmatter/docs/preparation/shell-expansion.md,darkmatter/features/shell-expansion/spec.md,darkmatter/features/shell-expansion/tech-design.md,darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs,darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs,darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs,darkmatter/lib/src/markdown/compose/shell_expansion/store.rs,darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs,darkmatter/lib/src/markdown/compose/shell_expansion/types.rs,docs/dependencies.md
+reviews_files: darkmatter/cli/src/approval.rs,darkmatter/cli/src/commands.rs,darkmatter/cli/tests/cli.rs,darkmatter/docs/darkmatter-compose-pipeline.md,darkmatter/docs/designs/shell-expansion.md,darkmatter/docs/preparation/shell-expansion.md,darkmatter/features/shell-expansion/spec.md,darkmatter/features/shell-expansion/tech-design.md,darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs,darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs,darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs,darkmatter/lib/src/markdown/compose/shell_expansion/store.rs,darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs,darkmatter/lib/src/markdown/compose/shell_expansion/types.rs,docs/dependencies.md
 ---
 ## Tech Design for shell-expansion Complete
 
@@ -93,7 +93,7 @@ All Phase 3 components were already implemented:
 
 - `darkmatter/cli/src/approval.rs` — CliShellApprovalHandler with interactive 5-choice prompt, can_prompt_interactively() check
 - `darkmatter/cli/src/commands.rs` — run_compose() builds ShellExpansionOptions with conditional approval handler based on file input and terminal detection
-- `darkmatter/docs/darkmatter-pipeline.md` — already includes shell expansion in the pipeline table
+- `darkmatter/docs/darkmatter-compose-pipeline.md` — already includes shell expansion in the pipeline table
 - `docs/dependencies.md` — `which` crate already documented
 
 ### Cleanup Fixes Applied
@@ -116,7 +116,7 @@ All three phases complete. 86 unit tests + 15 doctests pass. The only failing te
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
@@ -186,7 +186,7 @@ Changes not staged for commit:
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
@@ -222,7 +222,7 @@ Changes not staged for commit:
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
@@ -252,7 +252,7 @@ Changes not staged for commit:
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
@@ -280,7 +280,7 @@ Changes not staged for commit:
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`
@@ -308,7 +308,7 @@ Changes not staged for commit:
 - `darkmatter/cli/src/approval.rs`
 - `darkmatter/cli/src/commands.rs`
 - `darkmatter/cli/tests/cli.rs`
-- `darkmatter/docs/darkmatter-pipeline.md`
+- `darkmatter/docs/darkmatter-compose-pipeline.md`
 - `darkmatter/docs/designs/shell-expansion.md`
 - `darkmatter/docs/preparation/shell-expansion.md`
 - `darkmatter/features/shell-expansion/spec.md`

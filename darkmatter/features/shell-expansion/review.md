@@ -101,7 +101,7 @@ In `executor.rs`, stdout/stderr drain threads use `unwrap_or_default()` on join 
 The plan (Task 3.4) calls for:
 
 - Updating `docs/dependencies.md` with the `which` crate entry
-- Updating `darkmatter/docs/darkmatter-pipeline.md` with the new stage ordering
+- Updating `darkmatter/docs/darkmatter-compose-pipeline.md` with the new stage ordering
 
 Neither update appears to have been made. The `which` crate is added to `Cargo.toml` but not documented.
 

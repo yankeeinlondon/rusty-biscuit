@@ -639,7 +639,7 @@ Use `assert_cmd` for CLI invocation testing.
 **Files modified**:
 - `darkmatter/docs/dependencies.md` — add `which` crate entry
 - `darkmatter/lib/README.md` — mention shell expansion in feature list if applicable
-- `darkmatter/docs/darkmatter-pipeline.md` — update Stage 1 order to include shell expansion
+- `darkmatter/docs/darkmatter-compose-pipeline.md` — update Stage 1 order to include shell expansion
 
 **Acceptance criteria**:
 - `which` crate documented with version and purpose

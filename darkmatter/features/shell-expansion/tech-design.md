@@ -143,7 +143,7 @@ The new Stage 1 order should be:
 5. cleanup
 6. normalization
 
-This preserves the documented position in `darkmatter/docs/darkmatter-pipeline.md`.
+This preserves the documented position in `darkmatter/docs/darkmatter-compose-pipeline.md`.
 
 Rationale:
 
