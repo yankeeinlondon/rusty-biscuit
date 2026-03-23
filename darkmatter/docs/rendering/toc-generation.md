@@ -4,4 +4,4 @@ It is not uncommon for people to want a **Table of Contents** to be generated fo
 
 --- 
 
-[< back to **Pipeline Documentation**](../darkmatter-pipeline.md)
+[< back to **Pipeline Documentation**](../darkmatter-compose-pipeline.md)

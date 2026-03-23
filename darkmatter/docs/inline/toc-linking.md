@@ -129,4 +129,4 @@ Let's come up with one more example where put all the parameters to work:
 
 --- 
 
-[< back to **Pipeline Documentation**](../darkmatter-pipeline.md)
+[< back to **Pipeline Documentation**](../darkmatter-compose-pipeline.md)
