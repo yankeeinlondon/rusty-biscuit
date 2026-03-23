@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "anguage",
+        "blockquotes",
         "chgrp",
         "cmark",
         "Commonmark",
@@ -30,6 +31,7 @@
         "reflog",
         "sgdisk",
         "sixel",
+        "STRIKETHROUGH",
         "syntect",
         "textwrap",
         "transcludes",

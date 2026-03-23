@@ -116,10 +116,11 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
 
     This will include the Markdown content from `./some_content.md` but before adding it it will look for a H2 section who's title _starts with_ (because of the `*` wildcard usage) and remove those sections.
 
-    - The **exclude** command can be used more than once for a single transclusion but each exclusion needs to express the full `exclude=XYZ` key value pair.
-    - The exclusion requires a valid staring string; valid string are:
-        - `## `, `### `, `#### `, `#### `, and `##### ` for the H2 to H6 headings
-        - `!prelude` - any content _before_ the first heading tag (of any level)
+    - The **exclude** command can be used more than once for a single transclusion but each exclusion needs to express the full `exclude={match-pattern}` key value pair.
+    - The exclusion requires a valid _exclusion_ string; valid strings:
+        - start with `## `, `### `, `#### `, `#### `, and `##### ` for the H2 to H6 headings
+            - a match is achieved when
+        - or equal `!prelude` - any content _before_ the first heading tag (of any level)
 
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 

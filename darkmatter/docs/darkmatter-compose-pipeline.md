@@ -4,27 +4,20 @@
 
 
 
-| Inline Pre (serial)                                       | Transclusion (concurrent)                                        | Inline Post (serial)                                            | Rendering                                              |
-| -------------                                             | -------------                                                    | ---------------                                                 | ---------------                                        |
-| [1. Text Replacement 🏁](./inline/text-replacement.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [Cleaning 🏁](./inline/cleaning.md)                             | [Table Rendering](./rendering/table-rendering.md)      |
-| [2. Page Blocks 🏁](./inline/page-blocks.md)              | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [Normalization 🏁](./inline/normalization-and-releveling.md)     | [YouTube Embedding](./rendering/youtube-embedding.md)  |
-| [3. Interpolation 🏁](./inline/interpolation.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 | [Popover](./rendering/popover.md)                      |
-| [4. Shell Expansion 🏁](./inline/shell-expansion.md)      | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 | [List Expansion](./rendering/list-expansion.md)        |
-|                                                           | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 | [Smart Image](./rendering/smart-image.md)              |
-|                                                           | [AI Summarization](./transclusion/summarization.md)               |                                                                 | [Image Rendering 🏁](./rendering/image-rendering.md)  |
-|                                                           | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 | [Disclosure Blocks](./rendering/disclosure.md)         |
-|                                                           |                                                                   |                                                                 | [Block Columns](./rendering/block-columns.md)          |
-|                                                           |                                                                   |                                                                 | [Audio Content](./rendering/audio-content.md)          |
-|                                                           |                                                                   |                                                                 | [Mermaid Rendering 🏁](./rendering/mermaid.md)         |
-|                                                           |                                                                   |                                                                 | [TOC Generation](./rendering/toc-generation.md)        |
-|                                                           |                                                                   |                                                                 | [Person Card](./rendering/person.md)                   |
-|                                                           |                                                                   |                                                                 | [Place Card](./rendering/place.md)                     |
-|                                                           |                                                                   |                                                                 | [Product Card](./rendering/product.md)                 |
+| Inline Pre (serial)                                       | Transclusion (concurrent)                                        | Inline Post (serial)                                            | 
+| -------------                                             | -------------                                                    | ---------------                                                 | 
+| [1. Text Replacement 🏁](./inline/text-replacement.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [1. Cleaning 🏁](./inline/cleaning.md)                             |
+| [2. Page Blocks 🏁](./inline/page-blocks.md)              | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
+| [3. Interpolation 🏁](./inline/interpolation.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
+| [4. Shell Expansion 🏁](./inline/shell-expansion.md)      | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
+|                                                           | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
+|                                                           | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
+|                                                           | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
 
 > **Note:** items marked with `🏁` are implemented
 
 
-## Stages
+## Pipeline Stages
 
 ### Inline Mutation
 
@@ -51,7 +44,7 @@ into the most valid form we can deterministically reach.
 - [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed       
 - [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).
 - [Shell Expansion](./inline/shell-expansion.md) - allows _approved_ commands to be run and have the STDOUT replace the directive
-- [Link Validation](./inline/link-validation.md) - looks at all of the linked references on the base page -- that includes both hyperlinks _and_ image references -- and makes sure all are valid.
+- Link Validation is deferred and not part of the shipped compose pipeline yet.
 
 #### Post Ops
 
@@ -66,6 +59,8 @@ The **transclusion** stage is typified by recursive operations which have the po
 > **Note:** Not all operations are expensive -- for instance the most common transclusion directive is the `::file <ref>` directive which points to another local Markdown document. Assuming the document it references
 doesn't have it's own transclusions this operation will be lightning fast and no slower than any of the the inline mutation operations.
 However, even in this example, we don't know how expensive the operation is until the graph dependency has been traversed
+
+
 
 ### Rendering
 
@@ -82,18 +77,52 @@ flowchart LR
   InlinePre["Inline (pre)"]
   Transclusion[Transclusion]
   InlinePost["Inline (post)"]
-  Render[Rendering]
-
-  InlinePre --> Transclusion --> InlinePost --> Render
+  InlinePre --> Transclusion --> InlinePost
 ```
 
 - Both the `Inline` stages of the workflow process content serially but that is **NOT** true for transclusion:
 
-    - transclusion starts by running the entire `compose` pipeline on the transcluded file
-    - if the base page has 5 transclusions, it would be wasteful to run each recursive transclusion serially
-    - instead each transclusion operation is run concurrently and then as each conclusion completes it replaces the transclusion directive with the fully composed document (or document structure in the case TOC linking)
-    - the base document's transclusion is done when all transclusions are complete
+    - transclusion starts by serially preparing the work items in `ComposeOperation::default_order()`
+    - block/file transclusion, frontmatter transclusion, code transclusion, and TOC-linking are then resolved concurrently
+    - `::toc-linking` reads headings from the referenced file's raw markdown source rather than recursively composed output
+    - ancestry repetition is treated as a cycle; shared DAG dependencies across sibling branches are allowed
+    - the base document's transclusion is done when all prepared work items are complete
 
 - Only after these concurrent transclusions complete do we move to the final `Inline (post)` process.
 - After we conclude the Inline post processing we optionally will move into rendering
     - the default output for the compose pipeline is plain text output so no rendering support is needed
+
+## Rendering
+
+The Compose pipeline does not do any "rendering" per se but it's not uncommon programmatically to chain 
+[rendering](./darkmatter-rendering-pipeline.md) immediately _after_ a page being _composed_. In addition the 
+Darkmatter CLI reinforces this pattern by providing CLI switches to provide this same chaining. 
+This back-to-back pipelining transform is visualized below:
+
+```mermaid title="Chaining Compose and Render Pipelines"
+flowchart LR
+
+DM@{label: "Darkmatter", shape: "doc"}
+MdInput@{label: "Markdown", shape: "doc"}
+Md@{label: "Markdown", shape: "doc"}
+Compose("Composition
+Pipeline")
+Render("Render
+Pipeline
+")
+Output(Output)
+
+DM -->|provide to| Compose
+MdInput -->|provide to| Compose
+Compose -->|transform| Md
+Md --> Render
+Render -->|transform| Output
+```
+
+The key things to remember are:
+
+- the **Compose Pipeline** expects either Markdown or Darkmatter content as input
+    - in the case of receiving a Markdown document _without_ any Darkmatter directives, only very mild formatting changes from operations like 
+- the [Rendering Pipeline](./darkmatter-render-pipeline.md) expects to receive Markdown content not Darkmatter and it returns one of the supported [output formats](./topics/output-formats.md).
+
+For more details on the **rendering pipeline** always refer to: [Rendering Pipeline](./darkmatter-rendering-pipeline.md)

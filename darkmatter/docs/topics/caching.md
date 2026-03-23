@@ -45,33 +45,53 @@ While the transclusion a from local Markdown file is a relatively straightforwar
 
 ### Transclusion Cache Strategy
 
-A transclusion's hash is composed of the _operation_ and _parameters_ which a document uses in their transclusion reference. However, we need to be able to break the parameters of each transclusion operation into two categories if we want to maximize cache hits:
+A transclusion's hash is composed of the _operation_ and _parameters_ which a document uses in their transclusion reference. However, we need to be able to break the parameters of each transclusion operation into four categories if we want to maximize cache hits:
 
-1. Transclusion Param
-2. Post Transclusion Param
+1. Pre Transclusion Param
+2. Variant Param
+3. Post Transclusion Param
+4. Conditional Param
 
-This separation will allow us to base the hash **only** on the parameters which will cause variations in how the transclusion operation will render; not on any post processing steps required in the host document.
+All _conditional_ parameters are immediately excluded from being part of the hash key as they must be evaluated as a first step and their outcome either renders or doesn't render the transclusion but it has no impact on what the transclusion looks like.
 
-> **Note: having this concept of two different types of transclusion parameters is new and it will likely be worth formalizing the implementations of transclusion operations with a `Transclusion` trait. This trait could be made responsible for imposing a pre and post step to the operation where:
+The Pre and Post Transclusion params are those which influence a fast/inexpensive operation that can happen either _before_ or _after_ the core transclusion takes place. These parameters can also be removed from the hash key.
+
+Finally the **Variant** params are the parameters who's value will vary the expensive part of the transclusion.
+
+> **Note: having this concept of different types of transclusion parameters is new and it will likely be worth formalizing the implementations of transclusion operations with a `Transclusion` trait. This trait could be made responsible for imposing a pre, core and post step to the operation where:
 >
-> - the "pre" step is the cacheable part (e.g., expensive, async, etc.)
-> - and the "post" step should only be quick, synchronous based operations. 
+> - the "pre" step is a quick pre-step operation which run quickly, synchronously, and is allowed the operations configuration during the "core" step
+> - the "core" step is the expensive, async, and cacheable part 
+> - and the "post" step should only be a quick, synchronous based operations. 
 > 
-> This formality would forcing each operation to think through which aspects of their operation are expensive and should be made cacheable, versus those aspects which can be quickly layered on top afterward. Because each operation is formally broken into these two parts it also becomes much clearer which _parameters_ should be considered a transclusion param versus a post-transclusion param. 
+> This formality would forcing each operation to think through which aspects of their operation are expensive and should be made cacheable, versus those aspects which can be quickly layered on top afterward. Because each operation is formally broken into these parts it also becomes much clearer which _parameters_ should be considered a variant param versus a non-influencing param (pre/post).
 >
-> Finally the same **trait** could be used to force the operation to provide a `cacheable_params()` function which would allow the operation to define how to segment which parameters are considered "transclusion params". This allows the caching layer to remain oblivious to each operations internals and can simply ask the operation to provide the segmentation in a consistent fashion. 
+> The same **trait** could be used to force the operation to provide a `variant_params()` function which would allow the operation to define how to segment which parameters are considered "variant params". This allows the caching layer to remain oblivious to each operations internals and can simply ask the operation to provide the segmentation in a consistent fashion. 
 
-Let's do a small exploration of what a "transclusion param" versus a "post transclusion param" is via an example:
 
-- the [`file::` directive](../transclusion/block-transclusion.md#block-transclusion) allows a parent document to reference another local file for transclusion 
-- the _file reference_ is clearly a critical "transclusion parameters" 
-- we will now look at two parameters which need a little more consideration:
-    - `exclude`, and
-    - `replace`
-- **exclude:**
-    - the `exclude` parameter allows us to _exclude_ certain sections of the child document before injecting it into the parent document
-    - the search expression the parent document is allowed to use is 
+### Cache Expiry / Invalidation
 
-### Cache Lifetimes and Fallbacks
+Each operational directive should have a view on how fast and reliable the environment it operates in:
+
+- the `file::` directive works with local Markdown files, it is:
+    - very fast to validate the resource
+    - highly reliable access to files
+- in contrast the `url::` directive works over the network, so it is:
+    - moderate speed to validate the resource being transcluded
+- even more dramatic is the (yet to be implemented) `::prompt` directive:
+    - it operates over the network (at least 99% of the time it does, local models are an edge case)
+    - it requires a service (Model API, Agent API) to be able to up
+    - it requires that the service is able to complete the request
+    - and when all goes well the amount of time it takes to generate a response is MUCH longer than the other two
+
+Based on the characteristics of the operational directive we should be able to compute a "default lifetime" (aka, how long is a cache entry valid for before needing to be regenerated). Each individual operation -- via a configuration object -- should be able to override this default lifetime where needed.
+
+- Regardless of whether a cache item has passed it's lifetime/expire timestamp, we will always try to maintain at least one copy of each cache item so that if there is an outage, a user is offline, or an explicit call to use an optimistic cache (aka, use cache whenever it's available even when expired).
+- Modes:
+    - `strict` - all expired cache entries **must** be re-generated to complete the composition pipeline; failures to do so will result in an error
+    - `fallback` - all expired cache entries are attempted to be re-generated but if that fails then we will send warning message to STDERR but fallback to the cached entry. If a non-cached entity is encountered which can not be re-generated then we will return with an error
+    - `optimistic` - any cache request -- expired or not -- will be treated as a cache hit. Entities not in the cache will be generated (and cached). If an error occurs during generation then we will return as an error
+    - `forced` - any cache request -- expired or not -- will be treated as a cache hit. Entities not in the cache will be generated (and cached). If an error occurs we will send a warning message to STDERR but replace the operational directive with an empty string. This mode should never be used for production content.
+
 
 
