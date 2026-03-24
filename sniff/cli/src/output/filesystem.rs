@@ -679,8 +679,9 @@ pub fn render_git_section(
 
             let uncommitted = if info.changed_files > 0 {
                 format!(
-                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted files</i></dim>",
-                    info.changed_files
+                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted {}</i></dim>",
+                    info.changed_files,
+                    if info.changed_files == 1 { "file" } else { "files" }
                 )
             } else {
                 String::new()
