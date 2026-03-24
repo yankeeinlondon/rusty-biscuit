@@ -10,7 +10,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
-use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
+use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats, FrameworkStats};
 
@@ -316,6 +316,21 @@ fn format_diff_stats(added: usize, removed: usize) -> String {
     )
 }
 
+/// Formats ahead/behind counts relative to a base branch as styled markup.
+///
+/// Includes the base branch name in the output. Returns phrases like
+/// `"3 ahead of main"`, `"2 behind main"`, or `"up to date with main"`.
+fn format_ahead_behind_of(ahead: usize, behind: usize, base: &str) -> String {
+    match (ahead, behind) {
+        (0, 0) => format!("up to date with <b>{base}</b>"),
+        (a, 0) => format!("<green-500>{a} ahead</green-500> of <b>{base}</b>"),
+        (0, b) => format!("<red-500>{b} behind</red-500> <b>{base}</b>"),
+        (a, b) => format!(
+            "<green-500>{a} ahead</green-500>, <red-500>{b} behind</red-500> of <b>{base}</b>"
+        ),
+    }
+}
+
 /// Format a single commit as a styled one-liner.
 ///
 /// Parses conventional commit format and includes SHA, timestamp, ref decorations,
@@ -448,7 +463,7 @@ pub fn render_hash_section(
 fn format_file_line(
     path: &std::path::Path,
     verbose: u8,
-    action: &sniff::filesystem::git::FileAction,
+    action: &FileAction,
 ) -> String {
     let path_str = path.display().to_string();
     let (dir, name) = split_path(&path_str);
@@ -562,7 +577,12 @@ pub fn render_git_section(
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let action = file.action.label();
-        let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
+        // Only show diff stats for modified files (not created/deleted)
+        let diff_stats = if file.action == FileAction::Modified {
+            format_diff_stats(file.lines_added, file.lines_removed)
+        } else {
+            String::new()
+        };
         let line = if dir.is_empty() {
             format!(
                 "<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}",
@@ -628,17 +648,45 @@ pub fn render_git_section(
         writeln!(out, "{}\n", wt_title.render(&terminal)).unwrap();
 
         let mut wt_list = UnorderedList::empty();
-        wt_list.add(Prose::new(format!(
-            "The <i>base repo</i> is located at <blue>{}</blue>",
-            git.repo_root.display()
-        )));
-        for (branch, info) in &git.worktrees {
+
+        // Base repo line: varies based on whether we're in the base repo or a worktree
+        if git.in_worktree {
+            if let Some(ref base_root) = git.base_repo_root {
+                wt_list.add(Prose::new(format!(
+                    "Base Repo: <dim>the base repo is located at <blue-500>{}</blue-500></dim>",
+                    base_root.display()
+                )));
+            }
+        } else if let Some(ref branch) = git.current_branch {
             wt_list.add(Prose::new(format!(
-                "<b>{}:</b> <i>the {} worktree is located at</i> <blue>{}</blue>",
-                branch,
-                branch,
-                info.filepath.display()
+                "<b>Base Repo:</b> you are in the base repo which is on the <blue-500>{branch}</blue-500> branch"
             )));
+        }
+
+        // Worktree lines: varies based on whether we're inside that worktree
+        for (_key, info) in &git.worktrees {
+            let branch = &info.branch;
+            let status = format_ahead_behind_of(info.ahead, info.behind, &info.base_branch);
+            let merge_status = if info.has_conflicts {
+                " · <red-500><b>conflicts</b></red-500>"
+            } else {
+                " · <green-500>clean</green-500>"
+            };
+
+            // Check if we're inside this particular worktree
+            let is_current = git.in_worktree
+                && git.repo_root.canonicalize().ok()
+                    == info.filepath.canonicalize().ok();
+
+            if is_current {
+                wt_list.add(Prose::new(format!(
+                    "<b>{branch}:</b> you are {status}{merge_status}"
+                )));
+            } else {
+                wt_list.add(Prose::new(format!(
+                    "{branch}: <dim>is {status}</dim>{merge_status}"
+                )));
+            }
         }
         writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
     }
@@ -743,11 +791,7 @@ pub fn render_git_section(
                 .as_ref()
                 .map(|url| {
                     let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
-                    let provider_label = format!(
-                        "<dim>{}</dim> {}",
-                        remote.provider.symbol(),
-                        remote.provider.display_name()
-                    );
+                    let provider_label = remote.provider.display_name();
                     if let Some(ref repo_path) = owner_repo {
                         let link_url = browse_url.unwrap_or_else(|| url.clone());
                         format!(

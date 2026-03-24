@@ -1,6 +1,5 @@
 ---
 source: sniff/cli/tests/snapshots.rs
-assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -11,81 +10,47 @@ Usage: sniff [OPTIONS] [COMMAND]
   -b, --base <BASE>  Base directory for filesystem analysis
       --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
   -v, --verbose...   Increase output verbosity
+      --plain        Strip terminal escape codes from text output
   -h, --help         Print help
   -V, --version      Print version
 
 
 Commands:
-  Top-level sections:
-    sniff os          Show only OS information
-    sniff hardware    Show only hardware information
-    sniff network     Show only network information
-    sniff filesystem  Show only filesystem information
-    sniff topics      Show subsection topics as a table
+  System:
+    sniff os              Show OS information
+    sniff hardware        Show hardware information
+    sniff network         Show network information
+    sniff cpu             Show CPU information
+    sniff gpu             Show GPU information
+    sniff memory          Show memory information
+    sniff storage         Show storage/disk information
+    sniff audio-devices   Show audio devices
 
-  Hardware details:
-    sniff cpu             Show only CPU information
-    sniff gpu             Show only GPU information
-    sniff memory          Show only memory information
-    sniff storage         Show only storage/disk information
-    sniff audio-devices   Show only audio devices
-
-  Filesystem details:
-    sniff repo                       Show only repository/monorepo structure
-    sniff repo --latest-versions     Check registries for dependency updates
-    sniff repo biscuit               Filter to packages matching "biscuit"
-    sniff repo !biscuit              Exclude packages matching "biscuit"
-    sniff repo @sniff                Filter to packages in the "sniff" area
-    sniff repo deps                  Show internal dependency list (text)
-    sniff repo deps --ui             Show internal dependency diagram (Mermaid)
-    sniff repo deps biscuit          Filtered text dependency list
-    sniff repo packages biscuit      Filtered CSV package names
-    sniff repo package               Package name for current directory
-    sniff repo package-area          Package area for current directory
-    sniff repo dirty-packages        Packages with uncommitted changes
-    sniff repo dirty-package-areas   Package areas with uncommitted changes
-    sniff repo package-root          Root directory of the current package
-    sniff repo package-area-root     Root directory of the current package area
-    sniff repo repo-root             Root directory of the repository
-    sniff language                   Show only language detection results
-    sniff files                      Show broad file associations
-    sniff files --association image  Show only image file statistics
-    sniff docs                       Show markdown documents in the repository
-    sniff docs --readme              Show only README.md files
-    sniff docs --plan                Show only plan-related documents
-    sniff docs --src                 Show only documents under src/ directories
-    sniff docs --has-prompt          Show only documents with a prompt
-    sniff docs homelab               Filter documents matching "homelab"
+  Repository & Filesystem:
+    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff filesystem      Show full filesystem report
+    sniff language        Show language detection
+    sniff files           Show file associations
+    sniff docs            Show markdown documents
 
   Programs:
-    sniff programs                   Show all installed programs
-    sniff editors                    Show only installed editors
-    sniff editors install            Interactive install picker for editors
-    sniff editors install vim        Install vim directly
-    sniff utilities                  Show only installed utilities
-    sniff language-package-managers  Show only language package managers
-    sniff os-package-managers        Show only OS package managers
-    sniff tts-clients                Show only TTS clients
-    sniff terminal-apps              Show only terminal apps
-    sniff audio                      Show only headless audio players
-    sniff agents                     Show only AI agent CLI tools
+    sniff programs        Show all installed programs
+    sniff editors         Show editors (supports 'install' subcommand)
+    sniff utilities       Show utilities
+    sniff agents          Show AI agent CLI tools
 
   Services:
-    sniff services              Show running services (default)
-    sniff services --state all  Show all services
+    sniff services        Show running services
+
+  Justfiles:
+    sniff just            Detect justfiles and recipes
+    sniff just sniff      Filter to justfiles with "sniff" in their path
+    sniff just --with build   Show justfiles containing a "build" recipe
+    sniff just -v         Show justfiles with recipe details
+
+  Discovery:
+    sniff topics          Show all subsection topics
 
 Output modes:
-  - No subcommand: Show this help (use --json for full JSON output)
-  - With subcommand: Text output by default, use --json for JSON
-
-Examples:
-  sniff                      # Show this help
-  sniff --json               # Full system info as JSON
-  sniff cpu                  # CPU info as text
-  sniff cpu --json           # CPU info as JSON
-  sniff --json cpu           # Same as above (flag position flexible)
-  sniff programs             # Programs as text
-  sniff programs --json      # Programs as JSON
-  sniff filesystem --refresh-remotes --latest-versions  # Enriched filesystem report
-  sniff editors install      # Interactive editor install picker
-  sniff -b /path/to/repo filesystem  # Analyze specific directory
+  No subcommand: show this help (use --json for full JSON)
+  With subcommand: text by default, --json for JSON, --plain for unstyled text
