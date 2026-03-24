@@ -71,7 +71,8 @@
         {
             "name": "queue",
             "path": "queue"
-        },{
+        },
+        {
             "name": "messenger",
             "path": "messenger"
         },
@@ -102,6 +103,10 @@
         {
             "name": "unchained-ai",
             "path": "unchained-ai"
+        },
+        {
+            "name": "worktree",
+            "path": "worktree"
         },
         {
             "name": "~ monorepo",

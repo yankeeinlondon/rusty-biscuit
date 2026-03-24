@@ -41,7 +41,7 @@ dependencies = [
 name = "agent-sandbox-cli"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "tracing",
@@ -161,9 +161,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.6.21"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43d5b281e737544384e969a5ccad3f1cdd24b48086a0fc1b2a5262a26b8f4f4a"
+checksum = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -182,9 +182,9 @@ checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
 name = "anstyle-parse"
-version = "0.2.7"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e7644824f0aa2c7b9384579234ef10eb7efb6a0deb83f9630a49594dd9c15c2"
+checksum = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e"
 dependencies = [
  "utf8parse",
 ]
@@ -225,7 +225,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 name = "arcam-amp-integration"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
  "futures-util",
  "homelab",
  "schematic-schema",
@@ -627,7 +627,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-file",
- "clap 4.5.60",
+ "clap 4.6.0",
  "color-eyre",
  "predicates",
  "serde_json",
@@ -652,7 +652,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-hash",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "predicates",
  "tempfile",
@@ -684,7 +684,7 @@ name = "biscuit-speaks-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "darkmatter",
  "inquire",
@@ -702,7 +702,7 @@ dependencies = [
  "base64",
  "biscuit-visualized",
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "expectrl",
  "globset",
  "ignore",
@@ -733,7 +733,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "expectrl",
@@ -751,7 +751,7 @@ name = "biscuit-visualized"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
- "clap 4.5.60",
+ "clap 4.6.0",
  "layout-rs",
  "mermaid-rs-renderer",
  "resvg 0.45.1",
@@ -1129,9 +1129,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.60"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2797f34da339ce31042b27d23607e051786132987f595b02ba4f6a6dffb7030a"
+checksum = "b193af5b67834b676abd72466a96c1024e6a6ad978a1f484bd90b85c94041351"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1139,9 +1139,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.60"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a241312cea5059b13574bb9b3861cabf758b879c15190b37b6d6fd63ab6876"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1152,11 +1152,11 @@ dependencies = [
 
 [[package]]
 name = "clap_complete"
-version = "4.5.66"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c757a3b7e39161a4e56f9365141ada2a6c915a8622c408ab6bb4b5d047371031"
+checksum = "19c9f1dde76b736e3681f28cec9d5a61299cbaae0fce80a68e43724ad56031eb"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_lex",
  "is_executable",
  "shlex",
@@ -1164,9 +1164,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.55"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92793da1a46a5f2a02a6f4c46c6496b28c43638adea8306fcb0caa1634f24e5"
+checksum = "1110bd8a634a1ab8cb04345d8d878267d57c3cf1b38d91b71af6686408bbca6a"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1215,7 +1215,7 @@ dependencies = [
  "assert_cmd",
  "biscuit-terminal",
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "claudine",
  "color-eyre",
@@ -1708,6 +1708,7 @@ dependencies = [
  "biscuit-hash",
  "biscuit-terminal",
  "chrono",
+ "dashmap",
  "dirs",
  "git2",
  "globset",
@@ -1745,7 +1746,7 @@ dependencies = [
  "biscuit-file",
  "biscuit-hash",
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "darkmatter",
@@ -1793,6 +1794,20 @@ dependencies = [
  "darling_core",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2202,7 +2217,7 @@ dependencies = [
 name = "eversolo-integration"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
  "homelab",
  "schematic-schema",
  "serde",
@@ -3004,7 +3019,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "homelab",
@@ -4292,7 +4307,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9588ccb8bb35fc5bca68bd896966865fa178f64a041d3bc6cacba17beaabec6"
 dependencies = [
  "anyhow",
- "clap 4.5.60",
+ "clap 4.6.0",
  "fontdb",
  "json5",
  "once_cell",
@@ -4333,7 +4348,7 @@ name = "messenger-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "dirs",
@@ -4445,7 +4460,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "indicatif",
@@ -5267,7 +5282,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "clap 4.5.60",
+ "clap 4.6.0",
  "itertools 0.14.0",
  "proc-macro2",
  "quote",
@@ -5512,7 +5527,7 @@ name = "playa-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "darkmatter",
  "playa",
@@ -5850,7 +5865,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "crossterm 0.29.0",
  "dirs",
  "predicates",
@@ -5941,9 +5956,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
@@ -6426,7 +6441,7 @@ dependencies = [
  "biscuit-file",
  "biscuit-speaks",
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "darkmatter",
  "dirs",
  "dotenvy",
@@ -6465,7 +6480,7 @@ name = "research-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
- "clap 4.5.60",
+ "clap 4.6.0",
  "dirs",
  "dotenvy",
  "glob",
@@ -6995,7 +7010,7 @@ name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
  "biscuit-file",
- "clap 4.5.60",
+ "clap 4.6.0",
  "colored",
  "prettyplease",
  "proc-macro2",
@@ -7558,7 +7573,7 @@ dependencies = [
  "assert_cmd",
  "biscuit-terminal",
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "darkmatter",
  "expectrl",
@@ -7598,7 +7613,7 @@ dependencies = [
 name = "sony-receiver-integration"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
  "futures-util",
  "homelab",
  "schematic-schema",
@@ -8964,7 +8979,7 @@ name = "tree-hugger-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "ignore",
  "owo-colors",
@@ -9350,7 +9365,7 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 name = "ui"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.60",
+ "clap 4.6.0",
 ]
 
 [[package]]
@@ -9391,7 +9406,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
- "clap 4.5.60",
+ "clap 4.6.0",
  "clap_complete",
  "color-eyre",
  "predicates",
@@ -9407,7 +9422,7 @@ name = "unchained-ai-gen"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clap 4.5.60",
+ "clap 4.6.0",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -10782,6 +10797,30 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "worktree"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "which 8.0.0",
+]
+
+[[package]]
+name = "worktree-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-terminal",
+ "clap 4.6.0",
+ "clap_complete",
+ "predicates",
+ "worktree",
 ]
 
 [[package]]
