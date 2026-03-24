@@ -27,30 +27,42 @@ fn format_status_line(status: &WorktreeStatus) -> String {
         .unwrap_or("(detached)");
 
     let name_styled = if status.entry.is_current {
-        format!("<bold><cyan>{name}</cyan></bold>")
-    } else if status.entry.is_main {
-        format!("<bold>{name}</bold>")
+        format!("<b>{name}</b>")
     } else {
-        name.to_string()
+        format!("<dim>{name}</dim>")
     };
 
     let mut parts = vec![name_styled];
 
     if !status.entry.is_main {
-        let merge_indicator = if status.is_clean {
-            "<green>clean</green>".to_string()
+        let merge_indicator = if status.entry.is_current {
+            if status.is_clean {
+                "<green>clean</green>".to_string()
+            } else {
+                "<red>conflict</red>".to_string()
+            }
+        } else if status.is_clean {
+            "<dim>clean</dim>".to_string()
         } else {
-            "<red>conflict</red>".to_string()
+            "<dim>conflict</dim>".to_string()
         };
         parts.push(merge_indicator);
 
         if status.ahead > 0 || status.behind > 0 {
             let mut counts = Vec::new();
             if status.ahead > 0 {
-                counts.push(format!("<green>+{}</green>", status.ahead));
+                counts.push(if status.entry.is_current {
+                    format!("<green>+{}</green>", status.ahead)
+                } else {
+                    format!("<dim>+{}</dim>", status.ahead)
+                });
             }
             if status.behind > 0 {
-                counts.push(format!("<yellow>-{}</yellow>", status.behind));
+                counts.push(if status.entry.is_current {
+                    format!("<yellow>-{}</yellow>", status.behind)
+                } else {
+                    format!("<dim>-{}</dim>", status.behind)
+                });
             }
             parts.push(counts.join(" "));
         }
