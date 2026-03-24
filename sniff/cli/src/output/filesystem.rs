@@ -666,7 +666,11 @@ pub fn render_git_section(
         // Worktree lines: varies based on whether we're inside that worktree
         for (_key, info) in &git.worktrees {
             let branch = &info.branch;
-            let status = format_ahead_behind_of(info.ahead, info.behind, &info.base_branch);
+            let status = if info.merged && info.ahead == 0 {
+                format!("merged into <b>{}</b>", &info.base_branch)
+            } else {
+                format_ahead_behind_of(info.ahead, info.behind, &info.base_branch)
+            };
             let merge_status = if info.has_conflicts {
                 " · <red-500><b>conflicts</b></red-500>"
             } else {

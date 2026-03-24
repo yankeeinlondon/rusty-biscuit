@@ -749,6 +749,8 @@ pub struct WorktreeInfo {
     pub base_branch: String,
     /// Whether merging this worktree's HEAD into the base branch would produce conflicts.
     pub has_conflicts: bool,
+    /// Whether this worktree's branch is fully merged into the base branch.
+    pub merged: bool,
 }
 
 /// A file with uncommitted changes (staged or unstaged).
@@ -1752,6 +1754,12 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .and_then(|(base, wt_commit)| repo.graph_ahead_behind(wt_commit.id(), base).ok())
             .unwrap_or((0, 0));
 
+        // Check if worktree branch is fully merged into base (ancestor of base HEAD)
+        let merged = base_oid
+            .zip(head_commit.as_ref())
+            .map(|(base, wt_commit)| repo.graph_descendant_of(base, wt_commit.id()).unwrap_or(false))
+            .unwrap_or(false);
+
         // Check for merge conflicts by performing an in-memory merge
         let has_conflicts = base_oid
             .zip(head_commit.as_ref())
@@ -1777,6 +1785,7 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
                 behind,
                 base_branch: base_branch.clone(),
                 has_conflicts,
+                merged,
             },
         );
     }
@@ -2850,6 +2859,7 @@ mod tests {
             behind: 1,
             base_branch: "main".to_string(),
             has_conflicts: false,
+            merged: false,
         };
 
         let json = serde_json::to_string(&worktree).unwrap();
