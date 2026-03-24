@@ -273,6 +273,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: async, futures, streams_
 
+- [dashmap](https://github.com/xacrimon/dashmap) _v6.1_ [📄](https://docs.rs/dashmap)
+
+    _Concurrent hash map with sharded locking, used for low-contention run-local caches in Darkmatter._
+
+    _Tags: concurrency, hashmap, performance_
+
 - [rayon](https://github.com/rayon-rs/rayon) _v1.11.0_
 
     _Data parallelism library using work-stealing thread pool for parallel processing._
