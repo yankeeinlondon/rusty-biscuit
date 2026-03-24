@@ -1,9 +1,18 @@
+use std::io::IsTerminal as _;
+
 use biscuit_terminal::components::list::UnorderedList;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::terminal_image::ImageWidth;
+use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
-use worktree::worktree::{list_worktrees, WorktreeStatus};
+use worktree::worktree::{default_branch, list_worktrees, WorktreeStatus};
 use worktree::WorktreeError;
+
+use super::git_graph;
+
+const GRAPH_WIDTH: u32 = 55;
 
 pub fn run() -> Result<(), WorktreeError> {
     let statuses = list_worktrees()?;
@@ -16,15 +25,80 @@ pub fn run() -> Result<(), WorktreeError> {
 
     eprintln!("\n{}", list.render(&terminal));
 
+    // Render git graph if terminal is wide enough
+    if terminal.width() >= GRAPH_WIDTH {
+        render_graph(&statuses, &terminal);
+    }
+
     Ok(())
 }
 
+fn render_graph(statuses: &[WorktreeStatus], terminal: &Terminal) {
+    let Ok(default) = default_branch() else {
+        return;
+    };
+
+    let current = statuses.iter().find(|s| s.entry.is_current);
+
+    let instructions = if let Some(current) = current {
+        if current.entry.is_main {
+            let branch_names: Vec<String> = statuses
+                .iter()
+                .filter_map(|s| s.entry.branch.clone())
+                .collect();
+            git_graph::base_graph(&branch_names, &default)
+        } else {
+            let branch = current.entry.branch.as_deref().unwrap_or("HEAD");
+            git_graph::worktree_graph(branch, &default)
+        }
+    } else {
+        None
+    };
+
+    if let Some(instructions) = instructions {
+        let img_term = image_terminal(terminal);
+        let diagram =
+            MermaidDiagram::new(instructions).with_width(ImageWidth::Characters(GRAPH_WIDTH));
+        eprint!("{}", diagram.render(&img_term));
+    }
+}
+
+/// Build a Terminal suitable for rendering images to stderr.
+///
+/// `Terminal::default()` calls `is_tty()` which checks stdout. When the shell
+/// wrapper captures stdout via `$()`, stdout is a pipe and image support is
+/// suppressed. This builds a terminal that uses stderr for the TTY check and
+/// detects image support from `$TERM_PROGRAM` env vars instead.
+fn image_terminal(_base: &Terminal) -> Terminal {
+    let stderr_is_tty = std::io::stderr().is_terminal();
+    let img_support = if stderr_is_tty {
+        detect_image_support_from_env()
+    } else {
+        ImageSupport::None
+    };
+    Terminal::builder()
+        .is_tty(stderr_is_tty)
+        .image_support(img_support)
+        .build()
+}
+
+fn detect_image_support_from_env() -> ImageSupport {
+    match std::env::var("TERM_PROGRAM").as_deref() {
+        Ok("ghostty") | Ok("kitty") | Ok("WezTerm") | Ok("Warp") | Ok("WarpTerminal")
+        | Ok("konsole") | Ok("wast") => ImageSupport::Kitty,
+        Ok("iTerm.app") => ImageSupport::ITerm,
+        _ => {
+            if std::env::var("KITTY_WINDOW_ID").is_ok() {
+                ImageSupport::Kitty
+            } else {
+                ImageSupport::None
+            }
+        }
+    }
+}
+
 fn format_status_line(status: &WorktreeStatus) -> String {
-    let name = status
-        .entry
-        .branch
-        .as_deref()
-        .unwrap_or("(detached)");
+    let name = status.entry.branch.as_deref().unwrap_or("(detached)");
 
     let name_styled = if status.entry.is_current {
         format!("<b>{name}</b>")
