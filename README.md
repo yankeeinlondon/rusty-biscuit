@@ -6,7 +6,7 @@
 
 ## Package Areas
 
-This monorepo is broken up into _package areas_ many of which combine a Library package for programmatic access and a CLI for terminal access. 
+This monorepo is broken up into _package areas_ many of which combine a Library package for programmatic access and a CLI for terminal access.
 
 | Capability | Communicate | Inspect |
 | ---                                      | ---         | --- |
@@ -14,7 +14,7 @@ This monorepo is broken up into _package areas_ many of which combine a Library 
 | [biscuit-hash](./biscuit-hash/README.md) - _hash utils_ | [messenger](./messenger/README.md) - _Discord, Slack, ..._  | [sniff](./sniff/README.md) - _host detection_  |
 |  [biscuit-terminal](./biscuit-terminal/README.md) - _term detect & render_ | [playa](./playa/README.md) - _headless audio_ | |
 | [biscuit-visualized](./biscuit-visualized/README.md) - _data viz_ | | |
-| [schematic](./schematic/README.md) - _API clients_ | | | 
+| [schematic](./schematic/README.md) - _API clients_ | | |
 
 Then there are two libraries centered around the ideas of _composition_ and _orchestration_:
 
@@ -85,13 +85,16 @@ At this point you're ready to explore, install, test, whatever you like.
 
 - run `just` and it will give you all the "recipes" appropriate for the directory you are in
 - it will include things like:
-    - testing
-    - linting
-    - installing
-    - documentation drift
-    - skill generation
-    - _and more_
+  - testing
+  - linting
+  - installing
+  - documentation drift
+  - skill generation
+  - _and more_
 
+## Shell Completions
+
+Shell completions help people learn CLI structure as well as navigate a CLI they don't use that often. All of the CLI's in this monorepo have shell completions included for all the major shells (bash, zsh, fish). How to include the shell completions for each CLI is available as part of the CLI's help system but if you are using zsh or bash you can use my conditional script which will add shell completions for the CLI's in this monorepo (and `just`) which you have installed: [Shell Completions](./docs/shell-completions.md).
 
 ## License
 
@@ -100,4 +103,3 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 You are free to use, modify, and redistribute this software under the terms of that license. See the [`LICENSE`](./LICENSE) file for full details.
 
 > **Note:** If you run this software as a service, you must provide a link to the source code of the running version.
-
