@@ -31,7 +31,7 @@ fn run() -> Result<(), worktree::WorktreeError> {
     match cli.command.unwrap_or(Commands::List) {
         Commands::List => commands::list(),
         Commands::Create { branch, stay } => commands::create(&branch, stay),
-        Commands::Go { name } => commands::go(&name),
+        Commands::Go { name, .. } => commands::go(&name),
     }
 }
 

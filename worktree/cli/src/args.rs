@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::engine::ArgValueCompleter;
 use clap_complete::Shell;
 
 /// A simple CLI for working with git worktrees
@@ -35,10 +36,22 @@ pub enum Commands {
     },
 
     /// Navigate to a worktree or the base checkout
+    #[command(disable_help_flag = true)]
     Go {
         /// Worktree name or "base" for the main checkout
+        #[arg(add = ArgValueCompleter::new(complete_worktree_names))]
         name: String,
+
+        #[arg(long, action = clap::ArgAction::Help, hide = true)]
+        help: Option<bool>,
     },
+}
+
+fn complete_worktree_names(_current: &std::ffi::OsStr) -> Vec<clap_complete::CompletionCandidate> {
+    worktree::worktree::worktree_names()
+        .into_iter()
+        .map(clap_complete::CompletionCandidate::new)
+        .collect()
 }
 
 const AFTER_HELP: &str = "\

@@ -47,6 +47,9 @@
 - `wt go <worktree|base>`
 
     - moves the user to the specified worktree (or base)
+    - communicates the change in directories with:
+        - `\nYou've been moved into the <blue-500>{worktree}</blue-500> <i>worktree</i> of <yellow>{{repo}}</yellow> at the same relative location (<dim>{relative-path}</dim>)`
+        - `\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{{repo}}</yellow> at the same relative location (<dim>{relative-path}</dim>)`
 
     > **Note:** the shell completions for `wt` will be updated dynamically and able to resolve the valid worktree names without the user needing to type them out
 
