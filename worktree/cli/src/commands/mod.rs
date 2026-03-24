@@ -1,4 +1,5 @@
 mod create;
+mod git_graph;
 mod go;
 mod list;
 
