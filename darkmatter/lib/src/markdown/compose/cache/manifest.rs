@@ -50,6 +50,10 @@ pub struct ComposedDocumentManifest {
     pub cache_version: u16,
     /// Combined cache key for this entry.
     pub entry_key: u64,
+    /// Hash of the composed document's source identifier.
+    pub source_id_hash: u64,
+    /// Body semantic hash from the source document snapshot used to compute this entry.
+    pub source_body_semantic_hash: u64,
     /// Hash of this document's own content + options (excluding deps).
     pub self_hash: u64,
     /// Merkle-style hash: `hash(self_hash, dep1.closure_hash, dep2.closure_hash, ...)`.
@@ -95,14 +99,22 @@ pub struct OperationResultManifest {
     pub op_kind: String,
     /// Hash of the operation's own content + variant parameters.
     pub self_hash: u64,
+    /// Closure hash for the operation result after validating its source inputs.
+    pub closure_hash: u64,
     /// xxHash of the result content blob.
     pub payload_blob_hash: u64,
+    /// Canonical source identifier (absolute path or URL).
+    pub canonical_source: String,
     /// xxHash of the source file identifier.
     pub source_id_hash: u64,
+    /// xxHash of the source content used to produce this result.
+    pub source_content_hash: u64,
     /// When this artifact was created.
     pub created_at: SystemTime,
     /// When this artifact was last read from cache.
     pub last_accessed_at: SystemTime,
+    /// Optional expiration time for time-bound operation artifacts.
+    pub expires_at: Option<SystemTime>,
 }
 
 #[allow(dead_code)]
@@ -110,6 +122,13 @@ impl OperationResultManifest {
     /// Updates the last-accessed timestamp to now.
     pub fn touch(&mut self) {
         self.last_accessed_at = SystemTime::now();
+    }
+
+    /// Returns true if the artifact has expired.
+    pub fn is_expired(&self) -> bool {
+        self.expires_at
+            .map(|exp| SystemTime::now() > exp)
+            .unwrap_or(false)
     }
 }
 

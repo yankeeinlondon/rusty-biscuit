@@ -353,10 +353,14 @@ mod tests {
     fn closure_hash_changes_with_deps() {
         let self_hash = 12345u64;
         let deps1 = vec![DependencyRef {
+            artifact_class: crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
+            entry_key: 1,
             source_id_hash: 100,
             closure_hash: 200,
         }];
         let deps2 = vec![DependencyRef {
+            artifact_class: crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
+            entry_key: 1,
             source_id_hash: 100,
             closure_hash: 300, // Different closure hash
         }];

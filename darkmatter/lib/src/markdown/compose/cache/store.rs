@@ -302,6 +302,8 @@ mod tests {
         let manifest = ComposedDocumentManifest {
             cache_version: CACHE_VERSION,
             entry_key: 55555,
+            source_id_hash: 44444,
+            source_body_semantic_hash: 33333,
             self_hash: 100,
             closure_hash: 200,
             dependency_count: 0,

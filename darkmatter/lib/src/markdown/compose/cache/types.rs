@@ -55,6 +55,10 @@ pub enum SourceKind {
 /// Reference to a dependency in a Merkle-style closure hash chain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DependencyRef {
+    /// Artifact class of the dependency.
+    pub artifact_class: ArtifactClass,
+    /// Entry key of the dependency artifact.
+    pub entry_key: u64,
     /// Hash of the dependency's source identifier.
     pub source_id_hash: u64,
     /// Closure hash of the dependency (includes its own transitive deps).

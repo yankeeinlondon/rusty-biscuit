@@ -438,6 +438,7 @@ pub(crate) struct PipelineRuntime {
     pub transclusion: crate::markdown::compose::transclusion::TransclusionRuntime,
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
+    dependencies: Vec<crate::markdown::compose::cache::types::DependencyRef>,
 }
 
 impl PipelineRuntime {
@@ -457,6 +458,7 @@ impl PipelineRuntime {
             ),
             shell: ShellExpansionRuntime::new(),
             cache,
+            dependencies: Vec::new(),
         }
     }
 
@@ -467,12 +469,24 @@ impl PipelineRuntime {
             transclusion: self.transclusion.clone_for_child(),
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
+            dependencies: Vec::new(),
         }
     }
 
     /// Merges a child runtime's stats back into this runtime.
     pub fn merge_child(&mut self, child: &Self) {
         self.transclusion.merge_child(&child.transclusion);
+    }
+
+    pub fn record_dependency(
+        &mut self,
+        dependency: crate::markdown::compose::cache::types::DependencyRef,
+    ) {
+        self.dependencies.push(dependency);
+    }
+
+    pub fn dependencies(&self) -> &[crate::markdown::compose::cache::types::DependencyRef] {
+        &self.dependencies
     }
 
     pub fn load_markdown(&self, path: &std::path::Path) -> MarkdownResult<Markdown> {

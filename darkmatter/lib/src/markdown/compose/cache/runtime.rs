@@ -9,9 +9,13 @@ use super::hashing::{
     body_semantic_hash, body_template_hash, compose_cache_key, frontmatter_hash, raw_bytes_hash,
     source_id_hash,
 };
-use super::manifest::{CACHE_VERSION, DocumentSnapshotManifest};
+use super::manifest::{
+    CACHE_VERSION, ComposedDocumentManifest, DocumentSnapshotManifest, OperationResultManifest,
+};
 use super::store::FileStore;
-use super::types::{ArtifactClass, CacheAccessMode, CacheStats, SourceKind};
+use super::types::{
+    ArtifactClass, CacheAccessMode, CacheFreshnessMode, CacheStats, DependencyRef, SourceKind,
+};
 use crate::markdown::compose::ComposeReport;
 use crate::markdown::types::MarkdownResult;
 use crate::markdown::Markdown;
@@ -43,6 +47,8 @@ pub(crate) struct ComposeResult {
     pub content: String,
     /// The compose report from the child pipeline.
     pub report: ComposeReport,
+    /// Direct cache dependencies of this composed document.
+    pub dependencies: Vec<DependencyRef>,
 }
 
 /// The cached result of an individual operation (code transclusion, TOC linking).
@@ -64,6 +70,20 @@ pub(crate) struct PersistentContext {
     pub options_hash: u64,
 }
 
+/// Pre-computed source state for a persistable operation result.
+pub(crate) struct OperationPersistentContext {
+    pub op_kind: &'static str,
+    pub entry_key: u64,
+    pub source_id: u64,
+    pub canonical_source: String,
+    pub source_content_hash: u64,
+}
+
+enum PersistentLookup<T> {
+    Fresh(T),
+    Stale(T),
+}
+
 /// Timeout for waiting on an in-flight computation before falling back
 /// to duplicate computation (mitigates rayon deadlock risk).
 const INFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -79,6 +99,7 @@ const INFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) struct RunLocalCache {
     markdown_documents: Arc<Mutex<HashMap<String, Markdown>>>,
     toc_headings: Arc<Mutex<HashMap<String, Vec<MarkdownTocNode>>>>,
+    document_snapshots: Arc<Mutex<HashMap<u64, DocumentSnapshotManifest>>>,
     compose_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<ComposeResult>>>>>,
     operation_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<OperationResult>>>>>,
     stats: Arc<Mutex<CacheStats>>,
@@ -108,6 +129,7 @@ impl RunLocalCache {
         Self {
             markdown_documents: Arc::new(Mutex::new(HashMap::new())),
             toc_headings: Arc::new(Mutex::new(HashMap::new())),
+            document_snapshots: Arc::new(Mutex::new(HashMap::new())),
             compose_results: Arc::new(Mutex::new(HashMap::new())),
             operation_results: Arc::new(Mutex::new(HashMap::new())),
             stats: Arc::new(Mutex::new(CacheStats::default())),
@@ -205,6 +227,7 @@ impl RunLocalCache {
         &self,
         key: &str,
         persistent_ctx: Option<&PersistentContext>,
+        freshness_mode: CacheFreshnessMode,
         compute: F,
     ) -> MarkdownResult<Arc<ComposeResult>>
     where
@@ -255,22 +278,30 @@ impl RunLocalCache {
         self.record_miss();
 
         // Check persistent store
-        if let Some(result) = self.try_persistent_read(key, persistent_ctx) {
-            let arc_result = Arc::new(result);
-            {
-                let mut state = slot.state.lock().unwrap();
-                *state = SlotState::Ready(Arc::clone(&arc_result));
+        let stale_fallback = match self.try_persistent_read_compose(key, persistent_ctx, freshness_mode)
+        {
+            Some(PersistentLookup::Fresh(result)) => {
+                let arc_result = Arc::new(result);
+                {
+                    let mut state = slot.state.lock().unwrap();
+                    *state = SlotState::Ready(Arc::clone(&arc_result));
+                }
+                slot.ready.notify_all();
+                self.record_write();
+                return Ok(arc_result);
             }
-            slot.ready.notify_all();
-            self.record_write();
-            return Ok(arc_result);
-        }
+            Some(PersistentLookup::Stale(result)) if freshness_mode == CacheFreshnessMode::Fallback => {
+                Some(result)
+            }
+            Some(PersistentLookup::Stale(_)) => None,
+            None => None,
+        };
 
         // Compute fresh result
         match compute() {
             Ok(result) => {
                 // Write to persistent store (best-effort)
-                self.try_persistent_write(key, persistent_ctx, &result);
+                self.try_persistent_write_compose(key, persistent_ctx, &result);
 
                 let arc_result = Arc::new(result);
                 {
@@ -282,6 +313,17 @@ impl RunLocalCache {
                 Ok(arc_result)
             }
             Err(err) => {
+                if let Some(stale) = stale_fallback {
+                    let arc_result = Arc::new(stale);
+                    {
+                        let mut state = slot.state.lock().unwrap();
+                        *state = SlotState::Ready(Arc::clone(&arc_result));
+                    }
+                    slot.ready.notify_all();
+                    self.record_stale_hit();
+                    return Ok(arc_result);
+                }
+
                 {
                     let mut state = slot.state.lock().unwrap();
                     *state = SlotState::Failed(err.to_string());
@@ -300,6 +342,8 @@ impl RunLocalCache {
     pub fn get_or_compute_operation<F>(
         &self,
         key: &str,
+        persistent_ctx: Option<&OperationPersistentContext>,
+        freshness_mode: CacheFreshnessMode,
         compute: F,
     ) -> MarkdownResult<Arc<OperationResult>>
     where
@@ -344,8 +388,31 @@ impl RunLocalCache {
 
         self.record_miss();
 
+        let stale_fallback =
+            match self.try_persistent_read_operation(key, persistent_ctx, freshness_mode) {
+                Some(PersistentLookup::Fresh(result)) => {
+                    let arc_result = Arc::new(result);
+                    {
+                        let mut state = slot.state.lock().unwrap();
+                        *state = SlotState::Ready(Arc::clone(&arc_result));
+                    }
+                    slot.ready.notify_all();
+                    self.record_write();
+                    return Ok(arc_result);
+                }
+                Some(PersistentLookup::Stale(result))
+                    if freshness_mode == CacheFreshnessMode::Fallback =>
+                {
+                    Some(result)
+                }
+                Some(PersistentLookup::Stale(_)) => None,
+                None => None,
+            };
+
         match compute() {
             Ok(result) => {
+                self.try_persistent_write_operation(key, persistent_ctx, &result);
+
                 let arc_result = Arc::new(result);
                 {
                     let mut state = slot.state.lock().unwrap();
@@ -356,6 +423,17 @@ impl RunLocalCache {
                 Ok(arc_result)
             }
             Err(err) => {
+                if let Some(stale) = stale_fallback {
+                    let arc_result = Arc::new(stale);
+                    {
+                        let mut state = slot.state.lock().unwrap();
+                        *state = SlotState::Ready(Arc::clone(&arc_result));
+                    }
+                    slot.ready.notify_all();
+                    self.record_stale_hit();
+                    return Ok(arc_result);
+                }
+
                 {
                     let mut state = slot.state.lock().unwrap();
                     *state = SlotState::Failed(err.to_string());
@@ -486,41 +564,22 @@ impl RunLocalCache {
     }
 
     /// Attempts to read a compose result from the persistent store.
-    ///
-    /// When a `PersistentContext` is provided, computes the full entry key
-    /// from the document snapshot's `body_semantic_hash` combined with the
-    /// state/context/options hashes. Falls back to path-based key otherwise.
-    fn try_persistent_read(
+    fn try_persistent_read_compose(
         &self,
         key: &str,
         persistent_ctx: Option<&PersistentContext>,
-    ) -> Option<ComposeResult> {
-        use super::hashing::compose_entry_key;
-
+        freshness_mode: CacheFreshnessMode,
+    ) -> Option<PersistentLookup<ComposeResult>> {
         let store = self.persistent.as_ref()?;
 
         // Compute the persistent entry key
         let entry_key = match persistent_ctx {
-            Some(ctx) => {
-                // Look up the document snapshot to get body_semantic_hash
-                let snapshot: DocumentSnapshotManifest = store
-                    .read_manifest(ArtifactClass::DocumentSnapshot, ctx.source_id)
-                    .ok()
-                    .flatten()?;
-
-                compose_entry_key(
-                    ctx.source_id,
-                    snapshot.body_semantic_hash,
-                    ctx.state_hash,
-                    ctx.context_hash,
-                    ctx.options_hash,
-                )
-            }
+            Some(ctx) => self.compose_entry_key(ctx)?,
             None => biscuit_hash::xx_hash(key),
         };
 
         // Read the composed document manifest
-        let mut manifest: super::manifest::ComposedDocumentManifest =
+        let mut manifest: ComposedDocumentManifest =
             match store.read_manifest(ArtifactClass::ComposeDocumentCore, entry_key) {
                 Ok(Some(m)) => m,
                 Ok(None) => return None,
@@ -530,50 +589,88 @@ impl RunLocalCache {
                 }
             };
 
-        // Check expiration
-        if manifest.is_expired() {
-            tracing::debug!("Persistent cache entry expired for {}", key);
-            return None;
+        let content = self.read_blob_string(key, manifest.payload_blob_hash)?;
+
+        let is_stale = match freshness_mode {
+            CacheFreshnessMode::Optimistic | CacheFreshnessMode::Forced => false,
+            CacheFreshnessMode::Strict | CacheFreshnessMode::Fallback => {
+                manifest.is_expired() || !self.validate_compose_manifest(&manifest)
+            }
+        };
+
+        if is_stale && freshness_mode == CacheFreshnessMode::Strict {
+            tracing::debug!("Persistent compose cache entry stale for {}", key);
+            return Some(PersistentLookup::Stale(ComposeResult {
+                content,
+                report: ComposeReport::new(),
+                dependencies: manifest.dependencies.clone(),
+            }));
         }
-
-        // Read the blob using the hash from the manifest
-        let blob = match store.read_blob(manifest.payload_blob_hash, "md") {
-            Ok(Some(data)) => data,
-            Ok(None) => {
-                tracing::debug!(
-                    "Persistent cache blob missing for {} (hash {:016x})",
-                    key,
-                    manifest.payload_blob_hash
-                );
-                return None;
-            }
-            Err(e) => {
-                tracing::debug!("Persistent cache blob read error for {}: {}", key, e);
-                return None;
-            }
-        };
-
-        let content = match String::from_utf8(blob) {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
 
         // Update last-accessed timestamp (best-effort)
         manifest.touch();
         let _ = store.write_manifest(ArtifactClass::ComposeDocumentCore, entry_key, &manifest);
 
         self.stats.lock().unwrap().persistent_hits += 1;
-        Some(ComposeResult {
+        let result = ComposeResult {
             content,
             report: ComposeReport::new(),
-        })
+            dependencies: manifest.dependencies.clone(),
+        };
+
+        if is_stale {
+            Some(PersistentLookup::Stale(result))
+        } else {
+            Some(PersistentLookup::Fresh(result))
+        }
+    }
+
+    /// Attempts to read an operation result from the persistent store.
+    fn try_persistent_read_operation(
+        &self,
+        key: &str,
+        persistent_ctx: Option<&OperationPersistentContext>,
+        freshness_mode: CacheFreshnessMode,
+    ) -> Option<PersistentLookup<OperationResult>> {
+        let store = self.persistent.as_ref()?;
+        let entry_key = persistent_ctx.map(|ctx| ctx.entry_key).unwrap_or_else(|| biscuit_hash::xx_hash(key));
+
+        let mut manifest: OperationResultManifest =
+            match store.read_manifest(ArtifactClass::OperationResult, entry_key) {
+                Ok(Some(m)) => m,
+                Ok(None) => return None,
+                Err(e) => {
+                    tracing::debug!("Persistent operation manifest read error for {}: {}", key, e);
+                    return None;
+                }
+            };
+
+        let content = self.read_blob_string(key, manifest.payload_blob_hash)?;
+        let is_stale = match freshness_mode {
+            CacheFreshnessMode::Optimistic | CacheFreshnessMode::Forced => false,
+            CacheFreshnessMode::Strict | CacheFreshnessMode::Fallback => {
+                manifest.is_expired() || !self.validate_operation_manifest(&manifest)
+            }
+        };
+
+        if is_stale && freshness_mode == CacheFreshnessMode::Strict {
+            tracing::debug!("Persistent operation cache entry stale for {}", key);
+            return Some(PersistentLookup::Stale(OperationResult { content }));
+        }
+
+        manifest.touch();
+        let _ = store.write_manifest(ArtifactClass::OperationResult, entry_key, &manifest);
+
+        self.stats.lock().unwrap().persistent_hits += 1;
+        if is_stale {
+            Some(PersistentLookup::Stale(OperationResult { content }))
+        } else {
+            Some(PersistentLookup::Fresh(OperationResult { content }))
+        }
     }
 
     /// Attempts to write a compose result to the persistent store (best-effort).
-    ///
-    /// When a `PersistentContext` is provided, computes the full entry key
-    /// and Merkle-style closure hash. Falls back to path-based key otherwise.
-    fn try_persistent_write(
+    fn try_persistent_write_compose(
         &self,
         key: &str,
         persistent_ctx: Option<&PersistentContext>,
@@ -593,31 +690,34 @@ impl RunLocalCache {
         let blob_hash = raw_bytes_hash(blob);
 
         // Compute the entry key and self_hash from persistent context
-        let (entry_key, self_hash) = match persistent_ctx {
+        let (entry_key, source_id_hash, source_body_semantic_hash, self_hash) = match persistent_ctx {
             Some(ctx) => {
-                let body_semantic = body_semantic_hash(&result.content);
+                let Some(snapshot) = self.get_document_snapshot(ctx.source_id) else {
+                    return;
+                };
                 let ek = compose_entry_key(
                     ctx.source_id,
-                    body_semantic,
+                    snapshot.body_semantic_hash,
                     ctx.state_hash,
                     ctx.context_hash,
                     ctx.options_hash,
                 );
-                (ek, blob_hash)
+                (ek, ctx.source_id, snapshot.body_semantic_hash, blob_hash)
             }
             None => {
                 let ek = biscuit_hash::xx_hash(key);
-                (ek, blob_hash)
+                (ek, 0, 0, blob_hash)
             }
         };
 
-        // Compute closure hash (no dependencies tracked yet — leaf documents)
-        let deps = vec![];
+        let deps = result.dependencies.clone();
         let c_hash = closure_hash(self_hash, &deps);
 
-        let manifest = super::manifest::ComposedDocumentManifest {
+        let manifest = ComposedDocumentManifest {
             cache_version: CACHE_VERSION,
             entry_key,
+            source_id_hash,
+            source_body_semantic_hash,
             self_hash,
             closure_hash: c_hash,
             dependency_count: deps.len(),
@@ -638,6 +738,59 @@ impl RunLocalCache {
             "md",
         ) {
             tracing::debug!("Persistent cache write error for {}: {}", key, e);
+        } else {
+            self.stats.lock().unwrap().persistent_writes += 1;
+        }
+    }
+
+    /// Attempts to write an operation result to the persistent store (best-effort).
+    fn try_persistent_write_operation(
+        &self,
+        key: &str,
+        persistent_ctx: Option<&OperationPersistentContext>,
+        result: &OperationResult,
+    ) {
+        let Some(store) = self.persistent.as_ref() else {
+            return;
+        };
+
+        if self.access_mode == CacheAccessMode::ReadOnly {
+            return;
+        }
+
+        let Some(ctx) = persistent_ctx else {
+            return;
+        };
+
+        let blob = result.content.as_bytes();
+        let blob_hash = raw_bytes_hash(blob);
+        let self_hash = blob_hash;
+        let closure_hash = self.operation_closure_hash(self_hash, ctx.source_content_hash);
+
+        let manifest = OperationResultManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: ctx.entry_key,
+            op_kind: ctx.op_kind.to_string(),
+            self_hash,
+            closure_hash,
+            payload_blob_hash: blob_hash,
+            canonical_source: ctx.canonical_source.clone(),
+            source_id_hash: ctx.source_id,
+            source_content_hash: ctx.source_content_hash,
+            created_at: std::time::SystemTime::now(),
+            last_accessed_at: std::time::SystemTime::now(),
+            expires_at: None,
+        };
+
+        if let Err(e) = store.write_artifact(
+            ArtifactClass::OperationResult,
+            ctx.entry_key,
+            &manifest,
+            blob,
+            blob_hash,
+            "md",
+        ) {
+            tracing::debug!("Persistent operation cache write error for {}: {}", key, e);
         } else {
             self.stats.lock().unwrap().persistent_writes += 1;
         }
@@ -675,6 +828,7 @@ impl RunLocalCache {
                     sid_hash,
                 ) && existing.is_fresh(current_modified, current_size)
                 {
+                    self.cache_document_snapshot(existing);
                     return; // Snapshot is still valid
                 }
             }
@@ -709,10 +863,169 @@ impl RunLocalCache {
             size_bytes,
         };
 
+        self.cache_document_snapshot(manifest.clone());
+
         if let Err(e) = store.write_manifest(ArtifactClass::DocumentSnapshot, sid_hash, &manifest)
         {
             tracing::debug!("Failed to write document snapshot for {:?}: {}", path, e);
         }
+    }
+
+    fn cache_document_snapshot(&self, manifest: DocumentSnapshotManifest) {
+        self.document_snapshots
+            .lock()
+            .unwrap()
+            .insert(manifest.source_id_hash, manifest);
+    }
+
+    fn get_document_snapshot(&self, source_id: u64) -> Option<DocumentSnapshotManifest> {
+        if let Some(snapshot) = self.document_snapshots.lock().unwrap().get(&source_id).cloned() {
+            return Some(snapshot);
+        }
+
+        let store = self.persistent.as_ref()?;
+        let snapshot: DocumentSnapshotManifest = store
+            .read_manifest(ArtifactClass::DocumentSnapshot, source_id)
+            .ok()
+            .flatten()?;
+        self.cache_document_snapshot(snapshot.clone());
+        Some(snapshot)
+    }
+
+    fn compose_entry_key(&self, ctx: &PersistentContext) -> Option<u64> {
+        use super::hashing::compose_entry_key;
+
+        let snapshot = self.get_document_snapshot(ctx.source_id)?;
+        Some(compose_entry_key(
+            ctx.source_id,
+            snapshot.body_semantic_hash,
+            ctx.state_hash,
+            ctx.context_hash,
+            ctx.options_hash,
+        ))
+    }
+
+    fn read_blob_string(&self, key: &str, blob_hash: u64) -> Option<String> {
+        let store = self.persistent.as_ref()?;
+        let blob = match store.read_blob(blob_hash, "md") {
+            Ok(Some(data)) => data,
+            Ok(None) => {
+                tracing::debug!(
+                    "Persistent cache blob missing for {} (hash {:016x})",
+                    key,
+                    blob_hash
+                );
+                return None;
+            }
+            Err(e) => {
+                tracing::debug!("Persistent cache blob read error for {}: {}", key, e);
+                return None;
+            }
+        };
+
+        String::from_utf8(blob).ok()
+    }
+
+    fn validate_compose_manifest(&self, manifest: &ComposedDocumentManifest) -> bool {
+        self.record_revalidation();
+
+        let Some(snapshot) = self.get_document_snapshot(manifest.source_id_hash) else {
+            return false;
+        };
+        if snapshot.body_semantic_hash != manifest.source_body_semantic_hash {
+            return false;
+        }
+
+        for dep in &manifest.dependencies {
+            let Some(current_closure_hash) = self.resolve_dependency_closure_hash(dep) else {
+                return false;
+            };
+            if current_closure_hash != dep.closure_hash {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn validate_operation_manifest(&self, manifest: &OperationResultManifest) -> bool {
+        self.record_revalidation();
+
+        let current_bytes = match std::fs::read(&manifest.canonical_source) {
+            Ok(bytes) => bytes,
+            Err(_) => return false,
+        };
+        raw_bytes_hash(&current_bytes) == manifest.source_content_hash
+    }
+
+    fn resolve_dependency_closure_hash(&self, dependency: &DependencyRef) -> Option<u64> {
+        let store = self.persistent.as_ref()?;
+
+        match dependency.artifact_class {
+            ArtifactClass::ComposeDocumentCore => {
+                let manifest: ComposedDocumentManifest = store
+                    .read_manifest(ArtifactClass::ComposeDocumentCore, dependency.entry_key)
+                    .ok()
+                    .flatten()?;
+                if !self.validate_compose_manifest(&manifest) {
+                    return None;
+                }
+                Some(manifest.closure_hash)
+            }
+            ArtifactClass::OperationResult => {
+                let manifest: OperationResultManifest = store
+                    .read_manifest(ArtifactClass::OperationResult, dependency.entry_key)
+                    .ok()
+                    .flatten()?;
+                if !self.validate_operation_manifest(&manifest) {
+                    return None;
+                }
+                Some(manifest.closure_hash)
+            }
+            ArtifactClass::DocumentSnapshot => None,
+        }
+    }
+
+    fn operation_closure_hash(&self, self_hash: u64, source_content_hash: u64) -> u64 {
+        let mut data = Vec::with_capacity(16);
+        data.extend_from_slice(&self_hash.to_le_bytes());
+        data.extend_from_slice(&source_content_hash.to_le_bytes());
+        biscuit_hash::xx_hash_bytes(&data)
+    }
+
+    pub fn compose_dependency_ref(
+        &self,
+        persistent_ctx: &PersistentContext,
+    ) -> Option<DependencyRef> {
+        let store = self.persistent.as_ref()?;
+        let entry_key = self.compose_entry_key(persistent_ctx)?;
+        let manifest: ComposedDocumentManifest = store
+            .read_manifest(ArtifactClass::ComposeDocumentCore, entry_key)
+            .ok()
+            .flatten()?;
+        Some(DependencyRef {
+            artifact_class: ArtifactClass::ComposeDocumentCore,
+            entry_key,
+            source_id_hash: manifest.source_id_hash,
+            closure_hash: manifest.closure_hash,
+        })
+    }
+
+    pub fn operation_dependency_ref(
+        &self,
+        persistent_ctx: &OperationPersistentContext,
+    ) -> Option<DependencyRef> {
+        let store = self.persistent.as_ref()?;
+        let manifest: OperationResultManifest = store
+            .read_manifest(ArtifactClass::OperationResult, persistent_ctx.entry_key)
+            .ok()
+            .flatten()?;
+        Some(DependencyRef {
+            artifact_class: ArtifactClass::OperationResult,
+            entry_key: persistent_ctx.entry_key,
+            source_id_hash: manifest.source_id_hash,
+            closure_hash: manifest.closure_hash,
+        })
     }
 
     fn record_hit(&self) {
@@ -734,11 +1047,30 @@ impl RunLocalCache {
     fn record_error(&self) {
         self.stats.lock().unwrap().errors += 1;
     }
+
+    fn record_revalidation(&self) {
+        self.stats.lock().unwrap().revalidations += 1;
+    }
+
+    fn record_stale_hit(&self) {
+        self.stats.lock().unwrap().stale_hits += 1;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::cache::operation::CodeOperation;
+    use crate::markdown::compose::cache::operation::CacheableOperation;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn persistent_cache() -> (tempfile::TempDir, RunLocalCache) {
+        let dir = tempdir().unwrap();
+        let cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        (dir, cache)
+    }
 
     #[test]
     fn cache_off_always_computes() {
@@ -747,11 +1079,12 @@ mod tests {
 
         for _ in 0..3 {
             let result = cache
-                .get_or_compute_compose("key1", None, || {
+                .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
                     call_count += 1;
                     Ok(ComposeResult {
                         content: format!("result-{}", call_count),
                         report: ComposeReport::new(),
+                        dependencies: vec![],
                     })
                 })
                 .unwrap();
@@ -770,21 +1103,23 @@ mod tests {
         let call_count = std::sync::atomic::AtomicUsize::new(0);
 
         let result1 = cache
-            .get_or_compute_compose("key1", None, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(ComposeResult {
                     content: "hello".to_string(),
                     report: ComposeReport::new(),
+                    dependencies: vec![],
                 })
             })
             .unwrap();
 
         let result2 = cache
-            .get_or_compute_compose("key1", None, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(ComposeResult {
                     content: "should not compute".to_string(),
                     report: ComposeReport::new(),
+                    dependencies: vec![],
                 })
             })
             .unwrap();
@@ -819,14 +1154,20 @@ mod tests {
                 handles.push(s.spawn(move || {
                     barrier.wait();
                     cache
-                        .get_or_compute_compose("contested-key", None, || {
+                        .get_or_compute_compose(
+                            "contested-key",
+                            None,
+                            CacheFreshnessMode::Strict,
+                            || {
                             compute_count.fetch_add(1, Ordering::SeqCst);
                             std::thread::sleep(Duration::from_millis(50));
                             Ok(ComposeResult {
                                 content: "shared-result".to_string(),
                                 report: ComposeReport::new(),
+                                dependencies: vec![],
                             })
-                        })
+                        },
+                        )
                         .unwrap()
                 }));
             }
@@ -883,10 +1224,11 @@ mod tests {
 
         // Populate cache
         cache
-            .get_or_compute_compose("key1", None, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
                 Ok(ComposeResult {
                     content: "original".to_string(),
                     report: ComposeReport::new(),
+                    dependencies: vec![],
                 })
             })
             .unwrap();
@@ -896,6 +1238,7 @@ mod tests {
             access_mode: CacheAccessMode::Refresh,
             markdown_documents: Arc::clone(&cache.markdown_documents),
             toc_headings: Arc::clone(&cache.toc_headings),
+            document_snapshots: Arc::clone(&cache.document_snapshots),
             compose_results: Arc::clone(&cache.compose_results),
             operation_results: Arc::clone(&cache.operation_results),
             stats: Arc::clone(&cache.stats),
@@ -903,10 +1246,11 @@ mod tests {
         };
 
         let result = refresh_cache
-            .get_or_compute_compose("key1", None, || {
+            .get_or_compute_compose("key1", None, CacheFreshnessMode::Strict, || {
                 Ok(ComposeResult {
                     content: "refreshed".to_string(),
                     report: ComposeReport::new(),
+                    dependencies: vec![],
                 })
             })
             .unwrap();
@@ -923,7 +1267,7 @@ mod tests {
 
         for _ in 0..3 {
             let result = cache
-                .get_or_compute_operation("op-key1", || {
+                .get_or_compute_operation("op-key1", None, CacheFreshnessMode::Strict, || {
                     call_count += 1;
                     Ok(OperationResult {
                         content: format!("op-{}", call_count),
@@ -942,7 +1286,7 @@ mod tests {
         let call_count = std::sync::atomic::AtomicUsize::new(0);
 
         let result1 = cache
-            .get_or_compute_operation("op-key1", || {
+            .get_or_compute_operation("op-key1", None, CacheFreshnessMode::Strict, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(OperationResult {
                     content: "code-block".to_string(),
@@ -951,7 +1295,7 @@ mod tests {
             .unwrap();
 
         let result2 = cache
-            .get_or_compute_operation("op-key1", || {
+            .get_or_compute_operation("op-key1", None, CacheFreshnessMode::Strict, || {
                 call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(OperationResult {
                     content: "should not compute".to_string(),
@@ -989,13 +1333,18 @@ mod tests {
                 handles.push(s.spawn(move || {
                     barrier.wait();
                     cache
-                        .get_or_compute_operation("contested-op", || {
+                        .get_or_compute_operation(
+                            "contested-op",
+                            None,
+                            CacheFreshnessMode::Strict,
+                            || {
                             compute_count.fetch_add(1, Ordering::SeqCst);
                             std::thread::sleep(Duration::from_millis(50));
                             Ok(OperationResult {
                                 content: "shared-op".to_string(),
                             })
-                        })
+                        },
+                        )
                         .unwrap()
                 }));
             }
@@ -1020,16 +1369,17 @@ mod tests {
 
         // Same key string, different namespaces
         cache
-            .get_or_compute_compose("shared-key", None, || {
+            .get_or_compute_compose("shared-key", None, CacheFreshnessMode::Strict, || {
                 Ok(ComposeResult {
                     content: "compose-content".to_string(),
                     report: ComposeReport::new(),
+                    dependencies: vec![],
                 })
             })
             .unwrap();
 
         let op_result = cache
-            .get_or_compute_operation("shared-key", || {
+            .get_or_compute_operation("shared-key", None, CacheFreshnessMode::Strict, || {
                 Ok(OperationResult {
                     content: "operation-content".to_string(),
                 })
@@ -1038,5 +1388,182 @@ mod tests {
 
         // Operation should NOT hit the compose cache
         assert_eq!(op_result.content, "operation-content");
+    }
+
+    #[test]
+    fn compose_dependency_invalidation_detects_child_source_changes() {
+        let (_dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let parent_path = workspace.path().join("parent.md");
+        let child_path = workspace.path().join("child.md");
+
+        fs::write(&parent_path, "# Parent\n\n::file ./child.md\n").unwrap();
+        fs::write(&child_path, "# Child\n\nVersion 1\n").unwrap();
+
+        cache.load_markdown(&parent_path).unwrap();
+        cache.load_markdown(&child_path).unwrap();
+
+        let parent_source = compose_cache_key(&parent_path);
+        let child_source = compose_cache_key(&child_path);
+        let parent_ctx = PersistentContext {
+            source_id: source_id_hash(&parent_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+        let child_ctx = PersistentContext {
+            source_id: source_id_hash(&child_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+
+        cache
+            .get_or_compute_compose("child", Some(&child_ctx), CacheFreshnessMode::Strict, || {
+                Ok(ComposeResult {
+                    content: "# Child\n\nVersion 1\n".to_string(),
+                    report: ComposeReport::new(),
+                    dependencies: vec![],
+                })
+            })
+            .unwrap();
+
+        let child_dep = cache.compose_dependency_ref(&child_ctx).unwrap();
+
+        cache
+            .get_or_compute_compose("parent", Some(&parent_ctx), CacheFreshnessMode::Strict, || {
+                Ok(ComposeResult {
+                    content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
+                    report: ComposeReport::new(),
+                    dependencies: vec![child_dep.clone()],
+                })
+            })
+            .unwrap();
+
+        fs::write(&child_path, "# Child\n\nVersion 2\n").unwrap();
+
+        let refresh_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(_dir.path().join("cache"));
+        refresh_cache.load_markdown(&child_path).unwrap();
+
+        let lookup = refresh_cache
+            .try_persistent_read_compose("parent", Some(&parent_ctx), CacheFreshnessMode::Strict);
+        assert!(
+            matches!(lookup, Some(PersistentLookup::Stale(_))),
+            "expected stale parent cache entry after child change"
+        );
+    }
+
+    #[test]
+    fn persistent_operation_cache_hits_across_runs() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let source_path = workspace.path().join("main.rs");
+        fs::write(&source_path, "fn main() {}\n").unwrap();
+
+        let canonical_source = compose_cache_key(&source_path);
+        let source_id = source_id_hash(&canonical_source);
+        let source_content_hash = raw_bytes_hash(&fs::read(&source_path).unwrap());
+        let op = CodeOperation;
+        let entry_key = op.variant_cache_key(source_id, &Default::default());
+        let persistent_ctx = OperationPersistentContext {
+            op_kind: "code",
+            entry_key,
+            source_id,
+            canonical_source,
+            source_content_hash,
+        };
+
+        cache
+            .get_or_compute_operation(
+                "code-op",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(OperationResult {
+                        content: "```rust\nfn main() {}\n```".to_string(),
+                    })
+                },
+            )
+            .unwrap();
+
+        let hit_cache =
+            RunLocalCache::new(CacheAccessMode::ReadWrite).with_persistent(dir.path().join("cache"));
+        let compute_count = std::sync::atomic::AtomicUsize::new(0);
+
+        let result = hit_cache
+            .get_or_compute_operation(
+                "code-op",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    compute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(OperationResult {
+                        content: "should not compute".to_string(),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert_eq!(compute_count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(result.content, "```rust\nfn main() {}\n```");
+    }
+
+    #[test]
+    fn fallback_mode_serves_stale_operation_when_recompute_fails() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let source_path = workspace.path().join("main.rs");
+        fs::write(&source_path, "fn main() {}\n").unwrap();
+
+        let canonical_source = compose_cache_key(&source_path);
+        let source_id = source_id_hash(&canonical_source);
+        let op = CodeOperation;
+        let entry_key = op.variant_cache_key(source_id, &Default::default());
+
+        let initial_ctx = OperationPersistentContext {
+            op_kind: "code",
+            entry_key,
+            source_id,
+            canonical_source: canonical_source.clone(),
+            source_content_hash: raw_bytes_hash(&fs::read(&source_path).unwrap()),
+        };
+
+        cache
+            .get_or_compute_operation(
+                "code-op",
+                Some(&initial_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(OperationResult {
+                        content: "cached content".to_string(),
+                    })
+                },
+            )
+            .unwrap();
+
+        fs::write(&source_path, "fn main() { println!(\"changed\"); }\n").unwrap();
+
+        let fallback_ctx = OperationPersistentContext {
+            op_kind: "code",
+            entry_key,
+            source_id,
+            canonical_source,
+            source_content_hash: raw_bytes_hash(&fs::read(&source_path).unwrap()),
+        };
+
+        let fallback_cache =
+            RunLocalCache::new(CacheAccessMode::ReadWrite).with_persistent(dir.path().join("cache"));
+        let result = fallback_cache
+            .get_or_compute_operation(
+                "code-op",
+                Some(&fallback_ctx),
+                CacheFreshnessMode::Fallback,
+                || Err(std::io::Error::other("boom").into()),
+            )
+            .unwrap();
+
+        assert_eq!(result.content, "cached content");
+        assert_eq!(fallback_cache.stats().stale_hits, 1);
     }
 }

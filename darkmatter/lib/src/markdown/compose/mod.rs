@@ -72,6 +72,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use cache::operation::CacheableOperation;
 use shell_expansion::{apply_replacements_in_reverse, execute_directive};
 
 #[derive(Clone)]
@@ -100,6 +101,7 @@ enum PreparedTransclusion {
         span: std::ops::Range<usize>,
         path: PathBuf,
         directive_options: transclusion::BlockOptions,
+        line: usize,
     },
     Toc {
         order: usize,
@@ -846,6 +848,7 @@ impl Markdown {
                             span: directive.span.clone(),
                             path,
                             directive_options: directive.options.clone(),
+                            line: directive.line,
                         }
                     } else {
                         PreparedTransclusion::Markdown {
@@ -1101,18 +1104,23 @@ impl Markdown {
                 span,
                 path,
                 directive_options,
+                line: _line,
             } => {
                 let cache_handle = {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.cache.clone()
                 };
-                let content = self.render_code_transclusion(
+                let (content, dependency) = self.render_code_transclusion(
                     &path,
                     &directive_options,
                     state,
                     options,
                     &cache_handle,
                 )?;
+                if let Some(dependency) = dependency {
+                    let mut runtime = runtime_mutex.lock().unwrap();
+                    runtime.record_dependency(dependency);
+                }
                 let mut code_report = ComposeReport::new();
                 code_report.transclusions_applied = 1;
                 Ok(ResolvedTransclusion {
@@ -1134,24 +1142,42 @@ impl Markdown {
                         &options.source,
                         &transclusion_opts,
                     )? {
-                    let (cache_handle, headings) = {
+                    let cache_handle = {
                         let runtime = runtime_mutex.lock().unwrap();
-                        let cache = runtime.cache.clone();
-                        let hdgs = runtime
-                            .load_toc_headings(&path)
-                            .map_err(toc_linking::TocLinkingError::Io)?;
-                        (cache, hdgs)
+                        runtime.cache.clone()
                     };
-
-                    let cache_key = cache::TocLinkingOperation::cache_key_string(
-                        &path,
-                        &directive.options,
-                    );
+                    let canonical_source = cache::compose_cache_key_for_path(&path);
+                    let source_id = cache::hashing::source_id_hash(&canonical_source);
+                    let source_bytes =
+                        std::fs::read(&path).map_err(toc_linking::TocLinkingError::Io)?;
+                    let source_content_hash = cache::hashing::raw_bytes_hash(&source_bytes);
+                    let buckets = cache::TocLinkingOperation::split_params(&directive.options);
+                    let entry_key =
+                        cache::TocLinkingOperation::variant_cache_key(source_id, &buckets);
+                    let cache_key = cache::TocLinkingOperation::cache_key_string(&path, &directive.options);
+                    let persistent_ctx = cache::OperationPersistentContext {
+                        op_kind: "toc-linking",
+                        entry_key,
+                        source_id,
+                        canonical_source,
+                        source_content_hash,
+                    };
                     let line = directive.line;
                     let options_clone = directive.options.clone();
                     let display_clone = display_target.clone();
+                    let path_clone = path.clone();
 
-                    let cached = cache_handle.get_or_compute_operation(&cache_key, || {
+                    let cached = cache_handle.get_or_compute_operation(
+                        &cache_key,
+                        Some(&persistent_ctx),
+                        options.cache_freshness_mode,
+                        || {
+                            let headings = {
+                                let runtime = runtime_mutex.lock().unwrap();
+                                runtime
+                                    .load_toc_headings(&path_clone)
+                                    .map_err(toc_linking::TocLinkingError::Io)?
+                            };
                         let content = toc_linking::render_resolved_directive(
                             &display_clone,
                             &headings,
@@ -1160,7 +1186,13 @@ impl Markdown {
                         )
                         .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                         Ok(cache::OperationResult { content })
-                    })?;
+                        },
+                    )?;
+
+                    if let Some(dependency) = cache_handle.operation_dependency_ref(&persistent_ctx) {
+                        let mut runtime = runtime_mutex.lock().unwrap();
+                        runtime.record_dependency(dependency);
+                    }
 
                     cached.content.clone()
                 } else {
@@ -1191,17 +1223,20 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
         // ── Core compose (cacheable via single-flight) ─────────────
-        let cache_key = cache::compose_cache_key_for_path(path);
-        // Clone the cache handle so the closure doesn't borrow runtime.
-        let cache_handle = runtime.cache.clone();
-
-        // Build persistent context for multi-dimensional cache key
         let persistent_ctx = cache::PersistentContext {
-            source_id: cache::hashing::source_id_hash(&cache_key),
+            source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_hash: cache::hashing::effective_state_hash(state),
             context_hash: cache::hashing::context_hash(state.context()),
             options_hash: cache::hashing::options_hash(options),
         };
+        let cache_key = format!(
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}",
+            persistent_ctx.source_id,
+            persistent_ctx.state_hash,
+            persistent_ctx.context_hash,
+            persistent_ctx.options_hash
+        );
+        let cache_handle = runtime.cache.clone();
 
         let inherited = self.build_child_external_state(state);
         let replace_parent_wins = matches!(
@@ -1214,22 +1249,35 @@ impl Markdown {
         };
         let path_buf = path.to_path_buf();
 
-        let cached = cache_handle.get_or_compute_compose(&cache_key, Some(&persistent_ctx), || {
-            let mut child_options = options
-                .clone()
-                .with_replace_parent_wins(replace_parent_wins)
-                .with_one_off_replace(one_off.clone());
-            child_options.external_state = Some(inherited.clone());
-            child_options.source = ComposeSource::File(path_buf.clone());
+        let cached = cache_handle.get_or_compute_compose(
+            &cache_key,
+            Some(&persistent_ctx),
+            options.cache_freshness_mode,
+            || {
+                let mut child_options = options
+                    .clone()
+                    .with_replace_parent_wins(replace_parent_wins)
+                    .with_one_off_replace(one_off.clone());
+                child_options.external_state = Some(inherited.clone());
+                child_options.source = ComposeSource::File(path_buf.clone());
 
-            let mut child = runtime.load_markdown(path)?;
-            let child_report = child.run_compose_pipeline_internal(child_options, runtime)?;
+                let mut compose_runtime = runtime.clone_for_child();
+                let mut child = compose_runtime.load_markdown(path)?;
+                let child_report =
+                    child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
+                runtime.merge_child(&compose_runtime);
 
-            Ok(cache::ComposeResult {
-                content: child.content().to_string(),
-                report: child_report,
-            })
-        })?;
+                Ok(cache::ComposeResult {
+                    content: child.content().to_string(),
+                    report: child_report,
+                    dependencies: compose_runtime.dependencies().to_vec(),
+                })
+            },
+        )?;
+
+        if let Some(dependency) = cache_handle.compose_dependency_ref(&persistent_ctx) {
+            runtime.record_dependency(dependency);
+        }
 
         report.merge(cached.report.clone());
 
@@ -1282,7 +1330,7 @@ impl Markdown {
         state: &EffectiveState,
         options: &ComposeOptions,
         cache_handle: &cache::RunLocalCache,
-    ) -> MarkdownResult<String> {
+    ) -> MarkdownResult<(String, Option<cache::types::DependencyRef>)> {
         // Compute variant params (needed for both cache key and core)
         let base_map = state.get_replace_map().cloned().unwrap_or_default();
         let effective_map = match &directive_options.replace {
@@ -1293,45 +1341,76 @@ impl Markdown {
             }
         };
         let language = transclusion::infer_language(path, &options.code_fallback_language);
+        let canonical_source = cache::compose_cache_key_for_path(path);
+        let source_id = cache::hashing::source_id_hash(&canonical_source);
+        let source_bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(err) => return Err(err.into()),
+        };
+        let source_content_hash = cache::hashing::raw_bytes_hash(&source_bytes);
 
-        // Cache key from source identity + variant params
-        let cache_key = cache::code_cache_key(path, &effective_map, &language);
+        let op = cache::CodeOperation;
+        let mut buckets = op.split_params(directive_options);
+        buckets
+            .variant
+            .push(("language".to_string(), language.clone()));
+        let entry_key = op.variant_cache_key(source_id, &buckets);
+        let cache_key = format!(
+            "code:{}:{:016x}",
+            canonical_source,
+            entry_key
+        );
+        let persistent_ctx = cache::OperationPersistentContext {
+            op_kind: "code",
+            entry_key,
+            source_id,
+            canonical_source,
+            source_content_hash,
+        };
 
         // Core computation (cacheable via single-flight)
-        let path_buf = path.to_path_buf();
         let context = options.context().clone();
-        let cached = cache_handle.get_or_compute_operation(&cache_key, || {
-            let raw = match std::fs::read_to_string(&path_buf) {
-                Ok(content) => content,
-                Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
-                    return Err(transclusion::TransclusionError::NonTextCodeSource {
-                        path: path_buf.clone(),
-                    }
-                    .into());
+        let path_buf = path.to_path_buf();
+        let raw_text = match String::from_utf8(source_bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                return Err(transclusion::TransclusionError::NonTextCodeSource {
+                    path: path_buf.clone(),
                 }
-                Err(err) => return Err(err.into()),
-            };
+                .into())
+            }
+        };
+        let cached = cache_handle.get_or_compute_operation(
+            &cache_key,
+            Some(&persistent_ctx),
+            options.cache_freshness_mode,
+            || {
+                let raw = raw_text.clone();
 
-            let replaced = if effective_map.is_empty() {
-                raw
-            } else {
-                let mut frontmatter = HashMap::new();
-                frontmatter.insert("replace".to_string(), Value::Object(effective_map.clone()));
-                let temp_state = EffectiveStateBuilder::new()
-                    .with_frontmatter(frontmatter)
-                    .with_context(context.clone())
-                    .build();
-                let (replaced, _) = replacement::apply_replacements(&raw, &temp_state);
-                replaced
-            };
+                let replaced = if effective_map.is_empty() {
+                    raw
+                } else {
+                    let mut frontmatter = HashMap::new();
+                    frontmatter.insert("replace".to_string(), Value::Object(effective_map.clone()));
+                    let temp_state = EffectiveStateBuilder::new()
+                        .with_frontmatter(frontmatter)
+                        .with_context(context.clone())
+                        .build();
+                    let (replaced, _) = replacement::apply_replacements(&raw, &temp_state);
+                    replaced
+                };
 
-            let fenced = transclusion::wrap_in_code_block(&replaced, &language);
-            let spaced = transclusion::ensure_vertical_spacing(&fenced);
-            Ok(cache::OperationResult { content: spaced })
-        })?;
+                let fenced = transclusion::wrap_in_code_block(&replaced, &language);
+                let spaced = transclusion::ensure_vertical_spacing(&fenced);
+                Ok(cache::OperationResult { content: spaced })
+            },
+        )?;
 
         // Post: apply wrappers (cheap, directive-specific)
-        Ok(self.apply_wrappers(cached.content.clone(), directive_options))
+        Ok((
+            self.apply_wrappers(cached.content.clone(), directive_options),
+            cache_handle.operation_dependency_ref(&persistent_ctx),
+        ))
     }
 
     fn apply_wrappers(

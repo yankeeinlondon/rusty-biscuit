@@ -177,72 +177,60 @@ impl CacheableOperation for CodeOperation {
 pub(crate) struct TocLinkingOperation;
 
 impl TocLinkingOperation {
-    /// Computes a string cache key for a TOC linking operation.
-    pub fn cache_key_string(path: &Path, options: &TocLinkingOptions) -> String {
-        let source_key = compose_cache_key(path);
-        let options_hash = Self::options_hash(options);
-        format!("toc:{}:{}", source_key, options_hash)
-    }
+    /// Classifies TOC linking options into cache-relevant buckets.
+    pub fn split_params(options: &TocLinkingOptions) -> ParamBuckets {
+        let mut buckets = ParamBuckets::default();
 
-    /// Hashes the TOC linking options that affect the rendered output.
-    fn options_hash(options: &TocLinkingOptions) -> u64 {
-        let mut parts = Vec::new();
-
-        // Levels (sorted for determinism)
         let mut levels: Vec<u8> = options.levels.levels.iter().copied().collect();
         levels.sort();
-        parts.push(format!("levels={:?}", levels));
+        buckets
+            .variant
+            .push(("levels".to_string(), format!("{:?}", levels)));
 
-        // Cleanup services
         let cleanups: Vec<String> = options
             .cleanup_services
             .iter()
             .map(|c| format!("{:?}", c))
             .collect();
-        parts.push(format!("cleanup={}", cleanups.join(",")));
+        buckets
+            .variant
+            .push(("cleanup".to_string(), cleanups.join(",")));
 
-        // Keep/filter patterns
         for p in &options.keep_patterns {
-            parts.push(format!("keep={}:{}", p.case_sensitive, p.pattern));
+            buckets.variant.push((
+                "keep".to_string(),
+                format!("{}:{}", p.case_sensitive, p.pattern),
+            ));
         }
         for p in &options.filter_patterns {
-            parts.push(format!("filter={}:{}", p.case_sensitive, p.pattern));
+            buckets.variant.push((
+                "filter".to_string(),
+                format!("{}:{}", p.case_sensitive, p.pattern),
+            ));
         }
 
-        // Empty text
         if let Some(text) = &options.empty_text {
-            parts.push(format!("empty={}", text));
+            buckets
+                .variant
+                .push(("empty".to_string(), text.clone()));
         }
 
-        xx_hash(&parts.join("\0"))
+        buckets
     }
-}
 
-/// Computes a string cache key for a code transclusion operation.
-///
-/// Combines the canonical source path with a variant hash derived from
-/// the effective replace map and inferred language.
-pub(crate) fn code_cache_key(
-    path: &Path,
-    replace_map: &serde_json::Map<String, Value>,
-    language: &str,
-) -> String {
-    let source_key = compose_cache_key(path);
-    let variant_hash = code_variant_hash(replace_map, language);
-    format!("code:{}:{}", source_key, variant_hash)
-}
-
-/// Computes the variant hash for a code transclusion from replace map and language.
-fn code_variant_hash(replace_map: &serde_json::Map<String, Value>, language: &str) -> u64 {
-    let mut parts = Vec::new();
-    parts.push(format!("lang={}", language));
-    if !replace_map.is_empty() {
-        parts.push(format!(
-            "replace={}",
-            canonical_json_sorted(&Value::Object(replace_map.clone()))
-        ));
+    /// Computes a variant cache key from source identity and parameter buckets.
+    pub fn variant_cache_key(source_id: u64, buckets: &ParamBuckets) -> u64 {
+        operation_entry_key("toc-linking", source_id, buckets.variant_hash())
     }
-    xx_hash(&parts.join("\0"))
+
+    /// Computes a string cache key for a TOC linking operation.
+    pub fn cache_key_string(path: &Path, options: &TocLinkingOptions) -> String {
+        let source_key = compose_cache_key(path);
+        let source_id = xx_hash(&source_key);
+        let buckets = Self::split_params(options);
+        let entry_key = Self::variant_cache_key(source_id, &buckets);
+        format!("toc:{}:{:016x}", source_key, entry_key)
+    }
 }
 
 #[cfg(test)]
@@ -368,35 +356,63 @@ mod tests {
     #[test]
     fn code_cache_key_deterministic() {
         let path = Path::new("/tmp/main.rs");
-        let map = Map::new();
+        let op = CodeOperation;
+        let options = BlockOptions::default();
+        let source_id = xx_hash(&compose_cache_key(path));
+        let mut buckets = op.split_params(&options);
+        buckets
+            .variant
+            .push(("language".to_string(), "rust".to_string()));
 
-        let k1 = code_cache_key(path, &map, "rust");
-        let k2 = code_cache_key(path, &map, "rust");
+        let k1 = op.variant_cache_key(source_id, &buckets);
+        let k2 = op.variant_cache_key(source_id, &buckets);
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn code_cache_key_sensitive_to_language() {
         let path = Path::new("/tmp/main.rs");
-        let map = Map::new();
+        let op = CodeOperation;
+        let options = BlockOptions::default();
+        let source_id = xx_hash(&compose_cache_key(path));
+        let mut rust_buckets = op.split_params(&options);
+        rust_buckets
+            .variant
+            .push(("language".to_string(), "rust".to_string()));
+        let mut python_buckets = op.split_params(&options);
+        python_buckets
+            .variant
+            .push(("language".to_string(), "python".to_string()));
 
         assert_ne!(
-            code_cache_key(path, &map, "rust"),
-            code_cache_key(path, &map, "python"),
+            op.variant_cache_key(source_id, &rust_buckets),
+            op.variant_cache_key(source_id, &python_buckets),
         );
     }
 
     #[test]
     fn code_cache_key_sensitive_to_replace_map() {
         let path = Path::new("/tmp/main.rs");
+        let op = CodeOperation;
+        let source_id = xx_hash(&compose_cache_key(path));
 
-        let map1 = Map::new();
-        let mut map2 = Map::new();
-        map2.insert("key".into(), Value::from("value"));
+        let options1 = BlockOptions::default();
+        let mut options2 = BlockOptions::default();
+        let mut replace_map = Map::new();
+        replace_map.insert("key".into(), Value::from("value"));
+        options2.replace = ReplaceOption::OneOff(replace_map);
+        let mut buckets1 = op.split_params(&options1);
+        buckets1
+            .variant
+            .push(("language".to_string(), "rust".to_string()));
+        let mut buckets2 = op.split_params(&options2);
+        buckets2
+            .variant
+            .push(("language".to_string(), "rust".to_string()));
 
         assert_ne!(
-            code_cache_key(path, &map1, "rust"),
-            code_cache_key(path, &map2, "rust"),
+            op.variant_cache_key(source_id, &buckets1),
+            op.variant_cache_key(source_id, &buckets2),
         );
     }
 }
