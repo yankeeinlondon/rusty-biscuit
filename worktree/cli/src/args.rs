@@ -23,7 +23,11 @@ pub struct Cli {
 #[derive(Subcommand, Clone)]
 pub enum Commands {
     /// List all worktrees with status indicators
-    List,
+    List {
+        /// Override the git graph width (e.g. "70", "70ch", "50%")
+        #[arg(long, short = 'w', value_name = "WIDTH")]
+        width: Option<String>,
+    },
 
     /// Create a new worktree from a branch name
     Create {
