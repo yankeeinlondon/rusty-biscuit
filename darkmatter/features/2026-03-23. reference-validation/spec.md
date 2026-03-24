@@ -1,8 +1,17 @@
-# Reference Validation and Document Caching
+# Reference Validation
+
+> **Note:** we have now implemented caching for the compose pipeline; details are available in [caching design](@darkmatter/docs/topics/caching.md).
 
 ## Reference Validation
 
-The [`Markdown`](@darkmatter/lib/src/markdown/mod.rs) struct in Darkmatter provides a strong foundation for working with markdown files. However, we're just update the corresponding documentation for this struct in @darkmatter/docs/structs/Markdown.md to reflect a more detailed understanding of "Document References".
+The [`Markdown`](@darkmatter/lib/src/markdown/mod.rs) struct in Darkmatter provides a strong foundation for working with markdown files. From this struct we can:
+
+1. run the [composition pipeline](@darkmatter/docs/darkmatter-compose-pipeline.md)
+2. run implementations `links()`, `inline_html_links()`, `image_references()`, and `inline_html_image_references()`
+
+However, both the link and image reference implementations do not report on the _composed_ markdown document which is really the question these implementations must report on.
+
+Beyond that change, we also need to move beyond _just_ links and image references to a larger set of references as well as provide validation features on these references.
 
 ### Hyperlinks
 
