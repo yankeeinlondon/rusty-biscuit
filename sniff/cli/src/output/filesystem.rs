@@ -677,6 +677,15 @@ pub fn render_git_section(
                 " · <green-500>clean</green-500>"
             };
 
+            let uncommitted = if info.changed_files > 0 {
+                format!(
+                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted files</i></dim>",
+                    info.changed_files
+                )
+            } else {
+                String::new()
+            };
+
             // Check if we're inside this particular worktree
             let is_current = git.in_worktree
                 && git.repo_root.canonicalize().ok()
@@ -684,11 +693,11 @@ pub fn render_git_section(
 
             if is_current {
                 wt_list.add(Prose::new(format!(
-                    "<b>{branch}:</b> you are {status}{merge_status}"
+                    "<b>{branch}:</b> you are {status}{merge_status}{uncommitted}"
                 )));
             } else {
                 wt_list.add(Prose::new(format!(
-                    "{branch}: <dim>is {status}</dim>{merge_status}"
+                    "{branch}: <dim>is {status}</dim>{merge_status}{uncommitted}"
                 )));
             }
         }

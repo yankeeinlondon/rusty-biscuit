@@ -751,6 +751,8 @@ pub struct WorktreeInfo {
     pub has_conflicts: bool,
     /// Whether this worktree's branch is fully merged into the base branch.
     pub merged: bool,
+    /// Number of uncommitted files (staged + unstaged + untracked).
+    pub changed_files: usize,
 }
 
 /// A file with uncommitted changes (staged or unstaged).
@@ -1770,9 +1772,13 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             })
             .unwrap_or(false);
 
-        // Check if worktree is dirty
-        let dirty =
-            get_repo_status_with_changes(&worktree_repo).map(|(s, _)| s.is_dirty).unwrap_or(false);
+        // Check if worktree is dirty and count changed files
+        let (dirty, changed_files) = get_repo_status_with_changes(&worktree_repo)
+            .map(|(s, _)| {
+                let count = s.staged_count + s.unstaged_count + s.untracked_count;
+                (s.is_dirty, count)
+            })
+            .unwrap_or((false, 0));
 
         worktrees.insert(
             branch.clone(),
@@ -1786,6 +1792,7 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
                 base_branch: base_branch.clone(),
                 has_conflicts,
                 merged,
+                changed_files,
             },
         );
     }
@@ -2860,6 +2867,7 @@ mod tests {
             base_branch: "main".to_string(),
             has_conflicts: false,
             merged: false,
+            changed_files: 4,
         };
 
         let json = serde_json::to_string(&worktree).unwrap();
