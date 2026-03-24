@@ -35,20 +35,20 @@ The implemented cache includes:
 - Dependency-aware closure-hash validation for composed documents
 - Freshness policy handling for persistent reads
 - In-memory retention of loaded document snapshots to avoid repeated manifest reads
+- Concurrent run-local maps for low-contention cache access
 
 The implementation does not yet include:
 
 - Remote artifact caching
 - TTL-driven policies for remote or LLM-backed operations
 - A special forced-mode empty-output fallback on generation failure
-- A concurrent map implementation such as `DashMap`
 - Persisted report warnings reconstruction from cache
 
 ## Runtime Architecture
 
 The runtime cache lives in `markdown/compose/cache/runtime.rs`.
 
-`RunLocalCache` owns several in-memory maps:
+`RunLocalCache` owns several in-memory maps backed by `DashMap`:
 
 - `markdown_documents`: canonical-path markdown loads
 - `toc_headings`: cached TOC heading extraction
@@ -206,6 +206,7 @@ It is used for:
 ### Frontmatter
 
 Frontmatter is converted to canonical JSON with recursively sorted keys and then hashed with raw `xxHash`.
+The serializer writes the canonical form in one pass instead of recursively building intermediate strings.
 
 This means:
 
@@ -499,7 +500,6 @@ The following are still reasonable future improvements:
 - Persist and reconstruct warnings from cache instead of dropping them on cache hits
 - Add explicit TTL policies for remote and time-sensitive operations
 - Implement the original forced-mode empty-output fallback semantics
-- Replace the coarse `Mutex<HashMap<...>>` maps with a more concurrent structure if contention becomes measurable
 - Decide whether `body_template_hash` should drive future structural caching or diagnostics
 - Expand operation caching beyond local-file-based `::code` and `::toc-linking`
 
