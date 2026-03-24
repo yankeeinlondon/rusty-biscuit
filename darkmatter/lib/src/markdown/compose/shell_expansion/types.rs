@@ -447,8 +447,7 @@ impl PipelineRuntime {
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
         cache_root: Option<std::path::PathBuf>,
     ) -> Self {
-        let mut cache =
-            crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
+        let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
         if let Some(root) = cache_root {
             cache = cache.with_persistent(root);
         }

@@ -7,8 +7,8 @@
 //! - `ComposeContext` - Runtime context captured at compose start
 //! - `ComposeReport` - Results and diagnostics from compose execution
 
-use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 use super::super::normalize::NormalizationReport;
+use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use url::Url;

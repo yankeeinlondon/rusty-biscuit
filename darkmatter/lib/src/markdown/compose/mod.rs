@@ -202,10 +202,7 @@ impl Markdown {
     fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
-            cache::FileStore::resolve_cache_root(
-                Some(root),
-                options.cache_namespace.as_deref(),
-            )
+            cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
         });
 
         let mut runtime = shell_expansion::types::PipelineRuntime::new(
@@ -1154,7 +1151,8 @@ impl Markdown {
                     let buckets = cache::TocLinkingOperation::split_params(&directive.options);
                     let entry_key =
                         cache::TocLinkingOperation::variant_cache_key(source_id, &buckets);
-                    let cache_key = cache::TocLinkingOperation::cache_key_string(&path, &directive.options);
+                    let cache_key =
+                        cache::TocLinkingOperation::cache_key_string(&path, &directive.options);
                     let persistent_ctx = cache::OperationPersistentContext {
                         op_kind: "toc-linking",
                         entry_key,
@@ -1178,18 +1176,19 @@ impl Markdown {
                                     .load_toc_headings(&path_clone)
                                     .map_err(toc_linking::TocLinkingError::Io)?
                             };
-                        let content = toc_linking::render_resolved_directive(
-                            &display_clone,
-                            &headings,
-                            &options_clone,
-                            line,
-                        )
-                        .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
-                        Ok(cache::OperationResult { content })
+                            let content = toc_linking::render_resolved_directive(
+                                &display_clone,
+                                &headings,
+                                &options_clone,
+                                line,
+                            )
+                            .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
+                            Ok(cache::OperationResult { content })
                         },
                     )?;
 
-                    if let Some(dependency) = cache_handle.operation_dependency_ref(&persistent_ctx) {
+                    if let Some(dependency) = cache_handle.operation_dependency_ref(&persistent_ctx)
+                    {
                         let mut runtime = runtime_mutex.lock().unwrap();
                         runtime.record_dependency(dependency);
                     }
@@ -1355,11 +1354,7 @@ impl Markdown {
             .variant
             .push(("language".to_string(), language.clone()));
         let entry_key = op.variant_cache_key(source_id, &buckets);
-        let cache_key = format!(
-            "code:{}:{:016x}",
-            canonical_source,
-            entry_key
-        );
+        let cache_key = format!("code:{}:{:016x}", canonical_source, entry_key);
         let persistent_ctx = cache::OperationPersistentContext {
             op_kind: "code",
             entry_key,
@@ -1377,7 +1372,7 @@ impl Markdown {
                 return Err(transclusion::TransclusionError::NonTextCodeSource {
                     path: path_buf.clone(),
                 }
-                .into())
+                .into());
             }
         };
         let cached = cache_handle.get_or_compute_operation(
