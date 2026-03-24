@@ -30,11 +30,15 @@ pub fn repo_info() -> Result<RepoInfo, WorktreeError> {
     let root = git_rev_parse("--show-toplevel")?;
     let root = PathBuf::from(root);
 
-    let name = root
-        .file_name()
-        .ok_or_else(|| WorktreeError::GitParse("cannot determine repo name".into()))?
-        .to_string_lossy()
-        .to_string();
+    // Derive the repo name from the main worktree path, not the current checkout.
+    // Inside a linked worktree, --show-toplevel returns the worktree dir (e.g.
+    // /tmp/wt/rusty-biscuit/feat-xyz), so file_name() would give "feat-xyz".
+    // The first entry from `git worktree list` is always the main checkout.
+    let name = main_worktree_name().unwrap_or_else(|_| {
+        root.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default()
+    });
 
     let cwd = std::env::current_dir()?;
     let relative_path = cwd
@@ -47,6 +51,23 @@ pub fn repo_info() -> Result<RepoInfo, WorktreeError> {
         root,
         relative_path,
     })
+}
+
+/// Derive the repository name from the main worktree path.
+///
+/// `git worktree list --porcelain` always lists the main checkout first,
+/// so its directory name is the canonical repo name even when called from
+/// inside a linked worktree.
+fn main_worktree_name() -> Result<String, WorktreeError> {
+    let output = git_command(&["worktree", "list", "--porcelain"])?;
+    let main_path = output
+        .lines()
+        .find_map(|line| line.strip_prefix("worktree "))
+        .ok_or_else(|| WorktreeError::GitParse("cannot find main worktree".into()))?;
+    PathBuf::from(main_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| WorktreeError::GitParse("cannot determine repo name".into()))
 }
 
 /// Run `git rev-parse` with the given argument and return trimmed stdout.

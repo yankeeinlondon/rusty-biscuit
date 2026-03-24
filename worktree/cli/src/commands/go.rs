@@ -1,3 +1,5 @@
+use std::io::IsTerminal as _;
+
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::terminal::Terminal;
@@ -21,28 +23,59 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
     let relative_display = relative.to_string_lossy();
     let repo = &info.name;
 
+    // Already in the target worktree — nothing to do.
+    if entry.is_current {
+        let kind = if entry.is_main {
+            format!("<blue-500>base</blue-500> <i>checkout</i>")
+        } else {
+            let worktree_name = entry.branch.as_deref().unwrap_or(name);
+            format!("<blue-500>{worktree_name}</blue-500> <i>worktree</i>")
+        };
+        let msg = format!("\nAlready in the {kind} of <yellow>{repo}</yellow>.");
+        eprintln!("{}", Prose::new(msg).render(&terminal));
+        return Ok(());
+    }
+
+    let location = if relative.as_os_str().is_empty() {
+        "<dim><i>repo root</i></dim>".to_string()
+    } else {
+        format!("<dim>{relative_display}</dim>")
+    };
+    let location_msg = format!("at the same relative location ({location})");
+
     let msg = if entry.is_main {
         if path_adjusted {
             format!(
-                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow>. <dim>({relative_display} doesn't exist here — moved to root)</dim>"
+                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
             )
         } else {
             format!(
-                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> at the same relative location (<dim>{relative_display}</dim>)"
+                "\nYou've been moved into the <blue-500>base</blue-500> <i>checkout</i> of <yellow>{repo}</yellow> {location_msg}"
             )
         }
     } else {
         let worktree_name = entry.branch.as_deref().unwrap_or(name);
         if path_adjusted {
             format!(
-                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow>. <dim>({relative_display} doesn't exist here — moved to root)</dim>"
+                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> <dim>(<b>{relative_display}</b> doesn't exist here — moved to <i>root</i>)</dim>"
             )
         } else {
             format!(
-                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> at the same relative location (<dim>{relative_display}</dim>)"
+                "\nYou've been moved into the <blue-500>{worktree_name}</blue-500> <i>worktree</i> of <yellow>{repo}</yellow> {location_msg}"
             )
         }
     };
+
+    // If stdout is a TTY the shell wrapper is not active — the cd: line would
+    // print raw to the terminal and the directory would never change.
+    if std::io::stdout().is_terminal() {
+        let warn = "\n<red><b>Shell wrapper not active.</b></red> The directory cannot be changed.\n\
+            Run this to activate it, then try again:\n\n\
+            <dim>source <(wt --completions zsh)</dim>\n\n\
+            Add that line to <dim>~/.zshrc</dim> to make it permanent.";
+        eprintln!("{}", Prose::new(warn).render(&terminal));
+        return Ok(());
+    }
 
     eprintln!("{}", Prose::new(msg).render(&terminal));
     println!("cd:{}", target.display());
