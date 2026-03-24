@@ -16,11 +16,12 @@ use super::store::FileStore;
 use super::types::{
     ArtifactClass, CacheAccessMode, CacheFreshnessMode, CacheStats, DependencyRef, SourceKind,
 };
-use crate::markdown::compose::ComposeReport;
-use crate::markdown::types::MarkdownResult;
 use crate::markdown::Markdown;
+use crate::markdown::compose::ComposeReport;
 use crate::markdown::toc::MarkdownTocNode;
-use std::collections::HashMap;
+use crate::markdown::types::MarkdownResult;
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -97,11 +98,11 @@ const INFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
 /// artifacts on disk for cross-run caching.
 #[derive(Clone)]
 pub(crate) struct RunLocalCache {
-    markdown_documents: Arc<Mutex<HashMap<String, Markdown>>>,
-    toc_headings: Arc<Mutex<HashMap<String, Vec<MarkdownTocNode>>>>,
-    document_snapshots: Arc<Mutex<HashMap<u64, DocumentSnapshotManifest>>>,
-    compose_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<ComposeResult>>>>>,
-    operation_results: Arc<Mutex<HashMap<String, Arc<SingleFlightSlot<OperationResult>>>>>,
+    markdown_documents: Arc<DashMap<String, Markdown>>,
+    toc_headings: Arc<DashMap<String, Vec<MarkdownTocNode>>>,
+    document_snapshots: Arc<DashMap<u64, DocumentSnapshotManifest>>,
+    compose_results: Arc<DashMap<String, Arc<SingleFlightSlot<ComposeResult>>>>,
+    operation_results: Arc<DashMap<String, Arc<SingleFlightSlot<OperationResult>>>>,
     stats: Arc<Mutex<CacheStats>>,
     access_mode: CacheAccessMode,
     /// Optional persistent file-backed cache store.
@@ -127,11 +128,11 @@ impl RunLocalCache {
     /// Creates a new run-local cache with the given access mode.
     pub fn new(access_mode: CacheAccessMode) -> Self {
         Self {
-            markdown_documents: Arc::new(Mutex::new(HashMap::new())),
-            toc_headings: Arc::new(Mutex::new(HashMap::new())),
-            document_snapshots: Arc::new(Mutex::new(HashMap::new())),
-            compose_results: Arc::new(Mutex::new(HashMap::new())),
-            operation_results: Arc::new(Mutex::new(HashMap::new())),
+            markdown_documents: Arc::new(DashMap::new()),
+            toc_headings: Arc::new(DashMap::new()),
+            document_snapshots: Arc::new(DashMap::new()),
+            compose_results: Arc::new(DashMap::new()),
+            operation_results: Arc::new(DashMap::new()),
             stats: Arc::new(Mutex::new(CacheStats::default())),
             access_mode,
             persistent: None,
@@ -162,8 +163,7 @@ impl RunLocalCache {
         let key = compose_cache_key(path);
 
         if self.access_mode != CacheAccessMode::Off {
-            let cache = self.markdown_documents.lock().unwrap();
-            if let Some(markdown) = cache.get(&key) {
+            if let Some(markdown) = self.markdown_documents.get(&key) {
                 return Ok(markdown.clone());
             }
         }
@@ -173,11 +173,13 @@ impl RunLocalCache {
         // Create a persistent document snapshot (best-effort)
         self.try_write_document_snapshot(path, &markdown);
 
-        if self.access_mode != CacheAccessMode::Off
-            && self.access_mode != CacheAccessMode::ReadOnly
+        if self.access_mode != CacheAccessMode::Off && self.access_mode != CacheAccessMode::ReadOnly
         {
-            let mut cache = self.markdown_documents.lock().unwrap();
-            Ok(cache.entry(key).or_insert_with(|| markdown.clone()).clone())
+            Ok(self
+                .markdown_documents
+                .entry(key)
+                .or_insert_with(|| markdown.clone())
+                .clone())
         } else {
             Ok(markdown)
         }
@@ -188,8 +190,7 @@ impl RunLocalCache {
         let key = compose_cache_key(path);
 
         if self.access_mode != CacheAccessMode::Off {
-            let cache = self.toc_headings.lock().unwrap();
-            if let Some(headings) = cache.get(&key) {
+            if let Some(headings) = self.toc_headings.get(&key) {
                 return Ok(headings.clone());
             }
         }
@@ -203,11 +204,13 @@ impl RunLocalCache {
             .cloned()
             .collect::<Vec<_>>();
 
-        if self.access_mode != CacheAccessMode::Off
-            && self.access_mode != CacheAccessMode::ReadOnly
+        if self.access_mode != CacheAccessMode::Off && self.access_mode != CacheAccessMode::ReadOnly
         {
-            let mut cache = self.toc_headings.lock().unwrap();
-            Ok(cache.entry(key).or_insert_with(|| headings.clone()).clone())
+            Ok(self
+                .toc_headings
+                .entry(key)
+                .or_insert_with(|| headings.clone())
+                .clone())
         } else {
             Ok(headings)
         }
@@ -240,62 +243,75 @@ impl RunLocalCache {
         }
 
         // Check for existing slot
-        let slot = {
-            let mut map = self.compose_results.lock().unwrap();
-
-            if self.access_mode != CacheAccessMode::Refresh
-                && let Some(existing) = map.get(key)
-            {
-                let state = existing.state.lock().unwrap();
-                match &*state {
-                    SlotState::Ready(result) => {
-                        self.record_hit();
-                        return Ok(Arc::clone(result));
-                    }
-                    SlotState::InFlight => {
-                        // Clone the Arc to wait on it outside the map lock
-                        let slot = Arc::clone(existing);
-                        drop(state);
-                        drop(map);
-                        return self.wait_for_compose_slot(key, &slot, compute);
-                    }
-                    SlotState::Failed(_) => {
-                        // Previous attempt failed — we'll recompute below
-                    }
-                }
-            }
-
-            // Insert InFlight slot
+        let slot = if self.access_mode == CacheAccessMode::Refresh {
             let slot = Arc::new(SingleFlightSlot {
                 state: Mutex::new(SlotState::InFlight),
                 ready: Condvar::new(),
             });
-            map.insert(key.to_string(), Arc::clone(&slot));
+            self.compose_results
+                .insert(key.to_string(), Arc::clone(&slot));
             slot
+        } else {
+            match self.compose_results.entry(key.to_string()) {
+                Entry::Occupied(mut entry) => {
+                    let existing = Arc::clone(entry.get());
+                    let state = existing.state.lock().unwrap();
+                    match &*state {
+                        SlotState::Ready(result) => {
+                            self.record_hit();
+                            return Ok(Arc::clone(result));
+                        }
+                        SlotState::InFlight => {
+                            let slot = Arc::clone(&existing);
+                            drop(state);
+                            return self.wait_for_compose_slot(key, &slot, compute);
+                        }
+                        SlotState::Failed(_) => {
+                            drop(state);
+                            let slot = Arc::new(SingleFlightSlot {
+                                state: Mutex::new(SlotState::InFlight),
+                                ready: Condvar::new(),
+                            });
+                            entry.insert(Arc::clone(&slot));
+                            slot
+                        }
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    let slot = Arc::new(SingleFlightSlot {
+                        state: Mutex::new(SlotState::InFlight),
+                        ready: Condvar::new(),
+                    });
+                    entry.insert(Arc::clone(&slot));
+                    slot
+                }
+            }
         };
 
         // We own the InFlight slot — try persistent cache before computing
         self.record_miss();
 
         // Check persistent store
-        let stale_fallback = match self.try_persistent_read_compose(key, persistent_ctx, freshness_mode)
-        {
-            Some(PersistentLookup::Fresh(result)) => {
-                let arc_result = Arc::new(result);
-                {
-                    let mut state = slot.state.lock().unwrap();
-                    *state = SlotState::Ready(Arc::clone(&arc_result));
+        let stale_fallback =
+            match self.try_persistent_read_compose(key, persistent_ctx, freshness_mode) {
+                Some(PersistentLookup::Fresh(result)) => {
+                    let arc_result = Arc::new(result);
+                    {
+                        let mut state = slot.state.lock().unwrap();
+                        *state = SlotState::Ready(Arc::clone(&arc_result));
+                    }
+                    slot.ready.notify_all();
+                    self.record_write();
+                    return Ok(arc_result);
                 }
-                slot.ready.notify_all();
-                self.record_write();
-                return Ok(arc_result);
-            }
-            Some(PersistentLookup::Stale(result)) if freshness_mode == CacheFreshnessMode::Fallback => {
-                Some(result)
-            }
-            Some(PersistentLookup::Stale(_)) => None,
-            None => None,
-        };
+                Some(PersistentLookup::Stale(result))
+                    if freshness_mode == CacheFreshnessMode::Fallback =>
+                {
+                    Some(result)
+                }
+                Some(PersistentLookup::Stale(_)) => None,
+                None => None,
+            };
 
         // Compute fresh result
         match compute() {
@@ -337,8 +353,8 @@ impl RunLocalCache {
     /// Single-flight get-or-compute for individual operation results.
     ///
     /// Same deduplication pattern as compose results, but for cheaper
-    /// operations like code transclusion and TOC linking. No persistent
-    /// cache integration yet (run-local only).
+    /// operations like code transclusion and TOC linking, including their
+    /// persistent cache manifests when a file-backed store is attached.
     pub fn get_or_compute_operation<F>(
         &self,
         key: &str,
@@ -354,36 +370,49 @@ impl RunLocalCache {
             return Ok(Arc::new(result));
         }
 
-        let slot = {
-            let mut map = self.operation_results.lock().unwrap();
-
-            if self.access_mode != CacheAccessMode::Refresh
-                && let Some(existing) = map.get(key)
-            {
-                let state = existing.state.lock().unwrap();
-                match &*state {
-                    SlotState::Ready(result) => {
-                        self.record_hit();
-                        return Ok(Arc::clone(result));
-                    }
-                    SlotState::InFlight => {
-                        let slot = Arc::clone(existing);
-                        drop(state);
-                        drop(map);
-                        return self.wait_for_operation_slot(key, &slot, compute);
-                    }
-                    SlotState::Failed(_) => {
-                        // Previous attempt failed — recompute below
-                    }
-                }
-            }
-
+        let slot = if self.access_mode == CacheAccessMode::Refresh {
             let slot = Arc::new(SingleFlightSlot {
                 state: Mutex::new(SlotState::InFlight),
                 ready: Condvar::new(),
             });
-            map.insert(key.to_string(), Arc::clone(&slot));
+            self.operation_results
+                .insert(key.to_string(), Arc::clone(&slot));
             slot
+        } else {
+            match self.operation_results.entry(key.to_string()) {
+                Entry::Occupied(mut entry) => {
+                    let existing = Arc::clone(entry.get());
+                    let state = existing.state.lock().unwrap();
+                    match &*state {
+                        SlotState::Ready(result) => {
+                            self.record_hit();
+                            return Ok(Arc::clone(result));
+                        }
+                        SlotState::InFlight => {
+                            let slot = Arc::clone(&existing);
+                            drop(state);
+                            return self.wait_for_operation_slot(key, &slot, compute);
+                        }
+                        SlotState::Failed(_) => {
+                            drop(state);
+                            let slot = Arc::new(SingleFlightSlot {
+                                state: Mutex::new(SlotState::InFlight),
+                                ready: Condvar::new(),
+                            });
+                            entry.insert(Arc::clone(&slot));
+                            slot
+                        }
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    let slot = Arc::new(SingleFlightSlot {
+                        state: Mutex::new(SlotState::InFlight),
+                        ready: Condvar::new(),
+                    });
+                    entry.insert(Arc::clone(&slot));
+                    slot
+                }
+            }
         };
 
         self.record_miss();
@@ -486,9 +515,10 @@ impl RunLocalCache {
                 let result = fallback_compute()?;
                 let arc_result = Arc::new(result);
                 {
-                    let map = self.compose_results.lock().unwrap();
-                    if let Some(existing) = map.get(key) {
-                        let mut s = existing.state.lock().unwrap();
+                    if let Some(existing) = self.compose_results.get(key) {
+                        let slot = Arc::clone(existing.value());
+                        drop(existing);
+                        let mut s = slot.state.lock().unwrap();
                         if matches!(&*s, SlotState::Failed(m) if *m == msg) {
                             *s = SlotState::Ready(Arc::clone(&arc_result));
                         }
@@ -543,9 +573,10 @@ impl RunLocalCache {
                 let result = fallback_compute()?;
                 let arc_result = Arc::new(result);
                 {
-                    let map = self.operation_results.lock().unwrap();
-                    if let Some(existing) = map.get(key) {
-                        let mut s = existing.state.lock().unwrap();
+                    if let Some(existing) = self.operation_results.get(key) {
+                        let slot = Arc::clone(existing.value());
+                        drop(existing);
+                        let mut s = slot.state.lock().unwrap();
                         if matches!(&*s, SlotState::Failed(m) if *m == msg) {
                             *s = SlotState::Ready(Arc::clone(&arc_result));
                         }
@@ -633,14 +664,20 @@ impl RunLocalCache {
         freshness_mode: CacheFreshnessMode,
     ) -> Option<PersistentLookup<OperationResult>> {
         let store = self.persistent.as_ref()?;
-        let entry_key = persistent_ctx.map(|ctx| ctx.entry_key).unwrap_or_else(|| biscuit_hash::xx_hash(key));
+        let entry_key = persistent_ctx
+            .map(|ctx| ctx.entry_key)
+            .unwrap_or_else(|| biscuit_hash::xx_hash(key));
 
         let mut manifest: OperationResultManifest =
             match store.read_manifest(ArtifactClass::OperationResult, entry_key) {
                 Ok(Some(m)) => m,
                 Ok(None) => return None,
                 Err(e) => {
-                    tracing::debug!("Persistent operation manifest read error for {}: {}", key, e);
+                    tracing::debug!(
+                        "Persistent operation manifest read error for {}: {}",
+                        key,
+                        e
+                    );
                     return None;
                 }
             };
@@ -690,7 +727,8 @@ impl RunLocalCache {
         let blob_hash = raw_bytes_hash(blob);
 
         // Compute the entry key and self_hash from persistent context
-        let (entry_key, source_id_hash, source_body_semantic_hash, self_hash) = match persistent_ctx {
+        let (entry_key, source_id_hash, source_body_semantic_hash, self_hash) = match persistent_ctx
+        {
             Some(ctx) => {
                 let Some(snapshot) = self.get_document_snapshot(ctx.source_id) else {
                     return;
@@ -805,8 +843,7 @@ impl RunLocalCache {
             return;
         };
 
-        if self.access_mode == CacheAccessMode::Off
-            || self.access_mode == CacheAccessMode::ReadOnly
+        if self.access_mode == CacheAccessMode::Off || self.access_mode == CacheAccessMode::ReadOnly
         {
             return;
         }
@@ -819,9 +856,7 @@ impl RunLocalCache {
             // Fast check: if manifest exists, verify freshness via mtime+size
             if let Ok(meta) = std::fs::metadata(path) {
                 let current_size = meta.len();
-                let current_modified = meta
-                    .modified()
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let current_modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
                 if let Ok(Some(existing)) = store.read_manifest::<DocumentSnapshotManifest>(
                     ArtifactClass::DocumentSnapshot,
@@ -865,21 +900,19 @@ impl RunLocalCache {
 
         self.cache_document_snapshot(manifest.clone());
 
-        if let Err(e) = store.write_manifest(ArtifactClass::DocumentSnapshot, sid_hash, &manifest)
-        {
+        if let Err(e) = store.write_manifest(ArtifactClass::DocumentSnapshot, sid_hash, &manifest) {
             tracing::debug!("Failed to write document snapshot for {:?}: {}", path, e);
         }
     }
 
     fn cache_document_snapshot(&self, manifest: DocumentSnapshotManifest) {
         self.document_snapshots
-            .lock()
-            .unwrap()
             .insert(manifest.source_id_hash, manifest);
     }
 
     fn get_document_snapshot(&self, source_id: u64) -> Option<DocumentSnapshotManifest> {
-        if let Some(snapshot) = self.document_snapshots.lock().unwrap().get(&source_id).cloned() {
+        if let Some(snapshot) = self.document_snapshots.get(&source_id) {
+            let snapshot = snapshot.clone();
             return Some(snapshot);
         }
 
@@ -1060,8 +1093,8 @@ impl RunLocalCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::cache::operation::CodeOperation;
     use crate::markdown::compose::cache::operation::CacheableOperation;
+    use crate::markdown::compose::cache::operation::CodeOperation;
     use std::fs;
     use tempfile::tempdir;
 
@@ -1136,8 +1169,8 @@ mod tests {
 
     #[test]
     fn single_flight_contention() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Barrier;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let cache = RunLocalCache::new(CacheAccessMode::ReadWrite);
         let compute_count = Arc::new(AtomicUsize::new(0));
@@ -1159,14 +1192,14 @@ mod tests {
                             None,
                             CacheFreshnessMode::Strict,
                             || {
-                            compute_count.fetch_add(1, Ordering::SeqCst);
-                            std::thread::sleep(Duration::from_millis(50));
-                            Ok(ComposeResult {
-                                content: "shared-result".to_string(),
-                                report: ComposeReport::new(),
-                                dependencies: vec![],
-                            })
-                        },
+                                compute_count.fetch_add(1, Ordering::SeqCst);
+                                std::thread::sleep(Duration::from_millis(50));
+                                Ok(ComposeResult {
+                                    content: "shared-result".to_string(),
+                                    report: ComposeReport::new(),
+                                    dependencies: vec![],
+                                })
+                            },
                         )
                         .unwrap()
                 }));
@@ -1315,8 +1348,8 @@ mod tests {
 
     #[test]
     fn operation_single_flight_contention() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Barrier;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let cache = RunLocalCache::new(CacheAccessMode::ReadWrite);
         let compute_count = Arc::new(AtomicUsize::new(0));
@@ -1338,12 +1371,12 @@ mod tests {
                             None,
                             CacheFreshnessMode::Strict,
                             || {
-                            compute_count.fetch_add(1, Ordering::SeqCst);
-                            std::thread::sleep(Duration::from_millis(50));
-                            Ok(OperationResult {
-                                content: "shared-op".to_string(),
-                            })
-                        },
+                                compute_count.fetch_add(1, Ordering::SeqCst);
+                                std::thread::sleep(Duration::from_millis(50));
+                                Ok(OperationResult {
+                                    content: "shared-op".to_string(),
+                                })
+                            },
                         )
                         .unwrap()
                 }));
@@ -1419,25 +1452,35 @@ mod tests {
         };
 
         cache
-            .get_or_compute_compose("child", Some(&child_ctx), CacheFreshnessMode::Strict, || {
-                Ok(ComposeResult {
-                    content: "# Child\n\nVersion 1\n".to_string(),
-                    report: ComposeReport::new(),
-                    dependencies: vec![],
-                })
-            })
+            .get_or_compute_compose(
+                "child",
+                Some(&child_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
             .unwrap();
 
         let child_dep = cache.compose_dependency_ref(&child_ctx).unwrap();
 
         cache
-            .get_or_compute_compose("parent", Some(&parent_ctx), CacheFreshnessMode::Strict, || {
-                Ok(ComposeResult {
-                    content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
-                    report: ComposeReport::new(),
-                    dependencies: vec![child_dep.clone()],
-                })
-            })
+            .get_or_compute_compose(
+                "parent",
+                Some(&parent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![child_dep.clone()],
+                    })
+                },
+            )
             .unwrap();
 
         fs::write(&child_path, "# Child\n\nVersion 2\n").unwrap();
@@ -1446,8 +1489,11 @@ mod tests {
             .with_persistent(_dir.path().join("cache"));
         refresh_cache.load_markdown(&child_path).unwrap();
 
-        let lookup = refresh_cache
-            .try_persistent_read_compose("parent", Some(&parent_ctx), CacheFreshnessMode::Strict);
+        let lookup = refresh_cache.try_persistent_read_compose(
+            "parent",
+            Some(&parent_ctx),
+            CacheFreshnessMode::Strict,
+        );
         assert!(
             matches!(lookup, Some(PersistentLookup::Stale(_))),
             "expected stale parent cache entry after child change"
@@ -1487,8 +1533,8 @@ mod tests {
             )
             .unwrap();
 
-        let hit_cache =
-            RunLocalCache::new(CacheAccessMode::ReadWrite).with_persistent(dir.path().join("cache"));
+        let hit_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
         let compute_count = std::sync::atomic::AtomicUsize::new(0);
 
         let result = hit_cache
@@ -1507,6 +1553,63 @@ mod tests {
 
         assert_eq!(compute_count.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(result.content, "```rust\nfn main() {}\n```");
+    }
+
+    #[test]
+    fn persistent_compose_cache_hits_across_runs() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let source_path = workspace.path().join("doc.md");
+        fs::write(&source_path, "# Title\n\nBody\n").unwrap();
+
+        cache.load_markdown(&source_path).unwrap();
+
+        let canonical_source = compose_cache_key(&source_path);
+        let persistent_ctx = PersistentContext {
+            source_id: source_id_hash(&canonical_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+
+        cache
+            .get_or_compute_compose(
+                "compose-op",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Title\n\nBody\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+
+        let hit_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        hit_cache.load_markdown(&source_path).unwrap();
+        let compute_count = std::sync::atomic::AtomicUsize::new(0);
+
+        let result = hit_cache
+            .get_or_compute_compose(
+                "compose-op",
+                Some(&persistent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    compute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(ComposeResult {
+                        content: "should not compute".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+
+        assert_eq!(compute_count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(result.content, "# Title\n\nBody\n");
     }
 
     #[test]
@@ -1552,8 +1655,8 @@ mod tests {
             source_content_hash: raw_bytes_hash(&fs::read(&source_path).unwrap()),
         };
 
-        let fallback_cache =
-            RunLocalCache::new(CacheAccessMode::ReadWrite).with_persistent(dir.path().join("cache"));
+        let fallback_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
         let result = fallback_cache
             .get_or_compute_operation(
                 "code-op",
@@ -1565,5 +1668,169 @@ mod tests {
 
         assert_eq!(result.content, "cached content");
         assert_eq!(fallback_cache.stats().stale_hits, 1);
+    }
+
+    #[test]
+    fn fallback_mode_serves_stale_compose_when_recompute_fails() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let parent_path = workspace.path().join("parent.md");
+        let child_path = workspace.path().join("child.md");
+        fs::write(&parent_path, "# Parent\n\n::file ./child.md\n").unwrap();
+        fs::write(&child_path, "# Child\n\nVersion 1\n").unwrap();
+
+        cache.load_markdown(&parent_path).unwrap();
+        cache.load_markdown(&child_path).unwrap();
+
+        let parent_source = compose_cache_key(&parent_path);
+        let child_source = compose_cache_key(&child_path);
+        let parent_ctx = PersistentContext {
+            source_id: source_id_hash(&parent_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+        let child_ctx = PersistentContext {
+            source_id: source_id_hash(&child_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+
+        cache
+            .get_or_compute_compose(
+                "child",
+                Some(&child_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+
+        let child_dep = cache.compose_dependency_ref(&child_ctx).unwrap();
+
+        cache
+            .get_or_compute_compose(
+                "parent",
+                Some(&parent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![child_dep.clone()],
+                    })
+                },
+            )
+            .unwrap();
+
+        fs::write(&child_path, "# Child\n\nVersion 2\n").unwrap();
+
+        let fallback_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        fallback_cache.load_markdown(&child_path).unwrap();
+
+        let result = fallback_cache
+            .get_or_compute_compose(
+                "parent",
+                Some(&parent_ctx),
+                CacheFreshnessMode::Fallback,
+                || Err(std::io::Error::other("boom").into()),
+            )
+            .unwrap();
+
+        assert_eq!(result.content, "# Parent\n\n# Child\n\nVersion 1\n");
+        assert_eq!(fallback_cache.stats().stale_hits, 1);
+    }
+
+    #[test]
+    fn optimistic_mode_accepts_stale_compose_without_recompute() {
+        let (dir, cache) = persistent_cache();
+        let workspace = tempdir().unwrap();
+        let parent_path = workspace.path().join("parent.md");
+        let child_path = workspace.path().join("child.md");
+        fs::write(&parent_path, "# Parent\n\n::file ./child.md\n").unwrap();
+        fs::write(&child_path, "# Child\n\nVersion 1\n").unwrap();
+
+        cache.load_markdown(&parent_path).unwrap();
+        cache.load_markdown(&child_path).unwrap();
+
+        let parent_source = compose_cache_key(&parent_path);
+        let child_source = compose_cache_key(&child_path);
+        let parent_ctx = PersistentContext {
+            source_id: source_id_hash(&parent_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+        let child_ctx = PersistentContext {
+            source_id: source_id_hash(&child_source),
+            state_hash: 0,
+            context_hash: 0,
+            options_hash: 0,
+        };
+
+        cache
+            .get_or_compute_compose(
+                "child",
+                Some(&child_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+
+        let child_dep = cache.compose_dependency_ref(&child_ctx).unwrap();
+
+        cache
+            .get_or_compute_compose(
+                "parent",
+                Some(&parent_ctx),
+                CacheFreshnessMode::Strict,
+                || {
+                    Ok(ComposeResult {
+                        content: "# Parent\n\n# Child\n\nVersion 1\n".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![child_dep.clone()],
+                    })
+                },
+            )
+            .unwrap();
+
+        fs::write(&child_path, "# Child\n\nVersion 2\n").unwrap();
+
+        let optimistic_cache = RunLocalCache::new(CacheAccessMode::ReadWrite)
+            .with_persistent(dir.path().join("cache"));
+        optimistic_cache.load_markdown(&child_path).unwrap();
+        let compute_count = std::sync::atomic::AtomicUsize::new(0);
+
+        let result = optimistic_cache
+            .get_or_compute_compose(
+                "parent",
+                Some(&parent_ctx),
+                CacheFreshnessMode::Optimistic,
+                || {
+                    compute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(ComposeResult {
+                        content: "should not compute".to_string(),
+                        report: ComposeReport::new(),
+                        dependencies: vec![],
+                    })
+                },
+            )
+            .unwrap();
+
+        assert_eq!(compute_count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(result.content, "# Parent\n\n# Child\n\nVersion 1\n");
     }
 }

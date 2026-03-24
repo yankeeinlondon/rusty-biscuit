@@ -12,8 +12,8 @@
 
 use super::manifest::CACHE_VERSION;
 use super::types::ArtifactClass;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -41,10 +41,7 @@ impl FileStore {
     ///
     /// Prefers `<workspace>/.darkmatter/cache/v1/`. Falls back to
     /// the platform cache directory if no workspace is detected.
-    pub fn resolve_cache_root(
-        workspace_root: Option<&Path>,
-        namespace: Option<&str>,
-    ) -> PathBuf {
+    pub fn resolve_cache_root(workspace_root: Option<&Path>, namespace: Option<&str>) -> PathBuf {
         let base = if let Some(root) = workspace_root {
             root.join(".darkmatter").join("cache")
         } else {
@@ -364,7 +361,11 @@ mod tests {
         let expected = store
             .root
             .join("manifests/snapshot/00/11/0011223344556677.json");
-        assert!(expected.exists(), "Expected fanout path: {}", expected.display());
+        assert!(
+            expected.exists(),
+            "Expected fanout path: {}",
+            expected.display()
+        );
     }
 
     #[test]
@@ -376,10 +377,7 @@ mod tests {
     #[test]
     fn resolve_cache_root_with_namespace() {
         let root = FileStore::resolve_cache_root(Some(Path::new("/project")), Some("test-ns"));
-        assert_eq!(
-            root,
-            PathBuf::from("/project/.darkmatter/cache/v1/test-ns")
-        );
+        assert_eq!(root, PathBuf::from("/project/.darkmatter/cache/v1/test-ns"));
     }
 
     #[test]

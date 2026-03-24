@@ -4,8 +4,10 @@
 //! cacheable compose operations. Variant parameters determine the
 //! cached core result; post parameters are applied after cache lookup.
 
-// Phase 3 API surface: the trait and operation structs are defined for
-// formalizing the parameter model and will be used by future consumers.
+// `CodeOperation` and `TocLinkingOperation` are wired into the compose
+// pipeline today. `FileOperation` remains available as the bucket model for
+// future compose-core refactoring, so this module still carries some unused
+// items in the current build.
 #![allow(dead_code)]
 
 use biscuit_hash::xx_hash;
@@ -68,9 +70,7 @@ impl CacheableOperation for FileOperation {
         let mut buckets = ParamBuckets::default();
 
         if let Some(when) = &options.when_expr {
-            buckets
-                .conditional
-                .push(("when".to_string(), when.clone()));
+            buckets.conditional.push(("when".to_string(), when.clone()));
         }
 
         // Variant: replace behavior affects the composed core
@@ -124,9 +124,7 @@ impl CacheableOperation for CodeOperation {
         let mut buckets = ParamBuckets::default();
 
         if let Some(when) = &options.when_expr {
-            buckets
-                .conditional
-                .push(("when".to_string(), when.clone()));
+            buckets.conditional.push(("when".to_string(), when.clone()));
         }
 
         // Variant: replace map and language affect the fenced core
@@ -210,9 +208,7 @@ impl TocLinkingOperation {
         }
 
         if let Some(text) = &options.empty_text {
-            buckets
-                .variant
-                .push(("empty".to_string(), text.clone()));
+            buckets.variant.push(("empty".to_string(), text.clone()));
         }
 
         buckets

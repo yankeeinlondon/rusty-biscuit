@@ -5,6 +5,8 @@
 //! and Merkle-style closure hash computation.
 
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_bytes, xx_hash_variant};
+use serde::Serialize;
+use serde::ser::{SerializeMap, SerializeSeq};
 use serde_json::{Map, Value};
 use std::path::Path;
 
@@ -128,7 +130,10 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
 
     parts.push(format!("fail_fast={}", options.fail_fast));
     parts.push(format!("max_depth={}", options.max_transclusion_depth));
-    parts.push(format!("allow_remote={}", options.allow_remote_transclusion));
+    parts.push(format!(
+        "allow_remote={}",
+        options.allow_remote_transclusion
+    ));
     parts.push(format!("allow_local_md={}", options.allow_local_markdown));
     parts.push(format!("allow_local_code={}", options.allow_local_code));
     parts.push(format!(
@@ -223,21 +228,41 @@ pub(crate) fn operation_entry_key(op_kind: &str, source_id: u64, variant_hash: u
 /// This ensures deterministic hashing regardless of insertion order.
 /// Arrays preserve their element order (order is semantically meaningful).
 pub(crate) fn canonical_json_sorted(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            let mut sorted: Vec<_> = map.iter().collect();
-            sorted.sort_by_key(|(k, _)| *k);
-            let entries: Vec<String> = sorted
-                .into_iter()
-                .map(|(k, v)| format!("{}:{}", serde_json::to_string(k).unwrap(), canonical_json_sorted(v)))
-                .collect();
-            format!("{{{}}}", entries.join(","))
+    let mut bytes = Vec::new();
+    serde_json::to_writer(&mut bytes, &CanonicalJson(value)).unwrap();
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
+struct CanonicalJson<'a>(&'a Value);
+
+impl Serialize for CanonicalJson<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.0 {
+            Value::Null => serializer.serialize_unit(),
+            Value::Bool(value) => serializer.serialize_bool(*value),
+            Value::Number(value) => value.serialize(serializer),
+            Value::String(value) => serializer.serialize_str(value),
+            Value::Array(values) => {
+                let mut seq = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    seq.serialize_element(&CanonicalJson(value))?;
+                }
+                seq.end()
+            }
+            Value::Object(map) => {
+                let mut entries: Vec<_> = map.iter().collect();
+                entries.sort_by(|left, right| left.0.cmp(right.0));
+
+                let mut object = serializer.serialize_map(Some(entries.len()))?;
+                for (key, value) in entries {
+                    object.serialize_entry(key, &CanonicalJson(value))?;
+                }
+                object.end()
+            }
         }
-        Value::Array(arr) => {
-            let entries: Vec<String> = arr.iter().map(canonical_json_sorted).collect();
-            format!("[{}]", entries.join(","))
-        }
-        _ => serde_json::to_string(value).unwrap_or_default(),
     }
 }
 
@@ -285,7 +310,10 @@ mod tests {
     fn canonical_json_scalars() {
         assert_eq!(canonical_json_sorted(&serde_json::json!(null)), "null");
         assert_eq!(canonical_json_sorted(&serde_json::json!(true)), "true");
-        assert_eq!(canonical_json_sorted(&serde_json::json!("hello")), r#""hello""#);
+        assert_eq!(
+            canonical_json_sorted(&serde_json::json!("hello")),
+            r#""hello""#
+        );
         assert_eq!(canonical_json_sorted(&serde_json::json!(42)), "42");
     }
 
@@ -353,19 +381,24 @@ mod tests {
     fn closure_hash_changes_with_deps() {
         let self_hash = 12345u64;
         let deps1 = vec![DependencyRef {
-            artifact_class: crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
+            artifact_class:
+                crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
             entry_key: 1,
             source_id_hash: 100,
             closure_hash: 200,
         }];
         let deps2 = vec![DependencyRef {
-            artifact_class: crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
+            artifact_class:
+                crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
             entry_key: 1,
             source_id_hash: 100,
             closure_hash: 300, // Different closure hash
         }];
 
-        assert_ne!(closure_hash(self_hash, &deps1), closure_hash(self_hash, &deps2));
+        assert_ne!(
+            closure_hash(self_hash, &deps1),
+            closure_hash(self_hash, &deps2)
+        );
     }
 
     #[test]

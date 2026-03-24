@@ -28,6 +28,7 @@ thiserror = "2.0"
 
 # Parallelism
 rayon = "1.10"
+dashmap = "6.1"
 
 # Utilities
 lazy_static = "1.5"
