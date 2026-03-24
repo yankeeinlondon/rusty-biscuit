@@ -255,10 +255,10 @@ fi
 if has_command "wt"; then
 
     if is_zsh; then
-        source <(COMPLETE=zsh wt)
+        source <(wt --completions zsh)
         logc "- {{BOLD}}wt{{RESET}} ({{DIM}}worktree{{RESET}}) completions loaded"
     elif is_bash; then
-        source <(COMPLETE=bash wt)
+        source <(wt --completions bash)
         logc "- {{BOLD}}wt{{RESET}} ({{DIM}}worktree{{RESET}}) completions loaded"
     fi
 fi

@@ -63,7 +63,7 @@ Examples:
   wt go feature-x       Navigate to a worktree
   wt go base            Navigate back to the base checkout
 
-Shell Completions:
-  wt --completions bash   Show setup for Bash
-  wt --completions zsh    Show setup for Zsh
-  wt --completions fish   Show setup for Fish";
+Shell Integration (cd wrapper + completions):
+  source <(wt --completions bash)              Add to ~/.bashrc
+  source <(wt --completions zsh)               Add to ~/.zshrc
+  source (wt --completions fish | psub)        Add to config.fish";

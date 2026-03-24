@@ -35,25 +35,65 @@ fn run() -> Result<(), worktree::WorktreeError> {
     }
 }
 
-/// Prints shell completions setup instructions.
+/// Prints a sourceable shell integration script (cd wrapper + completions).
+///
+/// The output is designed to be sourced directly, e.g.:
+///   source <(wt --completions zsh)
 fn print_completions(shell: clap_complete::Shell) {
     use clap_complete::Shell;
 
-    let (setup_cmd, config_file) = match shell {
-        Shell::Bash => ("source <(COMPLETE=bash wt)", "~/.bashrc"),
-        Shell::Zsh => ("source <(COMPLETE=zsh wt)", "~/.zshrc"),
-        Shell::Fish => ("COMPLETE=fish wt | source", "~/.config/fish/config.fish"),
-        Shell::PowerShell => (
-            r#"$env:COMPLETE = "powershell"; wt | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
-            "$PROFILE",
+    match shell {
+        Shell::Bash => println!(
+            r#"# wt shell integration — add to ~/.bashrc:
+#   source <(wt --completions bash)
+wt() {{
+    local output exit_code
+    output="$(command wt "$@")"
+    exit_code=$?
+    (( exit_code != 0 )) && return $exit_code
+    if [[ "$output" == cd:* ]]; then
+        builtin cd -- "${{output#cd:}}"
+    else
+        [[ -n "$output" ]] && echo "$output"
+    fi
+}}
+source <(COMPLETE=bash command wt)"#
         ),
-        Shell::Elvish => ("eval (E:COMPLETE=elvish wt | slurp)", "~/.elvish/rc.elv"),
+        Shell::Zsh => println!(
+            r#"# wt shell integration — add to ~/.zshrc:
+#   source <(wt --completions zsh)
+wt() {{
+    local output exit_code
+    output="$(command wt "$@")"
+    exit_code=$?
+    (( exit_code != 0 )) && return $exit_code
+    if [[ "$output" == cd:* ]]; then
+        builtin cd -- "${{output#cd:}}"
+    else
+        [[ -n "$output" ]] && print -- "$output"
+    fi
+}}
+source <(COMPLETE=zsh command wt)"#
+        ),
+        Shell::Fish => println!(
+            r#"# wt shell integration — add to ~/.config/fish/config.fish:
+#   source (wt --completions fish | psub)
+function wt
+    set output (command wt $argv)
+    set exit_code $status
+    if test $exit_code -ne 0
+        return $exit_code
+    end
+    if string match -q 'cd:*' -- $output
+        builtin cd (string replace 'cd:' '' -- $output)
+    else
+        test -n "$output" && echo $output
+    end
+end
+COMPLETE=fish command wt | source"#
+        ),
         _ => {
-            eprintln!("Shell {:?} is not supported for dynamic completions", shell);
-            return;
+            eprintln!("Shell {:?} is not supported", shell);
         }
-    };
-
-    println!("# Add this line to {}:", config_file);
-    println!("{}", setup_cmd);
+    }
 }
