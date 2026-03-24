@@ -10819,6 +10819,8 @@ dependencies = [
  "biscuit-terminal",
  "clap 4.6.0",
  "clap_complete",
+ "dirs",
+ "inquire",
  "predicates",
  "worktree",
 ]
