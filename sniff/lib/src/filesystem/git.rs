@@ -747,6 +747,8 @@ pub struct WorktreeInfo {
     pub behind: usize,
     /// The base branch used for ahead/behind comparison (e.g., "main").
     pub base_branch: String,
+    /// Whether merging this worktree's HEAD into the base branch would produce conflicts.
+    pub has_conflicts: bool,
 }
 
 /// A file with uncommitted changes (staged or unstaged).
@@ -1750,6 +1752,16 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .and_then(|(base, wt_commit)| repo.graph_ahead_behind(wt_commit.id(), base).ok())
             .unwrap_or((0, 0));
 
+        // Check for merge conflicts by performing an in-memory merge
+        let has_conflicts = base_oid
+            .zip(head_commit.as_ref())
+            .and_then(|(base_id, wt_commit)| {
+                let base_commit = repo.find_commit(base_id).ok()?;
+                let index = repo.merge_commits(wt_commit, &base_commit, None).ok()?;
+                Some(index.has_conflicts())
+            })
+            .unwrap_or(false);
+
         // Check if worktree is dirty
         let dirty =
             get_repo_status_with_changes(&worktree_repo).map(|(s, _)| s.is_dirty).unwrap_or(false);
@@ -1764,6 +1776,7 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
                 ahead,
                 behind,
                 base_branch: base_branch.clone(),
+                has_conflicts,
             },
         );
     }
@@ -2836,6 +2849,7 @@ mod tests {
             ahead: 3,
             behind: 1,
             base_branch: "main".to_string(),
+            has_conflicts: false,
         };
 
         let json = serde_json::to_string(&worktree).unwrap();

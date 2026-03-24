@@ -667,6 +667,11 @@ pub fn render_git_section(
         for (_key, info) in &git.worktrees {
             let branch = &info.branch;
             let status = format_ahead_behind_of(info.ahead, info.behind, &info.base_branch);
+            let merge_status = if info.has_conflicts {
+                " · <red-500><b>conflicts</b></red-500>"
+            } else {
+                " · <green-500>clean</green-500>"
+            };
 
             // Check if we're inside this particular worktree
             let is_current = git.in_worktree
@@ -675,11 +680,11 @@ pub fn render_git_section(
 
             if is_current {
                 wt_list.add(Prose::new(format!(
-                    "<b>{branch}:</b> you are {status}"
+                    "<b>{branch}:</b> you are {status}{merge_status}"
                 )));
             } else {
                 wt_list.add(Prose::new(format!(
-                    "{branch}: <dim>is {status}</dim>"
+                    "{branch}: <dim>is {status}</dim>{merge_status}"
                 )));
             }
         }
