@@ -1,4 +1,4 @@
-use biscuit_terminal::components::compose::Compose;
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::terminal::Terminal;
@@ -9,16 +9,12 @@ pub fn run() -> Result<(), WorktreeError> {
     let statuses = list_worktrees()?;
     let terminal = Terminal::default();
 
-    let mut compose = Compose::default();
-    compose.add_text("");
-
+    let mut list = UnorderedList::empty();
     for status in &statuses {
-        let line = format_status_line(status);
-        compose.add_prose(Prose::new(line));
+        list.add(Prose::new(format_status_line(status)));
     }
 
-    compose.add_text("");
-    eprintln!("{}", compose.render(&terminal));
+    eprintln!("\n{}", list.render(&terminal));
 
     Ok(())
 }
@@ -30,8 +26,6 @@ fn format_status_line(status: &WorktreeStatus) -> String {
         .as_deref()
         .unwrap_or("(detached)");
 
-    let marker = if status.entry.is_current { "▸ " } else { "  " };
-
     let name_styled = if status.entry.is_current {
         format!("<bold><cyan>{name}</cyan></bold>")
     } else if status.entry.is_main {
@@ -40,7 +34,7 @@ fn format_status_line(status: &WorktreeStatus) -> String {
         name.to_string()
     };
 
-    let mut parts = vec![format!("{marker}{name_styled}")];
+    let mut parts = vec![name_styled];
 
     if !status.entry.is_main {
         let merge_indicator = if status.is_clean {
