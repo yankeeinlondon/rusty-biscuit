@@ -9,6 +9,7 @@
         "Darkmatter",
         "dashmap",
         "doas",
+        "doctests",
         "epeat",
         "esac",
         "globset",
