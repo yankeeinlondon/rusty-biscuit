@@ -57,3 +57,8 @@ We will add a new `graph` command to the Darkmatter CLI:
     - it will however, check that the resource involved in the transclusion does exist
 - if we want to add recursion (aka, follow the transclusions) then we'll need a `--follow` flag for the CLI to indicate this
     - The `--follow` and `--validate` flags can be used together and when they are then we will validate the entire recursive tree of links.
+
+
+## Nerdfonts
+
+Just like we do with the `FileSystem` component, we should leverage biscuit-terminal's ability to detect if the terminal is using a nerdfont and then leverage that when it's available.
