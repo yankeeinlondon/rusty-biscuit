@@ -19,6 +19,10 @@ pub struct Cli {
     #[arg(long, short = 'w', value_name = "WIDTH", global = true)]
     pub width: Option<String>,
 
+    /// Show detailed commit history for the current worktree
+    #[arg(long, short = 'v', global = true)]
+    pub verbose: bool,
+
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
     pub completions: Option<Shell>,
