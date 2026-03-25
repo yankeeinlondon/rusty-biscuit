@@ -6,12 +6,19 @@ blast_radius:
   - darkmatter/lib/src/markdown/cleanup.rs
   - darkmatter/lib/src/markdown/normalize/mod.rs
   - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/cache/store.rs
   - darkmatter/lib/src/markdown/hash.rs
   - darkmatter/lib/src/markdown/output/mod.rs
   - darkmatter/lib/src/markdown/output/string.rs
   - darkmatter/lib/src/markdown/output/ast.rs
   - darkmatter/lib/src/markdown/output/html.rs
   - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/types.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/reference/meta.rs
+  - darkmatter/lib/src/markdown/reference/html.rs
   - darkmatter/lib/src/markdown/toc/mod.rs
   - darkmatter/lib/src/markdown/toc/types.rs
   - darkmatter/lib/src/markdown/delta/mod.rs
@@ -179,64 +186,151 @@ md.fm_set_defaults(serde_json::json!({
 
 ## Document References
 
-A document can reference other external assets through the following means:
+A document can reference external assets through hyperlinks, images, transclusions, inline CSS/scripts/fonts, and meta tags. Darkmatter provides both **local** (single-document) and **graph-aware** (transclusion-following) APIs for reference discovery, plus a validation engine.
 
-- **Hyperlinks**
+### Reference Categories
 
-    This includes both hyperlinks using Markdown syntax _and_ hyperlinks using inline HTML using the `<a>` tag
+| Category | Markdown Syntax | HTML Syntax |
+|----------|----------------|-------------|
+| Hyperlinks | `[text](url)` | `<a href="url">` |
+| Images | `![alt](src)` | `<img src="url">` |
+| Transclusions | `::file`, `::code`, `::url` | -- |
+| CSS | -- | `<style>`, `@import` |
+| Scripts | -- | `<script>`, `<script src="...">` |
+| Fonts | -- | `<link ... as="font">`, `@font-face` |
+| Meta tags | -- | `<meta name="..." content="...">` |
 
-- **Image References**
+### Transclusion Queries
 
-    This includes Markdown syntax for image references as well as inline HTML using the `<img>` tag
+**`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
 
-- **Transclusions**
+**`transclusions() -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance. This is a local query; use `transclusion_graph()` for recursive traversal.
 
-    Because Darkmatter's DSL includes _transclusions_ (aka, file references where the content isn't a _link_ but rather it will be directly included in the document during a "compose" operation )
+Each `TransclusionRef` includes:
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | `TransclusionRefKind` | `File`, `Code`, `Url`, `TocLinking`, `Prologue`, `Epilogue` |
+| `raw_target` | `String` | The target as written in the directive |
+| `resolved_target` | `Option<String>` | Resolved path using `biscuit_file::FileReference` semantics (supports `@repo-root` paths) |
+| `options` | `TransclusionRefOptions` | Directive options (when, replace, quotation, etc.) |
+| `origin` | `ReferenceOrigin` | Source file, line, span, and syntax type |
 
-- **Inline Tags:**
+Path resolution uses the same `FileReference` semantics as the graph builder and validator, so `resolved_target` is consistent across all three APIs.
 
-    - **Inline CSS and Imports**
+### Reference Graph
 
-        Markdown in Darkmatter would **not** typically have CSS imports -- nor would it render in Markdown differently based on this -- but if some inline HTML with a CSS import were present then we'd want to preserve it and it could have a visual impact when we render to HTML.
+Graph methods follow transclusion directives recursively and collect references at each node.
 
-        ```rust
-        impl for Markdown {
-            pub fn has_inline_css(): bool;
-            pub fn has_css_imports(): bool;
+**`transclusion_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a transclusion-only graph (no link/image extraction at leaf nodes).
 
-            /** returns a list of URLs */
-            pub fn get_css_imports(): Vec<String>;
-            /** returns blocks of inline CSS */
-            pub fn get_inline_css(): Vec<CssBlock>;
-            pub fn resolve_css_imports(): 
-        }
-        ```
+**`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node).
 
-    - **Fonts** and **Scripts**
+**`composed_references(options) -> MarkdownResult<ReferenceSet>`** flattens the reference graph into composed-order references.
 
-        Similarly to how we treat CSS Imports, both font imports and script imports would NOT be expected in normal Markdown content but because inline 
+**`composed_links(options) -> MarkdownResult<Vec<LinkReference>>`** returns composed-order hyperlinks.
 
-        ```rust
-        impl for Markdown {
-            pub fn has_inline_scripts(): bool;
-            pub fn has_script_imports(): bool;
-            pub fn has_font_imports(): bool;
+**`composed_image_references(options) -> MarkdownResult<Vec<ImageReference>>`** returns composed-order image references.
 
-            pub fn get_script_imports(): Vec<String>;
-            pub fn get_inline_script_blocks(): Vec<String>;
+All graph methods accept `ReferenceGraphOptions`, which wraps `ComposeOptions` and inherits its cache configuration. When `cache_root` is set, the graph builder resolves persistent cache paths through `FileStore::resolve_cache_root()`, honoring `cache_namespace` for branch/profile isolation -- matching the compose pipeline's cache semantics exactly.
 
-        }
-        ```
+```rust
+let mut options = ReferenceGraphOptions::default();
+options.compose = options.compose
+    .with_cache_root(workspace_root)
+    .with_cache_namespace("feature-branch");
 
-    - **Meta** tags
+let graph = md.reference_graph(options)?;
+```
 
-        Meta tags are uncommon in Markdown too but like the two prior sections we want to be able to detect and preserve these tags. However, in this case we want to add a couple of additional nuances:
+### Graph-Aware Inline Tag Extraction
 
-        - it would be good to be able to:
-            - convert meta tags to frontmatter key/values (part of builder interface)
-            - have a `get_meta_tags()` implementation which 
+These methods traverse the composed document graph to collect inline tags across all transcluded children:
 
+| Method | Returns |
+|--------|---------|
+| `inline_css_graph(options)` | `Vec<InlineCssBlock>` |
+| `css_import_graph(options)` | `Vec<ImportReference>` |
+| `inline_script_graph(options)` | `Vec<InlineScriptBlock>` |
+| `script_import_graph(options)` | `Vec<ImportReference>` |
+| `font_import_graph(options)` | `Vec<ImportReference>` |
+
+### Local Inline Tag Extraction
+
+Single-document variants (no transclusion traversal):
+
+| Method | Returns |
+|--------|---------|
+| `inline_css()` | `Vec<InlineCssBlock>` |
+| `css_imports()` | `Vec<ImportReference>` |
+| `inline_scripts()` | `Vec<InlineScriptBlock>` |
+| `script_imports()` | `Vec<ImportReference>` |
+| `font_imports()` | `Vec<ImportReference>` |
+
+### Meta Tags
+
+**`meta_tags() -> MarkdownResult<MetaTagMap>`** parses `<meta>` tags from the document content into an ordered map keyed by `name`, `property`, `http-equiv`, or `charset`.
+
+**`merge_meta_into_frontmatter(overwrite) -> MarkdownResult<usize>`** copies meta tag values into the document's frontmatter. Returns the number of keys inserted or updated.
+
+**`set_meta_tag(key, value) -> usize`** sets a `<meta>` tag in the document content. If a tag with the same key already exists, it is updated in place regardless of attribute order, extra whitespace, or additional attributes. Otherwise, a new tag is appended. Returns 0 for insert, 1 for update.
+
+Key-to-attribute mapping:
+
+| Key | HTML Attribute |
+|-----|---------------|
+| `charset` | `<meta charset="value">` |
+| Contains `:` (e.g. `og:title`) | `<meta property="key" content="value">` |
+| All other keys | `<meta name="key" content="value">` |
+
+```rust
+let mut md = Markdown::new("# Hello");
+md.set_meta_tag("author", "Ken");
+md.set_meta_tag("og:title", "My Page");
+
+let meta = md.meta_tags()?;
+assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
+```
+
+### Reference Validation
+
+**`validate_references(options) -> MarkdownResult<ReferenceValidationReport>`** validates all references in the document, optionally following transclusions through the reference graph.
+
+`ReferenceValidationOptions`:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `graph` | `ReferenceGraphOptions` | default | Controls graph traversal and cache settings |
+| `validate_remote` | `bool` | `false` | Validate remote URLs via HTTP |
+| `remote_timeout` | `Duration` | 10s | Timeout for remote URL checks |
+| `validate_fragments` | `bool` | `false` | Validate `#fragment` targets |
+| `fail_fast` | `bool` | `false` | Stop on first error |
+
+`ReferenceValidationReport`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `references_scanned` | `usize` | Total references checked |
+| `references_valid` | `usize` | References that passed |
+| `issues` | `Vec<ReferenceIssue>` | Validation issues found |
+| `warnings` | `Vec<String>` | Non-blocking warnings |
+
+Helper methods: `is_valid()`, `error_count()`.
+
+Issue codes: `MissingLocalTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteSkipped`, `MissingFragmentTarget`.
+
+```rust
+let options = ReferenceValidationOptions {
+    validate_fragments: true,
+    ..Default::default()
+};
+let report = md.validate_references(options)?;
+if !report.is_valid() {
+    for issue in &report.issues {
+        eprintln!("{}: {}", issue.code, issue.message);
+    }
+}
+```
 
 These methods parse the markdown body and return structured data.
 
