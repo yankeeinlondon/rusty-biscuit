@@ -36,10 +36,20 @@ impl ReferenceAnalysisRuntime {
 
 /// Construct a [`RunLocalCache`] from graph options, attaching persistent
 /// backing when `cache_root` is configured.
+///
+/// Uses [`FileStore::resolve_cache_root`] to match the compose pipeline's
+/// cache-path resolution, honoring `cache_namespace` for branch/profile
+/// isolation.
 fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
+    use crate::markdown::compose::cache::FileStore;
+
     let cache = RunLocalCache::new(options.compose.cache_access_mode);
     if let Some(ref root) = options.compose.cache_root {
-        cache.with_persistent(root.clone())
+        let resolved = FileStore::resolve_cache_root(
+            Some(root),
+            options.compose.cache_namespace.as_deref(),
+        );
+        cache.with_persistent(resolved)
     } else {
         cache
     }

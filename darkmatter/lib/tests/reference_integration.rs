@@ -621,3 +621,72 @@ fn transclusion_ref_all_kinds() {
     assert!(kinds.contains(&ReferenceSyntax::DirectiveCode));
     assert!(kinds.contains(&ReferenceSyntax::DirectiveUrl));
 }
+
+#[test]
+fn transclusion_ref_resolved_target_is_correct_path() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "::file sub/child.md\n"),
+            ("sub/child.md", "# Child\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let refs = md.transclusions().unwrap();
+    assert_eq!(refs.len(), 1);
+
+    let resolved = refs[0].resolved_target.as_deref().unwrap();
+    let expected = dir.path().join("sub/child.md");
+    // Compare canonical paths to handle /var vs /private/var on macOS
+    let resolved_canon = std::path::Path::new(resolved)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(resolved));
+    let expected_canon = expected
+        .canonicalize()
+        .unwrap_or_else(|_| expected.clone());
+    assert_eq!(
+        resolved_canon, expected_canon,
+        "resolved_target should point to the actual child file"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Cache path parity tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn reference_graph_cache_honors_namespace() {
+    let dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n::file child.md\n"),
+            ("child.md", "# Child\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let mut options = ReferenceGraphOptions::default();
+    options.compose = options
+        .compose
+        .with_cache_root(cache_dir.path())
+        .with_cache_namespace("test-branch");
+
+    // Build the graph — should use namespace-scoped persistent cache
+    let graph = md.reference_graph(options).unwrap();
+    assert_eq!(graph.node_count(), 2);
+
+    // Verify the namespaced cache directory was created
+    let expected_cache = cache_dir
+        .path()
+        .join(".darkmatter")
+        .join("cache");
+    // The version directory should exist under the namespace
+    assert!(
+        expected_cache.exists(),
+        "persistent cache directory structure should be created under resolve_cache_root path"
+    );
+}

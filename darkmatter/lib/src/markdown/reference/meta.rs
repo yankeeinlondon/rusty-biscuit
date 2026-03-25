@@ -177,39 +177,64 @@ fn build_meta_tag_html(key: &str, value: &str) -> String {
 
 /// Try to replace an existing `<meta>` tag that matches the given key.
 ///
+/// Scans for `<meta` tag boundaries and uses attribute extraction to identify
+/// matching tags regardless of attribute order, extra whitespace, or additional
+/// attributes. Only the first matching tag is replaced.
+///
 /// Returns `Some(updated_content)` if a replacement was made, `None` otherwise.
 fn replace_existing_meta_tag(content: &str, key: &str, new_value: &str) -> Option<String> {
-    // Build patterns to match existing meta tags for this key
-    let patterns: Vec<String> = if key == "charset" {
-        vec![
-            format!("<meta charset=\""),
-            format!("<meta charset='"),
-        ]
+    // Determine which attribute identifies this key
+    let (attr_name, attr_value): (&str, Option<&str>) = if key == "charset" {
+        ("charset", None) // charset matches any value
     } else if key.contains(':') {
-        vec![
-            format!("<meta property=\"{key}\""),
-            format!("<meta property='{key}'"),
-        ]
+        ("property", Some(key))
     } else {
-        vec![
-            format!("<meta name=\"{key}\""),
-            format!("<meta name='{key}'"),
-        ]
+        ("name", Some(key))
     };
 
-    for pattern in &patterns {
-        if let Some(start) = content.find(pattern.as_str()) {
-            // Find the end of the tag
-            let rest = &content[start..];
-            let end = rest.find('>').map(|i| start + i + 1)?;
+    // Scan for <meta tags (case-insensitive opening)
+    let lower = content.to_lowercase();
+    let mut search_from = 0;
 
+    while let Some(rel_start) = lower[search_from..].find("<meta") {
+        let start = search_from + rel_start;
+        let rest = &content[start..];
+
+        // Verify it's actually a tag opening (next non-alpha char must be space or >)
+        let after_meta = &rest["<meta".len()..];
+        if !after_meta.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/') {
+            search_from = start + 1;
+            continue;
+        }
+
+        // Find the closing >
+        let Some(close_offset) = rest.find('>') else {
+            search_from = start + 1;
+            continue;
+        };
+        let tag_end = start + close_offset + 1;
+        let tag_html = &content[start..tag_end];
+
+        // Use attribute extraction to check if this tag matches the key
+        let matches = if let Some(expected_value) = attr_value {
+            html::extract_attribute(tag_html, attr_name)
+                .map(|v| v == expected_value)
+                .unwrap_or(false)
+        } else {
+            // charset: any tag with a charset attribute matches
+            html::extract_attribute(tag_html, attr_name).is_some()
+        };
+
+        if matches {
             let new_tag = build_meta_tag_html(key, new_value);
             let mut result = String::with_capacity(content.len());
             result.push_str(&content[..start]);
             result.push_str(&new_tag);
-            result.push_str(&content[end..]);
+            result.push_str(&content[tag_end..]);
             return Some(result);
         }
+
+        search_from = tag_end;
     }
 
     None
@@ -361,5 +386,72 @@ mod tests {
         let updated = set_meta_tag(&mut md, "keywords", "programming");
         assert_eq!(updated, 1, "should update the first occurrence");
         assert!(md.content().contains("programming"));
+    }
+
+    // ── edge-case meta tag replacement tests ───────────────────────
+
+    #[test]
+    fn set_meta_tag_reordered_attributes() {
+        // content before name — attribute order reversed
+        let mut md = Markdown::new("<meta content=\"Alice\" name=\"author\">\n");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 1, "should find tag despite reordered attributes");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_extra_whitespace() {
+        // extra spaces between attributes
+        let mut md = Markdown::new("<meta   name=\"author\"   content=\"Alice\">\n");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 1, "should find tag despite extra whitespace");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_additional_attributes() {
+        // extra id attribute before the key attribute
+        let mut md =
+            Markdown::new("<meta id=\"m1\" name=\"author\" content=\"Alice\" class=\"meta\">\n");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 1, "should find tag with additional attributes");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_uppercase_tag() {
+        // uppercase META tag
+        let mut md = Markdown::new("<META name=\"author\" content=\"Alice\">\n");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 1, "should find uppercase META tag");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_og_reordered() {
+        // OG property with content before property attribute
+        let mut md = Markdown::new("<meta content=\"Old Title\" property=\"og:title\">\n");
+        let updated = set_meta_tag(&mut md, "og:title", "New Title");
+        assert_eq!(updated, 1, "should find OG tag despite reordered attributes");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("og:title").unwrap().as_str(), "New Title");
+    }
+
+    #[test]
+    fn set_meta_tag_charset_extra_whitespace() {
+        let mut md = Markdown::new("<meta   charset = \"ascii\">\n");
+        let updated = set_meta_tag(&mut md, "charset", "utf-8");
+        assert_eq!(updated, 1, "should find charset with extra whitespace");
+        assert!(md.content().contains("utf-8"));
+        assert!(!md.content().contains("ascii"));
     }
 }
