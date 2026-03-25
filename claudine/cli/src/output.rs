@@ -563,7 +563,7 @@ pub(crate) fn format_session_start(
     Prose::new(format!(
         "<dim>- <i>{name}</i> session ID </dim>{short_id}<dim>{model_part}</dim>"
     ))
-    .render(&crate::log::optimistic_terminal(None))
+    .render(&crate::log::terminal())
 }
 
 /// Render the user prompt as a truncated blockquote for frontmatter-prompt display.
@@ -709,7 +709,7 @@ pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
         )
     };
 
-    Some(Prose::new(friendly).render(&crate::log::optimistic_terminal(None)))
+    Some(Prose::new(friendly).render(&crate::log::terminal()))
 }
 
 #[cfg(test)]

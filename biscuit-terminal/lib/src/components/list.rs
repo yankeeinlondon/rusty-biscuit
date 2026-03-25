@@ -42,6 +42,34 @@ fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32
     }
 }
 
+/// Force-update the hanging indent on a component, replacing any previously
+/// configured value. Used when the bullet changes after initial construction.
+fn force_component_hanging_indent(content: &mut RenderableContent, hanging_indent: u32) {
+    if let RenderableContent::Component(arc) = content
+        && let Some(component) = Rc::get_mut(arc)
+    {
+        if component.is_block_level() {
+            return;
+        }
+        let layout = component.layout_mut();
+        match &layout.word_wrap {
+            WordWrap::None => {
+                layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
+            }
+            WordWrap::WrapProse(offset, _) => {
+                let offset = *offset;
+                layout.word_wrap = WordWrap::WrapProse(offset, Some(hanging_indent));
+            }
+            WordWrap::BespokeProse(offset, chars, _) => {
+                let offset = *offset;
+                let chars = chars.clone();
+                layout.word_wrap = WordWrap::BespokeProse(offset, chars, Some(hanging_indent));
+            }
+            WordWrap::Truncate(_) => {}
+        }
+    }
+}
+
 // =============================================================================
 // OrderedList
 // =============================================================================
@@ -421,8 +449,23 @@ impl UnorderedList {
     }
 
     /// Set a custom bullet character.
+    ///
+    /// When the new bullet has a different visible width than the current one,
+    /// the hanging indent on all inline component items is updated to match
+    /// so that continuation lines stay aligned with the start of the item text.
     pub fn with_bullet<T: Into<String>>(mut self, bullet: T) -> Self {
-        self.bullet = bullet.into();
+        let new_bullet: String = bullet.into();
+        if self.hanging_indent {
+            let old_width = visible_width(&self.bullet);
+            let new_width = visible_width(&new_bullet);
+            if old_width != new_width {
+                let new_indent = self.indent_children.unwrap_or(new_width);
+                for item in &mut self.items {
+                    force_component_hanging_indent(item, new_indent);
+                }
+            }
+        }
+        self.bullet = new_bullet;
         self
     }
 

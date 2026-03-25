@@ -315,13 +315,8 @@ fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     }
 }
 
-fn optimistic_terminal() -> Terminal {
-    let width = std::env::var("TERM_WIDTH")
-        .ok()
-        .or_else(|| std::env::var("COLUMNS").ok())
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|width| *width > 0);
-    crate::log::optimistic_terminal(width)
+fn wrap_terminal() -> Terminal {
+    crate::log::terminal()
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -451,7 +446,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     })?;
     let cwd = std::env::current_dir()?;
     let env_context = claudine::events::detect_environment_fast(&cwd);
-    let term = optimistic_terminal();
+    let term = wrap_terminal();
 
     let clients = InstalledAiClients::new();
     let binary_path = resolve_binary_path(profile, &clients)?;
@@ -1515,12 +1510,12 @@ fn emit_stream_summary(
         };
         eprint!("{separator}");
         if let Some(markup) = primary_markup {
-            let term = crate::log::optimistic_terminal(None);
+            let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
             eprint!("{rendered}\n");
         }
         if let Some(markup) = secondary_markup {
-            let term = crate::log::optimistic_terminal(None);
+            let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
             eprint!("  {rendered}\n");
         }
@@ -1551,14 +1546,14 @@ fn emit_stream_summary_no_separator(
 
     if verbosity != Verbosity::Silent {
         if let Some(markup) = format_summary_prose(summary) {
-            let term = crate::log::optimistic_terminal(None);
+            let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
             eprintln!("{rendered}");
         }
     }
     if verbosity != Verbosity::Silent && verbose {
         if let Some(markup) = format_verbose_summary_details_prose(summary, details) {
-            let term = crate::log::optimistic_terminal(None);
+            let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
             eprintln!("  {rendered}");
         }

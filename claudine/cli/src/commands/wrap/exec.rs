@@ -196,7 +196,7 @@ impl StreamThinkingRenderer {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::optimistic_terminal(None))
+        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
     }
 
     fn render_dim_italic(text: &str) -> String {
@@ -204,7 +204,7 @@ impl StreamThinkingRenderer {
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
         Prose::new(format!("<dim><i>{safe}</i></dim>"))
-            .render(&crate::log::optimistic_terminal(None))
+            .render(&crate::log::terminal())
     }
 }
 
