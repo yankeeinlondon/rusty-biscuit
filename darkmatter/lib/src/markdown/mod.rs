@@ -56,6 +56,7 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+pub use reference::file_tree::{FileTree, FileTreeError};
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 

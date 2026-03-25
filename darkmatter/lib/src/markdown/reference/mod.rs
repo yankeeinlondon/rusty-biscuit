@@ -5,6 +5,7 @@
 
 pub mod types;
 pub mod errors;
+pub mod file_tree;
 mod local;
 mod html;
 mod graph;

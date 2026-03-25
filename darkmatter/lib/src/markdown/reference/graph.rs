@@ -15,8 +15,8 @@ use crate::markdown::compose::transclusion::{
 use crate::markdown::types::MarkdownResult;
 use super::types::{
     ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
-    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceSyntax,
-    classify_target, make_reference_id,
+    ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
+    ReferenceSyntax, classify_target, make_reference_id,
 };
 
 /// Runtime state for reference graph analysis.
@@ -194,6 +194,34 @@ fn flatten_node(
     }
 }
 
+/// Build a heading index from prepared content.
+///
+/// Returns `(start_line, heading_text, heading_level)` tuples sorted by
+/// line number. Used to look up section context for transclusion directive
+/// lines.
+fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, u8)> {
+    let temp_md = Markdown::new(prepared_content);
+    let toc = temp_md.toc();
+    let mut index: Vec<(usize, String, u8)> = toc
+        .all_headings()
+        .into_iter()
+        .map(|h| (h.line_range.0, h.title.clone(), h.level))
+        .collect();
+    index.sort_by_key(|(line, _, _)| *line);
+    index
+}
+
+/// Look up the active section for a given line number.
+///
+/// Finds the heading with the greatest start line that is `<= target_line`.
+fn section_at_line(heading_index: &[(usize, String, u8)], target_line: usize) -> Option<(&str, u8)> {
+    heading_index
+        .iter()
+        .rev()
+        .find(|(line, _, _)| *line <= target_line)
+        .map(|(_, text, level)| (text.as_str(), *level))
+}
+
 /// Build a single graph node for a document.
 ///
 /// Returns the node itself plus all descendant nodes collected during
@@ -212,6 +240,9 @@ fn build_node(
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
     let prepared_content = prepare_content(md, source, options)?;
+
+    // Build heading index for section context on transclusion insertions
+    let heading_index = build_heading_index(&prepared_content);
 
     // Extract local references if requested
     let mut local_references = if extract_references {
@@ -266,10 +297,18 @@ fn build_node(
                                 extract_references,
                             )?;
 
+                            let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
+                                .map(|(t, l)| (Some(t.to_string()), Some(l)))
+                                .unwrap_or((None, None));
                             child_insertions.push(ReferenceInsertion {
                                 child_node_id: child_node.node_id.clone(),
                                 directive_line: directive.line,
                                 insertion_order,
+                                context: ReferenceInsertionContext {
+                                    directive_kind: Some(ReferenceSyntax::DirectiveFile),
+                                    section_heading_text: sec_text,
+                                    section_heading_level: sec_level,
+                                },
                             });
                             all_descendant_nodes.push(child_node);
                             all_descendant_nodes.append(&mut descendants);
@@ -371,6 +410,11 @@ fn build_node(
                             child_node_id: child_node.node_id.clone(),
                             directive_line: 0, // prologue goes at the start
                             insertion_order,
+                            context: ReferenceInsertionContext {
+                                directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
+                                section_heading_text: None,
+                                section_heading_level: None,
+                            },
                         });
                         all_descendant_nodes.push(child_node);
                         all_descendant_nodes.append(&mut descendants);
@@ -412,10 +456,18 @@ fn build_node(
                             extract_references,
                         )?;
 
+                        let (sec_text, sec_level) = heading_index.last()
+                            .map(|(_, t, l)| (Some(t.clone()), Some(*l)))
+                            .unwrap_or((None, None));
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: usize::MAX, // epilogue goes at the end
                             insertion_order,
+                            context: ReferenceInsertionContext {
+                                directive_kind: Some(ReferenceSyntax::FrontmatterEpilogue),
+                                section_heading_text: sec_text,
+                                section_heading_level: sec_level,
+                            },
                         });
                         all_descendant_nodes.push(child_node);
                         all_descendant_nodes.append(&mut descendants);
@@ -817,11 +869,13 @@ mod tests {
                     child_node_id: "child_a".into(),
                     directive_line: 0,
                     insertion_order: 0,
+                    context: ReferenceInsertionContext::default(),
                 },
                 ReferenceInsertion {
                     child_node_id: "child_b".into(),
                     directive_line: 0,
                     insertion_order: 1,
+                    context: ReferenceInsertionContext::default(),
                 },
             ],
         };

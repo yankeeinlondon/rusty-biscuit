@@ -65,6 +65,23 @@ pub enum ReferenceSyntax {
     HtmlMetaTag,
 }
 
+impl ReferenceSyntax {
+    /// Returns `true` if this syntax kind represents a transclusion that can
+    /// be expanded into a nested `FileTree` subtree.
+    ///
+    /// Only local Markdown transclusions are followable:
+    /// `::file`, `::toc-linking`, `prologue`, `epilogue`.
+    pub fn is_followable_transclusion(&self) -> bool {
+        matches!(
+            self,
+            ReferenceSyntax::DirectiveFile
+                | ReferenceSyntax::DirectiveTocLinking
+                | ReferenceSyntax::FrontmatterPrologue
+                | ReferenceSyntax::FrontmatterEpilogue
+        )
+    }
+}
+
 /// Classification of a reference's target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReferenceTarget {
@@ -236,6 +253,18 @@ impl<'a> IntoIterator for &'a ReferenceSet {
 
 // ── Graph ───────────────────────────────────────────────────────────
 
+/// Contextual metadata about where a transclusion directive appears
+/// within the parent document's section structure.
+#[derive(Debug, Clone, Default)]
+pub struct ReferenceInsertionContext {
+    /// The syntactic form of the directive that triggered insertion.
+    pub directive_kind: Option<ReferenceSyntax>,
+    /// The heading text of the section containing the directive (if any).
+    pub section_heading_text: Option<String>,
+    /// The heading level of the containing section (1–6).
+    pub section_heading_level: Option<u8>,
+}
+
 /// Records a child document insertion within a graph node.
 #[derive(Debug, Clone)]
 pub struct ReferenceInsertion {
@@ -245,6 +274,8 @@ pub struct ReferenceInsertion {
     pub directive_line: usize,
     /// Order among sibling insertions (0-based).
     pub insertion_order: usize,
+    /// Section context for the directive location.
+    pub context: ReferenceInsertionContext,
 }
 
 /// A single document node in the reference graph.

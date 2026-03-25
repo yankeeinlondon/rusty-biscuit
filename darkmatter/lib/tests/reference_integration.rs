@@ -747,3 +747,74 @@ fn reference_graph_cache_honors_namespace() {
         "persistent cache directory structure should be created under resolve_cache_root path"
     );
 }
+
+// ── FileTree integration tests ──────────────────────────────────────
+
+#[test]
+fn section_context_populated_in_graph() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Title\n\n## Intro\n\nSome text.\n\n::file child.md\n\n## Details\n\nMore text."),
+        ("child.md", "# Child\n\nChild content."),
+    ]);
+
+    let md = load_md(&dir, "root.md");
+    let graph = md.reference_graph(ReferenceGraphOptions::default()).unwrap();
+
+    assert!(!graph.root.child_insertions.is_empty(), "expected child insertions");
+    let insertion = &graph.root.child_insertions[0];
+    assert_eq!(
+        insertion.context.section_heading_text.as_deref(),
+        Some("Intro"),
+        "expected section heading 'Intro' for ::file directive in the Intro section"
+    );
+    assert_eq!(insertion.context.section_heading_level, Some(2));
+    assert_eq!(
+        insertion.context.directive_kind,
+        Some(ReferenceSyntax::DirectiveFile)
+    );
+}
+
+#[test]
+fn file_tree_builds_from_real_document() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("doc.md", "# Doc\n\n[link](https://example.com)\n\n![img](./logo.png)\n\n<style>body{}</style>\n\n::file child.md"),
+        ("child.md", "# Child"),
+    ]);
+
+    let path = dir.path().join("doc.md");
+    let mut tree = FileTree::new(&path).unwrap();
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    assert!(output.contains("doc.md"), "expected file label in output");
+    assert!(output.contains("example.com"), "expected hyperlink in output");
+    assert!(output.contains("logo.png"), "expected image ref in output");
+    assert!(output.contains("child.md"), "expected transclusion in output");
+    assert!(output.contains("1 inline CSS block"), "expected inline CSS in summary");
+}
+
+#[test]
+fn file_tree_follow_mode() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Root\n\n::file child.md"),
+        ("child.md", "# Child\n\n[child-link](https://child.example.com)"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    assert!(output.contains("root.md"), "expected root label");
+    assert!(output.contains("child.md"), "expected child label");
+    assert!(output.contains("child.example.com"), "expected child's hyperlink in follow mode");
+}
