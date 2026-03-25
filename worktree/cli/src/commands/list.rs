@@ -14,7 +14,7 @@ use super::git_graph;
 
 const DEFAULT_GRAPH_WIDTH: u32 = 55;
 
-pub fn run(width_spec: Option<&str>) -> Result<(), WorktreeError> {
+pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError> {
     let statuses = list_worktrees()?;
     let terminal = Terminal::default();
 
@@ -38,6 +38,10 @@ pub fn run(width_spec: Option<&str>) -> Result<(), WorktreeError> {
 
     if fits {
         render_graph(&statuses, &terminal, graph_width);
+    }
+
+    if verbose {
+        render_verbose(&statuses, &terminal);
     }
 
     Ok(())
@@ -69,6 +73,48 @@ fn render_graph(statuses: &[WorktreeStatus], terminal: &Terminal, graph_width: I
         let img_term = image_terminal(terminal);
         let diagram = MermaidDiagram::new(instructions).with_width(graph_width);
         eprint!("{}", diagram.render(&img_term));
+    }
+}
+
+fn render_verbose(statuses: &[WorktreeStatus], terminal: &Terminal) {
+    let Ok(default) = default_branch() else {
+        return;
+    };
+
+    let current = statuses.iter().find(|s| s.entry.is_current);
+    let Some(current) = current else {
+        return;
+    };
+    if current.entry.is_main {
+        return;
+    }
+    let branch = current.entry.branch.as_deref().unwrap_or("HEAD");
+
+    // Main section: the commit where the worktree branched from
+    let main_heading = Prose::new(format!("<b><blue-500>{default}</blue-500></b>"));
+    eprintln!("{}", main_heading.render(terminal));
+
+    if let Some(commit) = git_graph::merge_base_commit(&default, branch) {
+        let mut main_list = UnorderedList::empty();
+        main_list.add(Prose::new(git_graph::format_commit(&commit)));
+        eprintln!("{}", main_list.render(terminal));
+    }
+
+    // Worktree section: all commits since the branch point
+    let branch_heading = Prose::new(format!("<b><yellow-500>{branch}</yellow-500></b>"));
+    eprintln!("{}", branch_heading.render(terminal));
+
+    let branch_commits = git_graph::branch_commits_detail(branch, &default);
+    if branch_commits.is_empty() {
+        let mut empty_list = UnorderedList::empty();
+        empty_list.add(Prose::new("<dim>no commits since branching</dim>".to_string()));
+        eprintln!("{}", empty_list.render(terminal));
+    } else {
+        let mut branch_list = UnorderedList::empty();
+        for commit in &branch_commits {
+            branch_list.add(Prose::new(git_graph::format_commit(commit)));
+        }
+        eprintln!("{}", branch_list.render(terminal));
     }
 }
 
