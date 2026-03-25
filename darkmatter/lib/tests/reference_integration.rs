@@ -6,7 +6,7 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::reference::types::{
-    ReferenceGraphOptions, ReferenceKind, ReferenceSyntax,
+    ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
 use darkmatter::markdown::reference::validate::{
     ReferenceIssueCode, ReferenceValidationOptions,
@@ -218,6 +218,45 @@ fn transclusion_records_in_all_views() {
 }
 
 #[test]
+fn toc_linking_dependency_and_generated_links_appear_in_composed_references() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "::toc-linking child.md\n"),
+            ("child.md", "## Child Heading\n\nContent.\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceGraphOptions::default();
+    let graph = md.reference_graph(options.clone()).unwrap();
+
+    let toc_deps: Vec<_> = graph
+        .root
+        .local_references
+        .transclusions()
+        .into_iter()
+        .filter(|r| r.origin.syntax == ReferenceSyntax::DirectiveTocLinking)
+        .collect();
+    assert_eq!(toc_deps.len(), 1, "expected toc-linking dependency record");
+
+    let composed = md.composed_references(options).unwrap();
+    let generated_links: Vec<_> = composed
+        .records
+        .iter()
+        .filter(|r| {
+            r.kind == ReferenceKind::Hyperlink
+                && matches!(
+                    &r.target,
+                    ReferenceTarget::LocalPath { raw } if raw == "child.md#child-heading"
+                )
+        })
+        .collect();
+    assert_eq!(generated_links.len(), 1, "expected generated toc link in composed refs");
+}
+
+#[test]
 fn mermaid_output_includes_child_nodes() {
     let dir = TempDir::new().unwrap();
     write_files(
@@ -342,6 +381,24 @@ fn validate_missing_file_in_child() {
             .iter()
             .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget),
         "Should report missing target for child's broken link"
+    );
+}
+
+#[test]
+fn validate_missing_toc_linking_target() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("root.md", "::toc-linking missing.md\n")]);
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceValidationOptions::default();
+    let report = md.validate_references(options).unwrap();
+
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget),
+        "missing toc-linking target should be validated as a missing local dependency"
     );
 }
 
