@@ -12,7 +12,8 @@ use worktree::WorktreeError;
 
 use super::git_graph;
 
-const DEFAULT_GRAPH_WIDTH: u32 = 55;
+const DEFAULT_GRAPH_WIDTH: u32 = 70;
+const MIN_GRAPH_TERMINAL_WIDTH: u32 = 70;
 
 pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError> {
     let statuses = list_worktrees()?;
@@ -33,7 +34,7 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     // For a percentage, the graph always fits; for characters, check the terminal.
     let fits = match &graph_width {
         ImageWidth::Percent(_) | ImageWidth::Fill => true,
-        ImageWidth::Characters(cols) => terminal.width() >= *cols,
+        ImageWidth::Characters(_) => terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH,
     };
 
     if fits {
