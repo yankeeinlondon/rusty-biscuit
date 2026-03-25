@@ -10817,6 +10817,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
+ "chrono",
  "clap 4.6.0",
  "clap_complete",
  "dirs",
