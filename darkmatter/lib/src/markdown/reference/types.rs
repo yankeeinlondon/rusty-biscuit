@@ -381,20 +381,13 @@ fn short_label(id: &str) -> String {
 use crate::markdown::compose::ComposeOptions;
 
 /// Options for building a reference graph.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ReferenceGraphOptions {
     /// Compose options controlling InlinePre execution, cache settings,
     /// external state, shell settings, and other pipeline behavior.
     pub compose: ComposeOptions,
 }
 
-impl Default for ReferenceGraphOptions {
-    fn default() -> Self {
-        Self {
-            compose: ComposeOptions::new(),
-        }
-    }
-}
 
 // ── Transclusion query types ────────────────────────────────────────
 

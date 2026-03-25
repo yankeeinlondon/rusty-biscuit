@@ -167,15 +167,15 @@ fn classify_img_tag(
     if let Some(title) = extract_attribute(html, "title") {
         attributes.insert("title".into(), serde_json::Value::String(title));
     }
-    if let Some(width) = extract_attribute(html, "width") {
-        if let Ok(w) = width.parse::<u64>() {
-            attributes.insert("width".into(), serde_json::Value::Number(w.into()));
-        }
+    if let Some(width) = extract_attribute(html, "width")
+        && let Ok(w) = width.parse::<u64>()
+    {
+        attributes.insert("width".into(), serde_json::Value::Number(w.into()));
     }
-    if let Some(height) = extract_attribute(html, "height") {
-        if let Ok(h) = height.parse::<u64>() {
-            attributes.insert("height".into(), serde_json::Value::Number(h.into()));
-        }
+    if let Some(height) = extract_attribute(html, "height")
+        && let Ok(h) = height.parse::<u64>()
+    {
+        attributes.insert("height".into(), serde_json::Value::Number(h.into()));
     }
 
     Some(ReferenceRecord {

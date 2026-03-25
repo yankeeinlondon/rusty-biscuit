@@ -162,10 +162,10 @@ impl RunLocalCache {
     pub fn load_markdown(&self, path: &Path) -> MarkdownResult<Markdown> {
         let key = compose_cache_key(path);
 
-        if self.access_mode != CacheAccessMode::Off {
-            if let Some(markdown) = self.markdown_documents.get(&key) {
-                return Ok(markdown.clone());
-            }
+        if self.access_mode != CacheAccessMode::Off
+            && let Some(markdown) = self.markdown_documents.get(&key)
+        {
+            return Ok(markdown.clone());
         }
 
         let markdown = Markdown::try_from(path)?;
@@ -189,10 +189,10 @@ impl RunLocalCache {
     pub fn load_toc_headings(&self, path: &Path) -> std::io::Result<Vec<MarkdownTocNode>> {
         let key = compose_cache_key(path);
 
-        if self.access_mode != CacheAccessMode::Off {
-            if let Some(headings) = self.toc_headings.get(&key) {
-                return Ok(headings.clone());
-            }
+        if self.access_mode != CacheAccessMode::Off
+            && let Some(headings) = self.toc_headings.get(&key)
+        {
+            return Ok(headings.clone());
         }
 
         let content = std::fs::read_to_string(path)?;

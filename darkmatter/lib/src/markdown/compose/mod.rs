@@ -1342,10 +1342,7 @@ impl Markdown {
         let language = transclusion::infer_language(path, &options.code_fallback_language);
         let canonical_source = cache::compose_cache_key_for_path(path);
         let source_id = cache::hashing::source_id_hash(&canonical_source);
-        let source_bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(err) => return Err(err.into()),
-        };
+        let source_bytes = std::fs::read(path)?;
         let source_content_hash = cache::hashing::raw_bytes_hash(&source_bytes);
 
         let op = cache::CodeOperation;

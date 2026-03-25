@@ -52,24 +52,24 @@ impl Markdown {
     /// (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
     pub fn has_transclusions(&self) -> bool {
         // Check block directives
-        if let Ok(directives) = parse_directives(self.content()) {
-            if !directives.is_empty() {
-                return true;
-            }
+        if let Ok(directives) = parse_directives(self.content())
+            && !directives.is_empty()
+        {
+            return true;
         }
 
         // Check toc-linking directives
-        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content()) {
-            if !toc_directives.is_empty() {
-                return true;
-            }
+        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content())
+            && !toc_directives.is_empty()
+        {
+            return true;
         }
 
         // Check frontmatter prologue/epilogue
-        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
-            if !refs.prologue.is_empty() || !refs.epilogue.is_empty() {
-                return true;
-            }
+        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map())
+            && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
+        {
+            return true;
         }
 
         false
@@ -188,7 +188,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<ReferenceGraph> {
-        graph::build_transclusion_graph(self, &options).map_err(Into::into)
+        graph::build_transclusion_graph(self, &options)
     }
 
     /// Builds a full reference graph (transclusions + all reference types at each node).
@@ -196,7 +196,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<ReferenceGraph> {
-        graph::build_reference_graph(self, &options).map_err(Into::into)
+        graph::build_reference_graph(self, &options)
     }
 
     /// Flattens the reference graph into composed-order references.
