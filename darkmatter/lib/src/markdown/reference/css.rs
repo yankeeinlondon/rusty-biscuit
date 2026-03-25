@@ -1,10 +1,10 @@
-//! CSS import and font-face source extraction.
+//! CSS import and font-face source extraction using `cssparser`.
 //!
-//! Extracts `@import` and `@font-face { src: url(...) }` references
-//! from CSS content found within `<style>` blocks.
+//! Uses the `cssparser` tokenizer for spec-compliant extraction of
+//! `@import` and `@font-face { src: url(...) }` references from CSS
+//! content found within `<style>` blocks.
 
-use regex::Regex;
-use lazy_static::lazy_static;
+use cssparser::{Parser, ParserInput, Token};
 
 use crate::markdown::compose::ComposeSource;
 use super::types::{
@@ -12,82 +12,57 @@ use super::types::{
     classify_target, make_reference_id,
 };
 
-lazy_static! {
-    /// Matches `@import url("...")` or `@import url('...')` or `@import url(...)`.
-    static ref CSS_IMPORT_URL: Regex = Regex::new(
-        r#"@import\s+url\(\s*["']?([^"')]+)["']?\s*\)"#
-    ).unwrap();
-
-    /// Matches `@import "..."` or `@import '...'`.
-    static ref CSS_IMPORT_STRING: Regex = Regex::new(
-        r#"@import\s+["']([^"']+)["']"#
-    ).unwrap();
-
-    /// Matches `src: url("...")` or `src: url('...')` inside @font-face blocks.
-    static ref FONT_FACE_SRC_URL: Regex = Regex::new(
-        r#"src:\s*[^;]*url\(\s*["']?([^"')]+)["']?\s*\)"#
-    ).unwrap();
-}
-
 /// Extract `@import` URLs from CSS content.
 ///
 /// The `base_line` parameter offsets line numbers so provenance maps
 /// back to the original markdown document's `<style>` block position.
+///
+/// Handles all valid CSS `@import` forms:
+/// - `@import url("path");`
+/// - `@import url('path');`
+/// - `@import url(path);`
+/// - `@import "path";`
+/// - `@import 'path';`
+///
+/// Correctly skips `@import` inside comments.
 pub(crate) fn extract_css_imports(
     css_content: &str,
     source: &ComposeSource,
     base_line: usize,
 ) -> Vec<ReferenceRecord> {
     let mut records = Vec::new();
+    let mut input = ParserInput::new(css_content);
+    let mut parser = Parser::new(&mut input);
 
-    // @import url("...")
-    for captures in CSS_IMPORT_URL.captures_iter(css_content) {
-        if let Some(url_match) = captures.get(1) {
-            let url = url_match.as_str();
-            let line = base_line + css_content[..url_match.start()].matches('\n').count();
-            let span_start = url_match.start();
+    while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
+        if let Token::AtKeyword(ref name) = token
+            && name.eq_ignore_ascii_case("import")
+        {
+            let position = parser.position();
+            let byte_offset = position.byte_index();
 
-            records.push(ReferenceRecord {
-                id: make_reference_id(source, line, span_start),
-                kind: ReferenceKind::CssImport,
-                target: classify_target(url),
-                origin: ReferenceOrigin {
-                    source: source.clone(),
-                    line,
-                    span: span_start..url_match.end(),
-                    syntax: ReferenceSyntax::CssAtImport,
-                },
-                attributes: serde_json::Map::new(),
-            });
-        }
-    }
+            // The import URL can be a string or url() function
+            if let Some(url) = try_extract_import_url(&mut parser) {
+                let line = base_line + css_content[..byte_offset].matches('\n').count();
+                let span_start = byte_offset;
+                let span_end = parser.position().byte_index();
 
-    // @import "..." (without url() wrapper)
-    for captures in CSS_IMPORT_STRING.captures_iter(css_content) {
-        if let Some(url_match) = captures.get(1) {
-            let url = url_match.as_str();
-            // Skip if already captured by the url() pattern
-            if records.iter().any(|r| {
-                r.target.raw() == Some(url) && r.origin.syntax == ReferenceSyntax::CssAtImport
-            }) {
-                continue;
+                records.push(ReferenceRecord {
+                    id: make_reference_id(source, line, span_start),
+                    kind: ReferenceKind::CssImport,
+                    target: classify_target(&url),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line,
+                        span: span_start..span_end,
+                        syntax: ReferenceSyntax::CssAtImport,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
             }
 
-            let line = base_line + css_content[..url_match.start()].matches('\n').count();
-            let span_start = url_match.start();
-
-            records.push(ReferenceRecord {
-                id: make_reference_id(source, line, span_start),
-                kind: ReferenceKind::CssImport,
-                target: classify_target(url),
-                origin: ReferenceOrigin {
-                    source: source.clone(),
-                    line,
-                    span: span_start..url_match.end(),
-                    syntax: ReferenceSyntax::CssAtImport,
-                },
-                attributes: serde_json::Map::new(),
-            });
+            // Skip remaining tokens until semicolon or end
+            skip_until_semicolon(&mut parser);
         }
     }
 
@@ -95,61 +70,169 @@ pub(crate) fn extract_css_imports(
 }
 
 /// Extract `@font-face { src: url(...) }` references from CSS content.
+///
+/// Correctly identifies `@font-face` blocks and only extracts `url()`
+/// values from `src:` declarations within those blocks.
 pub(crate) fn extract_font_face_sources(
     css_content: &str,
     source: &ComposeSource,
     base_line: usize,
 ) -> Vec<ReferenceRecord> {
     let mut records = Vec::new();
+    let mut input = ParserInput::new(css_content);
+    let mut parser = Parser::new(&mut input);
 
-    // Find @font-face blocks and extract src: url() within them
-    let mut in_font_face = false;
-    let mut brace_depth = 0;
-    let mut font_face_start = 0;
-
-    let bytes = css_content.as_bytes();
-    for i in 0..bytes.len() {
-        if css_content[i..].starts_with("@font-face") {
-            in_font_face = true;
-            font_face_start = i;
-        }
-
-        if in_font_face {
-            if bytes[i] == b'{' {
-                brace_depth += 1;
-            } else if bytes[i] == b'}' {
-                brace_depth -= 1;
-                if brace_depth == 0 {
-                    // Extract the font-face block content
-                    let block = &css_content[font_face_start..=i];
-                    for captures in FONT_FACE_SRC_URL.captures_iter(block) {
-                        if let Some(url_match) = captures.get(1) {
-                            let url = url_match.as_str();
-                            let abs_start = font_face_start + url_match.start();
-                            let line = base_line
-                                + css_content[..abs_start].matches('\n').count();
-
-                            records.push(ReferenceRecord {
-                                id: make_reference_id(source, line, abs_start),
-                                kind: ReferenceKind::FontImport,
-                                target: classify_target(url),
-                                origin: ReferenceOrigin {
-                                    source: source.clone(),
-                                    line,
-                                    span: abs_start..font_face_start + url_match.end(),
-                                    syntax: ReferenceSyntax::CssFontFaceSrc,
-                                },
-                                attributes: serde_json::Map::new(),
-                            });
-                        }
+    while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
+        if let Token::AtKeyword(ref name) = token
+            && name.eq_ignore_ascii_case("font-face")
+        {
+            // Skip whitespace/comments until the opening brace
+            while let Ok(next) = parser.next_including_whitespace_and_comments().cloned() {
+                match next {
+                    Token::WhiteSpace(_) | Token::Comment(_) => continue,
+                    Token::CurlyBracketBlock => {
+                        // Now we can parse the nested block
+                        let _ = parser.parse_nested_block(|block_parser| {
+                            extract_font_face_urls(
+                                block_parser,
+                                css_content,
+                                source,
+                                base_line,
+                                &mut records,
+                            );
+                            Ok::<(), cssparser::ParseError<'_, ()>>(())
+                        });
+                        break;
                     }
-                    in_font_face = false;
+                    _ => break, // Unexpected token, skip this at-rule
                 }
             }
         }
     }
 
     records
+}
+
+/// Try to extract a URL from after `@import`.
+fn try_extract_import_url(parser: &mut Parser) -> Option<String> {
+    // Skip whitespace
+    while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
+        match token {
+            Token::WhiteSpace(_) | Token::Comment(_) => continue,
+            Token::QuotedString(ref s) => return Some(s.to_string()),
+            Token::UnquotedUrl(ref s) => return Some(s.to_string()),
+            Token::Function(ref name) if name.eq_ignore_ascii_case("url") => {
+                // Parse inside url()
+                let result: Result<String, cssparser::ParseError<'_, ()>> =
+                    parser.parse_nested_block(|p| {
+                        while let Ok(inner) = p.next_including_whitespace_and_comments().cloned() {
+                            match inner {
+                                Token::WhiteSpace(_) | Token::Comment(_) => continue,
+                                Token::QuotedString(ref s) => return Ok(s.to_string()),
+                                // Inside url(), bare text is also valid
+                                _ => {}
+                            }
+                        }
+                        Err(p.new_custom_error(()))
+                    });
+                return result.ok();
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Extract url() values from src: declarations within a @font-face block.
+fn extract_font_face_urls<'i>(
+    parser: &mut Parser<'i, '_>,
+    css_content: &str,
+    source: &ComposeSource,
+    base_line: usize,
+    records: &mut Vec<ReferenceRecord>,
+) {
+    let mut in_src = false;
+
+    while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
+        match token {
+            Token::Ident(ref name) if name.eq_ignore_ascii_case("src") => {
+                in_src = false;
+                // Look for the colon
+                while let Ok(next) = parser.next_including_whitespace_and_comments().cloned() {
+                    match next {
+                        Token::WhiteSpace(_) | Token::Comment(_) => continue,
+                        Token::Colon => {
+                            in_src = true;
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            Token::Semicolon | Token::CurlyBracketBlock => {
+                in_src = false;
+            }
+            Token::Function(ref name) if in_src && name.eq_ignore_ascii_case("url") => {
+                let url_byte_start = parser.position().byte_index();
+                let result: Result<String, cssparser::ParseError<'_, ()>> =
+                    parser.parse_nested_block(|p| {
+                        while let Ok(inner) = p.next_including_whitespace_and_comments().cloned() {
+                            match inner {
+                                Token::WhiteSpace(_) | Token::Comment(_) => continue,
+                                Token::QuotedString(ref s) => return Ok(s.to_string()),
+                                _ => {}
+                            }
+                        }
+                        Err(p.new_custom_error(()))
+                    });
+
+                if let Ok(url) = result {
+                    let line = base_line + css_content[..url_byte_start].matches('\n').count();
+                    let span_end = parser.position().byte_index();
+
+                    records.push(ReferenceRecord {
+                        id: make_reference_id(source, line, url_byte_start),
+                        kind: ReferenceKind::FontImport,
+                        target: classify_target(&url),
+                        origin: ReferenceOrigin {
+                            source: source.clone(),
+                            line,
+                            span: url_byte_start..span_end,
+                            syntax: ReferenceSyntax::CssFontFaceSrc,
+                        },
+                        attributes: serde_json::Map::new(),
+                    });
+                }
+            }
+            Token::UnquotedUrl(ref url) if in_src => {
+                let byte_offset = parser.position().byte_index();
+                let line = base_line + css_content[..byte_offset].matches('\n').count();
+
+                records.push(ReferenceRecord {
+                    id: make_reference_id(source, line, byte_offset),
+                    kind: ReferenceKind::FontImport,
+                    target: classify_target(url),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line,
+                        span: byte_offset..byte_offset + url.len(),
+                        syntax: ReferenceSyntax::CssFontFaceSrc,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Skip tokens until a semicolon or end of input.
+fn skip_until_semicolon(parser: &mut Parser) {
+    while let Ok(token) = parser.next_including_whitespace_and_comments() {
+        if matches!(token, Token::Semicolon) {
+            break;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -226,9 +309,65 @@ mod tests {
 
     #[test]
     fn base_line_offset() {
-        let css = "@import \"reset.css\";";
+        let css = r#"@import "reset.css";"#;
         let records = extract_css_imports(css, &ComposeSource::Unknown, 10);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].origin.line, 10);
+    }
+
+    // ── Additional cssparser tests ──────────────────────────────────
+
+    #[test]
+    fn import_inside_comment_is_skipped() {
+        let css = r#"/* @import "should-not-match.css"; */
+@import "real.css";"#;
+        let records = extract_css_imports(css, &ComposeSource::Unknown, 1);
+        assert_eq!(records.len(), 1);
+        assert!(matches!(
+            &records[0].target,
+            ReferenceTarget::LocalPath { raw } if raw == "real.css"
+        ));
+    }
+
+    #[test]
+    fn import_with_media_query() {
+        let css = r#"@import url("print.css") print;"#;
+        let records = extract_css_imports(css, &ComposeSource::Unknown, 1);
+        assert_eq!(records.len(), 1);
+        assert!(matches!(
+            &records[0].target,
+            ReferenceTarget::LocalPath { raw } if raw == "print.css"
+        ));
+    }
+
+    #[test]
+    fn multiple_imports() {
+        let css = r#"@import "a.css";
+@import url("b.css");
+@import 'c.css';"#;
+        let records = extract_css_imports(css, &ComposeSource::Unknown, 1);
+        assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn multiple_font_face_src_urls() {
+        let css = r#"@font-face {
+  font-family: "MyFont";
+  src: url("font.woff2") format("woff2"),
+       url("font.woff") format("woff");
+}"#;
+        let records = extract_font_face_sources(css, &ComposeSource::Unknown, 1);
+        assert_eq!(records.len(), 2);
+    }
+
+    #[test]
+    fn import_url_single_quotes() {
+        let css = r#"@import url('styles.css');"#;
+        let records = extract_css_imports(css, &ComposeSource::Unknown, 1);
+        assert_eq!(records.len(), 1);
+        assert!(matches!(
+            &records[0].target,
+            ReferenceTarget::LocalPath { raw } if raw == "styles.css"
+        ));
     }
 }

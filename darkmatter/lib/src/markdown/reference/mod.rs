@@ -73,10 +73,26 @@ impl Markdown {
                 DirectiveKind::Url => TransclusionRefKind::Url,
             };
 
+            // Fill resolved_target when source context is available (rec #4)
+            let resolved_target = match (&source, &kind) {
+                (ComposeSource::File(base_path), TransclusionRefKind::File | TransclusionRefKind::Code) => {
+                    base_path.parent().map(|dir| {
+                        dir.join(&directive.raw_target)
+                            .to_string_lossy()
+                            .to_string()
+                    })
+                }
+                (_, TransclusionRefKind::Url) => {
+                    // URL targets are already absolute
+                    Some(directive.raw_target.clone())
+                }
+                _ => None,
+            };
+
             refs.push(TransclusionRef {
                 kind,
                 raw_target: directive.raw_target.clone(),
-                resolved_target: None,
+                resolved_target,
                 options: block_options_to_ref_options(&directive.options),
                 origin: ReferenceOrigin {
                     source: source.clone(),
@@ -111,11 +127,17 @@ impl Markdown {
 
         // Frontmatter prologue/epilogue
         if let Ok(fm_refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
-            for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+            for prologue in &fm_refs.prologue {
+                let resolved_target = match &source {
+                    ComposeSource::File(base_path) => base_path.parent().map(|dir| {
+                        dir.join(prologue).to_string_lossy().to_string()
+                    }),
+                    _ => None,
+                };
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Prologue,
                     raw_target: prologue.clone(),
-                    resolved_target: None,
+                    resolved_target,
                     options: TransclusionRefOptions::default(),
                     origin: ReferenceOrigin {
                         source: source.clone(),
@@ -124,14 +146,19 @@ impl Markdown {
                         syntax: ReferenceSyntax::FrontmatterPrologue,
                     },
                 });
-                let _ = idx; // suppress unused warning
             }
 
             for epilogue in &fm_refs.epilogue {
+                let resolved_target = match &source {
+                    ComposeSource::File(base_path) => base_path.parent().map(|dir| {
+                        dir.join(epilogue).to_string_lossy().to_string()
+                    }),
+                    _ => None,
+                };
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Epilogue,
                     raw_target: epilogue.clone(),
-                    resolved_target: None,
+                    resolved_target,
                     options: TransclusionRefOptions::default(),
                     origin: ReferenceOrigin {
                         source: source.clone(),
@@ -196,6 +223,78 @@ impl Markdown {
             .into_iter()
             .filter(|r| r.kind == ReferenceKind::Image)
             .map(ImageReference::from)
+            .collect())
+    }
+
+    // ── Graph-aware Phase 2 APIs (rec #9) ──────────────────────────
+
+    /// Returns inline CSS blocks across the composed document graph.
+    pub fn inline_css_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<InlineCssBlock>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::InlineCss)
+            .map(InlineCssBlock::from)
+            .collect())
+    }
+
+    /// Returns CSS `@import` references across the composed document graph.
+    pub fn css_import_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<ImportReference>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::CssImport)
+            .map(ImportReference::from)
+            .collect())
+    }
+
+    /// Returns inline script blocks across the composed document graph.
+    pub fn inline_script_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<InlineScriptBlock>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::InlineScript)
+            .map(InlineScriptBlock::from)
+            .collect())
+    }
+
+    /// Returns `<script src="...">` import references across the composed document graph.
+    pub fn script_import_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<ImportReference>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::ScriptImport)
+            .map(ImportReference::from)
+            .collect())
+    }
+
+    /// Returns font import references across the composed document graph.
+    pub fn font_import_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<ImportReference>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::FontImport)
+            .map(ImportReference::from)
             .collect())
     }
 

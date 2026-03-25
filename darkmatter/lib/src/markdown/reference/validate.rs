@@ -98,6 +98,9 @@ pub enum ReferenceIssueCode {
     /// Remote URL returned an error or timed out.
     RemoteUnreachable,
     /// Remote validation was not performed (disabled).
+    ///
+    /// Emitted when `validate_remote` is false and a remote reference
+    /// cannot be verified.
     RemoteDisallowed,
     /// Source context needed but not available.
     MissingSourceContext,
@@ -105,11 +108,17 @@ pub enum ReferenceIssueCode {
     UnsupportedScheme,
     /// Fragment target not found in document headings.
     MissingFragmentTarget,
-    /// HTML tag is malformed.
+    /// HTML tag is malformed (e.g., missing required attributes).
+    ///
+    /// Reserved for future use with structured HTML validation.
     MalformedHtmlTag,
     /// CSS `@import` is malformed.
+    ///
+    /// Reserved for future use when CSS parsing is upgraded to `cssparser`.
     MalformedCssImport,
     /// Meta tag is malformed.
+    ///
+    /// Reserved for future use with structured meta tag validation.
     MalformedMetaTag,
 }
 
@@ -140,29 +149,33 @@ pub(crate) fn validate(
         ..Default::default()
     };
 
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-
-    // Collect headings for fragment validation (lazy, built on first need)
+    // Collect headings for fragment validation from the composed document.
+    // Uses the graph's prepared content which includes transcluded headings.
     let headings = if options.validate_fragments {
-        Some(collect_heading_slugs(md))
+        Some(collect_composed_heading_slugs(md, &options.graph))
     } else {
         None
     };
 
     for record in &ref_set.records {
+        // Use the reference's own origin source for validation (rec #5),
+        // not the root document source. This ensures child references
+        // are validated relative to their own file location.
+        let ref_source = &record.origin.source;
+
         match &record.target {
             ReferenceTarget::LocalPath { raw } => {
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(raw);
-                validate_local_path(&path_part, &source, record, &mut report);
+                validate_local_path(&path_part, ref_source, record, &mut report);
 
                 // Validate fragment if enabled and path exists
-                if options.validate_fragments {
-                    if let Some(ref frag) = fragment {
-                        validate_cross_doc_fragment(
-                            &path_part, frag, &source, record, &mut report,
-                        );
-                    }
+                if options.validate_fragments
+                    && let Some(ref frag) = fragment
+                {
+                    validate_cross_doc_fragment(
+                        &path_part, frag, ref_source, record, &mut report,
+                    );
                 }
 
                 if options.fail_fast && report.error_count() > 0 {
@@ -266,6 +279,9 @@ pub(crate) fn validate(
 }
 
 /// Validate a local file path reference.
+///
+/// Uses `biscuit_file::FileReference` for path resolution (rec #6),
+/// supporting repo-root `@` paths and consistent semantics with compose.
 fn validate_local_path(
     raw: &str,
     source: &ComposeSource,
@@ -274,7 +290,28 @@ fn validate_local_path(
 ) {
     match source {
         ComposeSource::File(base_path) => {
-            if let Some(base_dir) = base_path.parent() {
+            let base_dir = base_path.parent();
+
+            // Try biscuit_file::FileReference first for @repo-root support
+            if let Ok(file_ref) = biscuit_file::FileReference::new(raw)
+                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
+            {
+                if resolved.exists() {
+                    report.references_valid += 1;
+                } else {
+                    report.issues.push(ReferenceIssue {
+                        code: ReferenceIssueCode::MissingLocalTarget,
+                        message: format!("Missing local target: {raw}"),
+                        severity: ReferenceSeverity::Error,
+                        reference_id: record.id.clone(),
+                        origin: record.origin.clone(),
+                    });
+                }
+                return;
+            }
+
+            // Fallback to simple path join
+            if let Some(base_dir) = base_dir {
                 let resolved = base_dir.join(raw);
                 if resolved.exists() {
                     report.references_valid += 1;
@@ -301,9 +338,9 @@ fn validate_local_path(
             });
         }
         ComposeSource::Url(_) => {
-            report.warnings.push(format!(
-                "Local path in URL-sourced document: {raw}"
-            ));
+            report
+                .warnings
+                .push(format!("Local path in URL-sourced document: {raw}"));
             report.references_valid += 1;
         }
     }
@@ -311,7 +348,7 @@ fn validate_local_path(
 
 // ── Fragment validation ─────────────────────────────────────────────
 
-/// Collects heading slugs from a document for fragment validation.
+/// Collects heading slugs from a single document for fragment validation.
 fn collect_heading_slugs(md: &Markdown) -> Vec<String> {
     let toc = md.toc();
     toc.all_headings()
@@ -320,7 +357,41 @@ fn collect_heading_slugs(md: &Markdown) -> Vec<String> {
         .collect()
 }
 
+/// Collects heading slugs from the composed document (all graph nodes).
+///
+/// This provides the effective heading set after transclusion, so fragment
+/// validation checks against the actual composed heading list.
+fn collect_composed_heading_slugs(
+    md: &Markdown,
+    graph_options: &super::types::ReferenceGraphOptions,
+) -> Vec<String> {
+    // Build the reference graph to discover all nodes
+    let graph = match super::graph::build_reference_graph(md, graph_options) {
+        Ok(g) => g,
+        Err(_) => return collect_heading_slugs(md),
+    };
+
+    let mut all_slugs = Vec::new();
+
+    // Collect headings from the root document
+    all_slugs.extend(collect_heading_slugs(md));
+
+    // Collect headings from all child nodes
+    for node in &graph.nodes {
+        if let ComposeSource::File(path) = &node.source
+            && let Ok(child_md) = Markdown::try_from(path.as_path())
+        {
+            all_slugs.extend(collect_heading_slugs(&child_md));
+        }
+    }
+
+    all_slugs
+}
+
 /// Validates a fragment reference against a cross-document target.
+///
+/// Resolves the target path using `biscuit_file::FileReference` (rec #6)
+/// relative to the reference's own origin source (rec #5).
 fn validate_cross_doc_fragment(
     path: &str,
     fragment: &str,
@@ -331,11 +402,20 @@ fn validate_cross_doc_fragment(
     let ComposeSource::File(base_path) = source else {
         return;
     };
-    let Some(base_dir) = base_path.parent() else {
-        return;
-    };
+    let base_dir = base_path.parent();
 
-    let target_path = base_dir.join(path);
+    // Resolve via FileReference for @repo-root support, fallback to simple join
+    let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
+        file_ref.resolve_relative(base_dir).ok().flatten()
+    } else {
+        None
+    }
+    .unwrap_or_else(|| {
+        base_dir
+            .map(|d| d.join(path))
+            .unwrap_or_else(|| std::path::PathBuf::from(path))
+    });
+
     if !target_path.exists() {
         return; // Missing file is already reported by validate_local_path
     }
@@ -414,7 +494,7 @@ fn validate_remote_urls(
     use tokio::runtime::Handle;
 
     // Try to use the existing tokio runtime, or create a temporary one
-    let results = if let Ok(handle) = Handle::try_current() {
+    if let Ok(handle) = Handle::try_current() {
         // We're inside a tokio runtime, use block_in_place
         tokio::task::block_in_place(|| {
             handle.block_on(validate_remote_urls_async(records, timeout))
@@ -426,9 +506,7 @@ fn validate_remote_urls(
             .build()
             .unwrap();
         rt.block_on(validate_remote_urls_async(records, timeout))
-    };
-
-    results
+    }
 }
 
 async fn validate_remote_urls_async(

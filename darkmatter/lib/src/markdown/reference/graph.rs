@@ -3,23 +3,35 @@
 //! Builds a graph of documents connected by transclusion directives,
 //! extracts references at each node, and flattens into composed order.
 
-use dashmap::DashMap;
+use std::collections::BTreeMap;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOptions, ComposeOperation, ComposeSource};
+use crate::markdown::compose::{ComposeOperation, ComposeSource};
+use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::transclusion::{
     parse_directives, parse_frontmatter_refs, DirectiveKind, TransclusionRuntime,
 };
 use crate::markdown::types::MarkdownResult;
 use super::types::{
     ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
-    ReferenceRecord, ReferenceSet,
+    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceSyntax,
+    classify_target, make_reference_id,
 };
 
 /// Runtime state for reference graph analysis.
+///
+/// Shares a [`RunLocalCache`] across the entire graph traversal (rec #16),
+/// so repeated loads of the same child document hit the cache instead of disk.
 struct ReferenceAnalysisRuntime {
     transclusion: TransclusionRuntime,
-    loaded_markdown: DashMap<String, Markdown>,
+    cache: RunLocalCache,
+}
+
+impl ReferenceAnalysisRuntime {
+    /// Load a markdown document, using the shared cache.
+    fn load_markdown(&self, path: &std::path::Path) -> Option<Markdown> {
+        self.cache.load_markdown(path).ok()
+    }
 }
 
 /// Build a transclusion-only graph (no link/image extraction at leaf nodes).
@@ -29,13 +41,11 @@ pub(crate) fn build_transclusion_graph(
 ) -> MarkdownResult<ReferenceGraph> {
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
-        loaded_markdown: DashMap::new(),
+        cache: RunLocalCache::new(options.compose.cache_access_mode),
     };
 
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let root = build_node(md, &source, options, &mut runtime, false)?;
-
-    let all_nodes = collect_child_nodes(&root);
+    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, false)?;
 
     Ok(ReferenceGraph {
         root,
@@ -50,13 +60,11 @@ pub(crate) fn build_reference_graph(
 ) -> MarkdownResult<ReferenceGraph> {
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
-        loaded_markdown: DashMap::new(),
+        cache: RunLocalCache::new(options.compose.cache_access_mode),
     };
 
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-    let root = build_node(md, &source, options, &mut runtime, true)?;
-
-    let all_nodes = collect_child_nodes(&root);
+    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, true)?;
 
     Ok(ReferenceGraph {
         root,
@@ -72,135 +80,165 @@ pub(crate) fn flatten_graph(graph: &ReferenceGraph) -> ReferenceSet {
 }
 
 /// Recursively flatten a node's references in composed order.
+///
+/// Supports multiple insertions on the same directive line by grouping
+/// them in a `BTreeMap<usize, Vec<&ReferenceInsertion>>` and sorting
+/// each group by `insertion_order`.
+///
+/// When a transclusion record and its child insertion share the same line
+/// (which is the normal case), the child subtree is emitted immediately
+/// after the transclusion record.
 fn flatten_node(
     node: &ReferenceGraphNode,
     graph: &ReferenceGraph,
     out: &mut Vec<ReferenceRecord>,
 ) {
-    // Build an index of child insertions by directive line for interleaving
-    let mut insertion_map: std::collections::BTreeMap<usize, &ReferenceInsertion> =
-        std::collections::BTreeMap::new();
+    // Build an index of child insertions by directive line for interleaving.
+    let mut insertion_map: BTreeMap<usize, Vec<&ReferenceInsertion>> = BTreeMap::new();
     for insertion in &node.child_insertions {
-        insertion_map.insert(insertion.directive_line, insertion);
+        insertion_map
+            .entry(insertion.directive_line)
+            .or_default()
+            .push(insertion);
+    }
+    for insertions in insertion_map.values_mut() {
+        insertions.sort_by_key(|i| i.insertion_order);
     }
 
-    // Yield local references, interleaving child subtrees at insertion points
-    let mut last_line = 0;
+    // Track which insertion lines have been emitted to avoid double-processing.
+    let mut emitted_insertion_lines = std::collections::HashSet::new();
+
+    // Yield local references, interleaving child subtrees at insertion points.
+    let mut last_line: usize = 0;
     for record in &node.local_references.records {
-        // Check if any child should be inserted before this reference
-        for (_, insertion) in insertion_map.range(last_line..record.origin.line) {
-            if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
-                flatten_node(child_node, graph, out);
+        // Insert child subtrees whose directive_line falls before this reference.
+        // Guard: only create range when last_line <= record line (multiple records
+        // at the same line can cause last_line to exceed the current line).
+        if last_line < record.origin.line {
+            for (&line, insertions) in insertion_map.range(last_line..record.origin.line) {
+                if emitted_insertion_lines.insert(line) {
+                    for insertion in insertions {
+                        if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                            flatten_node(child_node, graph, out);
+                        }
+                    }
+                }
             }
         }
-        last_line = record.origin.line;
+
+        // Emit this reference
         out.push(record.clone());
+
+        // If a child insertion exists at the same line as this reference,
+        // emit it immediately after (this is the transclusion point).
+        if emitted_insertion_lines.insert(record.origin.line)
+            && let Some(insertions) = insertion_map.get(&record.origin.line)
+        {
+            for insertion in insertions {
+                if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                    flatten_node(child_node, graph, out);
+                }
+            }
+        }
+
+        last_line = record.origin.line.saturating_add(1);
     }
 
     // Flush remaining child insertions after all local references
-    let final_line = node
-        .local_references
-        .records
-        .last()
-        .map(|r| r.origin.line)
-        .unwrap_or(0);
-    for (line, insertion) in insertion_map.range(final_line..) {
-        if !node.local_references.records.iter().any(|r| r.origin.line == *line) {
-            if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
-                flatten_node(child_node, graph, out);
+    for (&line, insertions) in insertion_map.range(last_line..) {
+        if emitted_insertion_lines.insert(line) {
+            for insertion in insertions {
+                if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                    flatten_node(child_node, graph, out);
+                }
             }
         }
     }
 }
 
 /// Build a single graph node for a document.
+///
+/// Returns the node itself plus all descendant nodes collected during
+/// recursive traversal. This ensures the caller can assemble a complete
+/// flat node list for the graph.
 fn build_node(
     md: &Markdown,
     source: &ComposeSource,
     options: &ReferenceGraphOptions,
     runtime: &mut ReferenceAnalysisRuntime,
     extract_references: bool,
-) -> MarkdownResult<ReferenceGraphNode> {
+) -> MarkdownResult<(ReferenceGraphNode, Vec<ReferenceGraphNode>)> {
     let node_id = source_to_id(source);
 
-    // Prepare content by running InlinePre operations if the document has transclusions
-    let prepared_content = if md.has_transclusions() {
-        prepare_content(md, source, options)?
-    } else {
-        md.content().to_string()
-    };
+    // Always run InlinePre preparation (rec #2): page blocks, interpolation,
+    // shell expansion, and text replacement can affect references even in
+    // leaf documents with no transclusions.
+    let prepared_content = prepare_content(md, source, options)?;
 
     // Extract local references if requested
-    let local_references = if extract_references {
-        let mut records = Vec::new();
-        records.extend(super::local::extract_markdown_links(&prepared_content, source));
-        records.extend(super::local::extract_markdown_images(&prepared_content, source));
-        records.extend(super::html::extract_html_links(&prepared_content, source));
-        records.extend(super::html::extract_html_images(&prepared_content, source));
-        records.extend(super::html::extract_html_style_blocks(&prepared_content, source));
-        records.extend(super::html::extract_html_script_blocks(&prepared_content, source));
-        records.extend(super::html::extract_html_link_tags(&prepared_content, source));
-        records.extend(super::html::extract_html_meta_tags(&prepared_content, source));
-
-        // Extract CSS imports and font sources from inline style blocks
-        for style_record in super::html::extract_html_style_blocks(&prepared_content, source) {
-            if let Some(css_content) = style_record.attributes.get("css_content").and_then(|v| v.as_str()) {
-                records.extend(super::css::extract_css_imports(css_content, source, style_record.origin.line));
-                records.extend(super::css::extract_font_face_sources(css_content, source, style_record.origin.line));
-            }
-        }
-        // Sort by line number for composed-order interleaving
-        records.sort_by_key(|r| (r.origin.line, r.origin.span.start));
-        ReferenceSet { records }
+    let mut local_references = if extract_references {
+        extract_all_references(&prepared_content, source)
     } else {
         ReferenceSet::default()
     };
 
     // Parse transclusion directives and build child nodes
     let mut child_insertions = Vec::new();
-    let mut child_nodes = Vec::new();
+    let mut all_descendant_nodes: Vec<ReferenceGraphNode> = Vec::new();
     let mut insertion_order = 0;
 
     // Block directives
     if let Ok(directives) = parse_directives(&prepared_content) {
         for directive in &directives {
-            match directive.kind {
-                DirectiveKind::File => {
-                    // Try to resolve and recurse into the child
-                    if let Some(child_path) = resolve_local_target(&directive.raw_target, source) {
-                        let child_source = ComposeSource::File(child_path.clone());
-                        let child_id = source_to_id(&child_source);
+            // Emit transclusion reference records (rec #4)
+            if extract_references {
+                let syntax = match directive.kind {
+                    DirectiveKind::File => ReferenceSyntax::DirectiveFile,
+                    DirectiveKind::Code => ReferenceSyntax::DirectiveCode,
+                    DirectiveKind::Url => ReferenceSyntax::DirectiveUrl,
+                };
+                local_references.records.push(ReferenceRecord {
+                    id: make_reference_id(source, directive.line, directive.span.start),
+                    kind: ReferenceKind::Transclusion,
+                    target: classify_target(&directive.raw_target),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: directive.line,
+                        span: directive.span.clone(),
+                        syntax,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
 
-                        // Cycle/depth check
-                        if runtime.transclusion.enter(child_id.clone()).is_ok() {
-                            if let Ok(child_md) = Markdown::try_from(child_path.as_path()) {
-                                let child_node = build_node(
-                                    &child_md,
-                                    &child_source,
-                                    options,
-                                    runtime,
-                                    extract_references,
-                                )?;
+            if directive.kind == DirectiveKind::File {
+                // Try to resolve and recurse into the child
+                if let Some(child_path) = resolve_local_target(&directive.raw_target, source) {
+                    let child_source = ComposeSource::File(child_path.clone());
+                    let child_id = source_to_id(&child_source);
 
-                                child_insertions.push(ReferenceInsertion {
-                                    child_node_id: child_node.node_id.clone(),
-                                    directive_line: directive.line,
-                                    insertion_order,
-                                });
-                                child_nodes.push(child_node);
-                                insertion_order += 1;
-                            }
-                            runtime.transclusion.exit();
+                    // Cycle/depth check
+                    if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                        if let Some(child_md) = runtime.load_markdown(&child_path) {
+                            let (child_node, mut descendants) = build_node(
+                                &child_md,
+                                &child_source,
+                                options,
+                                runtime,
+                                extract_references,
+                            )?;
+
+                            child_insertions.push(ReferenceInsertion {
+                                child_node_id: child_node.node_id.clone(),
+                                directive_line: directive.line,
+                                insertion_order,
+                            });
+                            all_descendant_nodes.push(child_node);
+                            all_descendant_nodes.append(&mut descendants);
+                            insertion_order += 1;
                         }
+                        runtime.transclusion.exit();
                     }
-
-                    // Also record the directive itself as a transclusion reference
-                    if extract_references {
-                        // Already captured in local_references via directive scanning
-                    }
-                }
-                DirectiveKind::Code | DirectiveKind::Url => {
-                    // Non-recursive: record as reference but don't follow
                 }
             }
         }
@@ -208,14 +246,30 @@ fn build_node(
 
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
-        for prologue in &fm_refs.prologue {
+        for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+            // Emit transclusion reference record for prologue (rec #4)
+            if extract_references {
+                local_references.records.push(ReferenceRecord {
+                    id: make_reference_id(source, 0, idx),
+                    kind: ReferenceKind::Transclusion,
+                    target: classify_target(prologue),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: 0,
+                        span: 0..0,
+                        syntax: ReferenceSyntax::FrontmatterPrologue,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
+
             if let Some(child_path) = resolve_local_target(prologue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
                 if runtime.transclusion.enter(child_id.clone()).is_ok() {
-                    if let Ok(child_md) = Markdown::try_from(child_path.as_path()) {
-                        let child_node = build_node(
+                    if let Some(child_md) = runtime.load_markdown(&child_path) {
+                        let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
                             options,
@@ -228,7 +282,8 @@ fn build_node(
                             directive_line: 0, // prologue goes at the start
                             insertion_order,
                         });
-                        child_nodes.push(child_node);
+                        all_descendant_nodes.push(child_node);
+                        all_descendant_nodes.append(&mut descendants);
                         insertion_order += 1;
                     }
                     runtime.transclusion.exit();
@@ -236,14 +291,30 @@ fn build_node(
             }
         }
 
-        for epilogue in &fm_refs.epilogue {
+        for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
+            // Emit transclusion reference record for epilogue (rec #4)
+            if extract_references {
+                local_references.records.push(ReferenceRecord {
+                    id: make_reference_id(source, 0, 1000 + idx),
+                    kind: ReferenceKind::Transclusion,
+                    target: classify_target(epilogue),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: 0,
+                        span: 0..0,
+                        syntax: ReferenceSyntax::FrontmatterEpilogue,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
+
             if let Some(child_path) = resolve_local_target(epilogue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
                 if runtime.transclusion.enter(child_id.clone()).is_ok() {
-                    if let Ok(child_md) = Markdown::try_from(child_path.as_path()) {
-                        let child_node = build_node(
+                    if let Some(child_md) = runtime.load_markdown(&child_path) {
+                        let (child_node, mut descendants) = build_node(
                             &child_md,
                             &child_source,
                             options,
@@ -256,7 +327,8 @@ fn build_node(
                             directive_line: usize::MAX, // epilogue goes at the end
                             insertion_order,
                         });
-                        child_nodes.push(child_node);
+                        all_descendant_nodes.push(child_node);
+                        all_descendant_nodes.append(&mut descendants);
                         insertion_order += 1;
                     }
                     runtime.transclusion.exit();
@@ -265,7 +337,13 @@ fn build_node(
         }
     }
 
-    // Combine the main node with child nodes
+    // Re-sort after adding transclusion records
+    if extract_references {
+        local_references
+            .records
+            .sort_by_key(|r| (r.origin.line, r.origin.span.start));
+    }
+
     let main_node = ReferenceGraphNode {
         node_id,
         source: source.clone(),
@@ -273,25 +351,67 @@ fn build_node(
         child_insertions,
     };
 
-    // Store child nodes in the runtime for later retrieval
-    // (they'll be collected by the caller)
-    for child in child_nodes {
-        runtime
-            .loaded_markdown
-            .insert(child.node_id.clone(), Markdown::new(""));
-        // We need to return these — store them differently
-    }
+    Ok((main_node, all_descendant_nodes))
+}
 
-    Ok(main_node)
+/// Extract all reference types from prepared content in a single pass.
+///
+/// Avoids repeated extraction passes over the same HTML (rec #17) by
+/// extracting style blocks once and reusing them for CSS/font extraction.
+fn extract_all_references(content: &str, source: &ComposeSource) -> ReferenceSet {
+    let mut records = Vec::new();
+
+    // Markdown-native references
+    records.extend(super::local::extract_markdown_links(content, source));
+    records.extend(super::local::extract_markdown_images(content, source));
+
+    // HTML references
+    records.extend(super::html::extract_html_links(content, source));
+    records.extend(super::html::extract_html_images(content, source));
+    records.extend(super::html::extract_html_script_blocks(content, source));
+    records.extend(super::html::extract_html_link_tags(content, source));
+    records.extend(super::html::extract_html_meta_tags(content, source));
+
+    // Extract style blocks once and reuse for CSS/font extraction (rec #17)
+    let style_blocks = super::html::extract_html_style_blocks(content, source);
+    for style_record in &style_blocks {
+        if let Some(css_content) = style_record
+            .attributes
+            .get("css_content")
+            .and_then(|v| v.as_str())
+        {
+            records.extend(super::css::extract_css_imports(
+                css_content,
+                source,
+                style_record.origin.line,
+            ));
+            records.extend(super::css::extract_font_face_sources(
+                css_content,
+                source,
+                style_record.origin.line,
+            ));
+        }
+    }
+    records.extend(style_blocks);
+
+    // Sort by line number for composed-order interleaving
+    records.sort_by_key(|r| (r.origin.line, r.origin.span.start));
+    ReferenceSet { records }
 }
 
 /// Prepare content by running only InlinePre operations.
+///
+/// Starts from the caller's `ComposeOptions` (rec #3) to preserve
+/// external state, overrides, cache settings, shell settings, etc.
+/// Then restricts to InlinePre-only operations and sets the per-node source.
 fn prepare_content(
     md: &Markdown,
     source: &ComposeSource,
-    _options: &ReferenceGraphOptions,
+    options: &ReferenceGraphOptions,
 ) -> MarkdownResult<String> {
-    let inline_pre_options = ComposeOptions::new()
+    let mut inline_pre_options = options
+        .compose
+        .clone()
         .only(&[
             ComposeOperation::TextReplacement,
             ComposeOperation::PageBlocks,
@@ -299,7 +419,8 @@ fn prepare_content(
             ComposeOperation::ShellExpansion,
         ]);
 
-    let inline_pre_options = match source {
+    // Set the source for this specific node (may differ from root)
+    inline_pre_options = match source {
         ComposeSource::File(p) => inline_pre_options.with_source_file(p),
         ComposeSource::Url(u) => inline_pre_options.with_source_url(u.clone()),
         ComposeSource::Unknown => inline_pre_options,
@@ -310,15 +431,28 @@ fn prepare_content(
 }
 
 /// Resolve a local path target relative to a source.
+///
+/// Uses `biscuit_file::FileReference` for full resolution including
+/// repo-root `@` paths (rec #6), with fallback to simple path join.
 fn resolve_local_target(raw_target: &str, source: &ComposeSource) -> Option<std::path::PathBuf> {
     match source {
         ComposeSource::File(base_path) => {
-            let base_dir = base_path.parent()?;
+            let base_dir = base_path.parent();
+
+            // Try biscuit_file::FileReference for full resolution (supports @repo-root, etc.)
+            if let Ok(file_ref) = biscuit_file::FileReference::new(raw_target)
+                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
+            {
+                return Some(resolved);
+            }
+
+            // Fallback to simple path join
+            let base_dir = base_dir?;
             let resolved = base_dir.join(raw_target);
             if resolved.exists() {
                 Some(resolved.canonicalize().unwrap_or(resolved))
             } else {
-                Some(resolved) // Return even if doesn't exist, for validation to catch
+                Some(resolved)
             }
         }
         ComposeSource::Unknown | ComposeSource::Url(_) => None,
@@ -332,15 +466,6 @@ fn source_to_id(source: &ComposeSource) -> String {
         ComposeSource::File(p) => p.to_string_lossy().to_string(),
         ComposeSource::Url(u) => u.to_string(),
     }
-}
-
-/// Collect all child nodes recursively (for flat node storage).
-fn collect_child_nodes(_root: &ReferenceGraphNode) -> Vec<ReferenceGraphNode> {
-    // In the current implementation, child nodes are embedded via the
-    // ReferenceInsertion references. The actual child ReferenceGraphNodes
-    // need to be tracked during build. For now, return empty.
-    // The real child nodes are built inline and need a different collection strategy.
-    Vec::new()
 }
 
 #[cfg(test)]
@@ -385,5 +510,182 @@ mod tests {
     #[test]
     fn source_to_id_unknown() {
         assert_eq!(source_to_id(&ComposeSource::Unknown), "unknown");
+    }
+
+    #[test]
+    fn recursive_file_traversal() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Create child document with a link
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "# Child\n\n[child-link](https://child.example.com)").unwrap();
+
+        // Create root document that transcludes the child
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "[root-link](https://root.example.com)\n\n::file child.md\n\n[after](https://after.example.com)",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Root + child = 2 nodes
+        assert_eq!(graph.node_count(), 2);
+
+        // Root should have links + transclusion record
+        let root_links = graph.root.local_references.hyperlinks();
+        assert_eq!(root_links.len(), 2); // root-link + after
+        let root_transclusions = graph.root.local_references.transclusions();
+        assert_eq!(root_transclusions.len(), 1);
+
+        // Child node should have its link
+        let child_node = &graph.nodes[0];
+        let child_links = child_node.local_references.hyperlinks();
+        assert_eq!(child_links.len(), 1);
+
+        // Flattened should contain all references in composed order
+        let flat = flatten_graph(&graph);
+        assert!(flat.len() >= 4); // root-link, transclusion, child-link, after
+    }
+
+    #[test]
+    fn prologue_and_epilogue_traversal() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let prologue_path = dir.path().join("prologue.md");
+        std::fs::write(&prologue_path, "[prologue-link](https://prologue.example.com)").unwrap();
+
+        let epilogue_path = dir.path().join("epilogue.md");
+        std::fs::write(&epilogue_path, "[epilogue-link](https://epilogue.example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nprologue: prologue.md\nepilogue: epilogue.md\n---\n\n[main](https://main.example.com)",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Root + prologue + epilogue = 3 nodes
+        assert_eq!(graph.node_count(), 3);
+
+        // Root should have transclusion records for prologue and epilogue
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 2);
+    }
+
+    #[test]
+    fn cycle_detection() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let a_path = dir.path().join("a.md");
+        let b_path = dir.path().join("b.md");
+        std::fs::write(&a_path, "::file b.md").unwrap();
+        std::fs::write(&b_path, "::file a.md").unwrap();
+
+        let root_md = Markdown::try_from(a_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        // Should not infinite loop — cycle detection stops recursion
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+        assert!(graph.node_count() <= 3);
+    }
+
+    #[test]
+    fn transclusion_records_emitted() {
+        let md = Markdown::new("::file child.md\n::code example.rs\n::url https://example.com");
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&md, &options).unwrap();
+
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 3);
+
+        // Verify syntax types
+        let syntaxes: Vec<_> = transclusions.iter().map(|t| t.origin.syntax).collect();
+        assert!(syntaxes.contains(&ReferenceSyntax::DirectiveFile));
+        assert!(syntaxes.contains(&ReferenceSyntax::DirectiveCode));
+        assert!(syntaxes.contains(&ReferenceSyntax::DirectiveUrl));
+    }
+
+    #[test]
+    fn multiple_insertions_same_line() {
+        // Simulate multiple child_insertions on directive_line = 0 (e.g., two prologues)
+        let node = ReferenceGraphNode {
+            node_id: "root".into(),
+            source: ComposeSource::Unknown,
+            local_references: ReferenceSet::default(),
+            child_insertions: vec![
+                ReferenceInsertion {
+                    child_node_id: "child_a".into(),
+                    directive_line: 0,
+                    insertion_order: 0,
+                },
+                ReferenceInsertion {
+                    child_node_id: "child_b".into(),
+                    directive_line: 0,
+                    insertion_order: 1,
+                },
+            ],
+        };
+
+        let child_a = ReferenceGraphNode {
+            node_id: "child_a".into(),
+            source: ComposeSource::Unknown,
+            local_references: ReferenceSet {
+                records: vec![ReferenceRecord {
+                    id: "a_ref".into(),
+                    kind: ReferenceKind::Hyperlink,
+                    target: super::super::types::ReferenceTarget::RemoteUrl {
+                        raw: "https://a.example.com".into(),
+                    },
+                    origin: ReferenceOrigin {
+                        source: ComposeSource::Unknown,
+                        line: 1,
+                        span: 0..10,
+                        syntax: ReferenceSyntax::MarkdownLink,
+                    },
+                    attributes: serde_json::Map::new(),
+                }],
+            },
+            child_insertions: vec![],
+        };
+
+        let child_b = ReferenceGraphNode {
+            node_id: "child_b".into(),
+            source: ComposeSource::Unknown,
+            local_references: ReferenceSet {
+                records: vec![ReferenceRecord {
+                    id: "b_ref".into(),
+                    kind: ReferenceKind::Hyperlink,
+                    target: super::super::types::ReferenceTarget::RemoteUrl {
+                        raw: "https://b.example.com".into(),
+                    },
+                    origin: ReferenceOrigin {
+                        source: ComposeSource::Unknown,
+                        line: 1,
+                        span: 0..10,
+                        syntax: ReferenceSyntax::MarkdownLink,
+                    },
+                    attributes: serde_json::Map::new(),
+                }],
+            },
+            child_insertions: vec![],
+        };
+
+        let graph = ReferenceGraph {
+            root: node,
+            nodes: vec![child_a, child_b],
+        };
+
+        let flat = flatten_graph(&graph);
+        // Both children should appear in insertion_order (a before b)
+        assert_eq!(flat.len(), 2);
+        assert_eq!(flat.records[0].id, "a_ref");
+        assert_eq!(flat.records[1].id, "b_ref");
     }
 }

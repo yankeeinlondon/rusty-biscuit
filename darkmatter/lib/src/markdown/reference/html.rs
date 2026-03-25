@@ -120,6 +120,11 @@ fn classify_a_tag(
     span_start: usize,
     span_end: usize,
 ) -> Option<ReferenceRecord> {
+    // Require <a> tag specifically (rec #7a) — prevents <link href="..."> from
+    // being misclassified as a hyperlink.
+    if !is_tag(html, "a") {
+        return None;
+    }
     let href = extract_attribute(html, "href")?;
     let display = extract_inner_text(html).unwrap_or_default();
 
@@ -283,17 +288,22 @@ fn classify_link_tag(
     let rel = extract_attribute(html, "rel").unwrap_or_default();
     let as_attr = extract_attribute(html, "as").unwrap_or_default();
 
-    // Determine kind based on rel and as attributes
+    // Determine kind based on rel and as attributes (rec #7b).
+    // Only actual stylesheet-like rel values become CssImport.
+    // Other rel values (canonical, alternate, preconnect, etc.) are not CSS imports.
     let kind = if as_attr == "font"
-        || rel.contains("preload") && as_attr == "font"
         || href.ends_with(".woff")
         || href.ends_with(".woff2")
         || href.ends_with(".ttf")
         || href.ends_with(".otf")
     {
         ReferenceKind::FontImport
-    } else {
+    } else if rel.contains("stylesheet") {
         ReferenceKind::CssImport
+    } else {
+        // Non-stylesheet <link> tags (canonical, alternate, preconnect, icon, etc.)
+        // are recorded as hyperlinks for completeness, not as CSS imports.
+        ReferenceKind::Hyperlink
     };
 
     let mut attributes = serde_json::Map::new();
@@ -575,5 +585,56 @@ mod tests {
         assert!(is_tag("<meta charset=\"utf-8\">", "meta"));
         assert!(is_tag("<link rel=\"stylesheet\" href=\"x\">", "link"));
         assert!(is_tag("<script src=\"x\"></script>", "script"));
+    }
+
+    // ── Regression tests for rec #7a and #7b ────────────────────────
+
+    #[test]
+    fn link_tag_does_not_appear_in_extract_html_links() {
+        // rec #7a: <link> tags must NOT be classified as hyperlinks by extract_html_links
+        let content = r#"<link rel="stylesheet" href="style.css">"#;
+        let records = extract_html_links(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 0, "<link> should not be emitted as a hyperlink");
+    }
+
+    #[test]
+    fn canonical_link_is_not_css_import() {
+        // rec #7b: rel="canonical" must not be classified as CssImport
+        let content = r#"<link rel="canonical" href="https://example.com/page">"#;
+        let records = extract_html_link_tags(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_ne!(records[0].kind, ReferenceKind::CssImport);
+    }
+
+    #[test]
+    fn preconnect_link_is_not_css_import() {
+        let content = r#"<link rel="preconnect" href="https://fonts.googleapis.com">"#;
+        let records = extract_html_link_tags(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_ne!(records[0].kind, ReferenceKind::CssImport);
+    }
+
+    #[test]
+    fn alternate_link_is_not_css_import() {
+        let content = r#"<link rel="alternate" href="/feed.xml">"#;
+        let records = extract_html_link_tags(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_ne!(records[0].kind, ReferenceKind::CssImport);
+    }
+
+    #[test]
+    fn stylesheet_link_is_css_import() {
+        let content = r#"<link rel="stylesheet" href="main.css">"#;
+        let records = extract_html_link_tags(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, ReferenceKind::CssImport);
+    }
+
+    #[test]
+    fn icon_link_is_not_css_import() {
+        let content = r#"<link rel="icon" href="/favicon.ico">"#;
+        let records = extract_html_link_tags(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_ne!(records[0].kind, ReferenceKind::CssImport);
     }
 }
