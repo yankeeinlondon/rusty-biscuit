@@ -492,6 +492,40 @@ Compose reports can include cache stats gathered during the run:
 
 These are merged upward through child compose reports in the normal compose-report flow.
 
+## Reference Analysis as a Cache Consumer
+
+The reference analysis subsystem (`reference_graph()`, `validate_references()`, `composed_references()`, and related methods) also uses the persistent cache to avoid re-loading child documents during graph traversal.
+
+Reference analysis constructs its own `RunLocalCache` via `make_cache()` in `markdown/reference/graph.rs`. This cache uses the same `FileStore::resolve_cache_root()` path resolution as the compose pipeline, including `cache_namespace` support. This means:
+
+- The reference analysis pipeline and the compose pipeline resolve to the **same persistent cache directory** for a given `ComposeOptions`
+- `cache_namespace` isolation (e.g., per-branch or per-profile) is honored consistently across both consumers
+- Cached document loads from compose runs can be reused by reference analysis and vice versa
+
+### What reference analysis caches
+
+Reference analysis currently uses the persistent cache layer for:
+
+- `load_markdown()` — avoids re-reading child documents from disk during graph traversal
+- Document snapshot manifests — retained in run-local memory to avoid repeated manifest reads
+
+Reference analysis does **not** write composed-document or operation-result artifacts. It reads source documents and snapshot manifests but does not execute the full compose pipeline at each node.
+
+### Configuration
+
+Reference analysis inherits cache configuration from `ReferenceGraphOptions`, which wraps `ComposeOptions`:
+
+```rust
+let mut options = ReferenceGraphOptions::default();
+options.compose = options.compose
+    .with_cache_root(workspace_root)
+    .with_cache_namespace("feature-branch");
+
+let graph = md.reference_graph(options)?;
+```
+
+All `ComposeOptions` cache knobs apply: `cache_access_mode`, `cache_freshness_mode`, `cache_root`, and `cache_namespace`.
+
 ## Current Limitations and Future Work
 
 The following are still reasonable future improvements:
@@ -515,3 +549,4 @@ The current implementation is primarily defined in:
 - `darkmatter/lib/src/markdown/compose/cache/operation.rs`
 - `darkmatter/lib/src/markdown/compose/mod.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/reference/graph.rs`
