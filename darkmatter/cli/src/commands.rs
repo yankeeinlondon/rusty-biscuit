@@ -1,4 +1,4 @@
-use crate::args::{Cli, Command as CliCommand, OutputFormat};
+use crate::args::{Cli, Command as CliCommand, GraphFormat, OutputFormat, ValidateOutputFormat, ValidateTarget};
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
     open_output_artifact, print_delta, print_toc_tree, render_terminal_output,
@@ -145,6 +145,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             strict,
         } => {
             run_hash(input.as_ref(), body, frontmatter, strict)?;
+        }
+        CliCommand::Validate { target } => {
+            run_validate(target)?;
         }
     }
 
@@ -1063,4 +1066,149 @@ mod tests {
     fn wait_args_unknown_binary_returns_empty() {
         assert!(wait_args_for_editor("my-custom-editor").is_empty());
     }
+}
+
+fn run_validate(target: ValidateTarget) -> Result<()> {
+    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+    use darkmatter::markdown::reference::ReferenceGraphOptions;
+
+    match target {
+        ValidateTarget::Refs {
+            input,
+            remote,
+            fragments,
+            timeout,
+            fail_fast,
+            format,
+            verbose,
+            graph,
+        } => {
+            let md = Markdown::try_from(input.as_path())
+                .wrap_err_with(|| format!("Failed to load {}", input.display()))?;
+
+            // If --graph requested, print graph and exit
+            if let Some(graph_format) = graph {
+                let graph_options = ReferenceGraphOptions::default();
+                let ref_graph = md.reference_graph(graph_options)
+                    .wrap_err("Failed to build reference graph")?;
+
+                match graph_format {
+                    GraphFormat::Mermaid => println!("{}", ref_graph.to_mermaid()),
+                    GraphFormat::Dot => println!("{}", ref_graph.to_dot()),
+                }
+                return Ok(());
+            }
+
+            let options = ReferenceValidationOptions {
+                graph: ReferenceGraphOptions::default(),
+                validate_remote: remote,
+                remote_timeout: std::time::Duration::from_secs(timeout),
+                validate_fragments: fragments,
+                fail_fast,
+            };
+
+            let report = md
+                .validate_references(options)
+                .wrap_err("Reference validation failed")?;
+
+            match format {
+                ValidateOutputFormat::Text => {
+                    print_validation_report_text(&report, &input, verbose);
+                }
+                ValidateOutputFormat::Json => {
+                    print_validation_report_json(&report)?;
+                }
+            }
+
+            if report.is_valid() {
+                Ok(())
+            } else {
+                Err(eyre!(
+                    "{} error(s) found",
+                    report.error_count()
+                ))
+            }
+        }
+    }
+}
+
+fn print_validation_report_text(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    input: &std::path::Path,
+    verbose: bool,
+) {
+    use darkmatter::markdown::reference::validate::ReferenceSeverity;
+
+    println!("References scanned: {}", report.references_scanned);
+    println!("Valid: {}", report.references_valid);
+    println!("Issues: {}", report.issues.len());
+
+    if !report.issues.is_empty() {
+        println!();
+    }
+
+    for issue in &report.issues {
+        let severity = match issue.severity {
+            ReferenceSeverity::Error => "ERROR",
+            ReferenceSeverity::Warning => "WARN ",
+            ReferenceSeverity::Info => "INFO ",
+        };
+
+        let source = match &issue.origin.source {
+            darkmatter::markdown::compose::ComposeSource::File(p) => {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| input.display().to_string())
+            }
+            _ => input.display().to_string(),
+        };
+
+        println!(
+            "{severity}  {source}:{line}  {message}",
+            line = issue.origin.line,
+            message = issue.message
+        );
+    }
+
+    if verbose && !report.warnings.is_empty() {
+        println!();
+        for warning in &report.warnings {
+            println!("WARN   {warning}");
+        }
+    }
+}
+
+fn print_validation_report_json(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+) -> Result<()> {
+    use darkmatter::markdown::reference::validate::ReferenceSeverity;
+
+    let issues: Vec<serde_json::Value> = report
+        .issues
+        .iter()
+        .map(|i| {
+            serde_json::json!({
+                "code": format!("{:?}", i.code),
+                "message": i.message,
+                "severity": match i.severity {
+                    ReferenceSeverity::Error => "error",
+                    ReferenceSeverity::Warning => "warning",
+                    ReferenceSeverity::Info => "info",
+                },
+                "reference_id": i.reference_id,
+                "line": i.origin.line,
+            })
+        })
+        .collect();
+
+    let json = serde_json::json!({
+        "references_scanned": report.references_scanned,
+        "references_valid": report.references_valid,
+        "issues": issues,
+        "warnings": report.warnings,
+        "is_valid": report.is_valid(),
+    });
+
+    println!("{}", serde_json::to_string_pretty(&json)?);
+    Ok(())
 }

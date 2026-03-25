@@ -224,6 +224,13 @@ pub enum Command {
         file: String,
     },
 
+    /// Validate references in a markdown document.
+    Validate {
+        /// Validation target
+        #[command(subcommand)]
+        target: ValidateTarget,
+    },
+
     /// Hash a markdown document's frontmatter and body.
     Hash {
         /// Input file path (use "-" for stdin)
@@ -242,6 +249,63 @@ pub enum Command {
         #[arg(long)]
         strict: bool,
     },
+}
+
+/// Validation sub-targets.
+#[derive(Clone, Debug, Subcommand)]
+pub enum ValidateTarget {
+    /// Validate all references (links, images, transclusions).
+    Refs {
+        /// Input file path
+        #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+        input: PathBuf,
+
+        /// Enable remote URL validation
+        #[arg(long)]
+        remote: bool,
+
+        /// Enable fragment validation
+        #[arg(long)]
+        fragments: bool,
+
+        /// Remote validation timeout in seconds
+        #[arg(long, default_value = "10")]
+        timeout: u64,
+
+        /// Stop on first error
+        #[arg(long)]
+        fail_fast: bool,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ValidateOutputFormat::Text)]
+        format: ValidateOutputFormat,
+
+        /// Show all references, not just issues
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Print transclusion graph as Mermaid or DOT
+        #[arg(long, value_enum)]
+        graph: Option<GraphFormat>,
+    },
+}
+
+/// Output format for validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ValidateOutputFormat {
+    /// Human-readable text.
+    Text,
+    /// JSON output.
+    Json,
+}
+
+/// Graph visualization format.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum GraphFormat {
+    /// Mermaid flowchart.
+    Mermaid,
+    /// DOT (Graphviz) graph.
+    Dot,
 }
 
 /// Command-line interface for the darkmatter markdown renderer.
