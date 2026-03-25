@@ -25,7 +25,8 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("delta"))
         .stdout(predicate::str::contains("get"))
         .stdout(predicate::str::contains("set"))
-        .stdout(predicate::str::contains("hash"));
+        .stdout(predicate::str::contains("hash"))
+        .stdout(predicate::str::contains("graph"));
 }
 
 #[test]
@@ -1381,4 +1382,100 @@ fn validate_refs_graph_dot() {
         stdout.contains("digraph"),
         "Expected dot graph output, got: {stdout}"
     );
+}
+
+// =============================================================================
+//                          GRAPH COMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_graph_basic() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        tmp,
+        "# Test\n\n[link](https://example.com)\n\n![img](./logo.png)"
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("example.com"))
+        .stdout(predicate::str::contains("logo.png"));
+}
+
+#[test]
+fn test_graph_follow() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let parent = dir.path().join("parent.md");
+    let child = dir.path().join("child.md");
+    std::fs::write(&parent, "# Parent\n\n::file child.md").unwrap();
+    std::fs::write(&child, "# Child\n\n[link](https://child.example.com)").unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(&parent)
+        .arg("--follow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("parent.md"))
+        .stdout(predicate::str::contains("child.md"));
+}
+
+#[test]
+fn test_graph_validate_valid() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let md_path = dir.path().join("valid.md");
+    let linked = dir.path().join("linked.md");
+    std::fs::write(&md_path, "# Valid\n\n[link](./linked.md)").unwrap();
+    std::fs::write(&linked, "# Linked").unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(&md_path)
+        .arg("--validate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("valid"))
+        .stdout(predicate::str::contains("0 issues"));
+}
+
+#[test]
+fn test_graph_validate_invalid() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "# Test\n\n[broken](./nonexistent.md)").unwrap();
+
+    let output = md_cmd()
+        .arg("graph")
+        .arg(tmp.path())
+        .arg("--validate")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "expected exit code 2 for validation errors");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[missing]"), "expected [missing] suffix in output");
+    assert!(stdout.contains("1 issues"), "expected issue count in summary");
+}
+
+#[test]
+fn test_graph_file_not_found() {
+    md_cmd()
+        .arg("graph")
+        .arg("/nonexistent/file.md")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_graph_help() {
+    md_cmd()
+        .arg("graph")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--follow"))
+        .stdout(predicate::str::contains("--validate"));
 }

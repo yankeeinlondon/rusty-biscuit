@@ -149,6 +149,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         CliCommand::Validate { target } => {
             run_validate(target)?;
         }
+        CliCommand::Graph {
+            input,
+            follow,
+            validate,
+        } => {
+            run_graph(&input, follow, validate)?;
+        }
     }
 
     Ok(())
@@ -1210,5 +1217,49 @@ fn print_validation_report_json(
     });
 
     println!("{}", serde_json::to_string_pretty(&json)?);
+    Ok(())
+}
+
+fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let resolved = resolve_file_path(input)?;
+    let mut tree = FileTree::new(&resolved).map_err(|e| eyre!("{e}"))?;
+
+    if follow {
+        tree = tree.follow_transclusions();
+    }
+    if validate {
+        tree = tree.validate();
+    }
+
+    tree.ensure_built().map_err(|e| eyre!("{e}"))?;
+
+    let term = Terminal::default();
+    print!("{}", tree.display(&term));
+
+    // Validation summary footer
+    if validate {
+        if let Some(report) = tree.validation_report() {
+            println!(
+                "{} references scanned, {} valid, {} issues",
+                report.references_scanned,
+                report.references_valid,
+                report.issues.len()
+            );
+        }
+    }
+
+    // Exit code 2 for validation errors
+    if validate {
+        if let Some(report) = tree.validation_report() {
+            if !report.is_valid() {
+                std::process::exit(2);
+            }
+        }
+    }
+
     Ok(())
 }

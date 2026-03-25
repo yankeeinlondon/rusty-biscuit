@@ -249,6 +249,21 @@ pub enum Command {
         #[arg(long)]
         strict: bool,
     },
+
+    /// Visualize a markdown file's dependency graph.
+    Graph {
+        /// Input file path or file reference
+        #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]
+        input: PathBuf,
+
+        /// Recursively expand followable transclusions
+        #[arg(long)]
+        follow: bool,
+
+        /// Validate references and show inline status
+        #[arg(long)]
+        validate: bool,
+    },
 }
 
 /// Validation sub-targets.

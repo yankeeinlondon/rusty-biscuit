@@ -72,6 +72,24 @@ md delta original.md updated.md --json
 md -v delta original.md updated.md
 ```
 
+### Dependency Graph
+
+```bash
+# Visualize a file's dependency graph
+md graph README.md
+
+# Recursively follow transclusions
+md graph README.md --follow
+
+# Validate references inline
+md graph README.md --validate
+
+# Both together
+md graph README.md --follow --validate
+```
+
+Exit codes: `0` success/valid, `1` runtime error, `2` validation found errors.
+
 ### Compose Pipeline
 
 ```bash
