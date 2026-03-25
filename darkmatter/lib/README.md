@@ -262,6 +262,10 @@ The Darkmatter library also exposes some useful utilities for callers to be awar
 - **Link Checking:**
     - Darkmatter can traverse a compose pipeline's file graph and validate that all of the links point to valid resources
     - More details can be found at [Link Checking](../docs/utilities/link-checking.md)
+- **FileTree:**
+    - A `Renderable` terminal component that visualizes a Markdown file's dependency surface
+    - Shows references above the file line and transclusions below, with optional recursive expansion and validation overlays
+    - Used by the `md graph` CLI command
 
 ## Darkmatter Dependencies
 
