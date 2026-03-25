@@ -20,6 +20,7 @@ sniff-cli, sniff
 ```
 
 A package is considered dirty if any file within its directory tree has:
+
 - Staged changes (in the index)
 - Unstaged changes (modified working tree)
 - Untracked files (new files not yet versioned)
