@@ -51,25 +51,30 @@ fn short_sha(full: &str) -> String {
 pub fn worktree_graph(current_branch: &str, default_branch: &str) -> Option<String> {
     let base_sha = get_merge_base(default_branch, current_branch)?;
 
-    // Up to 3 context commits ending at the merge-base (oldest first)
-    let context = ancestor_commits(&base_sha, 3);
-    // Commits on the feature branch since divergence
-    let branch_commits = commits_since(current_branch, &base_sha, 20);
-    // Commits on main since divergence
-    let main_after = commits_since(default_branch, &base_sha, 20);
+    // Up to 2 context commits ending at the merge-base (oldest first)
+    let context = ancestor_commits(&base_sha, 2);
+    // Commits on the feature branch since divergence (cap at 5)
+    let branch_commits = commits_since(current_branch, &base_sha, 5);
+    // Commits on main since divergence (cap at 5)
+    let main_after = commits_since(default_branch, &base_sha, 5);
 
     let mut lines = vec!["gitGraph".to_string()];
     for sha in &context {
         lines.push(format!("    commit id: \"{sha}\""));
     }
-    if !branch_commits.is_empty() {
-        lines.push(format!("    branch {current_branch}"));
-        lines.push(format!("    checkout {current_branch}"));
+
+    // Always show the branch — even with 0 new commits, the fork point matters
+    lines.push(format!("    branch {current_branch}"));
+    lines.push(format!("    checkout {current_branch}"));
+    if branch_commits.is_empty() {
+        lines.push("    commit id: \"HEAD\"".to_string());
+    } else {
         for sha in &branch_commits {
             lines.push(format!("    commit id: \"{sha}\""));
         }
-        lines.push(format!("    checkout {default_branch}"));
     }
+    lines.push(format!("    checkout {default_branch}"));
+
     for sha in &main_after {
         lines.push(format!("    commit id: \"{sha}\""));
     }
@@ -129,13 +134,14 @@ pub fn base_graph(branch_names: &[String], default_branch: &str) -> Option<Strin
             .map_or(false, |b| b.merge_base_idx == i)
         {
             let info = branch_iter.next().unwrap();
-            if info.commits.is_empty() {
-                continue;
-            }
             lines.push(format!("    branch {}", info.name));
             lines.push(format!("    checkout {}", info.name));
-            for c in &info.commits {
-                lines.push(format!("    commit id: \"{c}\""));
+            if info.commits.is_empty() {
+                lines.push("    commit id: \"HEAD\"".to_string());
+            } else {
+                for c in &info.commits {
+                    lines.push(format!("    commit id: \"{c}\""));
+                }
             }
             lines.push(format!("    checkout {default_branch}"));
         }

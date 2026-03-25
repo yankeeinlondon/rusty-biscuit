@@ -15,6 +15,10 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
+    /// Override the git graph width (e.g. "70", "70ch", "50%")
+    #[arg(long, short = 'w', value_name = "WIDTH", global = true)]
+    pub width: Option<String>,
+
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
     pub completions: Option<Shell>,
@@ -23,11 +27,7 @@ pub struct Cli {
 #[derive(Subcommand, Clone)]
 pub enum Commands {
     /// List all worktrees with status indicators
-    List {
-        /// Override the git graph width (e.g. "70", "70ch", "50%")
-        #[arg(long, short = 'w', value_name = "WIDTH")]
-        width: Option<String>,
-    },
+    List,
 
     /// Create a new worktree from a branch name
     Create {

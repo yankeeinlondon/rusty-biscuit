@@ -28,8 +28,9 @@ fn run() -> Result<(), worktree::WorktreeError> {
         return Ok(());
     }
 
-    match cli.command.unwrap_or(Commands::List { width: None }) {
-        Commands::List { width } => commands::list(width.as_deref()),
+    let width = cli.width.as_deref();
+    match cli.command.unwrap_or(Commands::List) {
+        Commands::List => commands::list(width),
         Commands::Create { branch, stay } => commands::create(&branch, stay),
         Commands::Go { name, .. } => commands::go(&name),
     }
