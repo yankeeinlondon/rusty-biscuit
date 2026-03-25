@@ -160,7 +160,7 @@ Recommendation:
 
 ## Remaining Test Gaps
 
-The broad “needs more integration coverage” conclusion from the first review is no longer true. The remaining test gaps are narrower:
+The broad “needs more integration coverage” conclusion from the first review is no longer true. But the bugs above do mean the current test suite is still insufficient in a few important areas. The remaining gaps are narrower and more specific:
 
 - cycle tests should assert unique-node identity and safe flattening, not just “does not hang”
 - fragment-validation tests should cover prepared/composed headings, not just raw headings in child docs
@@ -175,3 +175,9 @@ Most of the original review items are closed. The remaining work is concentrated
 3. fuller cache integration
 
 Those are the main blockers I still see before marking `reference validate` as fully finished against the current spec and tech design.
+
+Just as importantly, each of those blockers maps directly to a missing test assertion:
+
+- the cycle bug survived because the tests only check termination, not graph correctness
+- the fragment bug survived because the tests only cover raw-heading targets, not prepared-heading targets
+- the cache gap survived because there are still no tests proving persistent-cache participation in reference analysis
