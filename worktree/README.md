@@ -2,6 +2,8 @@
 
 **Worktree** is a simple CLI for making working with [git worktrees](https://git-scm.com/docs/git-worktree) easier.
 
+<img src="../assets/Worktree-512.png" style="width: 250px" />
+
 
 ## Commands
 
