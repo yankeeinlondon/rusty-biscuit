@@ -127,9 +127,39 @@ fn cycle_detection_stops_infinite_recursion() {
 
     let md = load_md(&dir, "a.md");
     let options = ReferenceGraphOptions::default();
-    // Should not hang
+    // Should not hang and should produce exactly 2 unique nodes
     let graph = md.reference_graph(options).unwrap();
-    assert!(graph.node_count() <= 3);
+    assert_eq!(graph.node_count(), 2, "two-node cycle should produce exactly 2 unique nodes");
+
+    // Verify no duplicate node IDs
+    let mut ids = vec![graph.root.node_id.clone()];
+    ids.extend(graph.nodes.iter().map(|n| n.node_id.clone()));
+    let unique: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
+}
+
+#[test]
+fn cycle_composed_references_stay_finite() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("a.md", "[a-link](https://a.example.com)\n\n::file b.md\n"),
+            ("b.md", "[b-link](https://b.example.com)\n\n::file a.md\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "a.md");
+    let options = ReferenceGraphOptions::default();
+    let composed = md.composed_references(options).unwrap();
+
+    // Flattened references should be finite and non-duplicative
+    let link_count = composed
+        .records
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Hyperlink)
+        .count();
+    assert!(link_count <= 4, "composed links should be bounded, got {link_count}");
 }
 
 #[test]
@@ -370,6 +400,71 @@ fn validate_same_document_fragment_against_composed_headings() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  Fragment validation with prepared/composed headings
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn validate_cross_doc_fragment_with_interpolated_heading() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "[go](./target.md#visible)\n"),
+            (
+                "target.md",
+                "---\ntitle: Visible\n---\n\n# {{ title }}\n",
+            ),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceValidationOptions {
+        validate_fragments: true,
+        ..Default::default()
+    };
+    let report = md.validate_references(options).unwrap();
+
+    let fragment_issues: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
+        .collect();
+    assert!(
+        fragment_issues.is_empty(),
+        "Fragment #visible should be found after interpolation resolves {{ title }} to 'Visible'"
+    );
+}
+
+#[test]
+fn validate_same_doc_fragment_with_interpolated_heading() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "---\nsection: Features\n---\n\n[link](#features)\n\n# {{ section }}\n\nContent.\n",
+        )],
+    );
+
+    let md = load_md(&dir, "doc.md");
+    let options = ReferenceValidationOptions {
+        validate_fragments: true,
+        ..Default::default()
+    };
+    let report = md.validate_references(options).unwrap();
+
+    let fragment_issues: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
+        .collect();
+    assert!(
+        fragment_issues.is_empty(),
+        "Fragment #features should be found after interpolation resolves {{ section }}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  Graph-aware Phase 2 API tests (rec #9)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -409,6 +504,76 @@ fn script_import_graph_collects_across_nodes() {
     let options = ReferenceGraphOptions::default();
     let imports = md.script_import_graph(options).unwrap();
     assert!(imports.len() >= 2, "Expected 2 script imports, found {}", imports.len());
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Cache integration tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn reference_graph_with_cache_root() {
+    let dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n[link](https://example.com)\n\n::file child.md\n"),
+            ("child.md", "# Child\n\n[child-link](https://child.example.com)\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let mut options = ReferenceGraphOptions::default();
+    options.compose = options.compose.with_cache_root(cache_dir.path());
+
+    // First pass — populates the cache
+    let graph1 = md.reference_graph(options.clone()).unwrap();
+    assert_eq!(graph1.node_count(), 2);
+
+    // Second pass — should hit the cache for child document load
+    let graph2 = md.reference_graph(options).unwrap();
+    assert_eq!(graph2.node_count(), 2);
+    assert_eq!(
+        graph2.root.local_references.hyperlinks().len(),
+        graph1.root.local_references.hyperlinks().len()
+    );
+}
+
+#[test]
+fn fragment_validation_with_cache_root() {
+    let dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n[link](#child-heading)\n\n::file child.md\n",
+            ),
+            ("child.md", "## Child Heading\n\nContent.\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let mut graph_options = ReferenceGraphOptions::default();
+    graph_options.compose = graph_options.compose.with_cache_root(cache_dir.path());
+
+    let options = ReferenceValidationOptions {
+        graph: graph_options,
+        validate_fragments: true,
+        ..Default::default()
+    };
+    let report = md.validate_references(options).unwrap();
+
+    let fragment_issues: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
+        .collect();
+    assert!(
+        fragment_issues.is_empty(),
+        "Fragment #child-heading should resolve with cache_root set"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
