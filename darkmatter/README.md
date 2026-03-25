@@ -1,6 +1,6 @@
 # Darkmatter
 
-<img src="../assets/darkmatter-512.png" style="position:absolute; top:0; right: 100; width: 100" />
+<img src="../assets/darkmatter-512.png" style="width: 250px" />
 
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
 - Render to [multiple output formats](./docs/topics/output-formats.md)

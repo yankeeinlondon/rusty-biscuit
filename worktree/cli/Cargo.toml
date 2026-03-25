@@ -12,6 +12,8 @@ path = "src/main.rs"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
+dirs = "6"
+inquire = "0.9"
 worktree = { path = "../lib" }
 
 [dev-dependencies]

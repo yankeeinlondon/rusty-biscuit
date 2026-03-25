@@ -1183,7 +1183,17 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 eprintln!();
             }
 
-            if agent_exit == 0 && show_checks {
+            // SIGINT (Ctrl-C) yields exit code 130 (128 + 2); SIGTERM yields 143.
+            // These are user interruptions, not normal agent errors, and must not
+            // be silently promoted to success even when the file has changed.
+            let was_interrupted = agent_exit == 130 || agent_exit == 143;
+
+            if was_interrupted && show_checks {
+                log::message(&crate::output::fm_check_fail(
+                    &format!("{provider_name} agent was interrupted by the user (code {agent_exit})"),
+                    &term,
+                ));
+            } else if agent_exit == 0 && show_checks {
                 log::message(&crate::output::fm_check_ok(
                     &format!("{provider_name} agent completed successfully"),
                     &term,
@@ -1200,6 +1210,44 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 .strip_prefix(child_cwd)
                 .unwrap_or(&source.resolved_path)
                 .display();
+
+            // When the user interrupted the agent (Ctrl-C), report the outcome
+            // based on whether the body was partially written, then bail out.
+            if was_interrupted {
+                let body_on_disk = fs::read_to_string(source.resolved_path.as_path())
+                    .ok()
+                    .map(|text| {
+                        let md: darkmatter::markdown::Markdown = text.into();
+                        md.content().trim().to_string()
+                    })
+                    .unwrap_or_default();
+
+                if body_on_disk.is_empty() {
+                    log::message(&crate::output::fm_check_fail(
+                        &format!(
+                            "<b>User interrupted the agent with CTRL+C; the body of \
+                             <blue-500>{display_path}</blue-500> is empty so it appears \
+                             no work was accomplished.</b>"
+                        ),
+                        &term,
+                    ));
+                } else {
+                    log::message(&crate::output::fm_check_fail(
+                        &format!(
+                            "<b>User interrupted the agent with CTRL+C; the body of \
+                             <blue-500>{display_path}</blue-500> has been at least \
+                             partially filled:</b>"
+                        ),
+                        &term,
+                    ));
+                    eprintln!();
+                    for line in body_on_disk.lines() {
+                        eprintln!("  {line}");
+                    }
+                }
+
+                return Ok(1);
+            }
 
             // Read the file from disk to see what the agent did
             match fs::read_to_string(source.resolved_path.as_path()) {

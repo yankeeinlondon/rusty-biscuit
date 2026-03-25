@@ -59,6 +59,7 @@ apt install just
 <summary>Other Package Managers</summary>
 <pre><code lang=sh>
 asdf install just
+# Alpine
 apk add just
 # Red Hat, CentOS, Rocky, etc.
 dnf install just
@@ -94,7 +95,7 @@ At this point you're ready to explore, install, test, whatever you like.
 
 ## Shell Completions
 
-Shell completions help people learn CLI structure as well as navigate a CLI they don't use that often. All of the CLI's in this monorepo have shell completions included for all the major shells (bash, zsh, fish). How to include the shell completions for each CLI is available as part of the CLI's help system but if you are using zsh or bash you can use my conditional script which will add shell completions for the CLI's in this monorepo (and `just`) which you have installed: [Shell Completions](./docs/shell-completions.md).
+Shell completions help people learn new CLI's as well as navigate a CLI they don't use that often. All of the CLI's in this monorepo have shell completions included for all the major shells (bash, zsh, fish). How to include the shell completions for each CLI is available as part of the CLI's help system but if you are using zsh or bash you can use my conditional script which will add shell completions for the CLI's in this monorepo (and `just`) which you have installed: [Shell Completions](./docs/shell-completions.md).
 
 ## License
 

@@ -1,6 +1,5 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::config::resolve_base_dir;
 use crate::error::WorktreeError;
 use crate::git::{git_command, repo_info};
 use crate::util::dasherize;
@@ -165,13 +164,16 @@ fn check_clean_merge(default_branch: &str, branch: &str) -> bool {
     git_command(&["merge-tree", "--write-tree", default_branch, branch]).is_ok()
 }
 
-/// Create a new worktree.
+/// Create a new worktree under `base`.
+///
+/// The worktree is placed at `{base}/{repo-name}/{dasherized-branch}/`.
+/// Callers are responsible for resolving `base` (e.g. via
+/// [`worktree::config::resolve_base_dir`] or an interactive prompt).
 ///
 /// ## Errors
 ///
 /// Returns an error if the worktree already exists or git commands fail.
-pub fn create_worktree(branch: &str) -> Result<CreateResult, WorktreeError> {
-    let base = resolve_base_dir()?;
+pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, WorktreeError> {
     let info = repo_info()?;
 
     let dir_name = dasherize(branch);

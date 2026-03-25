@@ -19,6 +19,23 @@ pub enum WorktreeError {
     #[error("base directory '{0}' is itself a git repository -- it must be a plain directory")]
     BaseDirectoryIsGitRepo(String),
 
+    /// `~/.worktree.json` exists but cannot be parsed or is missing `base_dir`.
+    #[error("~/.worktree.json has an invalid format: {message}")]
+    ConfigInvalidFormat {
+        config_path: std::path::PathBuf,
+        message: String,
+    },
+
+    /// `~/.worktree.json` `base_dir` points to a directory that is itself a git repo.
+    #[error("base directory '{dir}' (from ~/.worktree.json) is itself a git repository")]
+    ConfigBaseDirIsGitRepo {
+        config_path: std::path::PathBuf,
+        dir: String,
+    },
+
+    #[error("operation cancelled")]
+    Cancelled,
+
     #[error("worktree '{0}' already exists")]
     WorktreeAlreadyExists(String),
 
@@ -34,6 +51,6 @@ pub enum WorktreeError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("JSON parse error: {0}")]
+    #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 }
