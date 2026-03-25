@@ -1,0 +1,321 @@
+//! Reference analysis subsystem for graph-aware reference discovery and validation.
+//!
+//! Provides local transclusion queries, unified reference types with provenance,
+//! reference graph traversal through composed document trees, and validation.
+
+pub mod types;
+pub mod errors;
+mod local;
+mod html;
+mod graph;
+pub mod validate;
+mod css;
+pub mod meta;
+
+pub use errors::ReferenceError;
+pub use types::*;
+
+use crate::markdown::Markdown;
+use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::transclusion::{
+    parse_directives, parse_frontmatter_refs,
+    BlockOptions, DirectiveKind,
+};
+use crate::markdown::types::MarkdownResult;
+
+impl Markdown {
+    /// Returns `true` if this document contains any transclusion directives
+    /// (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
+    pub fn has_transclusions(&self) -> bool {
+        // Check block directives
+        if let Ok(directives) = parse_directives(self.content()) {
+            if !directives.is_empty() {
+                return true;
+            }
+        }
+
+        // Check toc-linking directives
+        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content()) {
+            if !toc_directives.is_empty() {
+                return true;
+            }
+        }
+
+        // Check frontmatter prologue/epilogue
+        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
+            if !refs.prologue.is_empty() || !refs.epilogue.is_empty() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Returns all transclusion references in this document with provenance.
+    ///
+    /// This is a local query that does not follow transclusions recursively.
+    /// For recursive traversal, use [`transclusion_graph()`](Self::transclusion_graph).
+    pub fn transclusions(&self) -> MarkdownResult<Vec<TransclusionRef>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let mut refs = Vec::new();
+
+        // Block directives (::file, ::code, ::url)
+        let directives = parse_directives(self.content())
+            .map_err(|e| ReferenceError::ParseDirective {
+                line: 0,
+                message: e.to_string(),
+            })?;
+
+        for directive in &directives {
+            let kind = match directive.kind {
+                DirectiveKind::File => TransclusionRefKind::File,
+                DirectiveKind::Code => TransclusionRefKind::Code,
+                DirectiveKind::Url => TransclusionRefKind::Url,
+            };
+
+            refs.push(TransclusionRef {
+                kind,
+                raw_target: directive.raw_target.clone(),
+                resolved_target: None,
+                options: block_options_to_ref_options(&directive.options),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: directive.line,
+                    span: directive.span.clone(),
+                    syntax: match directive.kind {
+                        DirectiveKind::File => ReferenceSyntax::DirectiveFile,
+                        DirectiveKind::Code => ReferenceSyntax::DirectiveCode,
+                        DirectiveKind::Url => ReferenceSyntax::DirectiveUrl,
+                    },
+                },
+            });
+        }
+
+        // ::toc-linking directives
+        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content()) {
+            for td in &toc_directives {
+                refs.push(TransclusionRef {
+                    kind: TransclusionRefKind::TocLinking,
+                    raw_target: td.targets.join(" | "),
+                    resolved_target: None,
+                    options: TransclusionRefOptions::default(),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: td.line,
+                        span: td.span.clone(),
+                        syntax: ReferenceSyntax::DirectiveTocLinking,
+                    },
+                });
+            }
+        }
+
+        // Frontmatter prologue/epilogue
+        if let Ok(fm_refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
+            for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+                refs.push(TransclusionRef {
+                    kind: TransclusionRefKind::Prologue,
+                    raw_target: prologue.clone(),
+                    resolved_target: None,
+                    options: TransclusionRefOptions::default(),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: 0, // frontmatter doesn't have meaningful line numbers
+                        span: 0..0,
+                        syntax: ReferenceSyntax::FrontmatterPrologue,
+                    },
+                });
+                let _ = idx; // suppress unused warning
+            }
+
+            for epilogue in &fm_refs.epilogue {
+                refs.push(TransclusionRef {
+                    kind: TransclusionRefKind::Epilogue,
+                    raw_target: epilogue.clone(),
+                    resolved_target: None,
+                    options: TransclusionRefOptions::default(),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: 0,
+                        span: 0..0,
+                        syntax: ReferenceSyntax::FrontmatterEpilogue,
+                    },
+                });
+            }
+        }
+
+        Ok(refs)
+    }
+
+    /// Builds a transclusion-only graph (no link/image extraction at leaf nodes).
+    pub fn transclusion_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<ReferenceGraph> {
+        graph::build_transclusion_graph(self, &options).map_err(Into::into)
+    }
+
+    /// Builds a full reference graph (transclusions + all reference types at each node).
+    pub fn reference_graph(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<ReferenceGraph> {
+        graph::build_reference_graph(self, &options).map_err(Into::into)
+    }
+
+    /// Flattens the reference graph into composed-order references.
+    pub fn composed_references(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<ReferenceSet> {
+        let g = graph::build_reference_graph(self, &options)?;
+        Ok(graph::flatten_graph(&g))
+    }
+
+    /// Returns composed-order hyperlinks.
+    pub fn composed_links(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<LinkReference>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::Hyperlink)
+            .map(LinkReference::from)
+            .collect())
+    }
+
+    /// Returns composed-order image references.
+    pub fn composed_image_references(
+        &self,
+        options: ReferenceGraphOptions,
+    ) -> MarkdownResult<Vec<ImageReference>> {
+        let refs = self.composed_references(options)?;
+        Ok(refs
+            .records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::Image)
+            .map(ImageReference::from)
+            .collect())
+    }
+
+    // ── Phase 2: Extended extraction (local, single-document) ──────
+
+    /// Returns inline `<style>` blocks from this document.
+    pub fn inline_css(&self) -> MarkdownResult<Vec<InlineCssBlock>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let records = html::extract_html_style_blocks(self.content(), &source);
+        Ok(records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::InlineCss)
+            .map(InlineCssBlock::from)
+            .collect())
+    }
+
+    /// Returns CSS `@import` references from inline `<style>` blocks.
+    pub fn css_imports(&self) -> MarkdownResult<Vec<ImportReference>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let style_records = html::extract_html_style_blocks(self.content(), &source);
+        let mut imports = Vec::new();
+        for record in &style_records {
+            if let Some(css_content) = record.attributes.get("css_content").and_then(|v| v.as_str())
+            {
+                let css_records =
+                    css::extract_css_imports(css_content, &source, record.origin.line);
+                imports.extend(css_records.into_iter().map(ImportReference::from));
+            }
+        }
+        Ok(imports)
+    }
+
+    /// Returns inline `<script>` blocks (no `src`).
+    pub fn inline_scripts(&self) -> MarkdownResult<Vec<InlineScriptBlock>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let records = html::extract_html_script_blocks(self.content(), &source);
+        Ok(records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::InlineScript)
+            .map(InlineScriptBlock::from)
+            .collect())
+    }
+
+    /// Returns `<script src="...">` import references.
+    pub fn script_imports(&self) -> MarkdownResult<Vec<ImportReference>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let records = html::extract_html_script_blocks(self.content(), &source);
+        Ok(records
+            .into_iter()
+            .filter(|r| r.kind == ReferenceKind::ScriptImport)
+            .map(ImportReference::from)
+            .collect())
+    }
+
+    /// Returns font import references (`<link ... as="font">`, `@font-face src`).
+    pub fn font_imports(&self) -> MarkdownResult<Vec<ImportReference>> {
+        let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
+        let mut imports = Vec::new();
+
+        // From <link> tags
+        let link_records = html::extract_html_link_tags(self.content(), &source);
+        imports.extend(
+            link_records
+                .into_iter()
+                .filter(|r| r.kind == ReferenceKind::FontImport)
+                .map(ImportReference::from),
+        );
+
+        // From @font-face in <style> blocks
+        let style_records = html::extract_html_style_blocks(self.content(), &source);
+        for record in &style_records {
+            if let Some(css_content) = record.attributes.get("css_content").and_then(|v| v.as_str())
+            {
+                let font_records =
+                    css::extract_font_face_sources(css_content, &source, record.origin.line);
+                imports.extend(font_records.into_iter().map(ImportReference::from));
+            }
+        }
+
+        Ok(imports)
+    }
+
+    /// Returns parsed `<meta>` tags.
+    pub fn meta_tags(&self) -> MarkdownResult<meta::MetaTagMap> {
+        Ok(meta::parse_meta_tags(self.content()))
+    }
+
+    /// Merges `<meta>` tag values into frontmatter.
+    ///
+    /// Returns the number of keys inserted or updated.
+    pub fn merge_meta_into_frontmatter(&mut self, overwrite: bool) -> MarkdownResult<usize> {
+        let meta_map = meta::parse_meta_tags(self.content());
+        meta::merge_meta_into_frontmatter(&meta_map, self, overwrite)
+    }
+
+    // ── Validation ──────────────────────────────────────────────────
+
+    /// Validates all references in the document (optionally following transclusions).
+    pub fn validate_references(
+        &self,
+        options: validate::ReferenceValidationOptions,
+    ) -> MarkdownResult<validate::ReferenceValidationReport> {
+        validate::validate(self, &options).map_err(Into::into)
+    }
+}
+
+/// Converts `BlockOptions` to `TransclusionRefOptions`.
+fn block_options_to_ref_options(opts: &BlockOptions) -> TransclusionRefOptions {
+    use crate::markdown::compose::transclusion::ReplaceOption;
+    TransclusionRefOptions {
+        when_expr: opts.when_expr.clone(),
+        replace: match &opts.replace {
+            ReplaceOption::InheritDefault => None,
+            ReplaceOption::ParentWins => Some("parent-wins".into()),
+            ReplaceOption::OneOff(map) => {
+                Some(serde_json::to_string(map).unwrap_or_default())
+            }
+        },
+        quotation: opts.quotation.clone(),
+        disclosure: opts.disclosure.clone(),
+        exclude: opts.exclude.clone(),
+    }
+}

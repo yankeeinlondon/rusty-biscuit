@@ -39,6 +39,7 @@ pub mod inline;
 mod inline_html;
 pub mod normalize;
 pub mod output;
+pub mod reference;
 pub mod toc;
 mod types;
 
@@ -51,6 +52,10 @@ pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,
 };
+pub use reference::{
+    ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
+    ReferenceSet, TransclusionRef,
+};
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 
@@ -60,12 +65,14 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use url::Url;
 
 use crate::render::{ImageRef, Link};
+use compose::ComposeSource;
 
 /// A markdown document with frontmatter support.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Markdown {
     frontmatter: Frontmatter,
     content: String,
+    source: Option<ComposeSource>,
 }
 
 impl Markdown {
@@ -74,6 +81,7 @@ impl Markdown {
         Self {
             frontmatter: Frontmatter::new(),
             content: content.into(),
+            source: None,
         }
     }
 
@@ -82,6 +90,7 @@ impl Markdown {
         Self {
             frontmatter,
             content: content.into(),
+            source: None,
         }
     }
 
@@ -145,6 +154,17 @@ impl Markdown {
     /// Returns a mutable reference to the content.
     pub fn content_mut(&mut self) -> &mut String {
         &mut self.content
+    }
+
+    /// Returns the compose source, if known.
+    pub fn source(&self) -> &Option<ComposeSource> {
+        &self.source
+    }
+
+    /// Sets the compose source, returning the modified document.
+    pub fn with_source(mut self, source: ComposeSource) -> Self {
+        self.source = Some(source);
+        self
     }
 
     /// Consumes the markdown document and returns `(frontmatter, content)`.
@@ -766,7 +786,8 @@ impl TryFrom<&Path> for Markdown {
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let content = std::fs::read_to_string(path)?;
-        Ok(content.into())
+        let md: Markdown = content.into();
+        Ok(md.with_source(ComposeSource::infer_from_path(path)))
     }
 }
 
