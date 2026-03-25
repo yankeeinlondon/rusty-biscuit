@@ -17,7 +17,17 @@ For details, choose one or more of the packages in this package area.
 | [**CLI**](./cli/README.md) | `darkmatter-cli` | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
 | [**LSP**](./lsp/README.md) | `darkmatter-lsp` | **FUTURE:** A language server for Darkmatter (aka, Markdown + DSL) |
 
+## Documentation
 
+- to get details on the **Composition Pipeline** in Darkmatter read: [Darkmatter Composition Pipeline](./docs/darkmatter-compose-pipeline.md)
+- to get details on the **Rendering Pipeline** in Darkmatter read: [Darkmatter Render Pipeline](./docs/darkmatter-rendering-pipeline.md)
+- for more information on how to use CLI read: [Darkmatter CLI](./docs/cli/index.md)
+- Other topics you may be interested in:
+    - [What is Composition?](./docs/topics/what-is-composition.md)
+    - [Transclusion](./docs/topics/transclusion.md)
+    - [Rendering Output Formats](./docs/topics/output-formats.md)
+    - [Delta Processing](./docs/topics/delta.md)
+    - [Context Variables provided to Composition](./docs/topics/context-variables.md)
 
 
 ## License
