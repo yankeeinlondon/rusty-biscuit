@@ -34,6 +34,17 @@ impl ReferenceAnalysisRuntime {
     }
 }
 
+/// Construct a [`RunLocalCache`] from graph options, attaching persistent
+/// backing when `cache_root` is configured.
+fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
+    let cache = RunLocalCache::new(options.compose.cache_access_mode);
+    if let Some(ref root) = options.compose.cache_root {
+        cache.with_persistent(root.clone())
+    } else {
+        cache
+    }
+}
+
 /// Build a transclusion-only graph (no link/image extraction at leaf nodes).
 pub(crate) fn build_transclusion_graph(
     md: &Markdown,
@@ -41,11 +52,19 @@ pub(crate) fn build_transclusion_graph(
 ) -> MarkdownResult<ReferenceGraph> {
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
-        cache: RunLocalCache::new(options.compose.cache_access_mode),
+        cache: make_cache(options),
     };
 
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
+
+    // Seed the runtime with the root node so child documents that
+    // transclude the root are detected as cycles immediately.
+    let root_id = source_to_id(&source);
+    let _ = runtime.transclusion.enter(root_id);
+
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, false)?;
+
+    runtime.transclusion.exit();
 
     Ok(ReferenceGraph {
         root,
@@ -60,11 +79,19 @@ pub(crate) fn build_reference_graph(
 ) -> MarkdownResult<ReferenceGraph> {
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
-        cache: RunLocalCache::new(options.compose.cache_access_mode),
+        cache: make_cache(options),
     };
 
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
+
+    // Seed the runtime with the root node so child documents that
+    // transclude the root are detected as cycles immediately.
+    let root_id = source_to_id(&source);
+    let _ = runtime.transclusion.enter(root_id);
+
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, true)?;
+
+    runtime.transclusion.exit();
 
     Ok(ReferenceGraph {
         root,
@@ -399,6 +426,18 @@ fn extract_all_references(content: &str, source: &ComposeSource) -> ReferenceSet
     ReferenceSet { records }
 }
 
+/// Prepare content for validation heading extraction.
+///
+/// This is a `pub(super)` wrapper around [`prepare_content`] so the
+/// validator can run InlinePre preparation before extracting headings.
+pub(super) fn prepare_content_for_validation(
+    md: &Markdown,
+    source: &ComposeSource,
+    options: &ReferenceGraphOptions,
+) -> MarkdownResult<String> {
+    prepare_content(md, source, options)
+}
+
 /// Prepare content by running only InlinePre operations.
 ///
 /// Starts from the caller's `ComposeOptions` (rec #3) to preserve
@@ -440,30 +479,35 @@ fn resolve_local_target(raw_target: &str, source: &ComposeSource) -> Option<std:
             let base_dir = base_path.parent();
 
             // Try biscuit_file::FileReference for full resolution (supports @repo-root, etc.)
+            // Canonicalize so node IDs match source_to_id().
             if let Ok(file_ref) = biscuit_file::FileReference::new(raw_target)
                 && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
             {
-                return Some(resolved);
+                return Some(resolved.canonicalize().unwrap_or(resolved));
             }
 
-            // Fallback to simple path join
+            // Fallback to simple path join; canonicalize to match source_to_id().
             let base_dir = base_dir?;
             let resolved = base_dir.join(raw_target);
-            if resolved.exists() {
-                Some(resolved.canonicalize().unwrap_or(resolved))
-            } else {
-                Some(resolved)
-            }
+            Some(resolved.canonicalize().unwrap_or(resolved))
         }
         ComposeSource::Unknown | ComposeSource::Url(_) => None,
     }
 }
 
-/// Convert a compose source to a stable node ID.
+/// Convert a compose source to a stable, canonicalized node ID.
+///
+/// File paths are canonicalized to avoid duplicate nodes when the same
+/// physical file is referenced via different path spellings (e.g.,
+/// `/var/...` vs `/private/var/...` on macOS).
 fn source_to_id(source: &ComposeSource) -> String {
     match source {
         ComposeSource::Unknown => "unknown".to_string(),
-        ComposeSource::File(p) => p.to_string_lossy().to_string(),
+        ComposeSource::File(p) => p
+            .canonicalize()
+            .unwrap_or_else(|_| p.clone())
+            .to_string_lossy()
+            .to_string(),
         ComposeSource::Url(u) => u.to_string(),
     }
 }
@@ -593,7 +637,33 @@ mod tests {
         let options = ReferenceGraphOptions::default();
         // Should not infinite loop — cycle detection stops recursion
         let graph = build_reference_graph(&root_md, &options).unwrap();
-        assert!(graph.node_count() <= 3);
+
+        // A two-node cycle should produce exactly 2 unique nodes
+        assert_eq!(graph.node_count(), 2, "two-node cycle should produce exactly 2 nodes");
+
+        // Verify no duplicate node IDs
+        let mut ids: Vec<&str> = vec![&graph.root.node_id];
+        ids.extend(graph.nodes.iter().map(|n| n.node_id.as_str()));
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
+    }
+
+    #[test]
+    fn cycle_composed_references_are_finite() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let a_path = dir.path().join("a.md");
+        let b_path = dir.path().join("b.md");
+        std::fs::write(&a_path, "[a-link](https://a.example.com)\n\n::file b.md").unwrap();
+        std::fs::write(&b_path, "[b-link](https://b.example.com)\n\n::file a.md").unwrap();
+
+        let root_md = Markdown::try_from(a_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+        let flat = flatten_graph(&graph);
+
+        // composed_references should be finite and non-duplicative
+        assert!(flat.len() <= 10, "flattened refs should be bounded, got {}", flat.len());
     }
 
     #[test]

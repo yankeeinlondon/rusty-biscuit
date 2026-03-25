@@ -174,7 +174,7 @@ pub(crate) fn validate(
                     && let Some(ref frag) = fragment
                 {
                     validate_cross_doc_fragment(
-                        &path_part, frag, ref_source, record, &mut report,
+                        &path_part, frag, ref_source, record, &mut report, &options.graph,
                     );
                 }
 
@@ -348,9 +348,25 @@ fn validate_local_path(
 
 // ── Fragment validation ─────────────────────────────────────────────
 
-/// Collects heading slugs from a single document for fragment validation.
-fn collect_heading_slugs(md: &Markdown) -> Vec<String> {
-    let toc = md.toc();
+/// Collects heading slugs from prepared document content.
+///
+/// Runs InlinePre preparation (interpolation, page blocks, etc.) before
+/// extracting headings, so fragment validation matches the actual headings
+/// a reader would see after composition.
+fn collect_prepared_heading_slugs(
+    md: &Markdown,
+    source: &ComposeSource,
+    graph_options: &super::types::ReferenceGraphOptions,
+) -> Vec<String> {
+    // Prepare content with InlinePre to resolve interpolation, page blocks, etc.
+    let content = match super::graph::prepare_content_for_validation(md, source, graph_options) {
+        Ok(c) => c,
+        Err(_) => md.content().to_string(),
+    };
+
+    // Parse headings from the prepared content
+    let prepared_md = Markdown::new(&content);
+    let toc = prepared_md.toc();
     toc.all_headings()
         .into_iter()
         .map(|h| h.slug.to_lowercase())
@@ -360,28 +376,35 @@ fn collect_heading_slugs(md: &Markdown) -> Vec<String> {
 /// Collects heading slugs from the composed document (all graph nodes).
 ///
 /// This provides the effective heading set after transclusion, so fragment
-/// validation checks against the actual composed heading list.
+/// validation checks against the actual composed heading list. Each node's
+/// headings are extracted from prepared content (after InlinePre).
 fn collect_composed_heading_slugs(
     md: &Markdown,
     graph_options: &super::types::ReferenceGraphOptions,
 ) -> Vec<String> {
+    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
+
     // Build the reference graph to discover all nodes
     let graph = match super::graph::build_reference_graph(md, graph_options) {
         Ok(g) => g,
-        Err(_) => return collect_heading_slugs(md),
+        Err(_) => return collect_prepared_heading_slugs(md, &source, graph_options),
     };
 
     let mut all_slugs = Vec::new();
 
-    // Collect headings from the root document
-    all_slugs.extend(collect_heading_slugs(md));
+    // Collect headings from the root document (prepared)
+    all_slugs.extend(collect_prepared_heading_slugs(md, &source, graph_options));
 
-    // Collect headings from all child nodes
+    // Collect headings from all child nodes (prepared)
     for node in &graph.nodes {
         if let ComposeSource::File(path) = &node.source
             && let Ok(child_md) = Markdown::try_from(path.as_path())
         {
-            all_slugs.extend(collect_heading_slugs(&child_md));
+            all_slugs.extend(collect_prepared_heading_slugs(
+                &child_md,
+                &node.source,
+                graph_options,
+            ));
         }
     }
 
@@ -391,13 +414,15 @@ fn collect_composed_heading_slugs(
 /// Validates a fragment reference against a cross-document target.
 ///
 /// Resolves the target path using `biscuit_file::FileReference` (rec #6)
-/// relative to the reference's own origin source (rec #5).
+/// relative to the reference's own origin source (rec #5). Validates
+/// against prepared headings (after InlinePre) rather than raw headings.
 fn validate_cross_doc_fragment(
     path: &str,
     fragment: &str,
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
+    graph_options: &super::types::ReferenceGraphOptions,
 ) {
     let ComposeSource::File(base_path) = source else {
         return;
@@ -430,7 +455,8 @@ fn validate_cross_doc_fragment(
     }
 
     if let Ok(target_md) = Markdown::try_from(target_path.as_path()) {
-        let headings = collect_heading_slugs(&target_md);
+        let target_source = ComposeSource::File(target_path);
+        let headings = collect_prepared_heading_slugs(&target_md, &target_source, graph_options);
         let frag_lower = fragment.to_lowercase();
         if !headings.contains(&frag_lower) {
             report.issues.push(ReferenceIssue {

@@ -390,6 +390,29 @@ impl Markdown {
         meta::merge_meta_into_frontmatter(&meta_map, self, overwrite)
     }
 
+    /// Sets a `<meta>` tag in the document content.
+    ///
+    /// If a tag with the same key already exists, its value is updated
+    /// in place. Otherwise, a new `<meta>` tag is appended.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let mut md = Markdown::new("# Hello");
+    /// md.set_meta_tag("author", "Ken");
+    /// assert_eq!(md.meta_tags().unwrap().get("author").unwrap().as_str(), "Ken");
+    /// ```
+    ///
+    /// ## Returns
+    ///
+    /// The number of existing tags that were updated (0 means a new tag
+    /// was inserted, 1 means an existing tag was replaced).
+    pub fn set_meta_tag(&mut self, key: &str, value: &str) -> usize {
+        meta::set_meta_tag(self, key, value)
+    }
+
     // ── Validation ──────────────────────────────────────────────────
 
     /// Validates all references in the document (optionally following transclusions).

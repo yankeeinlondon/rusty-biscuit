@@ -128,6 +128,93 @@ pub fn merge_meta_into_frontmatter(
     Ok(count)
 }
 
+/// Sets a `<meta>` tag in the document content.
+///
+/// If a `<meta>` tag with the same key already exists, its `content`
+/// attribute is updated. Otherwise, a new `<meta>` tag is appended
+/// at the end of the document.
+///
+/// The `key` determines which HTML attribute is used:
+/// - Keys starting with `og:` or containing `:` use `property`
+/// - `charset` uses the `charset` attribute (no `content` attribute)
+/// - All other keys use `name`
+///
+/// Returns the number of tags modified (0 = inserted new, 1 = updated existing).
+pub fn set_meta_tag(md: &mut Markdown, key: &str, value: &str) -> usize {
+    let content = md.content().to_string();
+
+    // Build the new tag HTML
+    let new_tag = build_meta_tag_html(key, value);
+
+    // Try to find and replace an existing tag with the same key
+    if let Some(updated) = replace_existing_meta_tag(&content, key, value) {
+        *md.content_mut() = updated;
+        return 1;
+    }
+
+    // No existing tag — append at the end
+    let mut new_content = content;
+    if !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+    new_content.push_str(&new_tag);
+    new_content.push('\n');
+    *md.content_mut() = new_content;
+    0
+}
+
+/// Build the HTML string for a meta tag.
+fn build_meta_tag_html(key: &str, value: &str) -> String {
+    if key == "charset" {
+        format!("<meta charset=\"{value}\">")
+    } else if key.contains(':') {
+        // Open Graph or namespaced property
+        format!("<meta property=\"{key}\" content=\"{value}\">")
+    } else {
+        format!("<meta name=\"{key}\" content=\"{value}\">")
+    }
+}
+
+/// Try to replace an existing `<meta>` tag that matches the given key.
+///
+/// Returns `Some(updated_content)` if a replacement was made, `None` otherwise.
+fn replace_existing_meta_tag(content: &str, key: &str, new_value: &str) -> Option<String> {
+    // Build patterns to match existing meta tags for this key
+    let patterns: Vec<String> = if key == "charset" {
+        vec![
+            format!("<meta charset=\""),
+            format!("<meta charset='"),
+        ]
+    } else if key.contains(':') {
+        vec![
+            format!("<meta property=\"{key}\""),
+            format!("<meta property='{key}'"),
+        ]
+    } else {
+        vec![
+            format!("<meta name=\"{key}\""),
+            format!("<meta name='{key}'"),
+        ]
+    };
+
+    for pattern in &patterns {
+        if let Some(start) = content.find(pattern.as_str()) {
+            // Find the end of the tag
+            let rest = &content[start..];
+            let end = rest.find('>').map(|i| start + i + 1)?;
+
+            let new_tag = build_meta_tag_html(key, new_value);
+            let mut result = String::with_capacity(content.len());
+            result.push_str(&content[..start]);
+            result.push_str(&new_tag);
+            result.push_str(&content[end..]);
+            return Some(result);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +290,76 @@ mod tests {
         assert_eq!(count, 1);
         let author: Option<String> = md.fm_get("author").unwrap();
         assert_eq!(author, Some("Ken".to_string()));
+    }
+
+    // ── set_meta_tag tests ──────────────────────────────────────────
+
+    #[test]
+    fn set_meta_tag_insert_new() {
+        let mut md = Markdown::new("# Hello");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 0, "should return 0 for new insert");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_update_existing() {
+        let mut md = Markdown::new("# Hello\n\n<meta name=\"author\" content=\"Alice\">\n");
+        let updated = set_meta_tag(&mut md, "author", "Ken");
+        assert_eq!(updated, 1, "should return 1 for update");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("author").unwrap().as_str(), "Ken");
+    }
+
+    #[test]
+    fn set_meta_tag_charset() {
+        let mut md = Markdown::new("# Hello");
+        set_meta_tag(&mut md, "charset", "utf-8");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("charset").unwrap().as_str(), "utf-8");
+        assert!(md.content().contains("<meta charset=\"utf-8\">"));
+    }
+
+    #[test]
+    fn set_meta_tag_charset_update() {
+        let mut md = Markdown::new("<meta charset=\"ascii\">\n\n# Hello");
+        let updated = set_meta_tag(&mut md, "charset", "utf-8");
+        assert_eq!(updated, 1);
+        assert!(md.content().contains("<meta charset=\"utf-8\">"));
+        assert!(!md.content().contains("ascii"));
+    }
+
+    #[test]
+    fn set_meta_tag_og_property() {
+        let mut md = Markdown::new("# Hello");
+        set_meta_tag(&mut md, "og:title", "My Page");
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("og:title").unwrap().as_str(), "My Page");
+        assert!(md.content().contains("<meta property=\"og:title\" content=\"My Page\">"));
+    }
+
+    #[test]
+    fn set_meta_tag_og_property_update() {
+        let mut md = Markdown::new("<meta property=\"og:title\" content=\"Old\">\n\n# Hello");
+        let updated = set_meta_tag(&mut md, "og:title", "New Title");
+        assert_eq!(updated, 1);
+
+        let tags = parse_meta_tags(md.content());
+        assert_eq!(tags.get("og:title").unwrap().as_str(), "New Title");
+    }
+
+    #[test]
+    fn set_meta_tag_duplicate_key_updates_first() {
+        let mut md = Markdown::new(
+            "<meta name=\"keywords\" content=\"rust\">\n<meta name=\"keywords\" content=\"markdown\">\n",
+        );
+        let updated = set_meta_tag(&mut md, "keywords", "programming");
+        assert_eq!(updated, 1, "should update the first occurrence");
+        assert!(md.content().contains("programming"));
     }
 }
