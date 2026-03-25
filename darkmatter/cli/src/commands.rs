@@ -1080,7 +1080,7 @@ fn run_validate(target: ValidateTarget) -> Result<()> {
             timeout,
             fail_fast,
             format,
-            verbose,
+            show_all,
             graph,
         } => {
             let md = Markdown::try_from(input.as_path())
@@ -1113,7 +1113,7 @@ fn run_validate(target: ValidateTarget) -> Result<()> {
 
             match format {
                 ValidateOutputFormat::Text => {
-                    print_validation_report_text(&report, &input, verbose);
+                    print_validation_report_text(&report, &input, show_all);
                 }
                 ValidateOutputFormat::Json => {
                     print_validation_report_json(&report)?;
@@ -1135,7 +1135,7 @@ fn run_validate(target: ValidateTarget) -> Result<()> {
 fn print_validation_report_text(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     input: &std::path::Path,
-    verbose: bool,
+    show_all: bool,
 ) {
     use darkmatter::markdown::reference::validate::ReferenceSeverity;
 
@@ -1170,7 +1170,7 @@ fn print_validation_report_text(
         );
     }
 
-    if verbose && !report.warnings.is_empty() {
+    if show_all && !report.warnings.is_empty() {
         println!();
         for warning in &report.warnings {
             println!("WARN   {warning}");

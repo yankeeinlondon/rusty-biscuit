@@ -281,8 +281,8 @@ pub enum ValidateTarget {
         format: ValidateOutputFormat,
 
         /// Show all references, not just issues
-        #[arg(short, long)]
-        verbose: bool,
+        #[arg(long = "show-all")]
+        show_all: bool,
 
         /// Print transclusion graph as Mermaid or DOT
         #[arg(long, value_enum)]
