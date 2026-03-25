@@ -226,6 +226,8 @@ Graph methods follow transclusion directives recursively and collect references 
 
 **`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node).
 
+This includes `::toc-linking` as a dependency source and surfaces the generated markdown links those directives add to the effective composed document.
+
 **`composed_references(options) -> MarkdownResult<ReferenceSet>`** flattens the reference graph into composed-order references.
 
 **`composed_links(options) -> MarkdownResult<Vec<LinkReference>>`** returns composed-order hyperlinks.
@@ -301,7 +303,7 @@ assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `graph` | `ReferenceGraphOptions` | default | Controls graph traversal and cache settings |
-| `validate_remote` | `bool` | `false` | Validate remote URLs via HTTP |
+| `validate_remote` | `bool` | `false` | Validate remote URLs via HTTP/HTTPS |
 | `remote_timeout` | `Duration` | 10s | Timeout for remote URL checks |
 | `validate_fragments` | `bool` | `false` | Validate `#fragment` targets |
 | `fail_fast` | `bool` | `false` | Stop on first error |
@@ -317,7 +319,7 @@ assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
 
 Helper methods: `is_valid()`, `error_count()`.
 
-Issue codes: `MissingLocalTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteSkipped`, `MissingFragmentTarget`.
+Issue codes include `MissingLocalTarget`, `InvalidUrl`, `RemoteUnreachable`, `RemoteDisallowed`, `MissingSourceContext`, `UnsupportedScheme`, and `MissingFragmentTarget`.
 
 ```rust
 let options = ReferenceValidationOptions {

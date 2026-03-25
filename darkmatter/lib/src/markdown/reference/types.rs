@@ -102,7 +102,7 @@ pub fn classify_target(raw: &str) -> ReferenceTarget {
         ReferenceTarget::Fragment { raw: raw.into() }
     } else if raw.starts_with("data:") {
         ReferenceTarget::DataUri { raw: raw.into() }
-    } else if raw.starts_with("http://") || raw.starts_with("https://") {
+    } else if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("//") {
         ReferenceTarget::RemoteUrl { raw: raw.into() }
     } else if raw.starts_with("mailto:") || raw.starts_with("tel:") || raw.contains("://") {
         let scheme = if raw.contains("://") {
@@ -610,6 +610,12 @@ mod tests {
     #[test]
     fn classify_http_url() {
         let target = classify_target("http://example.com");
+        assert!(matches!(target, ReferenceTarget::RemoteUrl { .. }));
+    }
+
+    #[test]
+    fn classify_protocol_relative_url() {
+        let target = classify_target("//cdn.example.com/app.js");
         assert!(matches!(target, ReferenceTarget::RemoteUrl { .. }));
     }
 

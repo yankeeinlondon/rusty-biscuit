@@ -7,11 +7,13 @@ Reference validation checks that all references discovered in a document (and op
 Validation covers all reference types discovered by the reference analysis subsystem:
 
 - **Local paths** -- file existence check relative to each reference's own source location
-- **Remote URLs** -- syntax validation (always), HTTP reachability (opt-in)
+- **Remote URLs** -- syntax validation (always), HTTP reachability (opt-in), including protocol-relative URLs like `//cdn.example.com/app.js`
 - **Fragments** -- `#heading-slug` targets resolved against composed document headings (opt-in)
 - **Cross-document fragments** -- `./other.md#section` validated by loading the target and checking its headings
 
-References are extracted via graph traversal, so validation naturally covers the full transclusion tree when the document uses `::file`, `::code`, or frontmatter prologue/epilogue directives.
+References are extracted via graph traversal, so validation naturally covers the full transclusion tree when the document uses `::file`, `::code`, `::toc-linking`, or frontmatter prologue/epilogue directives.
+
+For `::toc-linking`, validation checks the resolved target file dependency and also sees the generated markdown links that directive injects into the effective composed document.
 
 ## Path Resolution
 
@@ -55,7 +57,7 @@ Helper methods: `is_valid()` (no error-severity issues), `error_count()`.
 | `RemoteUnreachable` | Error | HTTP check failed or timed out |
 | `RemoteDisallowed` | Info | Remote validation disabled, cannot verify |
 | `MissingSourceContext` | Warning | No source path available to resolve relative target |
-| `UnsupportedScheme` | Warning | Non-HTTP/HTTPS scheme (e.g., `ftp://`) |
+| `UnsupportedScheme` | Info | Non-HTTP/HTTPS scheme (e.g., `ftp://`) |
 | `MissingFragmentTarget` | Error | `#slug` not found in document headings |
 | `MalformedHtmlTag` | -- | Reserved for future structured HTML validation |
 | `MalformedCssImport` | -- | Reserved for future CSS parsing upgrade |

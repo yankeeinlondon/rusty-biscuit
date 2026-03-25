@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::compose::cache::RunLocalCache;
+use crate::markdown::compose::toc_linking;
 use crate::markdown::compose::transclusion::{
     parse_directives, parse_frontmatter_refs, DirectiveKind, TransclusionRuntime,
 };
@@ -281,6 +282,58 @@ fn build_node(
         }
     }
 
+    // ::toc-linking directives generate links in the effective document
+    // but do not create child graph nodes. Model them as transclusion
+    // dependencies plus synthesized hyperlink records at the directive line.
+    if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(&prepared_content) {
+        let transclusion_options = transclusion_options_for_source(options, source);
+
+        for directive in &toc_directives {
+            if let Some((display_target, path)) =
+                resolve_toc_linking_target(directive, source, &transclusion_options)
+            {
+                if extract_references {
+                    local_references.records.push(ReferenceRecord {
+                        id: make_reference_id(source, directive.line, directive.span.start),
+                        kind: ReferenceKind::Transclusion,
+                        target: classify_target(&display_target),
+                        origin: ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveTocLinking,
+                        },
+                        attributes: serde_json::Map::new(),
+                    });
+
+                    local_references.records.extend(
+                        generate_toc_link_references(
+                            &display_target,
+                            &path,
+                            directive,
+                            source,
+                        ),
+                    );
+                }
+            } else if extract_references
+                && let Some(raw_target) = directive.targets.first()
+            {
+                local_references.records.push(ReferenceRecord {
+                    id: make_reference_id(source, directive.line, directive.span.start),
+                    kind: ReferenceKind::Transclusion,
+                    target: classify_target(raw_target),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: directive.line,
+                        span: directive.span.clone(),
+                        syntax: ReferenceSyntax::DirectiveTocLinking,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
+        }
+    }
+
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
@@ -520,6 +573,66 @@ fn source_to_id(source: &ComposeSource) -> String {
             .to_string(),
         ComposeSource::Url(u) => u.to_string(),
     }
+}
+
+fn transclusion_options_for_source(
+    options: &ReferenceGraphOptions,
+    source: &ComposeSource,
+) -> crate::markdown::compose::TransclusionOptions {
+    let compose = match source {
+        ComposeSource::File(path) => options.compose.clone().with_source_file(path),
+        ComposeSource::Url(url) => options.compose.clone().with_source_url(url.clone()),
+        ComposeSource::Unknown => options.compose.clone(),
+    };
+    compose.transclusion_options()
+}
+
+fn resolve_toc_linking_target(
+    directive: &toc_linking::TocLinkingDirective,
+    source: &ComposeSource,
+    transclusion_options: &crate::markdown::compose::TransclusionOptions,
+) -> Option<(String, std::path::PathBuf)> {
+    toc_linking::resolve_target_chain(directive, source, transclusion_options)
+        .ok()
+        .flatten()
+}
+
+fn generate_toc_link_references(
+    display_target: &str,
+    path: &std::path::Path,
+    directive: &toc_linking::TocLinkingDirective,
+    source: &ComposeSource,
+) -> Vec<ReferenceRecord> {
+    let Ok(target_md) = Markdown::try_from(path) else {
+        return Vec::new();
+    };
+    let headings = target_md
+        .toc()
+        .all_headings()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let Ok(rendered) = toc_linking::render_resolved_directive(
+        display_target,
+        &headings,
+        &directive.options,
+        directive.line,
+    ) else {
+        return Vec::new();
+    };
+
+    super::local::extract_markdown_links(&rendered, source)
+        .into_iter()
+        .enumerate()
+        .map(|(idx, record)| {
+            let mut record = record;
+            record.id = make_reference_id(source, directive.line, directive.span.start + idx + 1);
+            record.origin.source = source.clone();
+            record.origin.line = directive.line;
+            record.origin.span = directive.span.clone();
+            record
+        })
+        .collect()
 }
 
 #[cfg(test)]

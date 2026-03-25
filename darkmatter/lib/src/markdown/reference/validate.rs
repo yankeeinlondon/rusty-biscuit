@@ -183,7 +183,8 @@ pub(crate) fn validate(
                 }
             }
             ReferenceTarget::RemoteUrl { raw } => {
-                if let Err(e) = url::Url::parse(raw) {
+                let normalized = normalize_remote_url(raw, &record.origin.source);
+                if let Err(e) = url::Url::parse(&normalized) {
                     report.issues.push(ReferenceIssue {
                         code: ReferenceIssueCode::InvalidUrl,
                         message: format!("Invalid URL: {e}"),
@@ -550,7 +551,7 @@ async fn validate_remote_urls_async(
     let mut handles = Vec::new();
     for record in records {
         let url = match &record.target {
-            ReferenceTarget::RemoteUrl { raw } => raw.clone(),
+            ReferenceTarget::RemoteUrl { raw } => normalize_remote_url(raw, &record.origin.source),
             _ => continue,
         };
 
@@ -619,6 +620,20 @@ async fn validate_with_get(client: &reqwest::Client, url: &str) -> RemoteResult 
     }
 }
 
+fn normalize_remote_url(raw: &str, source: &ComposeSource) -> String {
+    if raw.starts_with("//") {
+        let scheme = match source {
+            ComposeSource::Url(url) if url.scheme() == "http" || url.scheme() == "https" => {
+                url.scheme()
+            }
+            _ => "https",
+        };
+        format!("{scheme}:{raw}")
+    } else {
+        raw.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,6 +647,21 @@ mod tests {
         assert_eq!(report.references_scanned, 1);
         assert_eq!(report.references_valid, 1);
         assert!(report.is_valid());
+    }
+
+    #[test]
+    fn validate_protocol_relative_url_syntax() {
+        let md = Markdown::new("[cdn](//cdn.example.com/app.js)");
+        let options = ReferenceValidationOptions::default();
+        let report = validate(&md, &options).unwrap();
+        assert_eq!(report.references_scanned, 1);
+        assert_eq!(report.references_valid, 1);
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget)
+        );
     }
 
     #[test]
