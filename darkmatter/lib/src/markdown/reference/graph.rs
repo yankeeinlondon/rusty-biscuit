@@ -487,27 +487,41 @@ fn build_node(
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
-            // Skip literal content values (contain newlines or don't look like paths)
-            if is_literal_content(prologue) {
-                continue;
-            }
+            let is_literal = is_literal_content(prologue);
 
-            // Emit transclusion reference record for prologue (rec #4)
             if extract_references {
+                let mut attrs = serde_json::Map::new();
+                if is_literal {
+                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                    // Extract links from literal content for follow mode
+                    let links = super::local::extract_markdown_links(prologue, source);
+                    for mut link in links {
+                        link.attributes.insert(
+                            "toc_synthesized".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        local_references.records.push(link);
+                    }
+                }
                 local_references.records.push(ReferenceRecord {
                     id: make_reference_id(source, 0, idx),
                     kind: ReferenceKind::Transclusion,
-                    target: classify_target(prologue),
+                    target: if is_literal {
+                        classify_target("")
+                    } else {
+                        classify_target(prologue)
+                    },
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line: 0,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterPrologue,
                     },
-                    attributes: serde_json::Map::new(),
+                    attributes: attrs,
                 });
             }
 
+            if !is_literal {
             if let Some(child_path) = resolve_local_target(prologue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -541,32 +555,45 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
+            } // if !is_literal
         }
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
-            // Skip literal content values (contain newlines or don't look like paths)
-            if is_literal_content(epilogue) {
-                continue;
-            }
+            let is_literal = is_literal_content(epilogue);
 
-            // Emit transclusion reference record for epilogue (rec #4)
-            // Use usize::MAX as the line so it sorts after all body content
-            // and matches the child insertion's directive_line.
             if extract_references {
+                let mut attrs = serde_json::Map::new();
+                if is_literal {
+                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                    // Extract links from literal content for follow mode
+                    let links = super::local::extract_markdown_links(epilogue, source);
+                    for mut link in links {
+                        link.attributes.insert(
+                            "toc_synthesized".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        local_references.records.push(link);
+                    }
+                }
                 local_references.records.push(ReferenceRecord {
                     id: make_reference_id(source, usize::MAX, idx),
                     kind: ReferenceKind::Transclusion,
-                    target: classify_target(epilogue),
+                    target: if is_literal {
+                        classify_target("")
+                    } else {
+                        classify_target(epilogue)
+                    },
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line: usize::MAX,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterEpilogue,
                     },
-                    attributes: serde_json::Map::new(),
+                    attributes: attrs,
                 });
             }
 
+            if !is_literal {
             if let Some(child_path) = resolve_local_target(epilogue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -603,6 +630,7 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
+            } // if !is_literal
         }
     }
 

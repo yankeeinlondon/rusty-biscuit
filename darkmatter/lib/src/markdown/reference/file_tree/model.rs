@@ -283,9 +283,16 @@ fn build_node_model(
 
     for record in &transclusion_records {
         let trans_kind = syntax_to_transclusion_kind(record.origin.syntax);
-        let display_target = record.target.raw().unwrap_or("").to_string();
+        let is_literal = record.attributes.get("fm_literal").is_some();
+        let display_target = if is_literal {
+            String::new()
+        } else {
+            record.target.raw().unwrap_or("").to_string()
+        };
         let is_local_path = matches!(&record.target, ReferenceTarget::LocalPath { .. });
-        let followable = record.origin.syntax.is_followable_transclusion() && is_local_path;
+        let followable = !is_literal
+            && record.origin.syntax.is_followable_transclusion()
+            && is_local_path;
 
         // Find the matching child insertion for caption context.
         // Match by reference_id when available (stable across frontmatter
@@ -298,9 +305,13 @@ fn build_node_model(
             }
         });
 
-        let caption = insertion
-            .map(|ins| transclusion_caption(&ins.context))
-            .unwrap_or_else(|| default_caption_for_syntax(record.origin.syntax));
+        let caption = if is_literal {
+            "includes static text".to_string()
+        } else {
+            insertion
+                .map(|ins| transclusion_caption(&ins.context))
+                .unwrap_or_else(|| default_caption_for_syntax(record.origin.syntax))
+        };
 
         let child_node_id = insertion.map(|ins| ins.child_node_id.clone());
 

@@ -254,11 +254,12 @@ fn render_transclusions_unified(
     for (ei, edge) in node.transclusions.iter().enumerate() {
         let is_last = ei == edge_count - 1;
 
-        // Separator: insert │ between edges on kind change (but not after
-        // followed children — their content already provides visual separation)
-        if ei > 0 && !prev_had_children {
-            let prev_kind = node.transclusions[ei - 1].kind;
-            if edge.kind != prev_kind {
+        // Separator: always insert │ on kind change.
+        // After followed children, skip separator for same-kind edges
+        // (child content already provides visual separation).
+        if ei > 0 {
+            let kind_changed = edge.kind != node.transclusions[ei - 1].kind;
+            if kind_changed {
                 lines.push(format!("{indent}{VERT}"));
             }
         }
@@ -324,6 +325,11 @@ fn render_single_edge(
     width: usize,
 ) {
     let icon = icons::transclusion_icon(&edge.kind, is_nerd_font);
+    let is_fm = matches!(
+        edge.kind,
+        FileTreeTransclusionKind::Prologue | FileTreeTransclusionKind::Epilogue
+    );
+    let is_literal_fm = is_fm && edge.display_target.is_empty();
 
     let suffix = edge
         .validation
@@ -344,6 +350,21 @@ fn render_single_edge(
             };
             let content = format!("{icon}{}{caption}{suffix}", edge.display_target);
             format!("{prefix}{val_style}{content}\x1b[0m")
+        } else if is_fm {
+            // Prologue/epilogue: inverse label + dim/italic caption
+            let label = match edge.kind {
+                FileTreeTransclusionKind::Prologue => "prologue",
+                _ => "epilogue",
+            };
+            let caption = if is_literal_fm {
+                format!(" \x1b[2;3m{}\x1b[0m", edge.caption)
+            } else {
+                format!(
+                    " \x1b[2;3mreferences \x1b[0m\x1b[38;5;75m{}\x1b[0m",
+                    edge.display_target,
+                )
+            };
+            format!("{prefix}\x1b[7m {label} \x1b[0m{caption}{suffix}")
         } else {
             let styled_caption = style_transclusion_caption(&edge.caption);
             format!(
@@ -352,12 +373,24 @@ fn render_single_edge(
             )
         }
     } else {
-        let caption = if edge.caption.is_empty() {
-            String::new()
+        if is_fm {
+            let label = match edge.kind {
+                FileTreeTransclusionKind::Prologue => "prologue",
+                _ => "epilogue",
+            };
+            if is_literal_fm {
+                format!("{prefix}[{label}] {}{suffix}", edge.caption)
+            } else {
+                format!("{prefix}[{label}] references {}{suffix}", edge.display_target)
+            }
         } else {
-            format!(" {}", edge.caption)
-        };
-        format!("{prefix}{icon}{}{caption}{suffix}", edge.display_target)
+            let caption = if edge.caption.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", edge.caption)
+            };
+            format!("{prefix}{icon}{}{caption}{suffix}", edge.display_target)
+        }
     };
 
     lines.push(truncate_line(&line, width));
