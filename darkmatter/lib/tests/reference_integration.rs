@@ -840,6 +840,11 @@ fn file_tree_toc_linking_follow_mode() {
     assert!(output.contains("root.md"), "expected root label");
     // The child document should appear as a nested subtree in follow mode
     assert!(output.contains("child.md"), "expected nested child label from toc-linking follow");
+    // Prove that follow mode actually rendered the child's content (not just the edge label)
+    assert!(
+        output.contains("child.example.com"),
+        "expected child's hyperlink in nested subtree, proving recursive render"
+    );
 }
 
 #[test]

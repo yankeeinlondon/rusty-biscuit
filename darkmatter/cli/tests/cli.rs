@@ -1461,6 +1461,110 @@ fn test_graph_validate_invalid() {
 }
 
 #[test]
+fn test_graph_follow_toc_linking() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let parent = dir.path().join("root.md");
+    let child = dir.path().join("child.md");
+    std::fs::write(&parent, "# Root\n\n::toc-linking child.md").unwrap();
+    std::fs::write(
+        &child,
+        "# Child\n\n## Section A\n\n## Section B\n\n[link](https://child.example.com)",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(&parent)
+        .arg("--follow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("root.md"))
+        .stdout(predicate::str::contains("child.md"))
+        .stdout(predicate::str::contains("child.example.com"));
+}
+
+#[test]
+fn test_graph_follow_validate_child_broken_link() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let parent = dir.path().join("root.md");
+    let child = dir.path().join("child.md");
+    std::fs::write(&parent, "# Root\n\n::toc-linking child.md").unwrap();
+    std::fs::write(&child, "# Child\n\n[broken](./missing.md)").unwrap();
+
+    let output = md_cmd()
+        .arg("graph")
+        .arg(&parent)
+        .arg("--follow")
+        .arg("--validate")
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit code 2 when followed child has a broken link"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[missing]"),
+        "expected [missing] suffix for broken link in child"
+    );
+}
+
+#[test]
+fn test_graph_follow_multiple_prologues() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("root.md");
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    std::fs::write(
+        &root,
+        "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root",
+    )
+    .unwrap();
+    std::fs::write(&a, "# A\n\n[a-link](https://a.example.com)").unwrap();
+    std::fs::write(&b, "# B\n\n[b-link](https://b.example.com)").unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(&root)
+        .arg("--follow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a.md"))
+        .stdout(predicate::str::contains("b.md"))
+        .stdout(predicate::str::contains("a.example.com"))
+        .stdout(predicate::str::contains("b.example.com"));
+}
+
+#[test]
+fn test_graph_follow_epilogue() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("root.md");
+    let epilogue = dir.path().join("epilogue.md");
+    std::fs::write(
+        &root,
+        "---\nepilogue: epilogue.md\n---\n\n# Root\n\n[main](https://main.example.com)",
+    )
+    .unwrap();
+    std::fs::write(
+        &epilogue,
+        "# Epilogue\n\n[epi-link](https://epilogue.example.com)",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("graph")
+        .arg(&root)
+        .arg("--follow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("root.md"))
+        .stdout(predicate::str::contains("epilogue.md"))
+        .stdout(predicate::str::contains("epilogue.example.com"));
+}
+
+#[test]
 fn test_graph_file_not_found() {
     md_cmd()
         .arg("graph")
