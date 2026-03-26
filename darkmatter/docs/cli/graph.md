@@ -2,7 +2,7 @@
 
 Visualizes a Markdown file's dependency graph as a terminal tree, showing
 references (links, images, imports) and transclusion directives (`::file`,
-`::toc-linking`, etc.) with their insertion context.
+`::toc-linking`, prologue/epilogue) with their insertion context.
 
 ## Usage
 
@@ -18,10 +18,12 @@ md graph <FILE> [--follow] [--validate]
 ## Mental Model
 
 - **Without `--follow`**: Reports all references found directly in the Markdown
-  file, including transclusion directives shown as edges.
+  file, including transclusion directives shown as edges and frontmatter
+  prologue/epilogue entries.
 - **With `--follow`**: Reports references as if the document were **composed** —
-  transclusions are expanded, child document references are shown inline, and
-  `::toc-linking` synthesized hyperlinks appear in the root's reference groups.
+  transclusions are expanded and child document references are shown inline
+  under each edge. `::toc-linking` synthesized hyperlinks and links extracted
+  from literal frontmatter content appear in the root's reference groups.
 
 ## Layout Structure
 
@@ -38,7 +40,9 @@ Zone 2 — File head
 Zone 3 — Transclusion edges (below the file head)
     │◀─ 󰍔  ./child.md inserted into the '# Section' section
     │
-    ╰─▶ 󰍔  ./other.md TOC elements linked into the '## Section' section
+    ├─▶ 󰍔  ./other.md TOC elements linked into the '## Section' section
+    │
+    ╰◀─  epilogue  includes static text
 ```
 
 ### Zone 1: Reference Groups
@@ -55,7 +59,8 @@ Non-transclusion references extracted from the document, grouped by kind:
 | Font Imports         | `\u{f031}`   | 🔤      | `@font-face` sources   |
 
 Groups are separated by a `│` blank line. Duplicate URLs within a group are
-deduplicated (only shown once).
+deduplicated (only shown once). All nerd font icons use an extra trailing space
+for full-width rendering.
 
 ### Zone 2: File Head
 
@@ -67,24 +72,41 @@ is appended in dim text.
 
 Each transclusion directive produces an edge with a directional indicator:
 
-| Direction | Connector | Description                    |
-| --------- | --------- | ------------------------------ |
-| Incoming  | `│◀─`     | `::file`, prologue, epilogue   |
-| Outgoing  | `├─▶`     | `::toc-linking`                |
+| Direction | Connector | Description                                 |
+| --------- | --------- | ------------------------------------------- |
+| Incoming  | `│◀─`     | `::file`, `::code`, prologue, epilogue      |
+| Outgoing  | `├─▶`     | `::toc-linking`                             |
 
-Edge lines include the target path and a caption describing the insertion
-context:
+**Captions** describe the insertion context:
 
-```
-│◀─ 󰍔  ./child.md inserted into the '## Section' section
-╰─▶ 󰍔  ./other.md TOC elements linked into the '## Section' section
-```
+| Directive         | Caption format                                            |
+| ----------------- | --------------------------------------------------------- |
+| `::file`          | `inserted into the '{## Section}' section`                |
+| `::toc-linking`   | `TOC elements linked into the '{## Section}' section`     |
+| `::code`          | `inserted code into the '{## Section}' section`           |
+| `::url`           | `transcluded from URL into the '{## Section}' section`    |
+
+### Frontmatter Prologue/Epilogue Edges
+
+Frontmatter `prologue` and `epilogue` values appear as edges with special
+formatting. The display depends on whether the value is a file path or literal
+content:
+
+| Value type       | TTY rendering                                              | Non-TTY rendering                     |
+| ---------------- | ---------------------------------------------------------- | ------------------------------------- |
+| File reference   | ` epilogue ` (inverse) + *references* + **./file.md** (blue) | `[epilogue] references ./file.md`     |
+| Literal content  | ` epilogue ` (inverse) + *includes static text*             | `[epilogue] includes static text`     |
+
+Literal content values (containing newlines or `---` delimiters) are not
+followable — they cannot be recursively expanded. However, any markdown links
+within literal content (e.g., `[text](./file.md)`) are extracted and appear as
+synthesized references in the root's Zone 1 when `--follow` is used.
 
 ## Conditional Transclusions
 
 Directives with `when=` conditions are evaluated against the current
-environment. Only directives whose condition evaluates to `true` appear in the
-graph. For example:
+environment (frontmatter + external state + `env.*` variables). Only directives
+whose condition evaluates to `true` appear in the graph. For example:
 
 ```markdown
 ::file ./disclosure-cc.md when="env.AGENT == 'claude'"
@@ -94,49 +116,94 @@ graph. For example:
 
 With `AGENT=claude`, only `disclosure-cc.md` appears.
 
-## Literal Frontmatter Content
-
-Frontmatter `prologue` and `epilogue` values that contain literal content
-(newlines or `---` delimiters) are skipped — only file path references produce
-transclusion edges.
-
 ## Line Art Rules
 
 ### Connector Characters
 
-| Character | Unicode  | Usage                                 |
-| --------- | -------- | ------------------------------------- |
-| `╭`       | `U+256D` | First reference row (nothing above)   |
-| `├`       | `U+251C` | Middle rows (vertical continues)      |
-| `╰`       | `U+2570` | Last transclusion edge (terminates)   |
-| `│`       | `U+2502` | Vertical continuation                 |
-| `─`       | `U+2500` | Horizontal line segment               |
-| `◀`       | `U+25C0` | Incoming transclusion arrow           |
-| `▶`       | `U+25B6` | Outgoing transclusion arrow           |
+| Character | Unicode  | Usage                                        |
+| --------- | -------- | -------------------------------------------- |
+| `╭`       | `U+256D` | First reference row (nothing above)          |
+| `├`       | `U+251C` | Middle rows / outgoing edges (continues)     |
+| `╰`       | `U+2570` | Last transclusion edge (terminates branch)   |
+| `│`       | `U+2502` | Vertical continuation / incoming edge prefix |
+| `─`       | `U+2500` | Horizontal line segment                      |
+| `◀`       | `U+25C0` | Incoming transclusion arrow                  |
+| `▶`       | `U+25B6` | Outgoing transclusion arrow                  |
 
-### Vertical Line Termination
+### Connector Positions
 
-- The first reference row uses `╭──` (curved start, nothing above).
-- Subsequent reference rows use `├──` (vertical continues to file head).
-- The last transclusion edge uses `╰` (curved end, nothing below).
-- Incoming transclusion edges use `│◀─` (vertical with no rightward nub).
+| Position                    | Reference rows | Incoming edges | Outgoing edges |
+| --------------------------- | -------------- | -------------- | -------------- |
+| First (nothing above)       | `╭──`          | `│◀─`          | `├─▶`          |
+| Middle (continues)          | `├──`          | `│◀─`          | `├─▶`          |
+| Last (terminates branch)    | `├──`          | `╰◀─`          | `╰─▶`          |
+| Only item (first AND last)  | `╭──`          | `╰◀─`          | `╰─▶`          |
 
-### Spacing Between Transclusion Edges
+Note: Reference rows never use `╰` because the vertical always continues down
+to the file head below. Incoming edges use `│` (no rightward nub) instead of
+`├` so the arrow sits flush against the vertical.
 
-- **Same-kind edges** (e.g., consecutive `::file` directives): No blank `│`
-  separator — edges are adjacent.
-- **Kind change** (e.g., `::file` → `::toc-linking`): A `│` blank line is
-  inserted between them.
-- **After followed children**: No extra separator — the child's indented content
-  provides sufficient visual separation from the next sibling edge.
+### Spacing Rules
 
-### Reference Group Spacing
+#### Between File Head and First Edge
 
-- A `│` blank line separates different reference group kinds (e.g., remote
-  hyperlinks from local hyperlinks).
-- A `│` blank line separates the last reference group from the file head.
-- No `│` separator between the last reference row of a followed child and the
-  next sibling transclusion edge.
+A single `│` blank line separates the file head from the first transclusion edge:
+
+```
+󰍔 test.md
+    │                    ← always present
+    │◀─ 󰍔  ./child.md
+```
+
+#### Between Same-Kind Transclusion Edges
+
+No blank `│` separator — same-kind edges are adjacent:
+
+```
+    │◀─ 󰍔  ./a.md inserted into the '# Section' section
+    │◀─ 󰍔  ./b.md inserted into the '# Section' section
+    │◀─ 󰍔  ./c.md inserted into the '## Other' section
+```
+
+#### Between Different-Kind Transclusion Edges
+
+A `│` blank line is inserted when the kind changes:
+
+```
+    │◀─ 󰍔  ./c.md inserted into the '## Other' section
+    │                    ← kind change: ::file → ::toc-linking
+    ├─▶ 󰍔  ./links.md TOC elements linked into the '## Links' section
+    │                    ← kind change: ::toc-linking → epilogue
+    ╰◀─  epilogue  includes static text
+```
+
+#### Between Reference Groups
+
+A `│` blank line separates different reference group kinds:
+
+```
+    ╭── 🔗  https://example.com     ← remote hyperlinks
+    │                                ← group separator
+    ├── 󰍔  ./local.md               ← local hyperlinks
+    │                                ← separator before file head
+```
+
+#### Between Last Reference Group and File Head
+
+A `│` always separates the last reference group row from the file head.
+
+#### Between Followed Child Content and Next Sibling Edge
+
+When a followed edge has child reference groups, a `│` separates the last
+child reference row from the next sibling transclusion edge:
+
+```
+    │◀─ 󰍔  ./preparation.md inserted into the '# Section' section
+    │       ╭── 🔗  https://example.com
+    │       ├── 󰍔  @docs/related.md
+    │       │                        ← trailing separator from child refs
+    │◀─ 󰍔  ./next.md inserted into the '# Section' section
+```
 
 ## Follow Mode (`--follow`)
 
@@ -155,7 +222,11 @@ When `--follow` is enabled:
    that appear in the root node's reference groups, reflecting the composed
    document's full reference set. These are hidden in non-follow mode.
 
-4. **Recursive expansion** — followed children may themselves have transclusions
+4. **Literal content links appear in Zone 1** — markdown links within literal
+   frontmatter content (e.g., `[animals](./animals.md)` in an epilogue string)
+   are extracted and appear in the root's reference groups when following.
+
+5. **Recursive expansion** — followed children may themselves have transclusions
    that get expanded, with the same unified rendering applied at each depth.
 
 ## Validation Mode (`--validate`)
@@ -173,11 +244,15 @@ When `--validate` is enabled:
 
 When outputting to a terminal (TTY detected):
 
-- **File head**: bold label, dim summary counts
-- **Transclusion filename**: blue (`\x1b[38;5;75m`)
-- **Transclusion caption**: dim + italic, with section heading name in normal
-  weight (e.g., *inserted into the* '## Section' *section*)
-- **Validation errors**: colored by severity (red/yellow/cyan)
+| Element                | Style                                                    |
+| ---------------------- | -------------------------------------------------------- |
+| File head label        | Bold                                                     |
+| File head summary      | Dim                                                      |
+| Transclusion filename  | Blue (`\x1b[38;5;75m`)                                   |
+| Transclusion caption   | Dim + italic, section name in normal weight               |
+| Prologue/epilogue label| Inverse (white-on-black)                                 |
+| Prologue/epilogue desc | Dim + italic (literal) or dim + italic + blue (file ref) |
+| Validation errors      | Red (error), yellow (warning), cyan (info)               |
 
 When piped (non-TTY): plain text with no ANSI escape codes.
 
