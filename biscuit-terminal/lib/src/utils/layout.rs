@@ -306,6 +306,40 @@ impl Default for WordWrap {
     }
 }
 
+impl WordWrap {
+    /// Set the hanging indent, replacing any previously configured value.
+    ///
+    /// Continuation lines after a word wrap will be indented by `indent`
+    /// spaces. `Truncate` and `None` variants are upgraded to
+    /// `WrapProse` with the default start-looking window.
+    pub fn with_hanging_indent(self, indent: u32) -> Self {
+        match self {
+            WordWrap::None => WordWrap::WrapProse(Some(8), Some(indent)),
+            WordWrap::WrapProse(offset, _) => WordWrap::WrapProse(offset, Some(indent)),
+            WordWrap::BespokeProse(offset, chars, _) => {
+                WordWrap::BespokeProse(offset, chars, Some(indent))
+            }
+            WordWrap::Truncate(_) => self,
+        }
+    }
+
+    /// Set the hanging indent only if one is not already configured.
+    ///
+    /// Like [`with_hanging_indent`](Self::with_hanging_indent) but
+    /// respects an existing explicit value. `None` is upgraded to
+    /// `WrapProse` with the default start-looking window.
+    pub fn with_hanging_indent_if_none(self, indent: u32) -> Self {
+        match self {
+            WordWrap::None => WordWrap::WrapProse(Some(8), Some(indent)),
+            WordWrap::WrapProse(offset, None) => WordWrap::WrapProse(offset, Some(indent)),
+            WordWrap::BespokeProse(offset, chars, None) => {
+                WordWrap::BespokeProse(offset, chars, Some(indent))
+            }
+            _ => self,
+        }
+    }
+}
+
 /// Layout configuration for renderable components.
 ///
 /// Controls margins, alignment, word-wrapping, and background color for
@@ -746,5 +780,69 @@ mod tests {
             let result = layout.available_width(terminal_width);
             prop_assert!(result <= terminal_width.saturating_sub(margin_left).saturating_sub(margin_right));
         }
+    }
+
+    // =========================================================================
+    // WordWrap hanging indent methods
+    // =========================================================================
+
+    #[test]
+    fn test_with_hanging_indent_on_none() {
+        let wrap = WordWrap::None.with_hanging_indent(4);
+        assert_eq!(wrap, WordWrap::WrapProse(Some(8), Some(4)));
+    }
+
+    #[test]
+    fn test_with_hanging_indent_on_wrap_prose() {
+        let wrap = WordWrap::WrapProse(Some(5), Some(2)).with_hanging_indent(6);
+        assert_eq!(wrap, WordWrap::WrapProse(Some(5), Some(6)));
+    }
+
+    #[test]
+    fn test_with_hanging_indent_on_bespoke_prose() {
+        let wrap =
+            WordWrap::BespokeProse(Some(10), vec![' ', ','], Some(2)).with_hanging_indent(6);
+        assert_eq!(
+            wrap,
+            WordWrap::BespokeProse(Some(10), vec![' ', ','], Some(6))
+        );
+    }
+
+    #[test]
+    fn test_with_hanging_indent_on_truncate_is_noop() {
+        let wrap = WordWrap::Truncate(Some("...".into())).with_hanging_indent(4);
+        assert_eq!(wrap, WordWrap::Truncate(Some("...".into())));
+    }
+
+    #[test]
+    fn test_with_hanging_indent_if_none_sets_when_missing() {
+        let wrap = WordWrap::WrapProse(Some(5), None).with_hanging_indent_if_none(4);
+        assert_eq!(wrap, WordWrap::WrapProse(Some(5), Some(4)));
+    }
+
+    #[test]
+    fn test_with_hanging_indent_if_none_preserves_existing() {
+        let wrap = WordWrap::WrapProse(Some(5), Some(2)).with_hanging_indent_if_none(4);
+        assert_eq!(wrap, WordWrap::WrapProse(Some(5), Some(2)));
+    }
+
+    #[test]
+    fn test_with_hanging_indent_if_none_on_bespoke() {
+        let wrap =
+            WordWrap::BespokeProse(Some(10), vec![' '], None).with_hanging_indent_if_none(3);
+        assert_eq!(
+            wrap,
+            WordWrap::BespokeProse(Some(10), vec![' '], Some(3))
+        );
+    }
+
+    #[test]
+    fn test_with_hanging_indent_if_none_bespoke_preserves_existing() {
+        let wrap =
+            WordWrap::BespokeProse(Some(10), vec![' '], Some(2)).with_hanging_indent_if_none(4);
+        assert_eq!(
+            wrap,
+            WordWrap::BespokeProse(Some(10), vec![' '], Some(2))
+        );
     }
 }

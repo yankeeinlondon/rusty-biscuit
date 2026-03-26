@@ -13,32 +13,18 @@ use crate::{
 /// Configure word wrap on an inline component so that wrapped continuation
 /// lines align with content after the list prefix (bullet or number).
 ///
-/// - `WordWrap::None` → upgraded to `WrapProse` with `hanging_indent`
-/// - `WrapProse(_, None)` → fills in the hanging indent
-/// - `BespokeProse(_, _, None)` → fills in the hanging indent
-/// - Already has an explicit hanging indent → left as-is
-/// - `Truncate` → left as-is
+/// Sets the hanging indent only when one is not already configured,
+/// preserving any explicit value the caller set on the component.
 fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32) {
     if let RenderableContent::Component(arc) = content
         && let Some(component) = Rc::get_mut(arc)
+        && !component.is_block_level()
     {
-        if component.is_block_level() {
-            return;
-        }
         let layout = component.layout_mut();
-        match &layout.word_wrap {
-            WordWrap::None => {
-                layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
-            }
-            WordWrap::WrapProse(offset, None) => {
-                layout.word_wrap = WordWrap::WrapProse(*offset, Some(hanging_indent));
-            }
-            WordWrap::BespokeProse(offset, chars, None) => {
-                layout.word_wrap =
-                    WordWrap::BespokeProse(*offset, chars.clone(), Some(hanging_indent));
-            }
-            _ => {} // Already has indent or uses Truncate
-        }
+        layout.word_wrap = layout
+            .word_wrap
+            .clone()
+            .with_hanging_indent_if_none(hanging_indent);
     }
 }
 
@@ -47,26 +33,13 @@ fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32
 fn force_component_hanging_indent(content: &mut RenderableContent, hanging_indent: u32) {
     if let RenderableContent::Component(arc) = content
         && let Some(component) = Rc::get_mut(arc)
+        && !component.is_block_level()
     {
-        if component.is_block_level() {
-            return;
-        }
         let layout = component.layout_mut();
-        match &layout.word_wrap {
-            WordWrap::None => {
-                layout.word_wrap = WordWrap::WrapProse(Some(8), Some(hanging_indent));
-            }
-            WordWrap::WrapProse(offset, _) => {
-                let offset = *offset;
-                layout.word_wrap = WordWrap::WrapProse(offset, Some(hanging_indent));
-            }
-            WordWrap::BespokeProse(offset, chars, _) => {
-                let offset = *offset;
-                let chars = chars.clone();
-                layout.word_wrap = WordWrap::BespokeProse(offset, chars, Some(hanging_indent));
-            }
-            WordWrap::Truncate(_) => {}
-        }
+        layout.word_wrap = layout
+            .word_wrap
+            .clone()
+            .with_hanging_indent(hanging_indent);
     }
 }
 
