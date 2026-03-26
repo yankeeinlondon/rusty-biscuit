@@ -3,7 +3,12 @@ epilogue: "---\n\n- No [animals](./animals.md) were hurt in the preparation of t
 ---
 # Testing Composition
 
-<img src="https://icon-sets.iconify.design/streamline/industry-innovation-and-infrastructure/" />
+<meta property="og:site_name" content="testing">
+<meta property="og:description" content="a test of document composition">
+<link rel="stylesheet" href="./style.css">
+
+
+<img src="https://www.nerdfonts.com/assets/img/sankey-glyphs-combined-diagram.png" />
 
 This is a basic test of _composition_ through the Markdown pipeline we use in Darkmatter. The overall flow is:
 
