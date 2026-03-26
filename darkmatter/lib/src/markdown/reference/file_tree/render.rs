@@ -1,22 +1,31 @@
 //! Terminal rendering for the FileTree component.
 //!
-//! Implements the three-zone layout: reference groups above the file head line,
-//! the file head itself, and transclusion edges below.
+//! Implements a three-zone layout per node: reference groups above the file
+//! head line, the file head itself, and transclusion edges below.  In follow
+//! mode, followed edges merge with their child nodes — the edge arrow becomes
+//! the child's header and the child's content renders indented below it.
 
 use biscuit_terminal::terminal::Terminal;
 
 use crate::markdown::reference::validate::ReferenceSeverity;
 use super::icons;
 use super::model::{
-    FileTreeModel, FileTreeNode, FileTreeReferenceGroup, FileTreeTransclusionKind,
+    FileTreeModel, FileTreeNode, FileTreeReferenceGroup, FileTreeTransclusionEdge,
+    FileTreeTransclusionKind,
 };
 
 // ── Connector strings ───────────────────────────────────────────────
+//
+//  │        CONNECTOR_VERTICAL      (continuation)
+//  ├── 🔗   CONNECTOR_REF_PREFIX    (reference row branch)
+//  ├◂─      CONNECTOR_TRANSCLUSION_IN  (incoming transclusion)
+//  ├─▸      CONNECTOR_TRANSCLUSION_OUT (outgoing toc-linking)
+//  │        INDENT_CHILD            (child content indent)
 
 const CONNECTOR_VERTICAL: &str = "    \u{2502}";
-const CONNECTOR_REF_PREFIX: &str = "    \u{2502} \u{0305} \u{0305} \u{0305} \u{0305} ";
-const CONNECTOR_TRANSCLUSION_IN: &str = "    \u{2502}<--- ";
-const CONNECTOR_TRANSCLUSION_OUT: &str = "    \u{2502}---> ";
+const CONNECTOR_REF_PREFIX: &str = "    \u{251C}\u{2500}\u{2500} ";
+const CONNECTOR_TRANSCLUSION_IN: &str = "    \u{251C}\u{25C2}\u{2500} ";
+const CONNECTOR_TRANSCLUSION_OUT: &str = "    \u{251C}\u{2500}\u{25B8} ";
 const INDENT_CHILD: &str = "    \u{2502}   ";
 
 // ── Public rendering entry points ───────────────────────────────────
@@ -63,29 +72,8 @@ fn render_node(
     // Zone 2: File head line
     render_file_head(node, lines, indent, is_nerd_font, is_tty);
 
-    // Zone 3: Transclusion edges below
-    render_transclusion_edges(
-        &node.transclusions,
-        lines,
-        indent,
-        is_nerd_font,
-        is_tty,
-        width,
-    );
-
-    // Follow-mode children
-    for (i, child) in node.children.iter().enumerate() {
-        // Add a blank connector line before each child
-        lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
-
-        let child_indent = format!("{indent}{INDENT_CHILD}");
-        render_node(child, lines, &child_indent, is_nerd_font, is_tty, width);
-
-        // Trailing connector after non-last children
-        if i < node.children.len() - 1 {
-            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
-        }
-    }
+    // Zone 3+4: Transclusion edges unified with follow-mode children
+    render_transclusions_unified(node, lines, indent, is_nerd_font, is_tty, width);
 }
 
 /// Render the root node's content (reference groups, transclusions, children)
@@ -101,29 +89,8 @@ fn render_node_children_only(
     // Zone 1: Reference groups
     render_reference_groups(&node.reference_groups, lines, indent, is_nerd_font, is_tty, width);
 
-    // Zone 3: Transclusion edges
-    render_transclusion_edges(
-        &node.transclusions,
-        lines,
-        indent,
-        is_nerd_font,
-        is_tty,
-        width,
-    );
-
-    // Follow-mode children
-    for (i, child) in node.children.iter().enumerate() {
-        if !lines.is_empty() {
-            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
-        }
-
-        let child_indent = format!("{indent}{INDENT_CHILD}");
-        render_node(child, lines, &child_indent, is_nerd_font, is_tty, width);
-
-        if i < node.children.len() - 1 {
-            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
-        }
-    }
+    // Zone 3+4: Transclusion edges unified with follow-mode children
+    render_transclusions_unified(node, lines, indent, is_nerd_font, is_tty, width);
 }
 
 fn render_reference_groups(
@@ -201,57 +168,151 @@ fn render_file_head(
     }
 }
 
-fn render_transclusion_edges(
-    transclusions: &[super::model::FileTreeTransclusionEdge],
+/// Render transclusion edges and follow-mode children in a unified pass.
+///
+/// For edges without a followed child, renders the edge line only.
+/// For edges with a followed child, the edge arrow line becomes the child's
+/// header and the child's content (reference groups + sub-transclusions)
+/// renders indented below — eliminating the double-rendering problem.
+fn render_transclusions_unified(
+    node: &FileTreeNode,
     lines: &mut Vec<String>,
     indent: &str,
     is_nerd_font: bool,
     is_tty: bool,
     width: usize,
 ) {
-    if transclusions.is_empty() {
+    if node.transclusions.is_empty() {
         return;
     }
 
     // Separator between file head and transclusions
     lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
 
-    for edge in transclusions {
-        let icon = icons::transclusion_icon(&edge.kind, is_nerd_font);
-        let connector = match edge.kind {
-            FileTreeTransclusionKind::TocLinking => CONNECTOR_TRANSCLUSION_OUT,
-            _ => CONNECTOR_TRANSCLUSION_IN,
-        };
+    // Children are pushed in the same order as their corresponding followed
+    // edges in the model builder, so we consume them sequentially.
+    let mut child_idx = 0;
+    let edge_count = node.transclusions.len();
 
+    for (ei, edge) in node.transclusions.iter().enumerate() {
+        // Render the edge arrow line
+        render_single_edge(edge, lines, indent, is_nerd_font, is_tty, width);
+
+        // If this edge was followed, render the child's content below it
+        let is_followed = edge.followable
+            && edge.child_node_id.is_some()
+            && child_idx < node.children.len();
+
+        if is_followed {
+            let child = &node.children[child_idx];
+            child_idx += 1;
+
+            let child_indent = format!("{indent}{INDENT_CHILD}");
+
+            // Render the child's references (Zone 1 for the child)
+            render_reference_groups(
+                &child.reference_groups,
+                lines,
+                &child_indent,
+                is_nerd_font,
+                is_tty,
+                width,
+            );
+
+            // Render the child's transclusions + grandchildren (recursive)
+            render_transclusions_unified(child, lines, &child_indent, is_nerd_font, is_tty, width);
+        }
+
+        // Blank connector line between edges for visual separation
+        if ei < edge_count - 1 {
+            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
+        }
+    }
+}
+
+/// Render a single transclusion edge line.
+fn render_single_edge(
+    edge: &FileTreeTransclusionEdge,
+    lines: &mut Vec<String>,
+    indent: &str,
+    is_nerd_font: bool,
+    is_tty: bool,
+    width: usize,
+) {
+    let icon = icons::transclusion_icon(&edge.kind, is_nerd_font);
+    let connector = match edge.kind {
+        FileTreeTransclusionKind::TocLinking => CONNECTOR_TRANSCLUSION_OUT,
+        _ => CONNECTOR_TRANSCLUSION_IN,
+    };
+
+    let suffix = edge
+        .validation
+        .as_ref()
+        .and_then(|v| v.suffix.as_deref())
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default();
+
+    let prefix = format!("{indent}{connector}");
+
+    let line = if is_tty {
+        let val_style = validation_style(&edge.validation, is_tty);
+        if !val_style.is_empty() {
+            // Validation error: entire line in error color
+            let caption = if edge.caption.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", edge.caption)
+            };
+            let content = format!("{icon}{}{caption}{suffix}", edge.display_target);
+            format!("{prefix}{val_style}{content}\x1b[0m")
+        } else {
+            // Normal: blue filename, dim+italic caption with normal section name
+            let styled_caption = style_transclusion_caption(&edge.caption);
+            format!(
+                "{prefix}{icon}\x1b[38;5;75m{}\x1b[0m{styled_caption}{suffix}",
+                edge.display_target,
+            )
+        }
+    } else {
         let caption = if edge.caption.is_empty() {
             String::new()
         } else {
             format!(" {}", edge.caption)
         };
+        format!("{prefix}{icon}{}{caption}{suffix}", edge.display_target)
+    };
 
-        let suffix = edge
-            .validation
-            .as_ref()
-            .and_then(|v| v.suffix.as_deref())
-            .map(|s| format!(" {s}"))
-            .unwrap_or_default();
-
-        let content = format!("{icon}{}{caption}{suffix}", edge.display_target);
-        let prefix = format!("{indent}{connector}");
-
-        let line = if is_tty {
-            let style = validation_style(&edge.validation, is_tty);
-            let reset = if style.is_empty() { "" } else { "\x1b[0m" };
-            format!("{prefix}{style}{content}{reset}")
-        } else {
-            format!("{prefix}{content}")
-        };
-
-        lines.push(truncate_line(&line, width));
-    }
+    lines.push(truncate_line(&line, width));
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/// Style a transclusion caption for TTY output.
+///
+/// Renders the caption text as dim+italic, with the section heading name
+/// (delimited by single quotes) in normal weight.
+fn style_transclusion_caption(caption: &str) -> String {
+    if caption.is_empty() {
+        return String::new();
+    }
+    // dim+italic = \x1b[2;3m, reset = \x1b[0m
+    const DIM_ITALIC: &str = "\x1b[2;3m";
+    const RESET: &str = "\x1b[0m";
+
+    // Caption format: "inserted into the '## Heading' section"
+    // Split on single-quote delimiters to style the section heading normally.
+    if let Some(start) = caption.find('\'') {
+        if let Some(end) = caption[start + 1..].find('\'') {
+            let before = &caption[..start];
+            let section = &caption[start..start + 1 + end + 1]; // includes quotes
+            let after = &caption[start + 1 + end + 1..];
+            return format!(" {DIM_ITALIC}{before}{RESET}{section}{DIM_ITALIC}{after}{RESET}");
+        }
+    }
+
+    // No section delimiters — style the whole caption dim+italic
+    format!(" {DIM_ITALIC}{caption}{RESET}")
+}
 
 /// Get ANSI style prefix for validation status.
 fn validation_style(
@@ -310,6 +371,19 @@ mod tests {
                 children: vec![],
                 validation: FileTreeNodeValidation::default(),
             },
+        }
+    }
+
+    fn child_node(label: &str) -> FileTreeNode {
+        FileTreeNode {
+            source: ComposeSource::File(std::path::PathBuf::from(format!("/docs/{label}"))),
+            file_label: label.to_string(),
+            file_icon_kind: FileTreeIconKind::Markdown,
+            inline_summary: FileTreeInlineSummary::default(),
+            reference_groups: vec![],
+            transclusions: vec![],
+            children: vec![],
+            validation: FileTreeNodeValidation::default(),
         }
     }
 
@@ -451,20 +525,20 @@ mod tests {
     #[test]
     fn render_show_root_false_preserves_children() {
         let mut model = simple_model();
-        model.root.children = vec![FileTreeNode {
-            source: ComposeSource::File(std::path::PathBuf::from("/docs/child.md")),
-            file_label: "child.md".to_string(),
-            file_icon_kind: FileTreeIconKind::Markdown,
-            inline_summary: FileTreeInlineSummary::default(),
-            reference_groups: vec![],
-            transclusions: vec![],
-            children: vec![],
-            validation: FileTreeNodeValidation::default(),
+        model.root.transclusions = vec![FileTreeTransclusionEdge {
+            kind: FileTreeTransclusionKind::File,
+            display_target: "child.md".to_string(),
+            caption: String::new(),
+            directive_line: 5,
+            followable: true,
+            child_node_id: Some("child_1".to_string()),
+            validation: None,
         }];
+        model.root.children = vec![child_node("child.md")];
 
         let output = render_model_optimistic(&model, 120, false);
         assert!(!output.contains("test.md"), "root label should be hidden");
-        assert!(output.contains("child.md"), "child should still render");
+        assert!(output.contains("child.md"), "child should still render via edge");
     }
 
     #[test]
@@ -511,5 +585,124 @@ mod tests {
     fn truncate_line_zero_width_passthrough() {
         let line = "hello";
         assert_eq!(truncate_line(line, 0), "hello");
+    }
+
+    #[test]
+    fn style_caption_with_section() {
+        let caption = "inserted into the '## Details' section";
+        let styled = style_transclusion_caption(caption);
+        // Should contain dim+italic for text and reset around section name
+        assert!(styled.contains("\x1b[2;3m"), "should have dim+italic");
+        assert!(styled.contains("\x1b[0m"), "should have reset");
+        assert!(styled.contains("'## Details'"), "section name preserved");
+    }
+
+    #[test]
+    fn style_caption_no_section() {
+        let caption = "inserted";
+        let styled = style_transclusion_caption(caption);
+        assert!(styled.contains("\x1b[2;3m"), "should have dim+italic");
+        assert!(styled.contains("inserted"), "text preserved");
+    }
+
+    #[test]
+    fn style_caption_empty() {
+        assert_eq!(style_transclusion_caption(""), "");
+    }
+
+    #[test]
+    fn render_tty_transclusion_has_blue_target() {
+        let mut model = simple_model();
+        model.root.transclusions = vec![FileTreeTransclusionEdge {
+            kind: FileTreeTransclusionKind::File,
+            display_target: "./child.md".to_string(),
+            caption: "inserted into the '## Details' section".to_string(),
+            directive_line: 10,
+            followable: true,
+            child_node_id: None,
+            validation: None,
+        }];
+
+        let term = biscuit_terminal::terminal::Terminal {
+            is_tty: true,
+            is_nerd_font: Some(false),
+            ..Default::default()
+        };
+        let output = render_model(&model, &term, true);
+        // Blue color for filename: \x1b[38;5;75m
+        assert!(output.contains("\x1b[38;5;75m./child.md"), "target should be blue");
+        // Dim+italic for caption
+        assert!(output.contains("\x1b[2;3m"), "caption should be dim+italic");
+    }
+
+    #[test]
+    fn follow_mode_does_not_double_render() {
+        let mut model = simple_model();
+        let child = child_node("child.md");
+
+        model.root.transclusions = vec![FileTreeTransclusionEdge {
+            kind: FileTreeTransclusionKind::File,
+            display_target: "./child.md".to_string(),
+            caption: "inserted into the '## Details' section".to_string(),
+            directive_line: 10,
+            followable: true,
+            child_node_id: Some("child_1".to_string()),
+            validation: None,
+        }];
+        model.root.children = vec![child];
+
+        let output = render_model_optimistic(&model, 120, true);
+        let lines: Vec<&str> = output.lines().collect();
+
+        // The edge arrow should appear exactly once (as the child header)
+        let edge_count = lines.iter().filter(|l| l.contains("./child.md")).count();
+        assert_eq!(edge_count, 1, "child.md should appear once, not twice");
+
+        // The standalone file head "child.md" should NOT appear separately
+        // (only the edge arrow "./child.md" should be present via ├◂─)
+        let head_count = lines
+            .iter()
+            .filter(|l| {
+                l.contains("child.md") && !l.contains('\u{25C2}') && !l.contains('\u{25B8}')
+            })
+            .count();
+        assert_eq!(head_count, 0, "no standalone child file head in follow mode");
+    }
+
+    #[test]
+    fn follow_mode_renders_child_refs_under_edge() {
+        let mut model = simple_model();
+        let mut child = child_node("child.md");
+        child.reference_groups = vec![FileTreeReferenceGroup {
+            kind: FileTreeReferenceGroupKind::RemoteHyperlinks,
+            rows: vec![FileTreeReferenceRow {
+                kind: crate::markdown::reference::types::ReferenceKind::Hyperlink,
+                display_target: "https://example.com".to_string(),
+                raw_reference_id: "r1".to_string(),
+                validation: None,
+            }],
+        }];
+
+        model.root.transclusions = vec![FileTreeTransclusionEdge {
+            kind: FileTreeTransclusionKind::File,
+            display_target: "./child.md".to_string(),
+            caption: String::new(),
+            directive_line: 10,
+            followable: true,
+            child_node_id: Some("child_1".to_string()),
+            validation: None,
+        }];
+        model.root.children = vec![child];
+
+        let output = render_model_optimistic(&model, 120, true);
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Child's references should appear after the edge line
+        let edge_idx = lines.iter().position(|l| l.contains("./child.md")).unwrap();
+        let ref_idx = lines.iter().position(|l| l.contains("example.com")).unwrap();
+        assert!(
+            ref_idx > edge_idx,
+            "child refs should render below the edge"
+        );
     }
 }
