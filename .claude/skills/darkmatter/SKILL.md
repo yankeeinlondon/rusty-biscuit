@@ -111,7 +111,20 @@ md doc.md --output html --show   # Open in default app
 md toc doc.md                    # Table of contents
 md delta old.md new.md           # Document comparison
 md -v delta old.md new.md        # Verbose comparison (-v is top-level)
+md graph doc.md                  # Dependency graph visualization
+md graph doc.md --follow         # Recurse into transclusions
+md graph doc.md --validate       # Inline validation overlays
 ```
+
+### FileTree Component
+
+`FileTree` is a `Renderable` component that visualizes a Markdown file's dependency surface:
+- References (hyperlinks, images, CSS/script imports) above the file line
+- Transclusions below the file line with section-aware captions
+- Optional recursive expansion via `.follow_transclusions()`
+- Optional validation overlays via `.validate()`
+
+Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ## See Also
 
