@@ -64,6 +64,10 @@ pub enum MarkdownError {
     /// Page block pipeline error.
     #[error("Page block error: {0}")]
     PageBlock(#[from] crate::markdown::compose::page_blocks::PageBlockError),
+
+    /// Reference analysis error.
+    #[error("Reference error: {0}")]
+    Reference(#[from] crate::markdown::reference::ReferenceError),
 }
 
 /// Result type for markdown operations.
