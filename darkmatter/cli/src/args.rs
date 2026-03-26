@@ -118,6 +118,22 @@ pub enum Command {
             add = ArgValueCompleter::new(complete_indent_values)
         )]
         indent: Option<usize>,
+
+        /// Allow missing hyperlink targets (emit content, report errors on stderr)
+        #[arg(long)]
+        allow_missing_hyperlinks: bool,
+
+        /// Allow missing image reference targets (emit content, report errors on stderr)
+        #[arg(long)]
+        allow_missing_image_refs: bool,
+
+        /// Allow missing transclusion targets (remove directive, report errors on stderr)
+        #[arg(long)]
+        allow_missing_transclusions: bool,
+
+        /// Allow any missing reference (combines all --allow-missing-* flags)
+        #[arg(long)]
+        allow_any_missing_reference: bool,
     },
 
     /// Show markdown table of contents.

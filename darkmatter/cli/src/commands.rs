@@ -16,6 +16,34 @@ use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Resolved allow flags for compose validation.
+pub struct ComposeAllowFlags {
+    pub hyperlinks: bool,
+    pub image_refs: bool,
+    pub transclusions: bool,
+}
+
+impl ComposeAllowFlags {
+    /// Returns `true` if no allow flags are set (strict mode).
+    fn is_strict(&self) -> bool {
+        !self.hyperlinks && !self.image_refs && !self.transclusions
+    }
+
+    /// Returns `true` if the given issue kind is allowed by the current flags.
+    fn is_allowed(
+        &self,
+        kind: darkmatter::markdown::reference::types::ReferenceKind,
+    ) -> bool {
+        use darkmatter::markdown::reference::types::ReferenceKind;
+        match kind {
+            ReferenceKind::Hyperlink => self.hyperlinks,
+            ReferenceKind::Image => self.image_refs,
+            ReferenceKind::Transclusion => self.transclusions,
+            _ => false,
+        }
+    }
+}
+
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     let mut conflicts = Vec::new();
 
@@ -72,8 +100,17 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             compact,
             loose,
             indent,
+            allow_missing_hyperlinks,
+            allow_missing_image_refs,
+            allow_missing_transclusions,
+            allow_any_missing_reference,
         } => {
             let mode = resolve_list_spacing(compact, loose);
+            let allow = ComposeAllowFlags {
+                hyperlinks: allow_missing_hyperlinks || allow_any_missing_reference,
+                image_refs: allow_missing_image_refs || allow_any_missing_reference,
+                transclusions: allow_missing_transclusions || allow_any_missing_reference,
+            };
             run_compose(
                 input.as_ref(),
                 state.as_deref(),
@@ -83,6 +120,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 frontmatter,
                 mode,
                 indent,
+                &allow,
                 cli,
             )?;
         }
@@ -278,6 +316,7 @@ pub fn run_compose(
     include_frontmatter: bool,
     list_spacing: ListSpacingMode,
     indent: Option<usize>,
+    allow: &ComposeAllowFlags,
     cli: &Cli,
 ) -> Result<()> {
     let md = load_markdown(input)?;
@@ -288,6 +327,52 @@ pub fn run_compose(
         && path.to_str() != Some("-")
     {
         Some(resolve_file_path(path)?)
+    } else {
+        None
+    };
+
+    // ── Reference validation ───────────────────────────────────────────
+    // Validate before composing so broken references are caught early.
+    let deferred_report = if resolved_input.is_some() {
+        use biscuit_terminal::terminal::Terminal;
+        use darkmatter::markdown::reference::ReferenceGraphOptions;
+        use darkmatter::markdown::reference::validate::{
+            ReferenceValidationOptions, ReferenceSeverity,
+        };
+
+        let val_options = ReferenceValidationOptions {
+            graph: ReferenceGraphOptions::default(),
+            ..Default::default()
+        };
+
+        match md.validate_references(val_options) {
+            Ok(report) => {
+                let has_errors = report
+                    .issues
+                    .iter()
+                    .any(|i| i.severity == ReferenceSeverity::Error);
+
+                if has_errors {
+                    let has_unallowed = report.issues.iter().any(|i| {
+                        i.severity == ReferenceSeverity::Error && !allow.is_allowed(i.kind)
+                    });
+
+                    if allow.is_strict() || has_unallowed {
+                        // Strict mode or unallowed errors: show issues and exit
+                        let term = Terminal::default();
+                        let formatted = format_validation_issues(&report, &term);
+                        eprint!("{formatted}");
+                        std::process::exit(2);
+                    }
+
+                    // All errors are allowed — defer report for stderr after content
+                    Some(report)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
     } else {
         None
     };
@@ -446,6 +531,16 @@ pub fn run_compose(
         OutputFormat::Json => {
             let artifact = json_artifact(&composed)?;
             emit_or_show_artifact(artifact, show)?;
+        }
+    }
+
+    // Emit deferred validation issues to stderr (allowed but still reported)
+    if let Some(report) = deferred_report {
+        use biscuit_terminal::terminal::Terminal;
+        let term = Terminal::default();
+        let formatted = format_validation_issues(&report, &term);
+        if !formatted.is_empty() {
+            eprint!("\n{formatted}");
         }
     }
 
@@ -1220,6 +1315,132 @@ fn print_validation_report_json(
     Ok(())
 }
 
+/// Category label for a reference kind used in grouped validation output.
+fn reference_kind_category_label(
+    kind: darkmatter::markdown::reference::types::ReferenceKind,
+) -> &'static str {
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    match kind {
+        ReferenceKind::Hyperlink => "Invalid Hyperlink(s)",
+        ReferenceKind::Image => "Invalid Image Reference(s)",
+        ReferenceKind::Transclusion => "Invalid Transclusion Target(s)",
+        ReferenceKind::CssImport | ReferenceKind::InlineCss => "Invalid CSS Import(s)",
+        ReferenceKind::ScriptImport | ReferenceKind::InlineScript => "Invalid Script Import(s)",
+        ReferenceKind::FontImport => "Invalid Font Import(s)",
+        ReferenceKind::MetaTag => "Invalid Meta Tag(s)",
+    }
+}
+
+/// Formats grouped validation issues as a styled string.
+///
+/// Issues are grouped by [`ReferenceKind`] category, then listed by source
+/// document with the broken reference highlighted in red. Returns an empty
+/// string if there are no error-severity issues.
+fn format_validation_issues(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    use biscuit_terminal::components::list::UnorderedList;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable as _;
+    use darkmatter::markdown::compose::ComposeSource;
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    use darkmatter::markdown::reference::validate::ReferenceSeverity;
+    use std::collections::BTreeMap;
+
+    // Only show error-severity issues in grouped output
+    let errors: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.severity == ReferenceSeverity::Error)
+        .collect();
+
+    if errors.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    // Group by kind, preserving discovery order within each group
+    let mut groups: BTreeMap<u8, (ReferenceKind, Vec<_>)> = BTreeMap::new();
+    let kind_order = |k: ReferenceKind| -> u8 {
+        match k {
+            ReferenceKind::Transclusion => 0,
+            ReferenceKind::Hyperlink => 1,
+            ReferenceKind::Image => 2,
+            ReferenceKind::CssImport | ReferenceKind::InlineCss => 3,
+            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => 4,
+            ReferenceKind::FontImport => 5,
+            ReferenceKind::MetaTag => 6,
+        }
+    };
+
+    for issue in &errors {
+        let key = kind_order(issue.kind);
+        groups
+            .entry(key)
+            .or_insert_with(|| (issue.kind, Vec::new()))
+            .1
+            .push(*issue);
+    }
+
+    out.push('\n');
+
+    for (_order, (kind, issues)) in &groups {
+        let label = reference_kind_category_label(*kind);
+        let header = format!("<red-500><b>{label}</b></red-500>");
+        out.push_str(&Prose::new(header).render(term));
+        out.push('\n');
+
+        let mut list = UnorderedList::empty();
+        for issue in issues {
+            let source_name = match &issue.origin.source {
+                ComposeSource::File(p) => p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                ComposeSource::Url(u) => u.to_string(),
+                ComposeSource::Unknown => "unknown".to_string(),
+            };
+
+            let source_href = match &issue.origin.source {
+                ComposeSource::File(p) => {
+                    format!("file://{}", p.display())
+                }
+                _ => String::new(),
+            };
+
+            let item_text = if source_href.is_empty() {
+                format!(
+                    "the <blue-500>{source_name}</blue-500> reference to <red-500>{ref_display}</red-500> is not valid",
+                    ref_display = issue.reference_display,
+                )
+            } else {
+                format!(
+                    "the <a href=\"{source_href}\"><blue-500>{source_name}</blue-500></a> reference to <red-500>{ref_display}</red-500> is not valid",
+                    ref_display = issue.reference_display,
+                )
+            };
+
+            list.add(Prose::new(item_text));
+        }
+
+        out.push_str(&list.render(term));
+        out.push('\n');
+    }
+
+    // Summary line
+    let issue_count = errors.len();
+    let summary = format!(
+        "{} references scanned, {} valid, <red-500><b>{} issues</b></red-500>",
+        report.references_scanned, report.references_valid, issue_count
+    );
+    out.push_str(&Prose::new(summary).render(term));
+    out.push('\n');
+
+    out
+}
+
 fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::terminal::Terminal;
@@ -1246,31 +1467,16 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
             use biscuit_terminal::components::prose::Prose;
             use biscuit_terminal::components::renderable::Renderable as _;
 
-            let issue_count = report.issues.len();
-
-            // Print each issue with red styling
-            if !report.issues.is_empty() {
-                println!();
-                for issue in &report.issues {
-                    let msg = format!("<red-500>{}</red-500>", issue.message);
-                    println!("  {}", Prose::new(msg).render(&term));
-                }
-                println!();
-            }
-
-            // Summary line with red issue count when there are issues
-            let summary = if issue_count > 0 {
-                format!(
-                    "{} references scanned, {} valid, <red-500><b>{} issues</b></red-500>",
-                    report.references_scanned, report.references_valid, issue_count
-                )
+            let formatted = format_validation_issues(report, &term);
+            if !formatted.is_empty() {
+                println!("{formatted}");
             } else {
-                format!(
-                    "{} references scanned, {} valid, {} issues",
-                    report.references_scanned, report.references_valid, issue_count
-                )
-            };
-            println!("{}", Prose::new(summary).render(&term));
+                let summary = format!(
+                    "{} references scanned, {} valid, 0 issues",
+                    report.references_scanned, report.references_valid,
+                );
+                println!("\n{}", Prose::new(summary).render(&term));
+            }
 
             // Exit code 2 for validation errors
             if !report.is_valid() {
