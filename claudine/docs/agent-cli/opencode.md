@@ -1,3 +1,0 @@
-# Opencode CLI
-
-
