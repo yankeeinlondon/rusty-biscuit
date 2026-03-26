@@ -1,5 +1,5 @@
 ---
-epilogue: "---\n\n- No animals were hurt in the preparation of this document"
+epilogue: "---\n\n- No [animals](./animals.md) were hurt in the preparation of this document"
 ---
 # Testing Composition
 
