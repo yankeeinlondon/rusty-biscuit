@@ -818,3 +818,154 @@ fn file_tree_follow_mode() {
     assert!(output.contains("child.md"), "expected child label");
     assert!(output.contains("child.example.com"), "expected child's hyperlink in follow mode");
 }
+
+// ── Issue #1: ::toc-linking in follow mode ──────────────────────────
+
+#[test]
+fn file_tree_toc_linking_follow_mode() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Root\n\n::toc-linking child.md"),
+        ("child.md", "# Child\n\n## Section A\n\n## Section B\n\n[link](https://child.example.com)"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    assert!(output.contains("root.md"), "expected root label");
+    // The child document should appear as a nested subtree in follow mode
+    assert!(output.contains("child.md"), "expected nested child label from toc-linking follow");
+}
+
+#[test]
+fn file_tree_toc_linking_follow_validate_catches_child_issues() {
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Root\n\n::toc-linking child.md"),
+        ("child.md", "# Child\n\n[broken](./missing.md)"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path)
+        .unwrap()
+        .follow_transclusions()
+        .validate();
+    tree.ensure_built().unwrap();
+
+    let report = tree.validation_report().expect("should have validation report");
+    // The broken link in child.md should be reported
+    let has_missing = report.issues.iter().any(|i| {
+        i.code == ReferenceIssueCode::MissingLocalTarget
+    });
+    assert!(has_missing, "expected MissingLocalTarget issue from child document");
+}
+
+// ── Issue #2: Epilogue follow mode ──────────────────────────────────
+
+#[test]
+fn file_tree_epilogue_follow_mode() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "---\nepilogue: epilogue.md\n---\n\n# Root\n\n[main](https://main.example.com)"),
+        ("epilogue.md", "# Epilogue\n\n[epi-link](https://epilogue.example.com)"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    assert!(output.contains("root.md"), "expected root label");
+    assert!(output.contains("epilogue.md"), "expected epilogue child in follow mode");
+    assert!(
+        output.contains("epilogue.example.com"),
+        "expected epilogue's hyperlink in nested subtree"
+    );
+}
+
+// ── Issue #3: Multiple prologues ────────────────────────────────────
+
+#[test]
+fn file_tree_multiple_prologues_follow_mode() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root"),
+        ("a.md", "# A\n\n[a-link](https://a.example.com)"),
+        ("b.md", "# B\n\n[b-link](https://b.example.com)"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    assert!(output.contains("a.md"), "expected first prologue child");
+    assert!(output.contains("b.md"), "expected second prologue child (not a duplicate of first)");
+    assert!(output.contains("a.example.com"), "expected a.md's link");
+    assert!(output.contains("b.example.com"), "expected b.md's link");
+}
+
+// ── Issue #4: show_root(false) preserves the rest of the tree ───────
+
+#[test]
+fn file_tree_show_root_false_preserves_subtree() {
+    use biscuit_terminal::components::renderable::Renderable;
+    use darkmatter::markdown::reference::file_tree::FileTree;
+
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Root\n\n[link](https://example.com)\n\n::file child.md"),
+        ("child.md", "# Child"),
+    ]);
+
+    let path = dir.path().join("root.md");
+    let mut tree = FileTree::new(&path).unwrap().show_root(false);
+    tree.ensure_built().unwrap();
+
+    let output = tree.render_optimistic(Some(120));
+    // Root label should not appear but refs and transclusions should
+    assert!(!output.contains("\u{1F4C4}root.md"), "root file head should be hidden");
+    assert!(output.contains("example.com"), "reference groups should still render");
+    assert!(output.contains("child.md"), "transclusion edges should still render");
+}
+
+// ── Issue #5: Section captions for non-H2 headings ─────────────────
+
+#[test]
+fn file_tree_section_caption_respects_heading_level() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[
+        ("root.md", "# Root\n\n## Intro\n\n### Details\n\n::file child.md"),
+        ("child.md", "# Child"),
+    ]);
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceGraphOptions::default();
+    let graph = md.reference_graph(options).unwrap();
+
+    // Find the insertion for child.md
+    let insertion = &graph.root.child_insertions[0];
+    // The directive is under ### Details (level 3)
+    assert_eq!(
+        insertion.context.section_heading_level,
+        Some(3),
+        "expected level 3 for ### Details"
+    );
+    assert_eq!(
+        insertion.context.section_heading_text.as_deref(),
+        Some("Details")
+    );
+}
