@@ -53,6 +53,9 @@ pub mod unicode {
 }
 
 /// Select icon string for a reference group kind.
+///
+/// Uses two trailing spaces after nerd font icons so the glyph renders
+/// at full width — matching transclusion edge and file head icons.
 pub fn reference_icon(kind: &FileTreeReferenceGroupKind, is_nerd_font: bool) -> String {
     if is_nerd_font {
         let ch = match kind {
@@ -64,7 +67,7 @@ pub fn reference_icon(kind: &FileTreeReferenceGroupKind, is_nerd_font: bool) -> 
             FileTreeReferenceGroupKind::FontImports => nerd::FONT,
             FileTreeReferenceGroupKind::OtherLocalDependencies => nerd::FILE,
         };
-        format!("{ch} ")
+        format!("{ch}  ")
     } else {
         let s = match kind {
             FileTreeReferenceGroupKind::RemoteHyperlinks => unicode::HYPERLINK,

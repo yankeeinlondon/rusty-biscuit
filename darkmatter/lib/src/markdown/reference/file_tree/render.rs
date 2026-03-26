@@ -43,7 +43,7 @@ const REF_MID: &str    = "    \u{251C}\u{2500}\u{2500} ";  // ├── (continu
 
 // ── Transclusion edge branches ──────────────────────────────────────
 const TRANS_IN: &str       = "    \u{2502}\u{25C0}\u{2500} ";  // │◀─
-const TRANS_IN_LAST: &str  = "    \u{2502}\u{25C0}\u{2500} ";  // │◀─
+const TRANS_IN_LAST: &str  = "    \u{2570}\u{25C0}\u{2500} ";  // ╰◀─
 const TRANS_OUT: &str      = "    \u{251C}\u{2500}\u{25B6} ";  // ├─▶
 const TRANS_OUT_LAST: &str = "    \u{2570}\u{2500}\u{25B6} ";  // ╰─▶
 
@@ -124,6 +124,31 @@ fn render_reference_groups(
     is_tty: bool,
     width: usize,
 ) {
+    render_reference_groups_inner(groups, lines, indent, is_nerd_font, is_tty, width, true);
+}
+
+/// Render reference groups without the trailing │ separator.
+/// Used for child content under followed edges where no file head follows.
+fn render_reference_groups_no_trailing(
+    groups: &[FileTreeReferenceGroup],
+    lines: &mut Vec<String>,
+    indent: &str,
+    is_nerd_font: bool,
+    is_tty: bool,
+    width: usize,
+) {
+    render_reference_groups_inner(groups, lines, indent, is_nerd_font, is_tty, width, false);
+}
+
+fn render_reference_groups_inner(
+    groups: &[FileTreeReferenceGroup],
+    lines: &mut Vec<String>,
+    indent: &str,
+    is_nerd_font: bool,
+    is_tty: bool,
+    width: usize,
+    trailing_separator: bool,
+) {
     // Flatten all rows with their group context for position tracking.
     let non_empty: Vec<&FileTreeReferenceGroup> =
         groups.iter().filter(|g| !g.rows.is_empty()).collect();
@@ -169,8 +194,10 @@ fn render_reference_groups(
         }
     }
 
-    // Separator between reference groups and file head
-    lines.push(format!("{indent}{VERT}"));
+    // Separator between reference groups and file head (only when a file head follows)
+    if trailing_separator {
+        lines.push(format!("{indent}{VERT}"));
+    }
 }
 
 fn render_file_head(
@@ -217,7 +244,7 @@ fn render_transclusions_unified(
         return;
     }
 
-    // │ connects the file head to the first ├ below
+    // │ connects the file head to the first edge below
     lines.push(format!("{indent}{VERT}"));
 
     let edge_count = node.transclusions.len();
@@ -227,11 +254,11 @@ fn render_transclusions_unified(
     for (ei, edge) in node.transclusions.iter().enumerate() {
         let is_last = ei == edge_count - 1;
 
-        // Separator: insert │ between edges on kind change or after followed children
-        if ei > 0 {
+        // Separator: insert │ between edges on kind change (but not after
+        // followed children — their content already provides visual separation)
+        if ei > 0 && !prev_had_children {
             let prev_kind = node.transclusions[ei - 1].kind;
-            let kind_changed = edge.kind != prev_kind;
-            if kind_changed || prev_had_children {
+            if edge.kind != prev_kind {
                 lines.push(format!("{indent}{VERT}"));
             }
         }
@@ -255,7 +282,7 @@ fn render_transclusions_unified(
             let child_indent_str = if is_last { INDENT_CHILD_LAST } else { INDENT_CHILD };
             let child_indent = format!("{indent}{child_indent_str}");
 
-            render_reference_groups(
+            render_reference_groups_no_trailing(
                 &child.reference_groups,
                 lines,
                 &child_indent,

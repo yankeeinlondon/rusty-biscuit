@@ -263,10 +263,17 @@ fn build_node_model(
         }
     }
 
-    // Sort groups by fixed order, preserving source order within each
+    // Sort groups by fixed order, deduplicate rows by display_target
     let mut reference_groups: Vec<FileTreeReferenceGroup> = group_map
         .into_iter()
-        .map(|(kind, rows)| FileTreeReferenceGroup { kind, rows })
+        .map(|(kind, rows)| {
+            let mut seen = std::collections::HashSet::new();
+            let deduped = rows
+                .into_iter()
+                .filter(|r| seen.insert(r.display_target.clone()))
+                .collect();
+            FileTreeReferenceGroup { kind, rows: deduped }
+        })
         .collect();
     reference_groups.sort_by_key(|g| g.kind.sort_order());
 
