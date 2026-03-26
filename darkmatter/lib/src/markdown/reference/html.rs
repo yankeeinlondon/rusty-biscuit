@@ -95,11 +95,24 @@ fn walk_html_nodes(
         let (span_start, span_end) = position
             .map(|p| (p.start.offset, p.end.offset))
             .unwrap_or((0, 0));
-        let line = position
+        let base_line = position
             .map(|p| p.start.line)
             .unwrap_or_else(|| line_index.line_at(span_start));
 
-        if let Some(record) = classifier(&html_node.value, source, line, span_start, span_end) {
+        // The MDAST parser may merge adjacent HTML lines into a single
+        // Node::Html.  Split by lines so each tag gets classified.
+        let lines: Vec<&str> = html_node.value.lines().collect();
+        if lines.len() > 1 {
+            let mut offset = span_start;
+            for (li, tag_line) in lines.iter().enumerate() {
+                let line_end = offset + tag_line.len();
+                if let Some(record) = classifier(tag_line, source, base_line + li, offset, line_end) {
+                    records.push(record);
+                }
+                // +1 for the newline character
+                offset = line_end + 1;
+            }
+        } else if let Some(record) = classifier(&html_node.value, source, base_line, span_start, span_end) {
             records.push(record);
         }
     }
