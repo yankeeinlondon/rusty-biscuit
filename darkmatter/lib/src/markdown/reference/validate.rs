@@ -12,7 +12,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use super::errors::ReferenceError;
 use super::types::{
-    ReferenceGraphOptions, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
+    ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
 };
 
 /// Options for reference validation.
@@ -82,6 +82,10 @@ pub struct ReferenceIssue {
     pub message: String,
     /// Severity level.
     pub severity: ReferenceSeverity,
+    /// Semantic kind of the reference (hyperlink, image, transclusion, etc.).
+    pub kind: ReferenceKind,
+    /// The raw reference target string for display (e.g., `"./foo.md"`, `"https://example.com"`).
+    pub reference_display: String,
     /// ID of the reference that triggered this issue.
     pub reference_id: String,
     /// Where the reference was found.
@@ -189,6 +193,8 @@ pub(crate) fn validate(
                         code: ReferenceIssueCode::InvalidUrl,
                         message: format!("Invalid URL: {e}"),
                         severity: ReferenceSeverity::Error,
+                        kind: record.kind,
+                        reference_display: raw.clone(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
                     });
@@ -212,6 +218,8 @@ pub(crate) fn validate(
                                 code: ReferenceIssueCode::MissingFragmentTarget,
                                 message: format!("Fragment target not found: {raw}"),
                                 severity: ReferenceSeverity::Error,
+                                kind: record.kind,
+                                reference_display: raw.clone(),
                                 reference_id: record.id.clone(),
                                 origin: record.origin.clone(),
                             });
@@ -231,11 +239,13 @@ pub(crate) fn validate(
             ReferenceTarget::DataUri { .. } => {
                 report.references_valid += 1;
             }
-            ReferenceTarget::OtherScheme { scheme, .. } => {
+            ReferenceTarget::OtherScheme { scheme, raw } => {
                 report.issues.push(ReferenceIssue {
                     code: ReferenceIssueCode::UnsupportedScheme,
                     message: format!("Unsupported scheme: {scheme}"),
                     severity: ReferenceSeverity::Info,
+                    kind: record.kind,
+                    reference_display: raw.clone(),
                     reference_id: record.id.clone(),
                     origin: record.origin.clone(),
                 });
@@ -261,12 +271,18 @@ pub(crate) fn validate(
                 match result {
                     RemoteResult::Ok => {}
                     RemoteResult::Error(msg) => {
+                        let raw = match &record.target {
+                            ReferenceTarget::RemoteUrl { raw } => raw.clone(),
+                            _ => String::new(),
+                        };
                         // Undo the valid count added above
                         report.references_valid = report.references_valid.saturating_sub(1);
                         report.issues.push(ReferenceIssue {
                             code: ReferenceIssueCode::RemoteUnreachable,
                             message: msg,
                             severity: ReferenceSeverity::Error,
+                            kind: record.kind,
+                            reference_display: raw,
                             reference_id: record.id.clone(),
                             origin: record.origin.clone(),
                         });
@@ -304,6 +320,8 @@ fn validate_local_path(
                         code: ReferenceIssueCode::MissingLocalTarget,
                         message: format!("Missing local target: {raw}"),
                         severity: ReferenceSeverity::Error,
+                        kind: record.kind,
+                        reference_display: raw.to_string(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
                     });
@@ -321,6 +339,8 @@ fn validate_local_path(
                         code: ReferenceIssueCode::MissingLocalTarget,
                         message: format!("Missing local target: {raw}"),
                         severity: ReferenceSeverity::Error,
+                        kind: record.kind,
+                        reference_display: raw.to_string(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
                     });
@@ -334,6 +354,8 @@ fn validate_local_path(
                 code: ReferenceIssueCode::MissingSourceContext,
                 message: format!("Cannot validate local path without source context: {raw}"),
                 severity: ReferenceSeverity::Warning,
+                kind: record.kind,
+                reference_display: raw.to_string(),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });
@@ -464,6 +486,8 @@ fn validate_cross_doc_fragment(
                 code: ReferenceIssueCode::MissingFragmentTarget,
                 message: format!("Fragment '#{fragment}' not found in {path}"),
                 severity: ReferenceSeverity::Error,
+                kind: record.kind,
+                reference_display: format!("{path}#{fragment}"),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });
