@@ -249,7 +249,6 @@ fn render_transclusions_unified(
 
     let edge_count = node.transclusions.len();
     let mut child_idx = 0;
-    let mut prev_had_children = false;
 
     for (ei, edge) in node.transclusions.iter().enumerate() {
         let is_last = ei == edge_count - 1;
@@ -293,9 +292,6 @@ fn render_transclusions_unified(
             );
 
             render_transclusions_unified(child, lines, &child_indent, is_nerd_font, is_tty, width);
-            prev_had_children = true;
-        } else {
-            prev_had_children = false;
         }
     }
 }
