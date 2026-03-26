@@ -39,7 +39,7 @@
 //! ```
 
 pub(crate) mod cache;
-mod conditions;
+pub mod conditions;
 pub(crate) mod parse_utils;
 mod state;
 mod types;

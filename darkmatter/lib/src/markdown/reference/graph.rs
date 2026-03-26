@@ -6,8 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOperation, ComposeSource};
+use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
 use crate::markdown::compose::cache::RunLocalCache;
+use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
 use crate::markdown::compose::transclusion::{
     parse_directives, parse_frontmatter_refs, DirectiveKind, TransclusionRuntime,
@@ -256,9 +257,32 @@ fn build_node(
     let mut all_descendant_nodes: Vec<ReferenceGraphNode> = Vec::new();
     let mut insertion_order = 0;
 
+    // Build effective state for evaluating `when=` conditions.
+    // Uses the document's frontmatter merged with any external state from
+    // options, plus runtime context (including environment variables).
+    let effective_state = {
+        let fm: std::collections::HashMap<String, serde_json::Value> =
+            md.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut builder = EffectiveStateBuilder::new().with_frontmatter(fm);
+        if let Some(ref ext) = options.compose.external_state {
+            builder = builder.with_external_state(ext.clone());
+        }
+        builder.build()
+    };
+
     // Block directives
     if let Ok(directives) = parse_directives(&prepared_content) {
         for directive in &directives {
+            // Evaluate `when=` condition — skip directive entirely if false.
+            if let Some(ref when_expr) = directive.options.when_expr {
+                let condition_met = conditions::evaluate_condition(
+                    when_expr, &effective_state, directive.line,
+                ).unwrap_or(false);
+                if !condition_met {
+                    continue;
+                }
+            }
+
             // Emit transclusion reference records (rec #4)
             if extract_references {
                 let syntax = match directive.kind {
@@ -415,6 +439,11 @@ fn build_node(
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
+            // Skip literal content values (contain newlines or don't look like paths)
+            if is_literal_content(prologue) {
+                continue;
+            }
+
             // Emit transclusion reference record for prologue (rec #4)
             if extract_references {
                 local_references.records.push(ReferenceRecord {
@@ -467,6 +496,11 @@ fn build_node(
         }
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
+            // Skip literal content values (contain newlines or don't look like paths)
+            if is_literal_content(epilogue) {
+                continue;
+            }
+
             // Emit transclusion reference record for epilogue (rec #4)
             // Use usize::MAX as the line so it sorts after all body content
             // and matches the child insertion's directive_line.
@@ -627,6 +661,15 @@ fn prepare_content(
 
     let (result, _report) = md.compose_with(inline_pre_options)?;
     Ok(result.content().to_string())
+}
+
+/// Detect literal content in frontmatter prologue/epilogue values.
+///
+/// Returns `true` when the value is inline markdown content rather than
+/// a file path reference. Literal content contains newlines or starts
+/// with markdown syntax that cannot be a valid file path.
+fn is_literal_content(value: &str) -> bool {
+    value.contains('\n') || value.starts_with("---")
 }
 
 /// Resolve a local path target relative to a source.
