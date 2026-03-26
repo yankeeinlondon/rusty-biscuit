@@ -12,8 +12,7 @@ use worktree::WorktreeError;
 
 use super::git_graph;
 
-const DEFAULT_GRAPH_WIDTH: u32 = 70;
-const MIN_GRAPH_TERMINAL_WIDTH: u32 = 70;
+const MIN_GRAPH_TERMINAL_WIDTH: u32 = 80;
 
 pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError> {
     let statuses = list_worktrees()?;
@@ -26,19 +25,28 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
 
     eprintln!("\n{}", list.render(&terminal));
 
-    // Parse the requested graph width (falls back to the default on bad input)
-    let graph_width = width_spec
-        .and_then(|s| parse_width_spec(s).ok())
-        .unwrap_or(ImageWidth::Characters(DEFAULT_GRAPH_WIDTH));
+    // Generate graph instructions first so we can size the width based on commit count
+    if let Some(instructions) = graph_instructions(&statuses) {
+        let commit_count = instructions
+            .lines()
+            .filter(|l| l.contains("commit id:"))
+            .count();
 
-    // For a percentage, the graph always fits; for characters, check the terminal.
-    let fits = match &graph_width {
-        ImageWidth::Percent(_) | ImageWidth::Fill => true,
-        ImageWidth::Characters(_) => terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH,
-    };
+        let graph_width = width_spec
+            .and_then(|s| parse_width_spec(s).ok())
+            .unwrap_or_else(|| default_graph_width(commit_count, terminal.width()));
 
-    if fits {
-        render_graph(&statuses, &terminal, graph_width);
+        // For a percentage, the graph always fits; for characters, check the terminal.
+        let fits = match &graph_width {
+            ImageWidth::Percent(_) | ImageWidth::Fill => true,
+            ImageWidth::Characters(_) => terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH,
+        };
+
+        if fits {
+            let img_term = image_terminal(&terminal);
+            let diagram = MermaidDiagram::new(instructions).with_width(graph_width);
+            eprint!("{}", diagram.render(&img_term));
+        }
     }
 
     if verbose {
@@ -48,32 +56,38 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     Ok(())
 }
 
-fn render_graph(statuses: &[WorktreeStatus], terminal: &Terminal, graph_width: ImageWidth) {
-    let Ok(default) = default_branch() else {
-        return;
-    };
+fn graph_instructions(statuses: &[WorktreeStatus]) -> Option<String> {
+    let default = default_branch().ok()?;
+    let current = statuses.iter().find(|s| s.entry.is_current)?;
 
-    let current = statuses.iter().find(|s| s.entry.is_current);
-
-    let instructions = if let Some(current) = current {
-        if current.entry.is_main {
-            let branch_names: Vec<String> = statuses
-                .iter()
-                .filter_map(|s| s.entry.branch.clone())
-                .collect();
-            git_graph::base_graph(&branch_names, &default)
-        } else {
-            let branch = current.entry.branch.as_deref().unwrap_or("HEAD");
-            git_graph::worktree_graph(branch, &default)
-        }
+    if current.entry.is_main {
+        let branch_names: Vec<String> = statuses
+            .iter()
+            .filter_map(|s| s.entry.branch.clone())
+            .collect();
+        git_graph::base_graph(&branch_names, &default)
     } else {
-        None
-    };
+        let branch = current.entry.branch.as_deref().unwrap_or("HEAD");
+        git_graph::worktree_graph(branch, &default)
+    }
+}
 
-    if let Some(instructions) = instructions {
-        let img_term = image_terminal(terminal);
-        let diagram = MermaidDiagram::new(instructions).with_width(graph_width);
-        eprint!("{}", diagram.render(&img_term));
+/// Choose a default graph width based on how many commits are in the graph.
+fn default_graph_width(commit_count: usize, terminal_width: u32) -> ImageWidth {
+    if commit_count <= 4 {
+        ImageWidth::Characters(60)
+    } else if commit_count <= 8 {
+        ImageWidth::Characters(80)
+    } else if commit_count <= 15 {
+        if terminal_width > 120 {
+            ImageWidth::Characters(120)
+        } else {
+            ImageWidth::Percent(100.0)
+        }
+    } else if terminal_width >= 160 {
+        ImageWidth::Characters(160)
+    } else {
+        ImageWidth::Percent(100.0)
     }
 }
 
