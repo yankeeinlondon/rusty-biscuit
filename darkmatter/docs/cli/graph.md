@@ -237,6 +237,20 @@ When `--validate` is enabled:
   cyan (info).
 - A suffix is appended to invalid references: `[missing]`, `[invalid url]`,
   `[unreachable]`, `[unsupported]`, `[missing fragment]`, or `[issue]`.
+- After the tree, error-severity issues are printed grouped by category with
+  the source document as a clickable link (OSC 8) and the broken target in red:
+
+  ```
+  Invalid Hyperlink(s)
+  - the preparation.md reference to @darkmatter/docs/text-replacement.md is not valid
+  - the preparation.md reference to @darkmatter/docs/interpolation.md is not valid
+
+  19 references scanned, 17 valid, 2 issues
+  ```
+
+  Categories include: Invalid Hyperlink(s), Invalid Image Reference(s),
+  Invalid Transclusion Target(s), Invalid CSS Import(s), Invalid Script
+  Import(s), Invalid Font Import(s), and Invalid Meta Tag(s).
 - A summary footer shows `N references scanned, M valid, K issues`.
 - Exit code 2 is returned if any validation errors exist.
 
