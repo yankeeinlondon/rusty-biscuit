@@ -282,7 +282,7 @@ fn render_transclusions_unified(
             let child_indent_str = if is_last { INDENT_CHILD_LAST } else { INDENT_CHILD };
             let child_indent = format!("{indent}{child_indent_str}");
 
-            render_reference_groups_no_trailing(
+            render_reference_groups(
                 &child.reference_groups,
                 lines,
                 &child_indent,
