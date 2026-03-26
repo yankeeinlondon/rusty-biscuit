@@ -2694,6 +2694,32 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_inline_epilogue_with_markdown_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+
+        // Epilogue containing markdown link syntax should be treated as inline
+        // content, not as a file reference. Previously, the `/` in `](./...)
+        // caused `is_file_like_reference` to misidentify it as a path.
+        std::fs::write(
+            &root,
+            "---\nepilogue: \"---\\n\\n- No [animals](./animals.md) were hurt\"\n---\nBody.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        let (composed, _report) = md.compose_with(options).unwrap();
+
+        let content = composed.content();
+        assert!(
+            content.contains("[animals](./animals.md)"),
+            "Inline epilogue with markdown links should be preserved, got:\n{}",
+            content
+        );
+    }
+
+    #[test]
     fn test_stage2_exclude_removes_section() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");

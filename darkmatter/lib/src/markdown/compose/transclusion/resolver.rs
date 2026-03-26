@@ -70,7 +70,13 @@ pub(crate) fn resolve_path(
             line,
         })?;
         let suffix = raw_target.trim_start_matches('~').trim_start_matches('/');
-        return std::fs::canonicalize(Path::new(&home).join(suffix)).map_err(Into::into);
+        let candidate = Path::new(&home).join(suffix);
+        return std::fs::canonicalize(&candidate).map_err(|e| {
+            TransclusionError::Io(std::io::Error::new(
+                e.kind(),
+                format!("'{}' (resolved to '{}'): {e}", raw_target, candidate.display()),
+            ))
+        });
     }
 
     // Use FileReference for @, !, vault:, %, {{ENV}}, and absolute paths.
@@ -107,7 +113,12 @@ pub(crate) fn resolve_path(
     let raw = PathBuf::from(raw_target);
 
     if raw.is_absolute() {
-        return std::fs::canonicalize(raw).map_err(Into::into);
+        return std::fs::canonicalize(&raw).map_err(|e| {
+            TransclusionError::Io(std::io::Error::new(
+                e.kind(),
+                format!("'{}': {e}", raw.display()),
+            ))
+        });
     }
 
     let source_file =
@@ -131,7 +142,12 @@ pub(crate) fn resolve_path(
     } else {
         base_dir.join(Path::new(raw_target))
     };
-    std::fs::canonicalize(candidate).map_err(Into::into)
+    std::fs::canonicalize(&candidate).map_err(|e| {
+        TransclusionError::Io(std::io::Error::new(
+            e.kind(),
+            format!("'{}' (resolved to '{}'): {e}", raw_target, candidate.display()),
+        ))
+    })
 }
 
 /// Returns `true` if the target should be routed through [`FileReference`]
@@ -201,6 +217,16 @@ pub fn is_url_like(reference: &str) -> bool {
 /// separator (`/` or `\`), starts with a file-reference prefix (`@`, `~`,
 /// `!`, `%`), uses `vault:` syntax, or contains `{{` env-var interpolation.
 pub fn is_file_like_reference(reference: &str) -> bool {
+    // Multi-line content is inline markdown, never a file path.
+    if reference.contains('\n') {
+        return false;
+    }
+
+    // Markdown link syntax (`](`) indicates inline content, not a path.
+    if reference.contains("](") {
+        return false;
+    }
+
     if reference.contains('/')
         || reference.contains('\\')
         || reference.starts_with('@')
@@ -333,6 +359,16 @@ mod tests {
         assert!(!is_file_like_reference("Just some text content"));
         assert!(!is_file_like_reference("**Bold** markdown"));
         assert!(!is_file_like_reference(""));
+
+        // Inline content containing markdown links or newlines must not be
+        // misidentified as file paths.
+        assert!(!is_file_like_reference(
+            "---\n\n- No [animals](./animals.md) were hurt"
+        ));
+        assert!(!is_file_like_reference(
+            "See [other](./other.md) for details"
+        ));
+        assert!(!is_file_like_reference("Line one\nLine two"));
     }
 
     #[test]
