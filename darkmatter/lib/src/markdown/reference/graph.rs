@@ -300,10 +300,12 @@ fn build_node(
                             let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
                                 .map(|(t, l)| (Some(t.to_string()), Some(l)))
                                 .unwrap_or((None, None));
+                            let ref_id = make_reference_id(source, directive.line, directive.span.start);
                             child_insertions.push(ReferenceInsertion {
                                 child_node_id: child_node.node_id.clone(),
                                 directive_line: directive.line,
                                 insertion_order,
+                                reference_id: Some(ref_id),
                                 context: ReferenceInsertionContext {
                                     directive_kind: Some(ReferenceSyntax::DirectiveFile),
                                     section_heading_text: sec_text,
@@ -321,19 +323,20 @@ fn build_node(
         }
     }
 
-    // ::toc-linking directives generate links in the effective document
-    // but do not create child graph nodes. Model them as transclusion
-    // dependencies plus synthesized hyperlink records at the directive line.
+    // ::toc-linking directives generate synthesized TOC hyperlinks AND
+    // create child graph nodes for follow-mode expansion.
     if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(&prepared_content) {
         let transclusion_options = transclusion_options_for_source(options, source);
 
         for directive in &toc_directives {
+            let ref_id = make_reference_id(source, directive.line, directive.span.start);
+
             if let Some((display_target, path)) =
                 resolve_toc_linking_target(directive, source, &transclusion_options)
             {
                 if extract_references {
                     local_references.records.push(ReferenceRecord {
-                        id: make_reference_id(source, directive.line, directive.span.start),
+                        id: ref_id.clone(),
                         kind: ReferenceKind::Transclusion,
                         target: classify_target(&display_target),
                         origin: ReferenceOrigin {
@@ -354,11 +357,47 @@ fn build_node(
                         ),
                     );
                 }
+
+                // Create a child graph node so follow mode can expand the
+                // target document as a nested FileTree subtree.
+                let child_source = ComposeSource::File(path.clone());
+                let child_id = source_to_id(&child_source);
+
+                if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                    if let Some(child_md) = runtime.load_markdown(&path) {
+                        let (child_node, mut descendants) = build_node(
+                            &child_md,
+                            &child_source,
+                            options,
+                            runtime,
+                            extract_references,
+                        )?;
+
+                        let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
+                            .map(|(t, l)| (Some(t.to_string()), Some(l)))
+                            .unwrap_or((None, None));
+                        child_insertions.push(ReferenceInsertion {
+                            child_node_id: child_node.node_id.clone(),
+                            directive_line: directive.line,
+                            insertion_order,
+                            reference_id: Some(ref_id),
+                            context: ReferenceInsertionContext {
+                                directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                                section_heading_text: sec_text,
+                                section_heading_level: sec_level,
+                            },
+                        });
+                        all_descendant_nodes.push(child_node);
+                        all_descendant_nodes.append(&mut descendants);
+                        insertion_order += 1;
+                    }
+                    runtime.transclusion.exit();
+                }
             } else if extract_references
                 && let Some(raw_target) = directive.targets.first()
             {
                 local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, directive.line, directive.span.start),
+                    id: ref_id,
                     kind: ReferenceKind::Transclusion,
                     target: classify_target(raw_target),
                     origin: ReferenceOrigin {
@@ -406,10 +445,12 @@ fn build_node(
                             extract_references,
                         )?;
 
+                        let ref_id = make_reference_id(source, 0, idx);
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: 0, // prologue goes at the start
                             insertion_order,
+                            reference_id: Some(ref_id),
                             context: ReferenceInsertionContext {
                                 directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
                                 section_heading_text: None,
@@ -427,14 +468,16 @@ fn build_node(
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
             // Emit transclusion reference record for epilogue (rec #4)
+            // Use usize::MAX as the line so it sorts after all body content
+            // and matches the child insertion's directive_line.
             if extract_references {
                 local_references.records.push(ReferenceRecord {
-                    id: make_reference_id(source, 0, 1000 + idx),
+                    id: make_reference_id(source, usize::MAX, idx),
                     kind: ReferenceKind::Transclusion,
                     target: classify_target(epilogue),
                     origin: ReferenceOrigin {
                         source: source.clone(),
-                        line: 0,
+                        line: usize::MAX,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterEpilogue,
                     },
@@ -459,10 +502,12 @@ fn build_node(
                         let (sec_text, sec_level) = heading_index.last()
                             .map(|(_, t, l)| (Some(t.clone()), Some(*l)))
                             .unwrap_or((None, None));
+                        let ref_id = make_reference_id(source, usize::MAX, idx);
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: usize::MAX, // epilogue goes at the end
                             insertion_order,
+                            reference_id: Some(ref_id),
                             context: ReferenceInsertionContext {
                                 directive_kind: Some(ReferenceSyntax::FrontmatterEpilogue),
                                 section_heading_text: sec_text,
@@ -869,12 +914,14 @@ mod tests {
                     child_node_id: "child_a".into(),
                     directive_line: 0,
                     insertion_order: 0,
+                    reference_id: None,
                     context: ReferenceInsertionContext::default(),
                 },
                 ReferenceInsertion {
                     child_node_id: "child_b".into(),
                     directive_line: 0,
                     insertion_order: 1,
+                    reference_id: None,
                     context: ReferenceInsertionContext::default(),
                 },
             ],

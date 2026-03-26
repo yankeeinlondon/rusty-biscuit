@@ -180,7 +180,16 @@ pub fn build_file_tree_model(
     let issue_map = report
         .map(|r| build_issue_map(r))
         .unwrap_or_default();
-    let root = build_node_model(&graph.root, graph, &issue_map, follow);
+
+    // Build an id → &ReferenceGraphNode map once for O(1) lookups
+    // during recursive model construction (avoids O(n²) linear scans).
+    let mut node_map: HashMap<&str, &ReferenceGraphNode> = HashMap::with_capacity(graph.nodes.len() + 1);
+    node_map.insert(&graph.root.node_id, &graph.root);
+    for node in &graph.nodes {
+        node_map.insert(&node.node_id, node);
+    }
+
+    let root = build_node_model(&graph.root, &node_map, &issue_map, follow);
     FileTreeModel { root }
 }
 
@@ -208,7 +217,7 @@ fn build_issue_map(report: &ReferenceValidationReport) -> HashMap<String, FileTr
 /// Recursively build a view model node from a graph node.
 fn build_node_model(
     node: &ReferenceGraphNode,
-    graph: &ReferenceGraph,
+    node_map: &HashMap<&str, &ReferenceGraphNode>,
     issue_map: &HashMap<String, FileTreeReferenceValidation>,
     follow: bool,
 ) -> FileTreeNode {
@@ -266,9 +275,15 @@ fn build_node_model(
         let is_local_path = matches!(&record.target, ReferenceTarget::LocalPath { .. });
         let followable = record.origin.syntax.is_followable_transclusion() && is_local_path;
 
-        // Find the matching child insertion for caption context
+        // Find the matching child insertion for caption context.
+        // Match by reference_id when available (stable across frontmatter
+        // entries that share the same line number), falling back to
+        // directive_line for backwards compatibility.
         let insertion = node.child_insertions.iter().find(|ins| {
-            ins.directive_line == record.origin.line
+            match &ins.reference_id {
+                Some(ref_id) => ref_id == &record.id,
+                None => ins.directive_line == record.origin.line,
+            }
         });
 
         let caption = insertion
@@ -292,8 +307,8 @@ fn build_node_model(
         // Follow into child if enabled
         if follow && followable {
             if let Some(ref cid) = child_node_id {
-                if let Some(child_graph_node) = graph.node_by_id(cid) {
-                    children.push(build_node_model(child_graph_node, graph, issue_map, follow));
+                if let Some(child_graph_node) = node_map.get(cid.as_str()) {
+                    children.push(build_node_model(child_graph_node, node_map, issue_map, follow));
                 }
             }
         }
@@ -378,7 +393,10 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
     let section = context
         .section_heading_text
         .as_deref()
-        .map(|h| format!(" into the '## {h}' section"))
+        .map(|h| {
+            let hashes = "#".repeat(context.section_heading_level.unwrap_or(2) as usize);
+            format!(" into the '{hashes} {h}' section")
+        })
         .unwrap_or_default();
 
     match context.directive_kind {
@@ -527,5 +545,220 @@ mod tests {
         assert!(!ReferenceSyntax::DirectiveUrl.is_followable_transclusion());
         assert!(!ReferenceSyntax::DirectiveCode.is_followable_transclusion());
         assert!(!ReferenceSyntax::MarkdownLink.is_followable_transclusion());
+    }
+
+    #[test]
+    fn caption_uses_h3_heading_level() {
+        let ctx = ReferenceInsertionContext {
+            directive_kind: Some(ReferenceSyntax::DirectiveFile),
+            section_heading_text: Some("Details".to_string()),
+            section_heading_level: Some(3),
+        };
+        assert_eq!(
+            transclusion_caption(&ctx),
+            "inserted into the '### Details' section"
+        );
+    }
+
+    #[test]
+    fn caption_uses_h4_heading_level() {
+        let ctx = ReferenceInsertionContext {
+            directive_kind: Some(ReferenceSyntax::DirectiveFile),
+            section_heading_text: Some("Sub".to_string()),
+            section_heading_level: Some(4),
+        };
+        assert_eq!(
+            transclusion_caption(&ctx),
+            "inserted into the '#### Sub' section"
+        );
+    }
+
+    #[test]
+    fn caption_heading_level_defaults_to_h2() {
+        let ctx = ReferenceInsertionContext {
+            directive_kind: Some(ReferenceSyntax::DirectiveFile),
+            section_heading_text: Some("Test".to_string()),
+            section_heading_level: None,
+        };
+        assert_eq!(
+            transclusion_caption(&ctx),
+            "inserted into the '## Test' section"
+        );
+    }
+
+    #[test]
+    fn reference_id_matching_over_directive_line() {
+        use crate::markdown::reference::types::{
+            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion, ReferenceInsertionContext,
+            ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceTarget,
+        };
+
+        // Simulate two prologues: both have directive_line=0 but different reference_ids
+        let root = ReferenceGraphNode {
+            node_id: "root".into(),
+            source: ComposeSource::Unknown,
+            local_references: ReferenceSet {
+                records: vec![
+                    ReferenceRecord {
+                        id: "ref_a".into(),
+                        kind: ReferenceKind::Transclusion,
+                        target: ReferenceTarget::LocalPath { raw: "a.md".into() },
+                        origin: ReferenceOrigin {
+                            source: ComposeSource::Unknown,
+                            line: 0,
+                            span: 0..0,
+                            syntax: ReferenceSyntax::FrontmatterPrologue,
+                        },
+                        attributes: serde_json::Map::new(),
+                    },
+                    ReferenceRecord {
+                        id: "ref_b".into(),
+                        kind: ReferenceKind::Transclusion,
+                        target: ReferenceTarget::LocalPath { raw: "b.md".into() },
+                        origin: ReferenceOrigin {
+                            source: ComposeSource::Unknown,
+                            line: 0,
+                            span: 0..0,
+                            syntax: ReferenceSyntax::FrontmatterPrologue,
+                        },
+                        attributes: serde_json::Map::new(),
+                    },
+                ],
+            },
+            child_insertions: vec![
+                ReferenceInsertion {
+                    child_node_id: "child_a".into(),
+                    directive_line: 0,
+                    insertion_order: 0,
+                    reference_id: Some("ref_a".into()),
+                    context: ReferenceInsertionContext {
+                        directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
+                        section_heading_text: None,
+                        section_heading_level: None,
+                    },
+                },
+                ReferenceInsertion {
+                    child_node_id: "child_b".into(),
+                    directive_line: 0,
+                    insertion_order: 1,
+                    reference_id: Some("ref_b".into()),
+                    context: ReferenceInsertionContext {
+                        directive_kind: Some(ReferenceSyntax::FrontmatterPrologue),
+                        section_heading_text: None,
+                        section_heading_level: None,
+                    },
+                },
+            ],
+        };
+
+        let child_a = ReferenceGraphNode {
+            node_id: "child_a".into(),
+            source: ComposeSource::File(std::path::PathBuf::from("a.md")),
+            local_references: ReferenceSet {
+                records: vec![ReferenceRecord {
+                    id: "a_link".into(),
+                    kind: ReferenceKind::Hyperlink,
+                    target: ReferenceTarget::RemoteUrl { raw: "https://a.example.com".into() },
+                    origin: ReferenceOrigin {
+                        source: ComposeSource::Unknown,
+                        line: 1,
+                        span: 0..10,
+                        syntax: ReferenceSyntax::MarkdownLink,
+                    },
+                    attributes: serde_json::Map::new(),
+                }],
+            },
+            child_insertions: vec![],
+        };
+
+        let child_b = ReferenceGraphNode {
+            node_id: "child_b".into(),
+            source: ComposeSource::File(std::path::PathBuf::from("b.md")),
+            local_references: ReferenceSet {
+                records: vec![ReferenceRecord {
+                    id: "b_link".into(),
+                    kind: ReferenceKind::Hyperlink,
+                    target: ReferenceTarget::RemoteUrl { raw: "https://b.example.com".into() },
+                    origin: ReferenceOrigin {
+                        source: ComposeSource::Unknown,
+                        line: 1,
+                        span: 0..10,
+                        syntax: ReferenceSyntax::MarkdownLink,
+                    },
+                    attributes: serde_json::Map::new(),
+                }],
+            },
+            child_insertions: vec![],
+        };
+
+        let graph = ReferenceGraph {
+            root,
+            nodes: vec![child_a, child_b],
+        };
+
+        let model = build_file_tree_model(&graph, None, true);
+
+        // Both children should appear (not a duplicated first child)
+        assert_eq!(model.root.children.len(), 2, "expected 2 children, not duplicates of first");
+        assert_eq!(model.root.children[0].file_label, "a.md");
+        assert_eq!(model.root.children[1].file_label, "b.md");
+    }
+
+    #[test]
+    fn epilogue_matches_by_reference_id() {
+        use crate::markdown::reference::types::{
+            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion, ReferenceInsertionContext,
+            ReferenceOrigin, ReferenceRecord, ReferenceSet, ReferenceTarget,
+        };
+
+        let root = ReferenceGraphNode {
+            node_id: "root".into(),
+            source: ComposeSource::Unknown,
+            local_references: ReferenceSet {
+                records: vec![ReferenceRecord {
+                    id: "epi_ref".into(),
+                    kind: ReferenceKind::Transclusion,
+                    target: ReferenceTarget::LocalPath { raw: "epilogue.md".into() },
+                    origin: ReferenceOrigin {
+                        source: ComposeSource::Unknown,
+                        line: usize::MAX,
+                        span: 0..0,
+                        syntax: ReferenceSyntax::FrontmatterEpilogue,
+                    },
+                    attributes: serde_json::Map::new(),
+                }],
+            },
+            child_insertions: vec![ReferenceInsertion {
+                child_node_id: "child_epi".into(),
+                directive_line: usize::MAX,
+                insertion_order: 0,
+                reference_id: Some("epi_ref".into()),
+                context: ReferenceInsertionContext {
+                    directive_kind: Some(ReferenceSyntax::FrontmatterEpilogue),
+                    section_heading_text: None,
+                    section_heading_level: None,
+                },
+            }],
+        };
+
+        let child = ReferenceGraphNode {
+            node_id: "child_epi".into(),
+            source: ComposeSource::File(std::path::PathBuf::from("epilogue.md")),
+            local_references: ReferenceSet::default(),
+            child_insertions: vec![],
+        };
+
+        let graph = ReferenceGraph {
+            root,
+            nodes: vec![child],
+        };
+
+        let model = build_file_tree_model(&graph, None, true);
+
+        // The epilogue should now be followed as a child
+        assert_eq!(model.root.children.len(), 1);
+        assert_eq!(model.root.children[0].file_label, "epilogue.md");
+        // The transclusion edge should have a child_node_id
+        assert!(model.root.transclusions[0].child_node_id.is_some());
     }
 }

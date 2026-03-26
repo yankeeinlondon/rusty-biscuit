@@ -230,7 +230,13 @@ impl Renderable for FileTree {
                 let raw = render::render_model(model, term, self.show_root);
                 self.layout.apply_layout(&raw, term.width())
             }
-            None => String::new(),
+            None => {
+                if cfg!(debug_assertions) {
+                    "[FileTree: call ensure_built() before render()]".to_string()
+                } else {
+                    String::new()
+                }
+            }
         }
     }
 
@@ -241,7 +247,13 @@ impl Renderable for FileTree {
                 let raw = render::render_model_optimistic(model, width as usize, self.show_root);
                 self.layout.apply_layout(&raw, width)
             }
-            None => String::new(),
+            None => {
+                if cfg!(debug_assertions) {
+                    "[FileTree: call ensure_built() before render()]".to_string()
+                } else {
+                    String::new()
+                }
+            }
         }
     }
 

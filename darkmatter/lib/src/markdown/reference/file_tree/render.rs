@@ -27,23 +27,23 @@ pub fn render_model(model: &FileTreeModel, term: &Terminal, show_root: bool) -> 
     let is_tty = term.is_tty;
     let width = term.width() as usize;
 
-    if !show_root {
-        return String::new();
-    }
-
     let mut lines = Vec::new();
-    render_node(&model.root, &mut lines, "", is_nerd_font, is_tty, width);
+    if show_root {
+        render_node(&model.root, &mut lines, "", is_nerd_font, is_tty, width);
+    } else {
+        render_node_children_only(&model.root, &mut lines, "", is_nerd_font, is_tty, width);
+    }
     lines.join("\n")
 }
 
 /// Render the file tree model without terminal context (Unicode fallback).
 pub fn render_model_optimistic(model: &FileTreeModel, width: usize, show_root: bool) -> String {
-    if !show_root {
-        return String::new();
-    }
-
     let mut lines = Vec::new();
-    render_node(&model.root, &mut lines, "", false, false, width);
+    if show_root {
+        render_node(&model.root, &mut lines, "", false, false, width);
+    } else {
+        render_node_children_only(&model.root, &mut lines, "", false, false, width);
+    }
     lines.join("\n")
 }
 
@@ -82,6 +82,44 @@ fn render_node(
         render_node(child, lines, &child_indent, is_nerd_font, is_tty, width);
 
         // Trailing connector after non-last children
+        if i < node.children.len() - 1 {
+            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
+        }
+    }
+}
+
+/// Render the root node's content (reference groups, transclusions, children)
+/// without the root file head line. Used when `show_root(false)` is set.
+fn render_node_children_only(
+    node: &FileTreeNode,
+    lines: &mut Vec<String>,
+    indent: &str,
+    is_nerd_font: bool,
+    is_tty: bool,
+    width: usize,
+) {
+    // Zone 1: Reference groups
+    render_reference_groups(&node.reference_groups, lines, indent, is_nerd_font, is_tty, width);
+
+    // Zone 3: Transclusion edges
+    render_transclusion_edges(
+        &node.transclusions,
+        lines,
+        indent,
+        is_nerd_font,
+        is_tty,
+        width,
+    );
+
+    // Follow-mode children
+    for (i, child) in node.children.iter().enumerate() {
+        if !lines.is_empty() {
+            lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
+        }
+
+        let child_indent = format!("{indent}{INDENT_CHILD}");
+        render_node(child, lines, &child_indent, is_nerd_font, is_tty, width);
+
         if i < node.children.len() - 1 {
             lines.push(format!("{indent}{CONNECTOR_VERTICAL}"));
         }
@@ -233,17 +271,25 @@ fn validation_style(
     }
 }
 
-/// Truncate a line to fit within the given width.
+/// Truncate a line to fit within the given visible display width.
+///
+/// Uses ANSI-aware and Unicode-aware width measurement so that escape
+/// sequences do not count toward the column budget and multi-byte
+/// characters are measured by display width rather than byte length.
 fn truncate_line(line: &str, width: usize) -> String {
-    if width == 0 || line.len() <= width {
+    if width == 0 {
         return line.to_string();
     }
-    // Simple truncation — does not account for ANSI escape sequences or
-    // multi-byte characters perfectly, but avoids mangling connectors by
-    // only truncating content at the end.
-    let mut truncated = line[..width.saturating_sub(1)].to_string();
-    truncated.push('\u{2026}'); // …
-    truncated
+    let visible = biscuit_terminal::utils::block_constraint::visible_width(line) as usize;
+    if visible <= width {
+        return line.to_string();
+    }
+    // split_at_visible_width respects ANSI escapes and multi-byte chars.
+    let (head, _) = biscuit_terminal::utils::block_constraint::split_at_visible_width(
+        line,
+        width.saturating_sub(1) as u32,
+    );
+    format!("{head}\u{2026}") // …
 }
 
 #[cfg(test)]
@@ -395,9 +441,75 @@ mod tests {
     }
 
     #[test]
-    fn render_show_root_false() {
+    fn render_show_root_false_empty_model() {
         let model = simple_model();
         let output = render_model_optimistic(&model, 80, false);
+        // A model with no refs/transclusions/children renders empty even without root
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn render_show_root_false_preserves_children() {
+        let mut model = simple_model();
+        model.root.children = vec![FileTreeNode {
+            source: ComposeSource::File(std::path::PathBuf::from("/docs/child.md")),
+            file_label: "child.md".to_string(),
+            file_icon_kind: FileTreeIconKind::Markdown,
+            inline_summary: FileTreeInlineSummary::default(),
+            reference_groups: vec![],
+            transclusions: vec![],
+            children: vec![],
+            validation: FileTreeNodeValidation::default(),
+        }];
+
+        let output = render_model_optimistic(&model, 120, false);
+        assert!(!output.contains("test.md"), "root label should be hidden");
+        assert!(output.contains("child.md"), "child should still render");
+    }
+
+    #[test]
+    fn render_show_root_false_preserves_transclusions() {
+        let mut model = simple_model();
+        model.root.transclusions = vec![FileTreeTransclusionEdge {
+            kind: FileTreeTransclusionKind::File,
+            display_target: "child.md".to_string(),
+            caption: String::new(),
+            directive_line: 5,
+            followable: true,
+            child_node_id: None,
+            validation: None,
+        }];
+
+        let output = render_model_optimistic(&model, 120, false);
+        assert!(!output.contains("test.md"), "root label should be hidden");
+        assert!(output.contains("child.md"), "transclusions should still render");
+    }
+
+    #[test]
+    fn truncate_line_respects_ansi_escapes() {
+        // A line with ANSI color codes: visible content is "Red text"
+        let line = "\x1b[31mRed text\x1b[0m";
+        // Visible width is 8 chars ("Red text"), ANSI codes are invisible
+        let result = truncate_line(line, 20);
+        // Should not truncate because visible width (8) < 20
+        assert!(result.contains("Red text"));
+        assert!(!result.contains('\u{2026}'));
+    }
+
+    #[test]
+    fn truncate_line_truncates_visible_content() {
+        // No ANSI escapes, pure ASCII
+        let line = "This is a fairly long line of text";
+        let result = truncate_line(line, 10);
+        assert!(result.contains('\u{2026}'), "should have ellipsis");
+        // Visible result should be at most 10 columns
+        let visible = biscuit_terminal::utils::block_constraint::visible_width(&result) as usize;
+        assert!(visible <= 10, "visible width {visible} should be <= 10");
+    }
+
+    #[test]
+    fn truncate_line_zero_width_passthrough() {
+        let line = "hello";
+        assert_eq!(truncate_line(line, 0), "hello");
     }
 }

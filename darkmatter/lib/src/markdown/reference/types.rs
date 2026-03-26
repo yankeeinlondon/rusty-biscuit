@@ -274,6 +274,12 @@ pub struct ReferenceInsertion {
     pub directive_line: usize,
     /// Order among sibling insertions (0-based).
     pub insertion_order: usize,
+    /// Links this insertion to its corresponding [`ReferenceRecord::id`].
+    ///
+    /// Used by the `FileTree` model builder to match each transclusion
+    /// record to its child insertion without relying on line numbers alone
+    /// (which are ambiguous for frontmatter prologues/epilogues).
+    pub reference_id: Option<String>,
     /// Section context for the directive location.
     pub context: ReferenceInsertionContext,
 }
