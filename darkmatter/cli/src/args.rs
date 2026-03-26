@@ -124,7 +124,7 @@ pub enum Command {
     Toc {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT")]
-        input: PathBuf,
+        input: Option<PathBuf>,
 
         /// Output TOC as JSON
         #[arg(long)]
