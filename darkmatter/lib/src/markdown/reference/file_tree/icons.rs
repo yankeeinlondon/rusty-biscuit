@@ -57,7 +57,7 @@ pub fn reference_icon(kind: &FileTreeReferenceGroupKind, is_nerd_font: bool) -> 
     if is_nerd_font {
         let ch = match kind {
             FileTreeReferenceGroupKind::RemoteHyperlinks => nerd::HYPERLINK,
-            FileTreeReferenceGroupKind::LocalHyperlinks => nerd::LOCAL_LINK,
+            FileTreeReferenceGroupKind::LocalHyperlinks => nerd::MARKDOWN,
             FileTreeReferenceGroupKind::Images => nerd::IMAGE,
             FileTreeReferenceGroupKind::CssImports => nerd::CSS,
             FileTreeReferenceGroupKind::ScriptImports => nerd::SCRIPT,
@@ -68,7 +68,7 @@ pub fn reference_icon(kind: &FileTreeReferenceGroupKind, is_nerd_font: bool) -> 
     } else {
         let s = match kind {
             FileTreeReferenceGroupKind::RemoteHyperlinks => unicode::HYPERLINK,
-            FileTreeReferenceGroupKind::LocalHyperlinks => unicode::LOCAL_LINK,
+            FileTreeReferenceGroupKind::LocalHyperlinks => unicode::MARKDOWN,
             FileTreeReferenceGroupKind::Images => unicode::IMAGE,
             FileTreeReferenceGroupKind::CssImports => unicode::CSS,
             FileTreeReferenceGroupKind::ScriptImports => unicode::SCRIPT,
