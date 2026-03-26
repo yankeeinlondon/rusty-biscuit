@@ -234,6 +234,11 @@ fn build_node_model(
     let mut transclusion_records: Vec<&ReferenceRecord> = Vec::new();
 
     for record in &node.local_references.records {
+        // TOC-synthesized references only appear in follow (composed) mode.
+        if !follow && record.attributes.get("toc_synthesized").is_some() {
+            continue;
+        }
+
         match classify_reference_group(record) {
             Some(group_kind) => {
                 let display_target = record.target.raw().unwrap_or("").to_string();
@@ -288,7 +293,7 @@ fn build_node_model(
 
         let caption = insertion
             .map(|ins| transclusion_caption(&ins.context))
-            .unwrap_or_default();
+            .unwrap_or_else(|| default_caption_for_syntax(record.origin.syntax));
 
         let child_node_id = insertion.map(|ins| ins.child_node_id.clone());
 
@@ -406,7 +411,7 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
             format!("inserted{section}")
         }
         Some(ReferenceSyntax::DirectiveTocLinking) => {
-            format!("inserted TOC links{section}")
+            format!("TOC elements linked{section}")
         }
         Some(ReferenceSyntax::DirectiveCode) => {
             format!("inserted code{section}")
@@ -415,6 +420,22 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
             format!("transcluded from URL{section}")
         }
         _ => "inserted".to_string(),
+    }
+}
+
+/// Fallback caption when no insertion context is available.
+///
+/// Used when the target document couldn't be loaded (e.g. missing file),
+/// so no `ReferenceInsertion` was created in the graph builder.
+fn default_caption_for_syntax(syntax: ReferenceSyntax) -> String {
+    match syntax {
+        ReferenceSyntax::DirectiveTocLinking => "TOC elements linked".to_string(),
+        ReferenceSyntax::DirectiveCode => "inserted code".to_string(),
+        ReferenceSyntax::DirectiveUrl => "transcluded from URL".to_string(),
+        ReferenceSyntax::DirectiveFile
+        | ReferenceSyntax::FrontmatterPrologue
+        | ReferenceSyntax::FrontmatterEpilogue => "inserted".to_string(),
+        _ => String::new(),
     }
 }
 
@@ -473,7 +494,7 @@ mod tests {
         };
         assert_eq!(
             transclusion_caption(&ctx),
-            "inserted TOC links into the '## Links' section"
+            "TOC elements linked into the '## Links' section"
         );
     }
 
