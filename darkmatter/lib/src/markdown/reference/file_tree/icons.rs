@@ -79,7 +79,10 @@ pub fn reference_icon(kind: &FileTreeReferenceGroupKind, is_nerd_font: bool) -> 
     }
 }
 
-/// Select icon string for a file node.
+/// Select icon string for a file node (file head line).
+///
+/// Uses two trailing spaces after nerd font icons so the glyph renders
+/// at full width — matching the filesystem component's layout.
 pub fn file_icon(kind: &FileTreeIconKind, is_nerd_font: bool) -> String {
     if is_nerd_font {
         let ch = match kind {
@@ -97,15 +100,21 @@ pub fn file_icon(kind: &FileTreeIconKind, is_nerd_font: bool) -> String {
 }
 
 /// Select icon string for a transclusion edge.
+///
+/// Adds an extra trailing space after the nerd font icon so it has room
+/// to render at the same visual size as icons in the file head line.
 pub fn transclusion_icon(kind: &FileTreeTransclusionKind, is_nerd_font: bool) -> String {
-    match kind {
-        FileTreeTransclusionKind::Url => {
-            if is_nerd_font {
-                format!("{} ", nerd::BRAIN)
-            } else {
-                format!("{} ", unicode::BRAIN)
-            }
-        }
-        _ => file_icon(&FileTreeIconKind::Markdown, is_nerd_font),
+    if is_nerd_font {
+        let ch = match kind {
+            FileTreeTransclusionKind::Url => nerd::BRAIN,
+            _ => nerd::MARKDOWN,
+        };
+        format!("{ch}  ")
+    } else {
+        let s = match kind {
+            FileTreeTransclusionKind::Url => unicode::BRAIN,
+            _ => unicode::MARKDOWN,
+        };
+        format!("{s} ")
     }
 }
