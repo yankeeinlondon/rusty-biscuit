@@ -234,6 +234,11 @@ fn build_node_model(
     let mut transclusion_records: Vec<&ReferenceRecord> = Vec::new();
 
     for record in &node.local_references.records {
+        // TOC-synthesized references only appear in follow (composed) mode.
+        if !follow && record.attributes.get("toc_synthesized").is_some() {
+            continue;
+        }
+
         match classify_reference_group(record) {
             Some(group_kind) => {
                 let display_target = record.target.raw().unwrap_or("").to_string();
@@ -258,10 +263,17 @@ fn build_node_model(
         }
     }
 
-    // Sort groups by fixed order, preserving source order within each
+    // Sort groups by fixed order, deduplicate rows by display_target
     let mut reference_groups: Vec<FileTreeReferenceGroup> = group_map
         .into_iter()
-        .map(|(kind, rows)| FileTreeReferenceGroup { kind, rows })
+        .map(|(kind, rows)| {
+            let mut seen = std::collections::HashSet::new();
+            let deduped = rows
+                .into_iter()
+                .filter(|r| seen.insert(r.display_target.clone()))
+                .collect();
+            FileTreeReferenceGroup { kind, rows: deduped }
+        })
         .collect();
     reference_groups.sort_by_key(|g| g.kind.sort_order());
 
@@ -271,9 +283,16 @@ fn build_node_model(
 
     for record in &transclusion_records {
         let trans_kind = syntax_to_transclusion_kind(record.origin.syntax);
-        let display_target = record.target.raw().unwrap_or("").to_string();
+        let is_literal = record.attributes.get("fm_literal").is_some();
+        let display_target = if is_literal {
+            String::new()
+        } else {
+            record.target.raw().unwrap_or("").to_string()
+        };
         let is_local_path = matches!(&record.target, ReferenceTarget::LocalPath { .. });
-        let followable = record.origin.syntax.is_followable_transclusion() && is_local_path;
+        let followable = !is_literal
+            && record.origin.syntax.is_followable_transclusion()
+            && is_local_path;
 
         // Find the matching child insertion for caption context.
         // Match by reference_id when available (stable across frontmatter
@@ -286,9 +305,13 @@ fn build_node_model(
             }
         });
 
-        let caption = insertion
-            .map(|ins| transclusion_caption(&ins.context))
-            .unwrap_or_default();
+        let caption = if is_literal {
+            "includes static text".to_string()
+        } else {
+            insertion
+                .map(|ins| transclusion_caption(&ins.context))
+                .unwrap_or_else(|| default_caption_for_syntax(record.origin.syntax))
+        };
 
         let child_node_id = insertion.map(|ins| ins.child_node_id.clone());
 
@@ -406,7 +429,7 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
             format!("inserted{section}")
         }
         Some(ReferenceSyntax::DirectiveTocLinking) => {
-            format!("inserted TOC links{section}")
+            format!("TOC elements linked{section}")
         }
         Some(ReferenceSyntax::DirectiveCode) => {
             format!("inserted code{section}")
@@ -415,6 +438,22 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
             format!("transcluded from URL{section}")
         }
         _ => "inserted".to_string(),
+    }
+}
+
+/// Fallback caption when no insertion context is available.
+///
+/// Used when the target document couldn't be loaded (e.g. missing file),
+/// so no `ReferenceInsertion` was created in the graph builder.
+fn default_caption_for_syntax(syntax: ReferenceSyntax) -> String {
+    match syntax {
+        ReferenceSyntax::DirectiveTocLinking => "TOC elements linked".to_string(),
+        ReferenceSyntax::DirectiveCode => "inserted code".to_string(),
+        ReferenceSyntax::DirectiveUrl => "transcluded from URL".to_string(),
+        ReferenceSyntax::DirectiveFile
+        | ReferenceSyntax::FrontmatterPrologue
+        | ReferenceSyntax::FrontmatterEpilogue => "inserted".to_string(),
+        _ => String::new(),
     }
 }
 
@@ -473,7 +512,7 @@ mod tests {
         };
         assert_eq!(
             transclusion_caption(&ctx),
-            "inserted TOC links into the '## Links' section"
+            "TOC elements linked into the '## Links' section"
         );
     }
 

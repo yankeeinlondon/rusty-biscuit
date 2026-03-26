@@ -6,8 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOperation, ComposeSource};
+use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
 use crate::markdown::compose::cache::RunLocalCache;
+use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
 use crate::markdown::compose::transclusion::{
     parse_directives, parse_frontmatter_refs, DirectiveKind, TransclusionRuntime,
@@ -256,9 +257,32 @@ fn build_node(
     let mut all_descendant_nodes: Vec<ReferenceGraphNode> = Vec::new();
     let mut insertion_order = 0;
 
+    // Build effective state for evaluating `when=` conditions.
+    // Uses the document's frontmatter merged with any external state from
+    // options, plus runtime context (including environment variables).
+    let effective_state = {
+        let fm: std::collections::HashMap<String, serde_json::Value> =
+            md.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut builder = EffectiveStateBuilder::new().with_frontmatter(fm);
+        if let Some(ref ext) = options.compose.external_state {
+            builder = builder.with_external_state(ext.clone());
+        }
+        builder.build()
+    };
+
     // Block directives
     if let Ok(directives) = parse_directives(&prepared_content) {
         for directive in &directives {
+            // Evaluate `when=` condition — skip directive entirely if false.
+            if let Some(ref when_expr) = directive.options.when_expr {
+                let condition_met = conditions::evaluate_condition(
+                    when_expr, &effective_state, directive.line,
+                ).unwrap_or(false);
+                if !condition_met {
+                    continue;
+                }
+            }
+
             // Emit transclusion reference records (rec #4)
             if extract_references {
                 let syntax = match directive.kind {
@@ -331,6 +355,12 @@ fn build_node(
         for directive in &toc_directives {
             let ref_id = make_reference_id(source, directive.line, directive.span.start);
 
+            // Section context is always available from the parent document's
+            // heading index, regardless of whether the target can be loaded.
+            let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
+                .map(|(t, l)| (Some(t.to_string()), Some(l)))
+                .unwrap_or((None, None));
+
             if let Some((display_target, path)) =
                 resolve_toc_linking_target(directive, source, &transclusion_options)
             {
@@ -348,20 +378,30 @@ fn build_node(
                         attributes: serde_json::Map::new(),
                     });
 
-                    local_references.records.extend(
-                        generate_toc_link_references(
-                            &display_target,
-                            &path,
-                            directive,
-                            source,
-                        ),
-                    );
                 }
 
                 // Create a child graph node so follow mode can expand the
                 // target document as a nested FileTree subtree.
                 let child_source = ComposeSource::File(path.clone());
                 let child_id = source_to_id(&child_source);
+
+                // Generate synthesized TOC link references on the parent
+                // node (composed view). Tagged so the model builder only
+                // includes them when follow=true.
+                if extract_references {
+                    for mut record in generate_toc_link_references(
+                        &display_target,
+                        &path,
+                        directive,
+                        source,
+                    ) {
+                        record.attributes.insert(
+                            "toc_synthesized".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        local_references.records.push(record);
+                    }
+                }
 
                 if runtime.transclusion.enter(child_id.clone()).is_ok() {
                     if let Some(child_md) = runtime.load_markdown(&path) {
@@ -373,17 +413,14 @@ fn build_node(
                             extract_references,
                         )?;
 
-                        let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
-                            .map(|(t, l)| (Some(t.to_string()), Some(l)))
-                            .unwrap_or((None, None));
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: directive.line,
                             insertion_order,
-                            reference_id: Some(ref_id),
+                            reference_id: Some(ref_id.clone()),
                             context: ReferenceInsertionContext {
                                 directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
-                                section_heading_text: sec_text,
+                                section_heading_text: sec_text.clone(),
                                 section_heading_level: sec_level,
                             },
                         });
@@ -393,21 +430,56 @@ fn build_node(
                     }
                     runtime.transclusion.exit();
                 }
-            } else if extract_references
-                && let Some(raw_target) = directive.targets.first()
-            {
-                local_references.records.push(ReferenceRecord {
-                    id: ref_id,
-                    kind: ReferenceKind::Transclusion,
-                    target: classify_target(raw_target),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: directive.line,
-                        span: directive.span.clone(),
-                        syntax: ReferenceSyntax::DirectiveTocLinking,
+
+                // If no child insertion was created (target couldn't load),
+                // still create a context-only insertion so the caption has
+                // section information.
+                if !child_insertions.iter().any(|ins| ins.reference_id.as_deref() == Some(&ref_id)) {
+                    child_insertions.push(ReferenceInsertion {
+                        child_node_id: String::new(),
+                        directive_line: directive.line,
+                        insertion_order,
+                        reference_id: Some(ref_id),
+                        context: ReferenceInsertionContext {
+                            directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                            section_heading_text: sec_text,
+                            section_heading_level: sec_level,
+                        },
+                    });
+                    insertion_order += 1;
+                }
+            } else {
+                // Target didn't resolve — still emit reference record and
+                // a context-only insertion for the caption.
+                if extract_references {
+                    if let Some(raw_target) = directive.targets.first() {
+                        local_references.records.push(ReferenceRecord {
+                            id: ref_id.clone(),
+                            kind: ReferenceKind::Transclusion,
+                            target: classify_target(raw_target),
+                            origin: ReferenceOrigin {
+                                source: source.clone(),
+                                line: directive.line,
+                                span: directive.span.clone(),
+                                syntax: ReferenceSyntax::DirectiveTocLinking,
+                            },
+                            attributes: serde_json::Map::new(),
+                        });
+                    }
+                }
+
+                child_insertions.push(ReferenceInsertion {
+                    child_node_id: String::new(),
+                    directive_line: directive.line,
+                    insertion_order,
+                    reference_id: Some(ref_id),
+                    context: ReferenceInsertionContext {
+                        directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
+                        section_heading_text: sec_text,
+                        section_heading_level: sec_level,
                     },
-                    attributes: serde_json::Map::new(),
                 });
+                insertion_order += 1;
             }
         }
     }
@@ -415,22 +487,41 @@ fn build_node(
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
-            // Emit transclusion reference record for prologue (rec #4)
+            let is_literal = is_literal_content(prologue);
+
             if extract_references {
+                let mut attrs = serde_json::Map::new();
+                if is_literal {
+                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                    // Extract links from literal content for follow mode
+                    let links = super::local::extract_markdown_links(prologue, source);
+                    for mut link in links {
+                        link.attributes.insert(
+                            "toc_synthesized".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        local_references.records.push(link);
+                    }
+                }
                 local_references.records.push(ReferenceRecord {
                     id: make_reference_id(source, 0, idx),
                     kind: ReferenceKind::Transclusion,
-                    target: classify_target(prologue),
+                    target: if is_literal {
+                        classify_target("")
+                    } else {
+                        classify_target(prologue)
+                    },
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line: 0,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterPrologue,
                     },
-                    attributes: serde_json::Map::new(),
+                    attributes: attrs,
                 });
             }
 
+            if !is_literal {
             if let Some(child_path) = resolve_local_target(prologue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -464,27 +555,45 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
+            } // if !is_literal
         }
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
-            // Emit transclusion reference record for epilogue (rec #4)
-            // Use usize::MAX as the line so it sorts after all body content
-            // and matches the child insertion's directive_line.
+            let is_literal = is_literal_content(epilogue);
+
             if extract_references {
+                let mut attrs = serde_json::Map::new();
+                if is_literal {
+                    attrs.insert("fm_literal".to_string(), serde_json::Value::Bool(true));
+                    // Extract links from literal content for follow mode
+                    let links = super::local::extract_markdown_links(epilogue, source);
+                    for mut link in links {
+                        link.attributes.insert(
+                            "toc_synthesized".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        local_references.records.push(link);
+                    }
+                }
                 local_references.records.push(ReferenceRecord {
                     id: make_reference_id(source, usize::MAX, idx),
                     kind: ReferenceKind::Transclusion,
-                    target: classify_target(epilogue),
+                    target: if is_literal {
+                        classify_target("")
+                    } else {
+                        classify_target(epilogue)
+                    },
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line: usize::MAX,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterEpilogue,
                     },
-                    attributes: serde_json::Map::new(),
+                    attributes: attrs,
                 });
             }
 
+            if !is_literal {
             if let Some(child_path) = resolve_local_target(epilogue, source) {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -521,6 +630,7 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
+            } // if !is_literal
         }
     }
 
@@ -629,6 +739,15 @@ fn prepare_content(
     Ok(result.content().to_string())
 }
 
+/// Detect literal content in frontmatter prologue/epilogue values.
+///
+/// Returns `true` when the value is inline markdown content rather than
+/// a file path reference. Literal content contains newlines or starts
+/// with markdown syntax that cannot be a valid file path.
+fn is_literal_content(value: &str) -> bool {
+    value.contains('\n') || value.starts_with("---")
+}
+
 /// Resolve a local path target relative to a source.
 ///
 /// Uses `biscuit_file::FileReference` for full resolution including
@@ -703,31 +822,28 @@ fn generate_toc_link_references(
     let Ok(target_md) = Markdown::try_from(path) else {
         return Vec::new();
     };
-    let headings = target_md
-        .toc()
-        .all_headings()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    let Ok(rendered) = toc_linking::render_resolved_directive(
-        display_target,
-        &headings,
-        &directive.options,
-        directive.line,
-    ) else {
-        return Vec::new();
-    };
 
-    super::local::extract_markdown_links(&rendered, source)
-        .into_iter()
+    let toc = target_md.toc();
+    let headings = toc.all_headings();
+
+    headings
+        .iter()
+        .filter(|h| directive.options.levels.includes(h.level))
         .enumerate()
-        .map(|(idx, record)| {
-            let mut record = record;
-            record.id = make_reference_id(source, directive.line, directive.span.start + idx + 1);
-            record.origin.source = source.clone();
-            record.origin.line = directive.line;
-            record.origin.span = directive.span.clone();
-            record
+        .map(|(idx, h)| {
+            let fragment_url = format!("{display_target}#{}", h.slug);
+            ReferenceRecord {
+                id: make_reference_id(source, directive.line, directive.span.start + idx + 1),
+                kind: ReferenceKind::Hyperlink,
+                target: classify_target(&fragment_url),
+                origin: ReferenceOrigin {
+                    source: source.clone(),
+                    line: directive.line,
+                    span: directive.span.clone(),
+                    syntax: ReferenceSyntax::MarkdownLink,
+                },
+                attributes: serde_json::Map::new(),
+            }
         })
         .collect()
 }

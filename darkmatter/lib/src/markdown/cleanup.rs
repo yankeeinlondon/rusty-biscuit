@@ -1259,6 +1259,7 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
     let mut prev_item_indent: Option<usize> = None;
     let mut in_list_run = false; // true when previous line(s) were list items
     let mut prev_was_blank = false;
+    let mut had_continuation = false; // true when continuation content seen since last item
 
     for (idx, line) in stripped.iter().enumerate() {
         let trimmed = line.trim_start();
@@ -1273,7 +1274,9 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
                     ListSpacingMode::Loose => true,
                     ListSpacingMode::Normal => {
                         if let Some(prev) = prev_item_indent {
-                            indent != prev
+                            // Blank line on indent change OR when the previous item
+                            // had continuation content (loose list items).
+                            indent != prev || had_continuation
                         } else {
                             false
                         }
@@ -1297,7 +1300,11 @@ fn normalize_list_spacing(output: &mut String, mode: ListSpacingMode) {
         if is_item {
             prev_item_indent = Some(indent);
             in_list_run = true;
+            had_continuation = false;
         } else if !trimmed.is_empty() {
+            if is_cont {
+                had_continuation = true;
+            }
             if !is_cont {
                 prev_item_indent = None;
             }
@@ -2922,6 +2929,37 @@ Some prose after the list.
         assert!(
             cleaned.contains("\n\n3."),
             "Loose: blank line before item 3, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn normal_loose_list_preserves_blank_lines_between_items() {
+        // Loose lists (items with continuation paragraphs) should have blank
+        // lines between items in Normal mode, not just in Loose mode.
+        let input = "\
+- **First**
+
+    Paragraph under first item.
+
+- **Second**
+
+    Paragraph under second item.
+
+- **Third**
+
+    Paragraph under third item.
+";
+        let cleaned = cleanup_content(input);
+
+        assert!(
+            cleaned.contains("first item.\n\n- **Second**"),
+            "Normal: blank line before second item in loose list, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("second item.\n\n- **Third**"),
+            "Normal: blank line before third item in loose list, got:\n{}",
             cleaned
         );
     }
