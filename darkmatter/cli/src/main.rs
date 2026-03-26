@@ -54,6 +54,10 @@ fn init_tracing(verbose: u8) {
 }
 
 fn main() {
+    // Reset SIGPIPE to default (terminate) so piping to `head`, `md toc`, etc.
+    // exits cleanly instead of panicking on write to a closed pipe.
+    reset_sigpipe();
+
     CompleteEnv::with_factory(Cli::command).complete();
 
     if let Err(e) = run() {
@@ -177,3 +181,19 @@ fn print_completions(shell: clap_complete::Shell) {
     println!("# Add this line to {}:", config_file);
     println!("{}", setup_cmd);
 }
+
+/// Resets SIGPIPE to the default handler so writes to closed pipes
+/// terminate the process instead of panicking.
+///
+/// Rust ignores SIGPIPE by default, which causes `println!` to panic
+/// with "broken pipe" when output is piped to a process that exits
+/// early (e.g., `md compose test.md | md toc`).
+#[cfg(unix)]
+fn reset_sigpipe() {
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn reset_sigpipe() {}

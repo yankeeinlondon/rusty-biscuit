@@ -1,7 +1,14 @@
 ---
-epilogue: "---\n\n- No animals were hurt in the preparation of this document"
+epilogue: "---\n\n- No [animals](./animals.md) were hurt in the preparation of this document"
 ---
 # Testing Composition
+
+<meta property="og:site_name" content="testing">
+<meta property="og:description" content="a test of document composition">
+<link rel="stylesheet" href="./style.css">
+
+
+<img src="https://www.nerdfonts.com/assets/img/sankey-glyphs-combined-diagram.png" />
 
 This is a basic test of _composition_ through the Markdown pipeline we use in Darkmatter. The overall flow is:
 
@@ -23,3 +30,7 @@ flowchart LR
 ::file ./disclosure-cc.md when="env.AGENT == 'claude'"
 ::file ./disclosure-oc.md when="env.AGENT == 'opencode'"
 ::file ./disclosure.md when="!env.AGENT"
+
+## Some Other Things
+
+::toc-linking ./other.md

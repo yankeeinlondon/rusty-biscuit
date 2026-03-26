@@ -87,7 +87,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             )?;
         }
         CliCommand::Toc { input, json } => {
-            let md = load_markdown(Some(&input))?;
+            let md = load_markdown(input.as_ref())?;
             let toc = md.toc();
 
             if json {
@@ -1243,18 +1243,36 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
     // Validation summary footer
     if validate {
         if let Some(report) = tree.validation_report() {
-            println!(
-                "{} references scanned, {} valid, {} issues",
-                report.references_scanned,
-                report.references_valid,
-                report.issues.len()
-            );
-        }
-    }
+            use biscuit_terminal::components::prose::Prose;
+            use biscuit_terminal::components::renderable::Renderable as _;
 
-    // Exit code 2 for validation errors
-    if validate {
-        if let Some(report) = tree.validation_report() {
+            let issue_count = report.issues.len();
+
+            // Print each issue with red styling
+            if !report.issues.is_empty() {
+                println!();
+                for issue in &report.issues {
+                    let msg = format!("<red-500>{}</red-500>", issue.message);
+                    println!("  {}", Prose::new(msg).render(&term));
+                }
+                println!();
+            }
+
+            // Summary line with red issue count when there are issues
+            let summary = if issue_count > 0 {
+                format!(
+                    "{} references scanned, {} valid, <red-500><b>{} issues</b></red-500>",
+                    report.references_scanned, report.references_valid, issue_count
+                )
+            } else {
+                format!(
+                    "{} references scanned, {} valid, {} issues",
+                    report.references_scanned, report.references_valid, issue_count
+                )
+            };
+            println!("{}", Prose::new(summary).render(&term));
+
+            // Exit code 2 for validation errors
             if !report.is_valid() {
                 std::process::exit(2);
             }
