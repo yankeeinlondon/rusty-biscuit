@@ -191,8 +191,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             input,
             follow,
             validate,
+            json,
         } => {
-            run_graph(&input, follow, validate)?;
+            run_graph(&input, follow, validate, json)?;
         }
     }
 
@@ -1441,7 +1442,245 @@ fn format_validation_issues(
     out
 }
 
-fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
+// ── Graph JSON serialization ──────────────────────────────────────────
+
+/// Serialize a `ComposeSource` to a JSON-friendly path string.
+fn source_to_json(source: &darkmatter::markdown::compose::ComposeSource) -> serde_json::Value {
+    use darkmatter::markdown::compose::ComposeSource;
+    match source {
+        ComposeSource::File(p) => serde_json::Value::String(p.display().to_string()),
+        ComposeSource::Url(u) => serde_json::Value::String(u.to_string()),
+        ComposeSource::Unknown => serde_json::Value::Null,
+    }
+}
+
+/// Serialize a `ReferenceKind` to a snake_case string.
+fn kind_to_json(kind: darkmatter::markdown::reference::types::ReferenceKind) -> &'static str {
+    use darkmatter::markdown::reference::types::ReferenceKind;
+    match kind {
+        ReferenceKind::Hyperlink => "hyperlink",
+        ReferenceKind::Image => "image",
+        ReferenceKind::Transclusion => "transclusion",
+        ReferenceKind::CssImport => "css_import",
+        ReferenceKind::InlineCss => "inline_css",
+        ReferenceKind::ScriptImport => "script_import",
+        ReferenceKind::InlineScript => "inline_script",
+        ReferenceKind::FontImport => "font_import",
+        ReferenceKind::MetaTag => "meta_tag",
+    }
+}
+
+/// Serialize a `ReferenceTarget` to a JSON object with `type` and `raw`.
+fn target_to_json(
+    target: &darkmatter::markdown::reference::types::ReferenceTarget,
+) -> serde_json::Value {
+    use darkmatter::markdown::reference::types::ReferenceTarget;
+    match target {
+        ReferenceTarget::LocalPath { raw } => {
+            serde_json::json!({ "type": "local_path", "raw": raw })
+        }
+        ReferenceTarget::RemoteUrl { raw } => {
+            serde_json::json!({ "type": "remote_url", "raw": raw })
+        }
+        ReferenceTarget::Fragment { raw } => {
+            serde_json::json!({ "type": "fragment", "raw": raw })
+        }
+        ReferenceTarget::DataUri { raw } => {
+            serde_json::json!({ "type": "data_uri", "raw": raw })
+        }
+        ReferenceTarget::OtherScheme { raw, scheme } => {
+            serde_json::json!({ "type": "other_scheme", "raw": raw, "scheme": scheme })
+        }
+        ReferenceTarget::Inline => {
+            serde_json::json!({ "type": "inline" })
+        }
+    }
+}
+
+/// Serialize a `ReferenceSyntax` to a snake_case string.
+fn syntax_to_json(
+    syntax: darkmatter::markdown::reference::types::ReferenceSyntax,
+) -> &'static str {
+    use darkmatter::markdown::reference::types::ReferenceSyntax;
+    match syntax {
+        ReferenceSyntax::MarkdownLink => "markdown_link",
+        ReferenceSyntax::HtmlAnchor => "html_anchor",
+        ReferenceSyntax::MarkdownImage => "markdown_image",
+        ReferenceSyntax::HtmlImage => "html_image",
+        ReferenceSyntax::DirectiveFile => "directive_file",
+        ReferenceSyntax::DirectiveUrl => "directive_url",
+        ReferenceSyntax::DirectiveCode => "directive_code",
+        ReferenceSyntax::DirectiveTocLinking => "directive_toc_linking",
+        ReferenceSyntax::FrontmatterPrologue => "frontmatter_prologue",
+        ReferenceSyntax::FrontmatterEpilogue => "frontmatter_epilogue",
+        ReferenceSyntax::HtmlLinkTag => "html_link_tag",
+        ReferenceSyntax::HtmlScriptTag => "html_script_tag",
+        ReferenceSyntax::HtmlStyleTag => "html_style_tag",
+        ReferenceSyntax::CssAtImport => "css_at_import",
+        ReferenceSyntax::CssFontFaceSrc => "css_font_face_src",
+        ReferenceSyntax::HtmlMetaTag => "html_meta_tag",
+    }
+}
+
+/// Serialize a transclusion directive kind to a snake_case string.
+fn directive_kind_to_json(
+    syntax: darkmatter::markdown::reference::types::ReferenceSyntax,
+) -> &'static str {
+    use darkmatter::markdown::reference::types::ReferenceSyntax;
+    match syntax {
+        ReferenceSyntax::DirectiveFile => "file",
+        ReferenceSyntax::DirectiveUrl => "url",
+        ReferenceSyntax::DirectiveCode => "code",
+        ReferenceSyntax::DirectiveTocLinking => "toc_linking",
+        ReferenceSyntax::FrontmatterPrologue => "prologue",
+        ReferenceSyntax::FrontmatterEpilogue => "epilogue",
+        other => syntax_to_json(other),
+    }
+}
+
+/// Serialize a single `ReferenceRecord` to JSON.
+fn reference_record_to_json(
+    record: &darkmatter::markdown::reference::types::ReferenceRecord,
+) -> serde_json::Value {
+    let mut obj = serde_json::json!({
+        "id": record.id,
+        "kind": kind_to_json(record.kind),
+        "target": target_to_json(&record.target),
+        "syntax": syntax_to_json(record.origin.syntax),
+        "line": record.origin.line,
+    });
+
+    if !record.attributes.is_empty() {
+        obj["attributes"] = serde_json::Value::Object(record.attributes.clone());
+    }
+
+    obj
+}
+
+/// Serialize a `ReferenceInsertion` (transclusion) to JSON, optionally expanding child nodes.
+fn insertion_to_json(
+    insertion: &darkmatter::markdown::reference::types::ReferenceInsertion,
+    graph: &darkmatter::markdown::reference::types::ReferenceGraph,
+    follow: bool,
+) -> serde_json::Value {
+    let kind_str = insertion
+        .context
+        .directive_kind
+        .map(directive_kind_to_json)
+        .unwrap_or("unknown");
+
+    // Find the target path from the child node
+    let child_node = graph.node_by_id(&insertion.child_node_id);
+    let target = child_node.map(|n| source_to_json(&n.source)).unwrap_or(serde_json::Value::Null);
+
+    let mut obj = serde_json::json!({
+        "kind": kind_str,
+        "target": target,
+        "line": insertion.directive_line,
+        "followable": insertion.context.directive_kind
+            .map(|s| s.is_followable_transclusion())
+            .unwrap_or(false),
+    });
+
+    if let Some(ref heading) = insertion.context.section_heading_text {
+        obj["section"] = serde_json::Value::String(heading.clone());
+    }
+    if let Some(level) = insertion.context.section_heading_level {
+        obj["section_level"] = serde_json::Value::Number(level.into());
+    }
+
+    // Recursively expand child node when following
+    if follow {
+        if let Some(child) = child_node {
+            obj["node"] = graph_node_to_json(child, graph, true);
+        }
+    }
+
+    obj
+}
+
+/// Serialize a single graph node to JSON.
+fn graph_node_to_json(
+    node: &darkmatter::markdown::reference::types::ReferenceGraphNode,
+    graph: &darkmatter::markdown::reference::types::ReferenceGraph,
+    follow: bool,
+) -> serde_json::Value {
+    use darkmatter::markdown::compose::ComposeSource;
+
+    let file_name = match &node.source {
+        ComposeSource::File(p) => p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        ComposeSource::Url(u) => u.to_string(),
+        ComposeSource::Unknown => String::new(),
+    };
+
+    let references: Vec<_> = node
+        .local_references
+        .records
+        .iter()
+        // Exclude transclusion records (they appear under "transclusions")
+        .filter(|r| r.kind != darkmatter::markdown::reference::types::ReferenceKind::Transclusion)
+        .map(reference_record_to_json)
+        .collect();
+
+    let transclusions: Vec<_> = node
+        .child_insertions
+        .iter()
+        .map(|ins| insertion_to_json(ins, graph, follow))
+        .collect();
+
+    serde_json::json!({
+        "file": file_name,
+        "source": source_to_json(&node.source),
+        "references": references,
+        "transclusions": transclusions,
+    })
+}
+
+/// Serialize validation report to JSON.
+fn validation_report_to_json(
+    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+) -> serde_json::Value {
+    use darkmatter::markdown::compose::ComposeSource;
+    use darkmatter::markdown::reference::validate::ReferenceSeverity;
+
+    let issues: Vec<_> = report
+        .issues
+        .iter()
+        .map(|i| {
+            let source_file = match &i.origin.source {
+                ComposeSource::File(p) => serde_json::Value::String(p.display().to_string()),
+                ComposeSource::Url(u) => serde_json::Value::String(u.to_string()),
+                ComposeSource::Unknown => serde_json::Value::Null,
+            };
+            serde_json::json!({
+                "code": format!("{:?}", i.code),
+                "message": i.message,
+                "severity": match i.severity {
+                    ReferenceSeverity::Error => "error",
+                    ReferenceSeverity::Warning => "warning",
+                    ReferenceSeverity::Info => "info",
+                },
+                "kind": kind_to_json(i.kind),
+                "reference": i.reference_display,
+                "line": i.origin.line,
+                "source": source_file,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "valid": report.is_valid(),
+        "references_scanned": report.references_scanned,
+        "references_valid": report.references_valid,
+        "issues": issues,
+        "warnings": report.warnings,
+    })
+}
+
+fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::terminal::Terminal;
     use darkmatter::markdown::reference::file_tree::FileTree;
@@ -1458,6 +1697,24 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool) -> Result<()> {
 
     tree.ensure_built().map_err(|e| eyre!("{e}"))?;
 
+    // ── JSON output ──────────────────────────────────────────────────
+    if json {
+        if let Some(graph) = tree.graph() {
+            let mut root_json = graph_node_to_json(&graph.root, graph, follow);
+
+            if validate {
+                if let Some(report) = tree.validation_report() {
+                    root_json["validation"] = validation_report_to_json(report);
+                }
+            }
+
+            println!("{}", serde_json::to_string_pretty(&root_json)?);
+        }
+        // JSON mode always exits 0
+        return Ok(());
+    }
+
+    // ── Terminal tree output ─────────────────────────────────────────
     let term = Terminal::default();
     print!("{}", tree.display(&term));
 

@@ -7,13 +7,14 @@ references (links, images, imports) and transclusion directives (`::file`,
 ## Usage
 
 ```
-md graph <FILE> [--follow] [--validate]
+md graph <FILE> [--follow] [--validate] [--json]
 ```
 
 | Flag         | Description                                              |
 | ------------ | -------------------------------------------------------- |
-| `--follow`   | Recursively expand followable transclusions (composed view) |
+| `--follow`   | Recursively expand followable transclusions (composed view). Alias: `--compose` |
 | `--validate` | Validate references and show inline status with exit code 2 on errors |
+| `--json`     | Output the graph as JSON instead of a terminal tree (always exits 0) |
 
 ## Mental Model
 
@@ -253,6 +254,75 @@ When `--validate` is enabled:
   Import(s), Invalid Font Import(s), and Invalid Meta Tag(s).
 - A summary footer shows `N references scanned, M valid, K issues`.
 - Exit code 2 is returned if any validation errors exist.
+
+## JSON Output Mode (`--json`)
+
+When `--json` is passed, the graph is emitted as structured JSON to stdout
+instead of a terminal tree. The exit code is always 0 — validation status is
+conveyed via the `validation.valid` boolean.
+
+### Structure
+
+```json
+{
+  "file": "test.md",
+  "source": "/absolute/path/to/test.md",
+  "references": [
+    {
+      "id": "b44f128d...",
+      "kind": "hyperlink",
+      "target": { "type": "remote_url", "raw": "https://example.com" },
+      "syntax": "markdown_link",
+      "line": 12,
+      "attributes": { "display": "Example" }
+    }
+  ],
+  "transclusions": [
+    {
+      "kind": "file",
+      "target": "/absolute/path/to/child.md",
+      "line": 24,
+      "followable": true,
+      "section": "# Section Title",
+      "section_level": 1,
+      "node": { ... }
+    }
+  ],
+  "validation": {
+    "valid": false,
+    "references_scanned": 19,
+    "references_valid": 17,
+    "issues": [ ... ],
+    "warnings": [ ... ]
+  }
+}
+```
+
+### Key behavior
+
+- **Without `--follow`**: Only the root file's references and transclusions
+  are reported. Transclusion entries have no `node` property.
+- **With `--follow`** (or `--compose`): Each followable transclusion includes
+  a nested `node` object with the child document's own references and
+  transclusions, recursively expanded.
+- **Without `--validate`**: The `validation` key is omitted entirely.
+- **With `--validate`**: The `validation` key is always present. Check
+  `validation.valid` to determine whether the document has errors.
+- `attributes` is only present on references that carry extra metadata
+  (display text, CSS classes, image dimensions, etc.).
+
+### Reference kinds
+
+`hyperlink`, `image`, `transclusion`, `css_import`, `inline_css`,
+`script_import`, `inline_script`, `font_import`, `meta_tag`
+
+### Target types
+
+`local_path`, `remote_url`, `fragment`, `data_uri`, `other_scheme`, `inline`
+
+### Transclusion kinds
+
+`file`, `code`, `url`, `toc_linking`, `prologue`, `epilogue`
 
 ## TTY Formatting
 

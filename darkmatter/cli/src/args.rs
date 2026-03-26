@@ -273,12 +273,16 @@ pub enum Command {
         input: PathBuf,
 
         /// Recursively expand followable transclusions
-        #[arg(long)]
+        #[arg(long, visible_alias = "compose")]
         follow: bool,
 
         /// Validate references and show inline status
         #[arg(long)]
         validate: bool,
+
+        /// Output as JSON instead of a terminal tree
+        #[arg(long)]
+        json: bool,
     },
 }
 
