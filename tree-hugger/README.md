@@ -6,6 +6,8 @@ name: frontmatter
 
 A library (and CLI) for generating diagnostics and symbol summaries across multiple programming languages using Tree-sitter.
 
+<img src="../assets/tree-hugger-512.png" style="width: 250" />
+
 ## Packages
 
 ```txt

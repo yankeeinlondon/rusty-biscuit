@@ -5,6 +5,7 @@ use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{InquireError, Select, Text};
 use worktree::config::{config_path, considered_dirs, resolve_base_dir, save_config};
+use worktree::git::repo_info;
 use worktree::worktree::create_worktree;
 use worktree::WorktreeError;
 
@@ -27,10 +28,17 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
 
     let result = create_worktree(branch, &base)?;
 
+    let relative = repo_info().map(|i| i.relative_path).unwrap_or_default();
+    let location = if relative.as_os_str().is_empty() {
+        "<dim><i>repo root</i></dim>".to_string()
+    } else {
+        format!("<dim>{}</dim>", relative.to_string_lossy())
+    };
     let msg = format!(
-        "\n<green>Created worktree</green> <bold>{}</bold> at <dim>{}</dim>\n",
+        "\n<green>Created worktree</green> <bold>{}</bold> at <dim>{}</dim>\n  <dim>- you have been moved <i>into</i> the worktree at the same relative path ({})</dim>\n",
         result.branch,
-        result.worktree_path.display()
+        result.worktree_path.display(),
+        location,
     );
     eprintln!("{}", Prose::new(msg).render(&terminal));
 

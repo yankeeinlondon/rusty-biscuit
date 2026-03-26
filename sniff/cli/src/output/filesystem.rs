@@ -666,11 +666,25 @@ pub fn render_git_section(
         // Worktree lines: varies based on whether we're inside that worktree
         for (_key, info) in &git.worktrees {
             let branch = &info.branch;
-            let status = format_ahead_behind_of(info.ahead, info.behind, &info.base_branch);
+            let status = if info.merged && info.ahead == 0 {
+                format!("merged into <b>{}</b>", &info.base_branch)
+            } else {
+                format_ahead_behind_of(info.ahead, info.behind, &info.base_branch)
+            };
             let merge_status = if info.has_conflicts {
                 " · <red-500><b>conflicts</b></red-500>"
             } else {
                 " · <green-500>clean</green-500>"
+            };
+
+            let uncommitted = if info.changed_files > 0 {
+                format!(
+                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted {}</i></dim>",
+                    info.changed_files,
+                    if info.changed_files == 1 { "file" } else { "files" }
+                )
+            } else {
+                String::new()
             };
 
             // Check if we're inside this particular worktree
@@ -680,11 +694,11 @@ pub fn render_git_section(
 
             if is_current {
                 wt_list.add(Prose::new(format!(
-                    "<b>{branch}:</b> you are {status}{merge_status}"
+                    "<b>{branch}:</b> you are {status}{merge_status}{uncommitted}"
                 )));
             } else {
                 wt_list.add(Prose::new(format!(
-                    "{branch}: <dim>is {status}</dim>{merge_status}"
+                    "{branch}: <dim>is {status}</dim>{merge_status}{uncommitted}"
                 )));
             }
         }

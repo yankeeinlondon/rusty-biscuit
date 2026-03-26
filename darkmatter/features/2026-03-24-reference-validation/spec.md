@@ -34,7 +34,8 @@ The current implementations of `.image_references()` and `.inline_html_image_ref
 
 We need to be able to query any Markdown struct what transclusions it includes.
 
-- the key information we need back is 
+- get_transclusions() - reports on the transclusions in the local document
+- get_transclusions_graph() - reports on the full graph of transclusion originating from the given document
 
 
 ### CSS, Scripts, and Fonts
@@ -45,10 +46,19 @@ This document update includes a need to be able to report on:
 - inline scripts and script imports
 - Fonts imports
 
-None of the above are common in a Markdown file but we should be able to detect and preserve this information. While the `Markdown.md` file documents some of the methods it expects it is NOT currently implemented.
+- get_inline_css() - inline css blocks in local file
+- get_inline_css_graph() - inline css blocks in local file and transcluded files
+- get_css_imports()
+- get_css_import_graph() 
+
+- get_inline_script() - inline scripts blocks in local file
+- get_inline_script_graph() - inline scripts blocks in local file and transcluded files
+- get_script_imports()
+- get_script_import_graph() 
+
 
 ### Meta Tags
 
-In HTML `<meta>` tags are common but not in Markdown. In one regard, we want to be able to detect and preserve inline meta tags in Markdown but with meta tags we will go a bit further than we do with CSS, scripts, and fonts. This is described in the Markdown.md file in greater detail (this is described but not implemented).
-
-
+- get_meta_tags() - get all meta tags in the local document as a dictionary
+- merge_meta_into_frontmatter(overwrite: bool) - merge the meta tags key/values into frontmatter properties
+- set_meta_tag(key: string, value: MetaValue)
