@@ -15,9 +15,9 @@ const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/frontmatter-prompt.md";
 const DEFAULT_GUARDRAILS: &str = "\
 > **IMPORTANT:**
 >
-> - Never change the `prompt` frontmatter property, that property is to read and should not be reformatted or changed in any way
-> - Your task is to use the prompt from the `prompt` property to update the body of this document
-> - Do not create another document and have this document link to it unless the frontmatter `prompt` explicitly tells you to
+> - Return the replacement Markdown body content only
+> - Do not include frontmatter delimiters or frontmatter content
+> - Do not edit the source file directly
 ";
 
 /// Load guardrails from `.claudine/frontmatter-prompt.md` (creating it if

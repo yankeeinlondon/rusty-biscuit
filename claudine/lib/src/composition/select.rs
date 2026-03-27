@@ -3,99 +3,9 @@
 use std::collections::BTreeSet;
 
 use crate::events::Provider;
-use crate::linking::ranked_provider_preferences;
 
 use super::error::CompositionError;
-use super::types::{CompositionRequest, PreparedPrompt, SelectedProvider, SelectionReason};
-
-/// Select a provider for composition execution.
-///
-/// Precedence:
-/// 1. Explicit provider (from wrapper subcommand)
-/// 2. `AGENT` environment variable
-/// 3. Frontmatter `agent` hint
-/// 4. Ranked provider preferences (with fallback)
-pub fn select_provider(
-    request: &CompositionRequest,
-    prepared: &PreparedPrompt,
-    installed: &[Provider],
-    preference: &[Provider],
-) -> Result<SelectedProvider, CompositionError> {
-    let agent_env = std::env::var("AGENT").ok();
-    select_provider_with_env(
-        request,
-        prepared,
-        installed,
-        preference,
-        agent_env.as_deref(),
-    )
-}
-
-/// Core selection logic with the AGENT env value passed explicitly (for testability).
-pub fn select_provider_with_env(
-    request: &CompositionRequest,
-    prepared: &PreparedPrompt,
-    installed: &[Provider],
-    preference: &[Provider],
-    agent_env: Option<&str>,
-) -> Result<SelectedProvider, CompositionError> {
-    let candidates = build_candidate_set(installed, &request.excluded);
-    if candidates.is_empty() {
-        return Err(CompositionError::NoRunnableProviders);
-    }
-
-    // 1. Explicit provider
-    if let Some(provider) = request.explicit_provider {
-        if candidates.contains(&provider) {
-            return Ok(SelectedProvider {
-                provider,
-                reason: SelectionReason::ExplicitProvider,
-            });
-        }
-        return Err(CompositionError::NoRunnableProviders);
-    }
-
-    // 2. AGENT env override
-    if let Some(agent_val) = agent_env {
-        let trimmed = agent_val.trim();
-        if !trimmed.is_empty() {
-            let matches = Provider::fuzzy_match_all(trimmed);
-            let candidate_matches: Vec<Provider> = matches
-                .into_iter()
-                .filter(|p| candidates.contains(p))
-                .collect();
-
-            if candidate_matches.len() == 1 {
-                return Ok(SelectedProvider {
-                    provider: candidate_matches[0],
-                    reason: SelectionReason::EnvironmentOverride,
-                });
-            }
-            // Multiple or zero matches from env — fall through to next rule
-        }
-    }
-
-    // 3. Frontmatter agent hint
-    if let Some(ref hint) = prepared.source_agent_hint {
-        return resolve_agent_hint(hint, &candidates, request.force_interactive_selection);
-    }
-
-    // 4. Force interactive
-    if request.force_interactive_selection {
-        return Err(CompositionError::InteractiveSelectionRequired);
-    }
-
-    // 5. Preference fallback
-    let ranked = ranked_provider_preferences(&candidates, preference);
-    if let Some(&provider) = ranked.first() {
-        return Ok(SelectedProvider {
-            provider,
-            reason: SelectionReason::PreferenceFallback,
-        });
-    }
-
-    Err(CompositionError::NoRunnableProviders)
-}
+use super::types::{PreparedComposition, SelectedProvider, SelectionReason};
 
 /// Build the set of candidate providers by filtering installed providers.
 ///
@@ -108,6 +18,64 @@ pub fn build_candidate_set(installed: &[Provider], excluded: &BTreeSet<Provider>
         // RooCode is a VS Code extension, not a wrappable CLI
         .filter(|p| *p != Provider::RooCode)
         .collect()
+}
+
+/// Select a provider for composition execution.
+///
+/// Precedence:
+/// 1. Explicit provider (from `--claude`, `--codex`, etc.)
+/// 2. Single installed candidate after exclusion
+/// 3. Effective frontmatter `agent` hint (from composed state)
+/// 4. Config favorite (`settings.linking.preference[0]`)
+/// 5. Error: interactive selection required
+pub fn select_provider(
+    explicit_provider: Option<Provider>,
+    prepared: &PreparedComposition,
+    installed: &[Provider],
+    excluded: &BTreeSet<Provider>,
+    favorite: Option<Provider>,
+) -> Result<SelectedProvider, CompositionError> {
+    let candidates = build_candidate_set(installed, excluded);
+    if candidates.is_empty() {
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    // 1. Explicit provider
+    if let Some(provider) = explicit_provider {
+        if candidates.contains(&provider) {
+            return Ok(SelectedProvider {
+                provider,
+                reason: SelectionReason::ExplicitProvider,
+            });
+        }
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    // 2. Single installed candidate
+    if candidates.len() == 1 {
+        return Ok(SelectedProvider {
+            provider: candidates[0],
+            reason: SelectionReason::SingleInstalled,
+        });
+    }
+
+    // 3. Effective frontmatter agent hint
+    if let Some(ref hint) = prepared.effective_agent_hint {
+        return resolve_agent_hint(hint, &candidates, false);
+    }
+
+    // 4. Config favorite
+    if let Some(fav) = favorite
+        && candidates.contains(&fav)
+    {
+        return Ok(SelectedProvider {
+            provider: fav,
+            reason: SelectionReason::ConfigFavorite,
+        });
+    }
+
+    // 5. No automatic selection possible
+    Err(CompositionError::InteractiveSelectionRequired)
 }
 
 fn resolve_agent_hint(
@@ -167,109 +135,22 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::composition::types::{CompositionMode, PreparedPrompt};
+    use crate::composition::types::CompositionMode;
     use serde_json::json;
     use std::path::PathBuf;
 
-    fn make_prepared(agent_hint: Option<serde_json::Value>) -> PreparedPrompt {
-        PreparedPrompt {
+    fn make_prepared_composition(
+        agent_hint: Option<serde_json::Value>,
+    ) -> PreparedComposition {
+        use super::super::types::CompositionClosurePlan;
+        PreparedComposition {
             mode: CompositionMode::ChainedDocument,
             resolved_path: PathBuf::from("/tmp/test.md"),
             prompt: "test prompt".to_string(),
-            source_agent_hint: agent_hint,
+            effective_frontmatter: json!({}),
+            effective_agent_hint: agent_hint,
+            closure: CompositionClosurePlan::Direct,
         }
-    }
-
-    fn make_request(
-        explicit: Option<Provider>,
-        excluded: &[Provider],
-        interactive: bool,
-    ) -> CompositionRequest {
-        CompositionRequest {
-            mode: CompositionMode::ChainedDocument,
-            file_ref: "test.md".to_string(),
-            explicit_provider: explicit,
-            excluded: excluded.iter().copied().collect(),
-            force_interactive_selection: interactive,
-        }
-    }
-
-    #[test]
-    fn explicit_provider_selected() {
-        let request = make_request(Some(Provider::Claude), &[], false);
-        let prepared = make_prepared(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let result = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap();
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::ExplicitProvider);
-    }
-
-    #[test]
-    fn explicit_provider_excluded_fails() {
-        let request = make_request(Some(Provider::Claude), &[Provider::Claude], false);
-        let prepared = make_prepared(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let err = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap_err();
-        assert!(matches!(err, CompositionError::NoRunnableProviders));
-    }
-
-    #[test]
-    fn frontmatter_hint_selects_provider() {
-        let request = make_request(None, &[], false);
-        let prepared = make_prepared(Some(json!("claude")));
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let result = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap();
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
-    }
-
-    #[test]
-    fn frontmatter_hint_invalid() {
-        let request = make_request(None, &[], false);
-        let prepared = make_prepared(Some(json!("nonexistent")));
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let err = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap_err();
-        assert!(matches!(err, CompositionError::AgentHintInvalid(_)));
-    }
-
-    #[test]
-    fn frontmatter_true_requires_interactive() {
-        let request = make_request(None, &[], false);
-        let prepared = make_prepared(Some(json!(true)));
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let err = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::InteractiveSelectionRequired
-        ));
-    }
-
-    #[test]
-    fn preference_fallback_uses_ranked_order() {
-        let request = make_request(None, &[], false);
-        let prepared = make_prepared(None);
-        let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
-        let preference = vec![Provider::Codex, Provider::Claude];
-
-        let result =
-            select_provider_with_env(&request, &prepared, &installed, &preference, None).unwrap();
-        assert_eq!(result.provider, Provider::Codex);
-        assert_eq!(result.reason, SelectionReason::PreferenceFallback);
-    }
-
-    #[test]
-    fn no_providers_fails() {
-        let request = make_request(None, &[], false);
-        let prepared = make_prepared(None);
-        let installed: Vec<Provider> = Vec::new();
-
-        let err = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap_err();
-        assert!(matches!(err, CompositionError::NoRunnableProviders));
     }
 
     #[test]
@@ -289,15 +170,144 @@ mod tests {
     }
 
     #[test]
-    fn force_interactive_with_no_hint() {
-        let request = make_request(None, &[], true);
-        let prepared = make_prepared(None);
+    fn explicit_provider_selected() {
+        let prepared = make_prepared_composition(None);
         let installed = vec![Provider::Claude, Provider::Codex];
 
-        let err = select_provider_with_env(&request, &prepared, &installed, &[], None).unwrap_err();
+        let result = select_provider(
+            Some(Provider::Claude),
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Claude);
+        assert_eq!(result.reason, SelectionReason::ExplicitProvider);
+    }
+
+    #[test]
+    fn single_installed_selected() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude];
+
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Claude);
+        assert_eq!(result.reason, SelectionReason::SingleInstalled);
+    }
+
+    #[test]
+    fn frontmatter_hint_from_effective() {
+        let prepared = make_prepared_composition(Some(json!("codex")));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Codex);
+        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
+    }
+
+    #[test]
+    fn config_favorite_selected() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
+
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            Some(Provider::Gemini),
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Gemini);
+        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
+    }
+
+    #[test]
+    fn config_favorite_not_installed_falls_through() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        // Favorite is Gemini, but it's not installed
+        let err = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            Some(Provider::Gemini),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             CompositionError::InteractiveSelectionRequired
         ));
+    }
+
+    #[test]
+    fn no_automatic_selection_requires_interactive() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let err = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::InteractiveSelectionRequired
+        ));
+    }
+
+    #[test]
+    fn ambiguous_hint_errors() {
+        // "c" matches Claude and Codex
+        let prepared = make_prepared_composition(Some(json!("c")));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let err = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CompositionError::AgentHintAmbiguous { .. }));
+    }
+
+    #[test]
+    fn exclusion_narrows_to_single() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude, Provider::Codex];
+        let excluded: BTreeSet<Provider> = [Provider::Claude].into_iter().collect();
+
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &excluded,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Codex);
+        assert_eq!(result.reason, SelectionReason::SingleInstalled);
     }
 }

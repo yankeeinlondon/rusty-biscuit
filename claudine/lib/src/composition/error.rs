@@ -53,17 +53,22 @@ pub enum CompositionError {
 
     /// Interactive selection is required but no TTY is available.
     #[error(
-        "interactive provider selection required but no TTY available; set AGENT env var or add an `agent` frontmatter property"
+        "interactive provider selection required but no TTY available; use an explicit provider flag (--claude, --codex, etc.) or add an `agent` frontmatter property"
     )]
     InteractiveSelectionRequired,
+
+    /// Inline composition with `-i` is not supported for this provider
+    /// because it cannot capture the final assistant message.
+    #[error("inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message")]
+    InlineInteractiveUnsupported(String),
+
+    /// The provider returned an invalid response for inline composition.
+    #[error("invalid inline composition response: {0}")]
+    InvalidInlineResponse(String),
 
     /// The provider child process could not be launched.
     #[error("failed to launch provider: {0}")]
     ProviderLaunchFailed(String),
-
-    /// The provider child process exited with a non-zero code.
-    #[error("provider exited with code {0}")]
-    ProviderRunFailed(i32),
 
     /// Atomic file write failed during inline composition.
     #[error("atomic write failed: {0}")]
