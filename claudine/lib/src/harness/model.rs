@@ -1,6 +1,6 @@
 //! Core data model for the harness subsystem.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -82,6 +82,25 @@ pub enum ValidationPhase {
     PreOnly,
     PostOnly,
     Both,
+}
+
+/// Which execution phase produced a failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailurePhase {
+    PreCheck,
+    PostCheck,
+    Agent,
+}
+
+impl std::fmt::Display for FailurePhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PreCheck => write!(f, "pre_check"),
+            Self::PostCheck => write!(f, "post_check"),
+            Self::Agent => write!(f, "agent"),
+        }
+    }
 }
 
 /// A single parsed validation rule.
@@ -337,6 +356,30 @@ impl std::fmt::Display for ProcessTermination {
     }
 }
 
+/// Validation-specific details for failure handling.
+#[derive(Debug, Clone)]
+pub struct FailureCheck {
+    /// The normalized validation name.
+    pub name: ValidationEvent,
+    /// Optional subject key for subject-specific handling.
+    pub subject_key: Option<String>,
+}
+
+/// Provider permission assessment for `has_write_permission`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionAssessment {
+    Allowed,
+    Denied { reason: String },
+    Unknown { reason: String },
+}
+
+/// Provider-aware permission probe used by `has_write_permission`.
+pub trait HarnessPermissionProbe: Send + Sync {
+    /// Returns whether the current provider launch is expected to allow writes
+    /// to `path` for the given source document.
+    fn can_write(&self, path: &Path, source_path: &Path) -> PermissionAssessment;
+}
+
 /// A single validation failure with context.
 #[derive(Debug, Clone)]
 pub struct ValidationFailure {
@@ -344,6 +387,8 @@ pub struct ValidationFailure {
     pub rule_id: ValidationRuleId,
     /// The event name.
     pub event: ValidationEvent,
+    /// Which phase reported the failure.
+    pub phase: FailurePhase,
     /// Optional subject key.
     pub subject_key: Option<String>,
     /// Human-readable failure message (already rendered).
