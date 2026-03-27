@@ -76,6 +76,7 @@ The reporting is broken down into the following sections:
               - Left margin of 2 characters
           - If the agent specifies a `model` property, append a warning line after the content preview:
             `<dim><i><orange>note:</orange> this agent specifies a <b>model</b> property which limits cross-provider shareability</i></dim>`
+            (See [Non-Portable Properties](non-portable-properties.md) for why `model` blocks sharing.)
 
       - **Verbose**
           - If the number of agents (_after filtering_) is less than 6 (and more than 1) we will report using the verbose style.
@@ -144,14 +145,14 @@ The reporting is broken down into the following sections:
 
    **Property passthrough:**
 
-   Many properties — `temperature`, `top_p`, `max_turns`, `timeout_mins`, `tools`, `permissions`, etc. — are only recognized by some CLIs. However, under the same simplifying assumption that drives the alias strategy (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it.
+   Many properties — `temperature`, `top_p`, `max_turns`, `timeout_mins`, `tools`, `permissions`, etc. — are only recognized by some CLIs. However, under the same simplifying assumption that drives the alias strategy (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it. For the full analysis of which properties are safe to pass through and which block sharing, see [Non-Portable Properties](non-portable-properties.md).
 
    When the `--verbose` flag is used, the Footer Messages section includes per-property notes showing which CLIs actually consume each property present in the listed agents (see section 7).
 
    **Fixes that cannot be automated:**
 
    - **Format conversion** (Markdown → YAML for Goose, KimiCode, Roo Code): Structural differences between Markdown frontmatter and YAML schemas are too significant for automated conversion. Tracked as `format_incompatible`.
-   - **`model` property translation**: Provider-specific. Planned for Phase 2 (see `model-property-design.md`). In Phase 1, flagged as `ModelPropertyNotShareable`.
+   - **`model` property translation**: Provider-specific. Planned for Phase 2 (see `model-property-design.md`). In Phase 1, flagged as `ModelPropertyNotShareable`. See [Non-Portable Properties](non-portable-properties.md) for the full portability analysis of `model`, `tools`, and `skills`.
    - **`description` → `roleDefinition`** (Roo Code): Unlike the aliases above, `roleDefinition` is semantically distinct from `description` — it defines the agent's persona, not just when to use it. This requires human authoring and is not auto-aliased.
    - **`system_prompt_path` for KimiCode**: KimiCode agents require a file path to an external system prompt. This has no equivalent in other providers and cannot be derived.
    - **`groups` for Roo Code**: The `groups` array (e.g., `["read", "edit", "browser"]`) defines permission boundaries. There is no universal equivalent — requires human configuration.
@@ -349,4 +350,4 @@ Agent discovery follows the same pattern as skill discovery but adapted for sing
    - Roo Code: parse the single modes file
 3. Parse each agent file to extract name, description, and properties
 4. Determine scope (User, RepoMasked, Repo) based on path location
-5. Flag agents with `model` properties as having limited shareability
+5. Flag agents with non-portable properties (`model`, `tools`, `skills`) as having limited shareability — see [Non-Portable Properties](non-portable-properties.md)

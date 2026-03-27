@@ -1192,6 +1192,7 @@ dependencies = [
  "darkmatter",
  "dirs",
  "fs2",
+ "indexmap 2.13.0",
  "playa",
  "regex",
  "reqwest 0.13.2",
@@ -1202,10 +1203,12 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml",
  "toml_edit 0.25.3+spec-1.1.0",
  "tracing",
  "url",
  "walkdir",
+ "which 7.0.3",
 ]
 
 [[package]]

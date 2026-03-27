@@ -481,6 +481,7 @@ fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
         format!("already_linked={}", summary.already_linked),
         format!("skipped={}", summary.skipped),
         format!("names_inserted={}", summary.names_inserted),
+        format!("not_shareable={}", summary.not_shareable),
     ];
     let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));
     log::data(&format!(" {}", detail.render(term)));

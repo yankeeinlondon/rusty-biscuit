@@ -4,8 +4,57 @@ Claudine supports the ability to _compose_ content leveraging the Darkmatter lib
 
 We will discuss two kinds of composition:
 
+- direct composition
 - inline composition
-- chained composition
+
+Both forms share a lot of the key principles and features but the _inline_ style allows a _all-in-one_ file approach to composition which is particularly valuable to certain use cases. Before we go into the differences, let's start with the similarities.
+
+## Composition Basics
+
+A **majority** of the composition features we'll be leveraging in Claudine are by leveraging **Darkmatter**'s [composition features](../../../darkmatter/docs/topics/what-is-composition.md) the remaining of features which Claudine layer's on top are just some conventions, validations, along with the richer output of non-interactive sessions with Claudine.
+
+> **Note:** the composition features can be used with both interactive and non-interactive sessions but we suspect you'll find that you can go further by leveraging the power of non-interactive sessions.
+
+The way you'll use composition with the Claudine CLI includes two base syntaxes:
+
+1. `claudine compose <file-ref> ...`
+2. `claudine <agent> --compose <file-ref> ...`
+    - examples: `claudine claude --compose ...`, `claudine codex --compose ...`, `claudine opencode --compose ...`
+
+In the first syntax you are _deferring_ an explicit choice of which Agentic CLI you will use versus the second where the Agent is declared as part of the command.
+
+### Simple Example
+
+```sh
+claudine codex --compose @commit.md
+```
+
+- Claudine then resolves the location of the `@commit.md` file using the file resolution functionality provided by [`biscuit-file`](../../../biscuit-file/README.md); this functionality includes treating the leading `@` character as a "magic path". Magic paths will attempt to resolve the "commit.md" file in multiple locations (in this order):
+    - the base of the current repo root
+    - if a monorepo:
+        - the base of the current package area
+        - if in a specific package then the root of that package
+    - the user's home directory
+- With the file resolved we now use Darkmatter's "compose pipeline on the file
+- The resolved Markdown content is then used as a prompt to the Agentic CLI provider
+- By default these prompts are non-interactive but you can switch to interactive by using the `--interactive` / `-i` switch
+- In the non-interactive mode, we will:
+    - pickup the Session ID from the Agent
+    - stream the Agent's response to STDOUT but through a filter so that Markdown output (which most Agents report with) will be converted to Terminal enhanced Markdown and look a lot more presentable while streaming
+    - the final output will be copied to the user's clipboard on completion
+
+
+## Inline Composition
+
+- will use the `prompt` property of the **commit.md**'s frontmatter
+    - if there is not a `prompt` file then we will return an error
+    - `<red><b>ERROR:</b></red> the file <blue>some-file.md</blue> does not have a <b>prompt</b> property in it's frontmatter!`
+- pass this prompt through Darkmatter's **compose** pipeline
+- then execute a non-interactive prompt -- using claudine -- to perform the work: 
+    - get content: `claudine {agent} -n "{prompt}" --silent`
+    - save to the Markdown files body
+    - update the `last_updated` frontmatter (YYYY-MM-DD)
+
 
 The _inline_ style of composition is a powerful way to keep Markdown documents in your repo up-to-date. It allows a caller to reference a markdown file and have the `prompt` property of it's frontmatter be used as a non-interactive prompt to build the content for the body of the of document.
 
@@ -120,3 +169,64 @@ The utility of these processes are:
     - there are, of course, many other use cases too
 - Chained operations are used to compose a reference file and then use it to prompt a non-interactive agent session
     - this provides a way to take a static "template" and inject dynamic content into the content before using it as a prompt to an Agent
+
+## Validations and Handlers
+
+Composed documents can declare **pre-checks**, **post-checks**, **timeouts**, and **handlers** in their frontmatter. When present, Claudine activates a harness that gates provider execution behind validation rules and can recover from failures automatically.
+
+### Pre-checks and Post-checks
+
+Pre-checks run before the provider launches; post-checks run after:
+
+```yaml
+pre_checks:
+  - file_exists: "@docs/plan.md"
+  - dir_exists: "@src/components"
+post_checks:
+  - file_changed: "@docs/plan.md"
+  - response_includes: "## Summary"
+```
+
+Available validations include filesystem checks (`file_exists`, `dir_exists`, `json_file_exists`, `yaml_file_exists`, `toml_file_exists`, `has_write_permission`), git checks (`no_dirty_source_code`, `has_dirty_source_code`), post-only file comparisons (`file_changed`, `file_unchanged`), frontmatter comparisons (`frontmatter_prop_changed`, `frontmatter_prop_unchanged`, `frontmatter_prop_equals`), response checks (`response_length_at_least`, `response_length_at_most`, `response_includes`, `response_missing`), and shell commands (`shell_command`).
+
+### Timeouts
+
+The `timeout` frontmatter property sets a per-page deadline:
+
+```yaml
+timeout: 5m
+```
+
+Accepts `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours` units.
+
+### Handlers
+
+Handlers define recovery actions when failures occur:
+
+```yaml
+handle_timeout:
+  resume:
+    prompt: "Continue from where you stopped."
+
+handle_agent_failure:
+  retry:
+    prompt_suffix: "The previous attempt failed. Please try again."
+    retries: 3
+
+handle_file_exists:
+  "@docs/plan.md":
+    redirect:
+      file: "./fallback.md"
+```
+
+Four handler actions are available:
+- **retry** — re-run the same prompt with optional modifications
+- **resume** — continue from the previous session (provider must support session resume)
+- **redirect** — switch to a different source document
+- **deviate** — execute a shell command, then re-evaluate post-checks
+
+A programmatic `handle` property accepts a shell command that receives failure context on stdin and returns a handler action as JSON on stdout.
+
+### Shell Policy
+
+Shell commands in `shell_command` validations and `deviate`/`handle` declarations share Darkmatter's shell policy files (`.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist`). Commands are tokenized and validated at parse time — before the provider is launched — so users are prompted for approval once rather than mid-execution.

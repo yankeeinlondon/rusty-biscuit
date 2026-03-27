@@ -108,7 +108,7 @@ The reporting is broken down into the following sections:
 
    **Property passthrough:**
 
-   Many properties — `allowed-tools`, `user-invocable`, `disable-model-invocation`, `context`, `agent`, `hooks`, etc. — are only recognized by some CLIs. However, under the same simplifying assumption that drives the alias strategy (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical SKILL.md and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it.
+   Many properties — `allowed-tools`, `user-invocable`, `disable-model-invocation`, `context`, `agent`, `hooks`, etc. — are only recognized by some CLIs. However, under the same simplifying assumption that drives the alias strategy (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical SKILL.md and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it. For the full analysis of which properties are safe to pass through and which block sharing, see [Non-Portable Properties](non-portable-properties.md).
 
    When the `--verbose` flag is used, the Footer Messages section includes per-property notes showing which CLIs actually consume each property present in the listed skills (see section 7).
 

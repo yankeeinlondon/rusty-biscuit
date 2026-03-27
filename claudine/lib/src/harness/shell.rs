@@ -1,0 +1,341 @@
+//! Shell policy adapter for harness runtime commands.
+//!
+//! Thin adapter that reuses Darkmatter's shell expansion infrastructure
+//! for tokenization, blacklist/whitelist checking, and command approval.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
+use darkmatter::markdown::compose::shell_expansion::{
+    ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
+    check_whitelist, normalize_command, resolve_policy_paths,
+};
+
+use crate::harness::error::HarnessError;
+use crate::harness::model::ApprovedRuntimeCommand;
+
+/// Options for the shell approval flow.
+#[derive(Clone)]
+pub struct ShellApprovalOptions {
+    /// Root directory for policy file resolution.
+    pub policy_root: Option<PathBuf>,
+    /// Callback for interactive command approval.
+    pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+}
+
+impl Default for ShellApprovalOptions {
+    fn default() -> Self {
+        Self {
+            policy_root: None,
+            approval_handler: None,
+        }
+    }
+}
+
+/// Tokenize a raw command string and validate it against shell policies.
+///
+/// Returns an `ApprovedRuntimeCommand` if the command passes all checks,
+/// or a `HarnessError` if the command is blacklisted, denied, or malformed.
+pub fn validate_and_approve_command(
+    raw: &str,
+    options: &ShellApprovalOptions,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    // Tokenize
+    let tokens = tokenize(raw).map_err(|_| HarnessError::ShellCommandDenied {
+        command: raw.to_string(),
+    })?;
+
+    if tokens.is_empty() {
+        return Err(HarnessError::ShellCommandDenied {
+            command: raw.to_string(),
+        });
+    }
+
+    validate_and_approve_command_parts(&tokens, options)
+}
+
+/// Validate an already-tokenized command against shell policies.
+///
+/// This is used for structured command inputs such as JSON arrays or expanded
+/// objects where the caller has already separated the executable from its args.
+pub fn validate_and_approve_command_parts(
+    parts: &[String],
+    options: &ShellApprovalOptions,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    if parts.is_empty() {
+        return Err(HarnessError::ShellCommandDenied {
+            command: String::new(),
+        });
+    }
+
+    let raw = parts.join(" ");
+    let executable = &parts[0];
+    let args: Vec<String> = parts[1..].to_vec();
+    let normalized = normalize_command(executable, &args);
+
+    // Check built-in blacklist
+    if let Some(reason) = check_builtin_blacklist(executable, &args) {
+        return Err(HarnessError::ShellCommandBlacklisted {
+            command: raw.clone(),
+            reason,
+        });
+    }
+
+    // Resolve policy paths
+    let source = match &options.policy_root {
+        Some(root) => ComposeSource::File(root.join("dummy")),
+        None => ComposeSource::Unknown,
+    };
+    let shell_opts = ShellExpansionOptions {
+        timeout: std::time::Duration::from_secs(30),
+        policy_root: options.policy_root.clone(),
+        working_directory: options.policy_root.clone(),
+        approval_handler: options.approval_handler.clone(),
+    };
+
+    let policy_paths = resolve_policy_paths(&shell_opts, &source).map_err(|_| {
+        HarnessError::ShellCommandDenied {
+            command: raw.clone(),
+        }
+    })?;
+
+    // Load and check user blacklist
+    let blacklist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
+        &policy_paths.blacklist,
+    )
+    .unwrap_or_default();
+    if check_user_blacklist(&blacklist, executable, &args, &normalized) {
+        return Err(HarnessError::ShellCommandBlacklisted {
+            command: raw.clone(),
+            reason: "command matches user blacklist".to_string(),
+        });
+    }
+
+    // Check whitelist — if whitelisted, approve immediately
+    let whitelist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
+        &policy_paths.whitelist,
+    )
+    .unwrap_or_default();
+    if check_whitelist(&whitelist, executable, &normalized) {
+        return Ok(ApprovedRuntimeCommand {
+            raw,
+            executable: executable.to_string(),
+            args,
+        });
+    }
+
+    // If not whitelisted, invoke approval handler
+    if let Some(ref handler) = options.approval_handler {
+        let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
+            source: source.clone(),
+            line: 0,
+            raw_command: raw.clone(),
+            executable: executable.to_string(),
+            args: args.clone(),
+            normalized_exact: normalized.clone(),
+            whitelist_path: policy_paths.whitelist.clone(),
+            blacklist_path: policy_paths.blacklist.clone(),
+            alias_name: None,
+        };
+
+        match handler.approve(request) {
+            Ok(decision) => {
+                use darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision;
+                match decision {
+                    ShellApprovalDecision::AllowExactPersist => {
+                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_exact(
+                            &policy_paths,
+                            &normalized,
+                        );
+                    }
+                    ShellApprovalDecision::AllowCommandPersist => {
+                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
+                            &policy_paths,
+                            executable,
+                        );
+                    }
+                    ShellApprovalDecision::AllowOnce => {}
+                    ShellApprovalDecision::Deny => {
+                        return Err(HarnessError::ShellCommandDenied {
+                            command: raw.clone(),
+                        });
+                    }
+                    ShellApprovalDecision::BlacklistPersist => {
+                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
+                            &policy_paths,
+                            &normalized,
+                        );
+                        return Err(HarnessError::ShellCommandBlacklisted {
+                            command: raw.clone(),
+                            reason: "user blacklisted this command".to_string(),
+                        });
+                    }
+                }
+            }
+            Err(_) => {
+                return Err(HarnessError::ShellCommandDenied {
+                    command: raw.clone(),
+                });
+            }
+        }
+    } else {
+        // No approval handler and not whitelisted: deny
+        return Err(HarnessError::ShellCommandDenied { command: raw });
+    }
+
+    Ok(ApprovedRuntimeCommand {
+        raw,
+        executable: executable.to_string(),
+        args,
+    })
+}
+
+/// Execute an approved command and return its exit code and stdout/stderr.
+///
+/// Enforces the given timeout: if the command does not complete within the
+/// duration, it is killed with SIGKILL and an error is returned.
+///
+/// Returns `(exit_code, stdout, stderr)`.
+pub fn execute_approved_command(
+    command: &ApprovedRuntimeCommand,
+    working_dir: Option<&std::path::Path>,
+    timeout: std::time::Duration,
+) -> Result<(i32, String, String), HarnessError> {
+    let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
+        action: "shell_command".to_string(),
+        detail: format!("executable '{}' not found in PATH", command.executable),
+    })?;
+
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(&command.args);
+    if let Some(dir) = working_dir {
+        cmd.current_dir(dir);
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| HarnessError::HandlerFailed {
+        action: "shell_command".to_string(),
+        detail: format!("failed to spawn '{}': {e}", command.executable),
+    })?;
+
+    // Poll for completion with timeout enforcement
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(50);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process finished — collect output
+                let mut stdout_buf = Vec::new();
+                let mut stderr_buf = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    use std::io::Read;
+                    let _ = out.read_to_end(&mut stdout_buf);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = err.read_to_end(&mut stderr_buf);
+                }
+                let exit_code = status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+                let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+                return Ok((exit_code, stdout, stderr));
+            }
+            Ok(None) => {
+                // Still running — check timeout
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(HarnessError::HandlerFailed {
+                        action: "shell_command".to_string(),
+                        detail: format!(
+                            "command '{}' timed out after {}s",
+                            command.raw,
+                            timeout.as_secs()
+                        ),
+                    });
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => {
+                return Err(HarnessError::HandlerFailed {
+                    action: "shell_command".to_string(),
+                    detail: format!("failed to wait for '{}': {e}", command.executable),
+                });
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_command_denied_without_approval_handler() {
+        // Use an isolated directory with no policy files and no approval handler.
+        let dir = tempfile::TempDir::new().unwrap();
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: None,
+        };
+        let result = validate_and_approve_command("echo hello", &options);
+        // Without whitelist or approval handler, this should be denied
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn blacklisted_command_rejected() {
+        let options = ShellApprovalOptions::default();
+        let result = validate_and_approve_command("rm -rf /", &options);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            HarnessError::ShellCommandBlacklisted { .. }
+        ));
+    }
+
+    #[test]
+    fn empty_command_rejected() {
+        let options = ShellApprovalOptions::default();
+        let result = validate_and_approve_command("", &options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn shell_metacharacters_rejected() {
+        let options = ShellApprovalOptions::default();
+        let result = validate_and_approve_command("echo hello | cat", &options);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn execute_echo_command() {
+        let cmd = ApprovedRuntimeCommand {
+            raw: "echo hello".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["hello".to_string()],
+        };
+        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5));
+        assert!(result.is_ok());
+        let (exit_code, stdout, _stderr) = result.unwrap();
+        assert_eq!(exit_code, 0);
+        assert!(stdout.trim() == "hello");
+    }
+
+    #[test]
+    fn execute_failing_command() {
+        let cmd = ApprovedRuntimeCommand {
+            raw: "false".to_string(),
+            executable: "false".to_string(),
+            args: vec![],
+        };
+        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5));
+        assert!(result.is_ok());
+        let (exit_code, _, _) = result.unwrap();
+        assert_ne!(exit_code, 0);
+    }
+}

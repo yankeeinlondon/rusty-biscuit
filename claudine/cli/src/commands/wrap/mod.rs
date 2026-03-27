@@ -15,9 +15,11 @@ use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
 use profile::{OutputFormat, WrapperProfile};
 use sniff::programs::InstalledAiClients;
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::log;
@@ -76,6 +78,97 @@ impl StructuredSummaryDetails {
         if !tool_name.is_empty() && !self.tool_names.iter().any(|name| name == tool_name) {
             self.tool_names.push(tool_name.to_string());
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HarnessPromptMode {
+    PromptFile,
+    Inline,
+    Compose,
+}
+
+#[derive(Debug, Clone)]
+struct HarnessPromptState {
+    mode: HarnessPromptMode,
+    source_path: PathBuf,
+    overlay: indexmap::IndexMap<String, serde_json::Value>,
+    prompt_tail: Vec<String>,
+    next_prompt_override: Option<String>,
+    next_resume_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct MaterializedHarnessPrompt {
+    frontmatter: serde_json::Value,
+    prompt: String,
+    env_overrides: Vec<(String, String)>,
+    inline_source_text: Option<String>,
+    inline_pre_frontmatter_hash: Option<u64>,
+    inline_pre_body_hash: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct AttemptLaunch {
+    args: Vec<String>,
+    env: HashMap<OsString, OsString>,
+    stdin_seed: Option<String>,
+    timeout: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct NextAttemptPlan {
+    next_attempt: u32,
+    prompt_append: Option<String>,
+    prompt_override: Option<String>,
+    set_overlay: Option<indexmap::IndexMap<String, serde_json::Value>>,
+    redirect_source: Option<PathBuf>,
+    resume_session_id: Option<String>,
+    clear_prompt_tail: bool,
+}
+
+fn harness_policy_root(source_path: &Path, repo_root: Option<&Path>) -> Option<PathBuf> {
+    let source_dir = source_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())?;
+
+    if let Some(source_repo_root) = find_git_root(source_dir) {
+        return Some(source_repo_root);
+    }
+
+    if let Some(repo_root) = repo_root
+        && source_path.starts_with(repo_root)
+    {
+        return Some(repo_root.to_path_buf());
+    }
+
+    Some(source_dir.to_path_buf())
+}
+
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start;
+
+    loop {
+        if current.join(".git").exists() {
+            return Some(current.to_path_buf());
+        }
+
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+
+    None
+}
+
+fn build_harness_shell_options(
+    source_path: &Path,
+    repo_root: Option<&Path>,
+) -> claudine::harness::ShellApprovalOptions {
+    claudine::harness::ShellApprovalOptions {
+        policy_root: harness_policy_root(source_path, repo_root),
+        approval_handler: None,
     }
 }
 
@@ -577,6 +670,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         repo_requested,
         needs_mcp_shadow_home,
     )?;
+    let prompt_source_env_base = env_plan.env.clone();
 
     // -- Prompt-file pipeline -------------------------------------------------
     let mut stdin_seed: Option<String> = None;
@@ -643,6 +737,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             delivery_method: delivery_method.to_string(),
             env_names: composed.env_names.clone(),
             body: composed.body.clone(),
+            frontmatter: composed.frontmatter.clone(),
         });
     }
 
@@ -703,6 +798,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     // -- Chained composition (--compose) pipeline ------------------------------
     let mut chained_composition = false;
+    let mut chained_composition_source: Option<claudine::composition::ResolvedCompositionSource> =
+        None;
 
     if let Some(ref compose_input) = args.compose {
         let source = claudine::composition::resolve_composition_source(compose_input)
@@ -732,6 +829,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         }
 
         chained_composition = true;
+        chained_composition_source = Some(source);
     }
 
     // -- Final argument validation -------------------------------------------
@@ -760,6 +858,79 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // INTERACTIVE env var that was set before the pipelines ran.
     if effective_non_interactive && !non_interactive_requested {
         env_plan.env.insert("INTERACTIVE".into(), "false".into());
+    }
+
+    // -- Harness detection and pre-checks ------------------------------------
+    // Check whether the composed frontmatter contains harness properties
+    // (pre_checks, post_checks, timeout, handle, handle_*). If so, parse a
+    // HarnessPlan and run pre-checks before provider launch.
+    let mut harness_state: Option<(
+        claudine::harness::HarnessPlan,
+        claudine::harness::PreRunSnapshot,
+    )> = None;
+    let mut harness_enabled = false;
+
+    // Extract composed frontmatter from whichever pipeline was used.
+    // Converts IndexMap-based FrontmatterMap to serde_json::Value::Object.
+    let fm_to_value = |fm: &indexmap::IndexMap<String, serde_json::Value>| -> serde_json::Value {
+        serde_json::Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    };
+
+    let composed_frontmatter: Option<serde_json::Value> =
+        if let Some(ref pf_info) = prompt_file_dry_run {
+            // --prompt-file: use composed frontmatter directly (preserves keys
+            // introduced by composition that might not be on disk).
+            Some(pf_info.frontmatter.clone())
+        } else if let Some((ref source, _, _, _)) = inline_composition_source {
+            // --frontmatter-prompt: frontmatter from source.markdown
+            Some(fm_to_value(source.markdown.frontmatter().as_map()))
+        } else if let Some(ref source) = chained_composition_source {
+            Some(fm_to_value(source.markdown.frontmatter().as_map()))
+        } else {
+            None
+        };
+
+    if let Some(ref fm) = composed_frontmatter {
+        if claudine::harness::has_harness_properties(fm) {
+            // Determine source path and repo root for resolution context
+            let source_path = prompt_file_dry_run
+                .as_ref()
+                .map(|pf| pf.resolved_path.clone())
+                .or_else(|| {
+                    inline_composition_source
+                        .as_ref()
+                        .map(|(s, _, _, _)| s.resolved_path.clone())
+                })
+                .or_else(|| {
+                    chained_composition_source
+                        .as_ref()
+                        .map(|source| source.resolved_path.clone())
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
+
+            let resolve_ctx = claudine::harness::HarnessResolutionContext {
+                source_path: &source_path,
+                repo_root: env_plan.repo_root.as_deref(),
+            };
+            let shell_options =
+                build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
+
+            match claudine::harness::parse_harness_plan_with_shell(
+                fm,
+                &source_path,
+                &resolve_ctx,
+                Some(&shell_options),
+            ) {
+                Ok(plan) => {
+                    let _ = plan;
+                    harness_enabled = true;
+                }
+                Err(e) => {
+                    // Parse error: render and exit before provider launch
+                    return Err(eyre!("{e}"));
+                }
+            }
+        }
     }
 
     let mut mcp_runtime = None;
@@ -1082,289 +1253,90 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    let exit_code =
-        if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) = inline_composition_source {
-            // Inline composition: the agent is responsible for writing to the file.
-            // Capture structured assistant text so we can render it with terminal-aware
-            // wrapping before running validation checks and emitting the metadata line.
-            let (agent_exit, deferred_summary) = if use_structured {
-                let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-                let parser_config = claudine::stream::ParserConfig {
-                    model: args.model.clone(),
-                };
-                let parser = claudine::stream::create_parser(
-                    provider,
-                    LiveStreamSink::new(
-                        provider,
-                        env_context.clone(),
-                        stream_verbosity,
-                        summary_details.clone(),
-                    ),
-                    parser_config,
-                );
-                let mut summary = exec::run_child_stream(
-                    binary_path.as_path(),
-                    &child_args,
-                    &env_plan.env,
-                    child_cwd,
-                    args.timeout,
-                    stderr_noise,
-                    profile.suppress_structured_stderr_on_success(),
-                    stdin_seed.as_deref(),
-                    parser,
-                )?;
-                // Codex never emits text via feed_line; its accumulated text is
-                // fallback-only, so it doesn't count as "streamed to stdout".
-                let had_streamed_assistant =
-                    provider != Provider::Codex && !summary.assistant_text.trim().is_empty();
-                if let Some(codex_output) = structured_codex_output.as_ref() {
-                    codex_output.apply_to_summary(&mut summary);
-                }
-                if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
-                    let text = &summary.assistant_text;
-                    if std::io::stdout().is_terminal() {
-                        let rendered = crate::output::render_assistant_markdown(text, &term);
-                        std::io::stdout().write_all(rendered.as_bytes())?;
-                        if !rendered.ends_with('\n') {
-                            std::io::stdout().write_all(b"\n")?;
-                        }
-                    } else {
-                        std::io::stdout().write_all(text.as_bytes())?;
-                        if !text.ends_with('\n') {
-                            std::io::stdout().write_all(b"\n")?;
-                        }
-                    }
-                    std::io::stdout().flush()?;
-                }
-
-                // Warn if agent provided no summary text to stdout
-                if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
-                    log::warn(
-                        "the agent did not provide a summarized message on their completed work!",
-                    );
-                }
-
-                let exit = summary.exit_code;
-                let details = summary_details.lock().unwrap().clone();
-                (exit, Some((summary, details, had_streamed_assistant)))
-            } else {
-                // Legacy path: forward I/O to terminal
-                let exit = exec::run_child(
-                    binary_path.as_path(),
-                    &child_args,
-                    &env_plan.env,
-                    child_cwd,
-                    args.timeout,
-                    exec::ChildIoOptions {
-                        stdout_noise_prefixes: stdout_noise,
-                        stderr_noise_prefixes: stderr_noise,
-                        stdin_seed: stdin_seed.as_deref(),
-                    },
-                )?;
-                (exit, None)
-            };
-
-            // Post-execution validation: always check the file, even on agent error.
-            // The agent may have successfully updated the file before an API error occurred.
-            let mut final_exit = agent_exit;
-            let show_checks = !silent_requested && !quiet_requested;
-            let provider_name = crate::output::capitalize_provider(provider);
-            let should_separate_checks = deferred_summary
+    let mut harness_prompt_state = prompt_file_dry_run
+        .as_ref()
+        .map(|pf| HarnessPromptState {
+            mode: HarnessPromptMode::PromptFile,
+            source_path: pf.resolved_path.clone(),
+            overlay: indexmap::IndexMap::new(),
+            prompt_tail: Vec::new(),
+            next_prompt_override: None,
+            next_resume_session_id: None,
+        })
+        .or_else(|| {
+            inline_composition_source
                 .as_ref()
-                .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+                .map(|(source, _, _, _)| HarnessPromptState {
+                    mode: HarnessPromptMode::Inline,
+                    source_path: source.resolved_path.clone(),
+                    overlay: indexmap::IndexMap::new(),
+                    prompt_tail: Vec::new(),
+                    next_prompt_override: None,
+                    next_resume_session_id: None,
+                })
+        })
+        .or_else(|| {
+            chained_composition_source
+                .as_ref()
+                .map(|source| HarnessPromptState {
+                    mode: HarnessPromptMode::Compose,
+                    source_path: source.resolved_path.clone(),
+                    overlay: indexmap::IndexMap::new(),
+                    prompt_tail: Vec::new(),
+                    next_prompt_override: None,
+                    next_resume_session_id: None,
+                })
+        });
 
-            if show_checks && should_separate_checks {
-                eprintln!();
-                eprintln!();
+    let mut harness_base_args = child_args.clone();
+    strip_prompt_from_args(provider, &mut harness_base_args);
+    if harness_enabled && !use_structured {
+        profile.prepare_captured_output(&mut harness_base_args);
+    }
+
+    let mut harness_base_env = env_plan.env.clone();
+    if let Some(ref pf_info) = prompt_file_dry_run {
+        for env_name in &pf_info.env_names {
+            if let Some(original) = prompt_source_env_base.get(&OsString::from(env_name)) {
+                harness_base_env.insert(env_name.clone().into(), original.clone());
+            } else {
+                harness_base_env.remove(&OsString::from(env_name));
             }
+        }
+    }
 
-            // SIGINT (Ctrl-C) yields exit code 130 (128 + 2); SIGTERM yields 143.
-            // These are user interruptions, not normal agent errors, and must not
-            // be silently promoted to success even when the file has changed.
-            let was_interrupted = agent_exit == 130 || agent_exit == 143;
-
-            if was_interrupted && show_checks {
-                log::message(&crate::output::fm_check_fail(
-                    &format!("{provider_name} agent was interrupted by the user (code {agent_exit})"),
-                    &term,
-                ));
-            } else if agent_exit == 0 && show_checks {
-                log::message(&crate::output::fm_check_ok(
-                    &format!("{provider_name} agent completed successfully"),
-                    &term,
-                ));
-            } else if agent_exit != 0 && show_checks {
-                log::message(&crate::output::fm_check_fail(
-                    &format!("{provider_name} agent exited with error (code {agent_exit})"),
-                    &term,
-                ));
-            }
-
-            let display_path = source
-                .resolved_path
-                .strip_prefix(child_cwd)
-                .unwrap_or(&source.resolved_path)
-                .display();
-
-            // When the user interrupted the agent (Ctrl-C), report the outcome
-            // based on whether the body was partially written, then bail out.
-            if was_interrupted {
-                let body_on_disk = fs::read_to_string(source.resolved_path.as_path())
-                    .ok()
-                    .map(|text| {
-                        let md: darkmatter::markdown::Markdown = text.into();
-                        md.content().trim().to_string()
-                    })
-                    .unwrap_or_default();
-
-                if body_on_disk.is_empty() {
-                    log::message(&crate::output::fm_check_fail(
-                        &format!(
-                            "<b>User interrupted the agent with CTRL+C; the body of \
-                             <blue-500>{display_path}</blue-500> is empty so it appears \
-                             no work was accomplished.</b>"
-                        ),
-                        &term,
-                    ));
-                } else {
-                    log::message(&crate::output::fm_check_fail(
-                        &format!(
-                            "<b>User interrupted the agent with CTRL+C; the body of \
-                             <blue-500>{display_path}</blue-500> has been at least \
-                             partially filled:</b>"
-                        ),
-                        &term,
-                    ));
-                    eprintln!();
-                    for line in body_on_disk.lines() {
-                        eprintln!("  {line}");
-                    }
-                }
-
-                return Ok(1);
-            }
-
-            // Read the file from disk to see what the agent did
-            match fs::read_to_string(source.resolved_path.as_path()) {
-                Ok(disk_text) => {
-                    let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
-                    // Check if the body was updated on disk
-                    let disk_body_hash = on_disk.hash_body(false);
-                    let body_updated = disk_body_hash != pre_body_hash;
-
-                    if body_updated {
-                        if show_checks {
-                            log::message(&crate::output::fm_check_ok(
-                                "Agent updated the target document's body",
-                                &term,
-                            ));
-                        }
-
-                        // Agent updated the file — if it also exited with an error,
-                        // the file update takes precedence (e.g. API error after writing).
-                        if agent_exit != 0 && show_checks {
-                            log::warn(
-                                "agent reported an error but the target file was updated; \
-                             treating as success",
-                            );
-                        }
-                        final_exit = 0;
-
-                        // Only check frontmatter when the agent actually did work
-                        let disk_fm_hash = on_disk.hash_frontmatter(false);
-                        let fm_tampered = disk_fm_hash != pre_fm_hash;
-                        if fm_tampered {
-                            if show_checks {
-                                log::message(&crate::output::fm_check_fail(
-                                    "Agent ignored instruction to leave frontmatter untouched \
-                                 (<i>we have reverted their changes</i>)",
-                                    &term,
-                                ));
-                            }
-                            // Restore original frontmatter but keep the agent's body content
-                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                            let doc_string = rewrite_markdown_preserving_frontmatter(
-                                &source.original_text,
-                                on_disk.content(),
-                                &today,
-                            )
-                            .map_err(|e| eyre!("failed to restore frontmatter: {e}"))?;
-                            claudine::config::atomic::atomic_write(
-                                &source.resolved_path,
-                                doc_string.as_bytes(),
-                            )
-                            .map_err(|e| eyre!("failed to write restored frontmatter: {e}"))?;
-                        } else {
-                            if show_checks {
-                                log::message(&crate::output::fm_check_ok(
-                                    "Agent left frontmatter untouched (<i>as instructed</i>)",
-                                    &term,
-                                ));
-                            }
-                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                            let doc_string = rewrite_markdown_preserving_frontmatter(
-                                &disk_text,
-                                on_disk.content(),
-                                &today,
-                            )
-                            .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                            claudine::config::atomic::atomic_write(
-                                &source.resolved_path,
-                                doc_string.as_bytes(),
-                            )
-                            .map_err(|e| eyre!("failed to write last_updated: {e}"))?;
-                        }
-
-                        if show_checks {
-                            log::message(&crate::output::fm_check_ok(
-                                "Updated <bold>last_updated</bold> property to today's date",
-                                &term,
-                            ));
-                        }
-                    } else if agent_exit == 0 {
-                        // Agent reported success but didn't update the file
-                        if show_checks {
-                            log::message(&crate::output::fm_check_fail(
-                                &format!(
-                                    "the referenced file -- {display_path} -- did not get \
-                                 updated even though the Agent reported a successful outcome!"
-                                ),
-                                &term,
-                            ));
-                        }
-                        final_exit = 1;
-                    }
-                    // If agent errored AND body wasn't updated, no further checks —
-                    // the agent failed before completing its work.
-                }
-                Err(e) => {
-                    log::error(&format!(
-                        "failed to read {display_path} after agent completion: {e}"
-                    ));
-                    final_exit = 1;
-                }
-            }
-
-            // Emit the metadata summary line last, after validation checks.
-            // Blank line before metadata to visually separate from checks.
-            if let Some((summary, details, _)) = deferred_summary {
-                if stream_verbosity != Verbosity::Silent {
-                    eprintln!();
-                }
-                emit_stream_summary_no_separator(
-                    &summary,
-                    profile,
-                    &env_context,
-                    stream_verbosity,
-                    verbose_requested,
-                    &details,
-                );
-            }
-
-            Ok(final_exit)
-        } else if use_structured {
+    let exit_code = if harness_enabled {
+        run_harness_loop(
+            provider,
+            profile,
+            binary_path.as_path(),
+            child_cwd,
+            effective_non_interactive,
+            args.timeout,
+            &harness_base_args,
+            &harness_base_env,
+            harness_prompt_state
+                .as_mut()
+                .expect("harness enabled without a markdown-backed prompt source"),
+            env_plan.repo_root.as_deref(),
+            use_structured,
+            structured_codex_output.as_ref(),
+            stdout_noise,
+            stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
+            !silent_requested && !quiet_requested,
+            stream_verbosity,
+            verbose_requested,
+            &env_context,
+            &term,
+        )
+    } else if let Some((source, _prepared, pre_fm_hash, pre_body_hash)) = inline_composition_source
+    {
+        // Inline composition: the agent is responsible for writing to the file.
+        // Capture structured assistant text so we can render it with terminal-aware
+        // wrapping before running validation checks and emitting the metadata line.
+        let (agent_exit, agent_termination, deferred_summary) = if use_structured {
             let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-            // Normal execution with structured stream parsing
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
@@ -1378,7 +1350,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 ),
                 parser_config,
             );
-            let mut summary = exec::run_child_stream(
+            let stream_result = exec::run_child_stream(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1389,12 +1361,16 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdin_seed.as_deref(),
                 parser,
             )?;
+            let termination = stream_result.termination;
+            let mut summary = stream_result.data;
+            // Codex never emits text via feed_line; its accumulated text is
+            // fallback-only, so it doesn't count as "streamed to stdout".
+            let had_streamed_assistant =
+                provider != Provider::Codex && !summary.assistant_text.trim().is_empty();
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
             }
-            // Codex never emits assistant text live (feed_line always returns None);
-            // the authoritative text comes from --output-last-message. Write it now.
-            if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+            if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
                 let text = &summary.assistant_text;
                 if std::io::stdout().is_terminal() {
                     let rendered = crate::output::render_assistant_markdown(text, &term);
@@ -1411,20 +1387,23 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 std::io::stdout().flush()?;
             }
 
-            // Emit stderr summaries and write synthetic event
-            emit_stream_summary(
-                &summary,
-                profile,
-                &env_context,
-                stream_verbosity,
-                verbose_requested,
-                &summary_details.lock().unwrap().clone(),
-            );
+            // Warn if agent provided no summary text to stdout
+            if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
+                log::warn(
+                    "the agent did not provide a summarized message on their completed work!",
+                );
+            }
 
-            Ok(summary.exit_code)
+            let exit = summary.exit_code;
+            let details = summary_details.lock().unwrap().clone();
+            (
+                exit,
+                termination,
+                Some((summary, details, had_streamed_assistant)),
+            )
         } else {
-            // Normal execution: forward I/O to terminal (legacy path)
-            exec::run_child(
+            // Legacy path: forward I/O to terminal
+            let result = exec::run_child(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1435,8 +1414,514 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     stderr_noise_prefixes: stderr_noise,
                     stdin_seed: stdin_seed.as_deref(),
                 },
-            )
+            )?;
+            (result.data, result.termination, None)
         };
+
+        // Post-execution validation: always check the file, even on agent error.
+        // The agent may have successfully updated the file before an API error occurred.
+        let mut final_exit = agent_exit;
+        let show_checks = !silent_requested && !quiet_requested;
+        let provider_name = crate::output::capitalize_provider(provider);
+        let should_separate_checks = deferred_summary
+            .as_ref()
+            .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+
+        if show_checks && should_separate_checks {
+            eprintln!();
+            eprintln!();
+        }
+
+        // SIGINT (Ctrl-C) yields exit code 130 (128 + 2); SIGTERM yields 143.
+        // These are user interruptions, not normal agent errors, and must not
+        // be silently promoted to success even when the file has changed.
+        let was_interrupted = agent_exit == 130 || agent_exit == 143;
+
+        if was_interrupted && show_checks {
+            log::message(&crate::output::fm_check_fail(
+                &format!("{provider_name} agent was interrupted by the user (code {agent_exit})"),
+                &term,
+            ));
+        } else if agent_exit == 0 && show_checks {
+            log::message(&crate::output::fm_check_ok(
+                &format!("{provider_name} agent completed successfully"),
+                &term,
+            ));
+        } else if agent_exit != 0 && show_checks {
+            log::message(&crate::output::fm_check_fail(
+                &format!("{provider_name} agent exited with error (code {agent_exit})"),
+                &term,
+            ));
+        }
+
+        let display_path = source
+            .resolved_path
+            .strip_prefix(child_cwd)
+            .unwrap_or(&source.resolved_path)
+            .display();
+
+        // When the user interrupted the agent (Ctrl-C), report the outcome
+        // based on whether the body was partially written, then bail out.
+        if was_interrupted {
+            let body_on_disk = fs::read_to_string(source.resolved_path.as_path())
+                .ok()
+                .map(|text| {
+                    let md: darkmatter::markdown::Markdown = text.into();
+                    md.content().trim().to_string()
+                })
+                .unwrap_or_default();
+
+            if body_on_disk.is_empty() {
+                log::message(&crate::output::fm_check_fail(
+                    &format!(
+                        "<b>User interrupted the agent with CTRL+C; the body of \
+                             <blue-500>{display_path}</blue-500> is empty so it appears \
+                             no work was accomplished.</b>"
+                    ),
+                    &term,
+                ));
+            } else {
+                log::message(&crate::output::fm_check_fail(
+                    &format!(
+                        "<b>User interrupted the agent with CTRL+C; the body of \
+                             <blue-500>{display_path}</blue-500> has been at least \
+                             partially filled:</b>"
+                    ),
+                    &term,
+                ));
+                eprintln!();
+                for line in body_on_disk.lines() {
+                    eprintln!("  {line}");
+                }
+            }
+
+            return Ok(1);
+        }
+
+        // Read the file from disk to see what the agent did
+        match fs::read_to_string(source.resolved_path.as_path()) {
+            Ok(disk_text) => {
+                let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
+                // Check if the body was updated on disk
+                let disk_body_hash = on_disk.hash_body(false);
+                let body_updated = disk_body_hash != pre_body_hash;
+
+                if body_updated {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Agent updated the target document's body",
+                            &term,
+                        ));
+                    }
+
+                    // Agent updated the file — if it also exited with an error,
+                    // the file update takes precedence (e.g. API error after writing).
+                    if agent_exit != 0 && show_checks {
+                        log::warn(
+                            "agent reported an error but the target file was updated; \
+                             treating as success",
+                        );
+                    }
+                    final_exit = 0;
+
+                    // Only check frontmatter when the agent actually did work
+                    let disk_fm_hash = on_disk.hash_frontmatter(false);
+                    let fm_tampered = disk_fm_hash != pre_fm_hash;
+                    if fm_tampered {
+                        if show_checks {
+                            log::message(&crate::output::fm_check_fail(
+                                "Agent ignored instruction to leave frontmatter untouched \
+                                 (<i>we have reverted their changes</i>)",
+                                &term,
+                            ));
+                        }
+                        // Restore original frontmatter but keep the agent's body content
+                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                        let doc_string = rewrite_markdown_preserving_frontmatter(
+                            &source.original_text,
+                            on_disk.content(),
+                            &today,
+                        )
+                        .map_err(|e| eyre!("failed to restore frontmatter: {e}"))?;
+                        claudine::config::atomic::atomic_write(
+                            &source.resolved_path,
+                            doc_string.as_bytes(),
+                        )
+                        .map_err(|e| eyre!("failed to write restored frontmatter: {e}"))?;
+                    } else {
+                        if show_checks {
+                            log::message(&crate::output::fm_check_ok(
+                                "Agent left frontmatter untouched (<i>as instructed</i>)",
+                                &term,
+                            ));
+                        }
+                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                        let doc_string = rewrite_markdown_preserving_frontmatter(
+                            &disk_text,
+                            on_disk.content(),
+                            &today,
+                        )
+                        .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
+                        claudine::config::atomic::atomic_write(
+                            &source.resolved_path,
+                            doc_string.as_bytes(),
+                        )
+                        .map_err(|e| eyre!("failed to write last_updated: {e}"))?;
+                    }
+
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Updated <bold>last_updated</bold> property to today's date",
+                            &term,
+                        ));
+                    }
+                } else if agent_exit == 0 {
+                    // Agent reported success but didn't update the file
+                    if show_checks {
+                        log::message(&crate::output::fm_check_fail(
+                            &format!(
+                                "the referenced file -- {display_path} -- did not get \
+                                 updated even though the Agent reported a successful outcome!"
+                            ),
+                            &term,
+                        ));
+                    }
+                    final_exit = 1;
+                }
+                // If agent errored AND body wasn't updated, no further checks —
+                // the agent failed before completing its work.
+            }
+            Err(e) => {
+                log::error(&format!(
+                    "failed to read {display_path} after agent completion: {e}"
+                ));
+                final_exit = 1;
+            }
+        }
+
+        // Harness post-checks: run after file reconciliation (frontmatter
+        // restoration, last_updated rewrite) so validations observe the final
+        // persisted state, not transient agent-written state.
+        if let Some((ref plan, ref snapshot)) = harness_state {
+            let outcome = if let Some((ref summary, _, _)) = deferred_summary {
+                claudine::harness::build_attempt_outcome(1, summary, agent_termination)
+            } else {
+                claudine::harness::AttemptOutcome {
+                    attempt: 1,
+                    session_id: None,
+                    final_response: String::new(),
+                    exit_code: agent_exit,
+                    termination: agent_termination,
+                    stderr_text: None,
+                }
+            };
+
+            // Check for agent failure / timeout
+            if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
+                let message = format!("agent failed with exit code {agent_exit}");
+                let ctx = claudine::harness::build_agent_failure_context(
+                    failure_event,
+                    message.clone(),
+                    1,
+                    outcome.session_id.clone(),
+                    Some(outcome.clone()),
+                );
+                match claudine::harness::resolve_handler(
+                    &ctx,
+                    &plan.handlers,
+                    plan.programmatic_handler.as_ref(),
+                ) {
+                    Ok(Some(_action)) => {
+                        // For the inline path, retry requires re-running the entire
+                        // inline composition flow which is not loopable in this context.
+                        // Log the handler message but still fail.
+                        log::warn(
+                            "handler resolved for inline (--frontmatter-prompt) failure, \
+                                       but retry is not supported for inline composition",
+                        );
+                    }
+                    Ok(None) | Err(_) => {}
+                }
+                return Err(eyre!("{message}"));
+            }
+
+            // Run post-checks with handler resolution
+            match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+                Ok(()) => {}
+                Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
+                    let contexts = claudine::harness::build_validation_failure_context(
+                        failures,
+                        1,
+                        outcome.session_id.clone(),
+                        Some(outcome.clone()),
+                    );
+                    // Try to resolve handlers; for inline path, we can't retry
+                    // but we can at least report the handler info
+                    for failure_ctx in &contexts {
+                        if let Ok(Some(_action)) = claudine::harness::resolve_handler(
+                            failure_ctx,
+                            &plan.handlers,
+                            plan.programmatic_handler.as_ref(),
+                        ) {
+                            log::warn(
+                                "handler resolved for inline (--frontmatter-prompt) \
+                                           post-check failure, but retry is not supported \
+                                           for inline composition",
+                            );
+                            break;
+                        }
+                    }
+                    return Err(eyre!(
+                        "post-check validation failed ({} {})",
+                        failures.len(),
+                        if failures.len() == 1 {
+                            "failure"
+                        } else {
+                            "failures"
+                        }
+                    ));
+                }
+                Err(e) => return Err(eyre!("{e}")),
+            }
+        }
+
+        // Emit the metadata summary line last, after validation checks.
+        // Blank line before metadata to visually separate from checks.
+        if let Some((summary, details, _)) = deferred_summary {
+            if stream_verbosity != Verbosity::Silent {
+                eprintln!();
+            }
+            emit_stream_summary_no_separator(
+                &summary,
+                profile,
+                &env_context,
+                stream_verbosity,
+                verbose_requested,
+                &details,
+            );
+        }
+
+        Ok(final_exit)
+    } else {
+        // Non-inline execution: prompt-file, compose, or plain prompt.
+        // Wrapped in a harness loop that supports retry/resume/deviate
+        // handlers when post-checks or agent execution fail.
+        let mut harness_attempt = 1u32;
+        const DEFAULT_MAX_RETRIES: u32 = 3;
+
+        'harness: loop {
+            // On retry (attempt > 1), re-run pre-checks and re-capture snapshot
+            if harness_attempt > 1 {
+                if let Some((ref plan, ref mut snapshot)) = harness_state {
+                    if let Err(e) = claudine::harness::evaluate_pre_checks(plan, &term) {
+                        return Err(eyre!("{e}"));
+                    }
+                    *snapshot = claudine::harness::capture_pre_run_snapshot(plan)
+                        .map_err(|e| eyre!("harness snapshot: {e}"))?;
+                }
+            }
+
+            // Execute the provider
+            let (exit_code, termination, session_id, final_response) = if use_structured {
+                let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+                let parser_config = claudine::stream::ParserConfig {
+                    model: args.model.clone(),
+                };
+                let parser = claudine::stream::create_parser(
+                    provider,
+                    LiveStreamSink::new(
+                        provider,
+                        env_context.clone(),
+                        stream_verbosity,
+                        summary_details.clone(),
+                    ),
+                    parser_config,
+                );
+                let stream_result = exec::run_child_stream(
+                    binary_path.as_path(),
+                    &child_args,
+                    &env_plan.env,
+                    child_cwd,
+                    args.timeout,
+                    stderr_noise,
+                    profile.suppress_structured_stderr_on_success(),
+                    stdin_seed.as_deref(),
+                    parser,
+                )?;
+                let stream_termination = stream_result.termination;
+                let mut summary = stream_result.data;
+                if let Some(codex_output) = structured_codex_output.as_ref() {
+                    codex_output.apply_to_summary(&mut summary);
+                }
+                if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+                    let text = &summary.assistant_text;
+                    if std::io::stdout().is_terminal() {
+                        let rendered = crate::output::render_assistant_markdown(text, &term);
+                        std::io::stdout().write_all(rendered.as_bytes())?;
+                        if !rendered.ends_with('\n') {
+                            std::io::stdout().write_all(b"\n")?;
+                        }
+                    } else {
+                        std::io::stdout().write_all(text.as_bytes())?;
+                        if !text.ends_with('\n') {
+                            std::io::stdout().write_all(b"\n")?;
+                        }
+                    }
+                    std::io::stdout().flush()?;
+                }
+
+                emit_stream_summary(
+                    &summary,
+                    profile,
+                    &env_context,
+                    stream_verbosity,
+                    verbose_requested,
+                    &summary_details.lock().unwrap().clone(),
+                );
+
+                let ec = summary.exit_code;
+                let sid = summary.session_id.clone();
+                let resp = summary.assistant_text.clone();
+                (ec, stream_termination, sid, resp)
+            } else {
+                // Legacy path: forward I/O to terminal
+                let result = exec::run_child(
+                    binary_path.as_path(),
+                    &child_args,
+                    &env_plan.env,
+                    child_cwd,
+                    args.timeout,
+                    exec::ChildIoOptions {
+                        stdout_noise_prefixes: stdout_noise,
+                        stderr_noise_prefixes: stderr_noise,
+                        stdin_seed: stdin_seed.as_deref(),
+                    },
+                )?;
+                (result.data, result.termination, None, String::new())
+            };
+
+            // If no harness is active, just return the exit code
+            let Some((ref plan, ref snapshot)) = harness_state else {
+                break Ok(exit_code);
+            };
+
+            // Build attempt outcome
+            let outcome = claudine::harness::AttemptOutcome {
+                attempt: harness_attempt,
+                session_id: session_id.clone(),
+                final_response,
+                exit_code,
+                termination,
+                stderr_text: None,
+            };
+
+            // Step 1: Check for agent failure / timeout before running post-checks
+            if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
+                let message = match failure_event {
+                    claudine::harness::FailureEvent::Timeout => {
+                        format!("provider timed out (attempt {harness_attempt})")
+                    }
+                    claudine::harness::FailureEvent::AgentFailure => {
+                        format!(
+                            "agent exited with error code {} (attempt {harness_attempt})",
+                            exit_code
+                        )
+                    }
+                    _ => format!("failure on attempt {harness_attempt}"),
+                };
+                let ctx = claudine::harness::build_agent_failure_context(
+                    failure_event,
+                    message.clone(),
+                    harness_attempt,
+                    session_id.clone(),
+                    Some(outcome.clone()),
+                );
+
+                match claudine::harness::resolve_handler(
+                    &ctx,
+                    &plan.handlers,
+                    plan.programmatic_handler.as_ref(),
+                ) {
+                    Ok(Some(action)) => {
+                        if let Some(next) = apply_handler_action(
+                            &action,
+                            harness_attempt,
+                            DEFAULT_MAX_RETRIES,
+                            &ctx.message,
+                            profile,
+                            session_id.as_deref(),
+                            plan.source_path.as_path(),
+                            &ctx,
+                            &term,
+                        )? {
+                            harness_attempt = next;
+                            continue 'harness;
+                        }
+                        break Err(eyre!("{message}"));
+                    }
+                    Ok(None) => break Err(eyre!("{message}")),
+                    Err(e) => break Err(eyre!("{e}")),
+                }
+            }
+
+            // Step 2: Run post-checks
+            match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+                Ok(()) => break Ok(exit_code),
+                Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
+                    // Try to resolve a handler for the first failure
+                    let contexts = claudine::harness::build_validation_failure_context(
+                        failures,
+                        harness_attempt,
+                        session_id.clone(),
+                        Some(outcome.clone()),
+                    );
+
+                    let mut handled = false;
+                    for failure_ctx in &contexts {
+                        match claudine::harness::resolve_handler(
+                            failure_ctx,
+                            &plan.handlers,
+                            plan.programmatic_handler.as_ref(),
+                        ) {
+                            Ok(Some(action)) => {
+                                if let Some(next) = apply_handler_action(
+                                    &action,
+                                    harness_attempt,
+                                    DEFAULT_MAX_RETRIES,
+                                    &failure_ctx.message,
+                                    profile,
+                                    session_id.as_deref(),
+                                    plan.source_path.as_path(),
+                                    failure_ctx,
+                                    &term,
+                                )? {
+                                    harness_attempt = next;
+                                    handled = true;
+                                    break;
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => break 'harness Err(eyre!("{e}")),
+                        }
+                    }
+                    if handled {
+                        continue 'harness;
+                    }
+                    // No handler found for any failure
+                    break Err(eyre!(
+                        "post-check validation failed ({} {})",
+                        failures.len(),
+                        if failures.len() == 1 {
+                            "failure"
+                        } else {
+                            "failures"
+                        }
+                    ));
+                }
+                Err(e) => break Err(eyre!("{e}")),
+            }
+        } // end 'harness loop
+    }?;
 
     // MCP injector cleanup: remove temp files written during injection
     if let Some((injector, injection_result)) = mcp_cleanup
@@ -1445,7 +1930,1120 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         tracing::warn!("MCP injector cleanup failed: {e}");
     }
 
-    exit_code
+    Ok(exit_code)
+}
+
+fn merge_frontmatter_overlay(
+    overlay: &mut indexmap::IndexMap<String, serde_json::Value>,
+    update: &indexmap::IndexMap<String, serde_json::Value>,
+) {
+    for (key, value) in update {
+        if value.is_null() {
+            overlay.shift_remove(key);
+        } else {
+            overlay.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn strip_prompt_from_args(provider: Provider, args: &mut Vec<String>) {
+    match provider {
+        Provider::Gemini | Provider::QwenCode => {
+            let mut index = 0;
+            while index < args.len() {
+                if args[index] == "--prompt" || args[index] == "-p" {
+                    if index + 1 < args.len() {
+                        args.drain(index..=index + 1);
+                    } else {
+                        args.remove(index);
+                    }
+                    return;
+                }
+                if args[index].starts_with("--prompt=") || args[index].starts_with("-p=") {
+                    args.remove(index);
+                    return;
+                }
+                index += 1;
+            }
+        }
+        Provider::Goose => {
+            if let Some(index) = args.iter().position(|arg| arg == "-t" || arg == "--text") {
+                if index + 1 < args.len() {
+                    args.drain(index..=index + 1);
+                } else {
+                    args.remove(index);
+                }
+            }
+        }
+        Provider::Codex | Provider::OpenCode => {
+            if let Some(location) = find_prompt_location(provider, args) {
+                match location {
+                    PromptLocation::Value(index) => {
+                        if index < args.len() {
+                            args.remove(index);
+                        }
+                    }
+                    PromptLocation::Inline { index, .. } => {
+                        if index < args.len() {
+                            args.remove(index);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strip_prompt_tags_for_provider(provider: Provider, prompt: &str) -> String {
+    if matches!(
+        provider,
+        Provider::Codex | Provider::Gemini | Provider::OpenCode
+    ) {
+        claudine::mcp::session::lex_tags(prompt).0
+    } else {
+        prompt.to_string()
+    }
+}
+
+fn normalize_resume_args(profile: &dyn WrapperProfile, mut args: Vec<String>) -> Vec<String> {
+    if args.first().is_some_and(|arg| arg == profile.binary()) {
+        args.remove(0);
+    }
+    args
+}
+
+fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base_args: &[String]) {
+    let mut index = 0;
+    while index < base_args.len() {
+        match base_args[index].as_str() {
+            "--json" | "--verbose" => {
+                if !resume_args.iter().any(|arg| arg == &base_args[index]) {
+                    resume_args.push(base_args[index].clone());
+                }
+            }
+            "--output-format" | "--format" | "--output-last-message" => {
+                if index + 1 < base_args.len()
+                    && !resume_args.iter().any(|arg| arg == &base_args[index])
+                {
+                    resume_args.push(base_args[index].clone());
+                    resume_args.push(base_args[index + 1].clone());
+                }
+                index += 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
+fn materialize_harness_prompt(
+    state: &HarnessPromptState,
+    repo_root: Option<&Path>,
+) -> Result<MaterializedHarnessPrompt> {
+    let source_text = fs::read_to_string(&state.source_path)
+        .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
+    let source_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    let mut effective_markdown = source_markdown.clone();
+    merge_frontmatter_overlay(
+        effective_markdown.frontmatter_mut().as_map_mut(),
+        &state.overlay,
+    );
+
+    let (mut prompt, frontmatter, env_overrides, inline_source_text, pre_fm_hash, pre_body_hash) =
+        match state.mode {
+            HarnessPromptMode::PromptFile | HarnessPromptMode::Compose => {
+                let options = darkmatter::markdown::compose::ComposeOptions::new()
+                    .with_source_file(&state.source_path);
+                let (composed, _report) =
+                    effective_markdown.compose_with(options).map_err(|e| {
+                        eyre!(
+                            "Darkmatter compose failed for '{}': {e}",
+                            state.source_path.display()
+                        )
+                    })?;
+                let body = composed.content().to_string();
+                let fm_map = composed.frontmatter().as_map();
+
+                if state.mode == HarnessPromptMode::PromptFile
+                    && body.trim().is_empty()
+                    && fm_map.contains_key("prompt")
+                {
+                    return Err(eyre!(
+                        "prompt file '{}' has an empty body but contains a frontmatter `prompt` key; \
+                         use <blue>--frontmatter-prompt</blue> (or <blue>--fp</blue>) instead of \
+                         <blue>--prompt-file</blue> for this file",
+                        state.source_path.display()
+                    ));
+                }
+
+                let env_overrides = if state.mode == HarnessPromptMode::PromptFile {
+                    prompt_file::frontmatter_to_env(fm_map)?
+                } else {
+                    Vec::new()
+                };
+
+                (
+                    body,
+                    serde_json::Value::Object(
+                        fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    ),
+                    env_overrides,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            HarnessPromptMode::Inline => {
+                claudine::composition::validate_file_permissions(&state.source_path)
+                    .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+                let source = claudine::composition::ResolvedCompositionSource {
+                    original_ref: state.source_path.display().to_string(),
+                    resolved_path: state.source_path.clone(),
+                    original_text: source_text.clone(),
+                    markdown: effective_markdown.clone(),
+                };
+                let prepared = claudine::composition::prepare_inline_prompt(&source, repo_root)
+                    .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+                (
+                    prepared.prompt,
+                    serde_json::Value::Object(
+                        effective_markdown
+                            .frontmatter()
+                            .as_map()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    ),
+                    Vec::new(),
+                    Some(source_text),
+                    Some(source_markdown.hash_frontmatter(false)),
+                    Some(source_markdown.hash_body(false)),
+                )
+            }
+        };
+
+    if let Some(ref override_prompt) = state.next_prompt_override {
+        prompt = override_prompt.clone();
+    } else {
+        for tail in &state.prompt_tail {
+            prompt.push_str("\n\n");
+            prompt.push_str(tail);
+        }
+    }
+
+    Ok(MaterializedHarnessPrompt {
+        frontmatter,
+        prompt,
+        env_overrides,
+        inline_source_text,
+        inline_pre_frontmatter_hash: pre_fm_hash,
+        inline_pre_body_hash: pre_body_hash,
+    })
+}
+
+fn build_harness_launch(
+    provider: Provider,
+    profile: &dyn WrapperProfile,
+    base_args: &[String],
+    base_env: &HashMap<OsString, OsString>,
+    state: &mut HarnessPromptState,
+    materialized: &MaterializedHarnessPrompt,
+    effective_non_interactive: bool,
+    cli_timeout: Option<u64>,
+    plan_timeout: Option<std::time::Duration>,
+) -> Result<AttemptLaunch> {
+    let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
+        let mut args = normalize_resume_args(profile, profile.build_resume_args(&session_id)?);
+        append_resume_passthrough_args(&mut args, base_args);
+        args
+    } else {
+        base_args.to_vec()
+    };
+    state.next_prompt_override = None;
+
+    let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
+    let mut stdin_seed = None;
+    profile.apply_prompt_body(
+        &mut args,
+        &mut stdin_seed,
+        &prompt,
+        effective_non_interactive,
+    )?;
+    profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
+
+    let mut env = base_env.clone();
+    for (key, value) in &materialized.env_overrides {
+        env.insert(key.clone().into(), value.clone().into());
+    }
+
+    Ok(AttemptLaunch {
+        args,
+        env,
+        stdin_seed,
+        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_harness_attempt(
+    attempt: u32,
+    provider: Provider,
+    profile: &dyn WrapperProfile,
+    binary_path: &Path,
+    child_cwd: &Path,
+    launch: &AttemptLaunch,
+    prompt_mode: HarnessPromptMode,
+    prompt_state: &HarnessPromptState,
+    materialized: &MaterializedHarnessPrompt,
+    use_structured: bool,
+    structured_codex_output: Option<&StructuredCodexOutput>,
+    stdout_noise: &[&str],
+    stderr_noise: &[&str],
+    suppress_stderr_on_success: bool,
+    show_checks: bool,
+    stream_verbosity: Verbosity,
+    verbose_requested: bool,
+    env_context: &EnvironmentContext,
+    term: &Terminal,
+) -> Result<claudine::harness::AttemptOutcome> {
+    let (mut exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
+        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+        let parser_config = claudine::stream::ParserConfig::default();
+        let parser = claudine::stream::create_parser(
+            provider,
+            LiveStreamSink::new(
+                provider,
+                env_context.clone(),
+                stream_verbosity,
+                summary_details.clone(),
+            ),
+            parser_config,
+        );
+        let stream_result = exec::run_child_stream(
+            binary_path,
+            &launch.args,
+            &launch.env,
+            child_cwd,
+            launch.timeout,
+            stderr_noise,
+            suppress_stderr_on_success,
+            launch.stdin_seed.as_deref(),
+            parser,
+        )?;
+        let termination = stream_result.termination;
+        let mut summary = stream_result.data;
+        if let Some(codex_output) = structured_codex_output {
+            codex_output.apply_to_summary(&mut summary);
+        }
+        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+            let text = &summary.assistant_text;
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(text, term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(text.as_bytes())?;
+                if !text.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+
+        emit_stream_summary(
+            &summary,
+            profile,
+            env_context,
+            stream_verbosity,
+            verbose_requested,
+            &summary_details.lock().unwrap().clone(),
+        );
+
+        (
+            summary.exit_code,
+            termination,
+            summary.session_id.clone(),
+            summary.assistant_text.clone(),
+            summary.stderr_text.clone(),
+        )
+    } else {
+        let capture = exec::run_child_capture(
+            binary_path,
+            &launch.args,
+            &launch.env,
+            child_cwd,
+            launch.timeout,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed: launch.stdin_seed.as_deref(),
+            },
+        )?;
+        let termination = capture.termination;
+        let stdout = capture.data.stdout;
+        let stderr = capture.data.stderr;
+        let response = profile.parse_captured_output(&stdout);
+
+        if !response.trim().is_empty() {
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(&response, term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(response.as_bytes())?;
+                if !response.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+
+        if !stderr.trim().is_empty() {
+            eprintln!("{stderr}");
+        }
+
+        (
+            capture.data.exit_code,
+            termination,
+            None,
+            response,
+            (!stderr.trim().is_empty()).then_some(stderr),
+        )
+    };
+
+    if prompt_mode == HarnessPromptMode::Inline {
+        exit_code = finalize_inline_harness_attempt(
+            provider,
+            &prompt_state.source_path,
+            materialized,
+            exit_code,
+            termination,
+            child_cwd,
+            show_checks,
+            term,
+        )?;
+    }
+
+    Ok(claudine::harness::AttemptOutcome {
+        attempt,
+        session_id,
+        final_response,
+        exit_code,
+        termination,
+        stderr_text,
+    })
+}
+
+fn finalize_inline_harness_attempt(
+    provider: Provider,
+    source_path: &Path,
+    materialized: &MaterializedHarnessPrompt,
+    agent_exit: i32,
+    termination: claudine::harness::ProcessTermination,
+    child_cwd: &Path,
+    show_checks: bool,
+    term: &Terminal,
+) -> Result<i32> {
+    let provider_name = crate::output::capitalize_provider(provider);
+    let display_path = source_path
+        .strip_prefix(child_cwd)
+        .unwrap_or(source_path)
+        .display();
+    let was_interrupted = matches!(
+        termination,
+        claudine::harness::ProcessTermination::Interrupted
+    ) || agent_exit == 130
+        || agent_exit == 143;
+
+    if show_checks {
+        if was_interrupted {
+            log::message(&crate::output::fm_check_fail(
+                &format!("{provider_name} agent was interrupted by the user (code {agent_exit})"),
+                term,
+            ));
+        } else if agent_exit == 0 {
+            log::message(&crate::output::fm_check_ok(
+                &format!("{provider_name} agent completed successfully"),
+                term,
+            ));
+        } else {
+            log::message(&crate::output::fm_check_fail(
+                &format!("{provider_name} agent exited with error (code {agent_exit})"),
+                term,
+            ));
+        }
+    }
+
+    if was_interrupted {
+        let body_on_disk = fs::read_to_string(source_path)
+            .ok()
+            .map(|text| {
+                let md: darkmatter::markdown::Markdown = text.into();
+                md.content().trim().to_string()
+            })
+            .unwrap_or_default();
+
+        if show_checks {
+            if body_on_disk.is_empty() {
+                log::message(&crate::output::fm_check_fail(
+                    &format!(
+                        "<b>User interrupted the agent with CTRL+C; the body of \
+                         <blue-500>{display_path}</blue-500> is empty so it appears no work was accomplished.</b>"
+                    ),
+                    term,
+                ));
+            } else {
+                log::message(&crate::output::fm_check_fail(
+                    &format!(
+                        "<b>User interrupted the agent with CTRL+C; the body of \
+                         <blue-500>{display_path}</blue-500> has been at least partially filled:</b>"
+                    ),
+                    term,
+                ));
+                eprintln!();
+                for line in body_on_disk.lines() {
+                    eprintln!("  {line}");
+                }
+            }
+        }
+        return Ok(1);
+    }
+
+    let Some(pre_body_hash) = materialized.inline_pre_body_hash else {
+        return Ok(agent_exit);
+    };
+    let Some(pre_fm_hash) = materialized.inline_pre_frontmatter_hash else {
+        return Ok(agent_exit);
+    };
+    let Some(source_text_before) = materialized.inline_source_text.as_deref() else {
+        return Ok(agent_exit);
+    };
+
+    match fs::read_to_string(source_path) {
+        Ok(disk_text) => {
+            let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
+            let body_updated = on_disk.hash_body(false) != pre_body_hash;
+            if body_updated {
+                if show_checks {
+                    log::message(&crate::output::fm_check_ok(
+                        "Agent updated the target document's body",
+                        term,
+                    ));
+                }
+                let disk_fm_hash = on_disk.hash_frontmatter(false);
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let rewritten = if disk_fm_hash != pre_fm_hash {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_fail(
+                            "Agent ignored instruction to leave frontmatter untouched \
+                             (<i>we have reverted their changes</i>)",
+                            term,
+                        ));
+                    }
+                    rewrite_markdown_preserving_frontmatter(
+                        source_text_before,
+                        on_disk.content(),
+                        &today,
+                    )?
+                } else {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_ok(
+                            "Agent left frontmatter untouched (<i>as instructed</i>)",
+                            term,
+                        ));
+                    }
+                    rewrite_markdown_preserving_frontmatter(&disk_text, on_disk.content(), &today)?
+                };
+                claudine::config::atomic::atomic_write(source_path, rewritten.as_bytes())
+                    .map_err(|e| eyre!("failed to rewrite inline target: {e}"))?;
+                if agent_exit != 0
+                    && show_checks
+                    && termination == claudine::harness::ProcessTermination::Completed
+                {
+                    log::warn(
+                        "agent reported an error but the target file was updated; treating as success",
+                    );
+                }
+                Ok(
+                    if termination == claudine::harness::ProcessTermination::Completed {
+                        0
+                    } else {
+                        agent_exit
+                    },
+                )
+            } else {
+                if show_checks && agent_exit == 0 {
+                    log::message(&crate::output::fm_check_fail(
+                        &format!(
+                            "the referenced file -- {display_path} -- did not get updated even \
+                             though the Agent reported a successful outcome!"
+                        ),
+                        term,
+                    ));
+                }
+                Ok(if agent_exit == 0 { 1 } else { agent_exit })
+            }
+        }
+        Err(e) => Err(eyre!(
+            "failed to read {} after agent completion: {e}",
+            source_path.display()
+        )),
+    }
+}
+
+fn apply_next_attempt_plan(state: &mut HarnessPromptState, plan: &NextAttemptPlan) {
+    if plan.clear_prompt_tail {
+        state.prompt_tail.clear();
+    }
+    if let Some(ref path) = plan.redirect_source {
+        state.source_path = path.clone();
+    }
+    if let Some(ref overlay) = plan.set_overlay {
+        merge_frontmatter_overlay(&mut state.overlay, overlay);
+    }
+    if let Some(ref append) = plan.prompt_append {
+        state.prompt_tail.push(append.clone());
+    }
+    if let Some(ref prompt) = plan.prompt_override {
+        state.next_prompt_override = Some(prompt.clone());
+    }
+    state.next_resume_session_id = plan.resume_session_id.clone();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_next_attempt_plan(
+    action: &claudine::harness::HandlerAction,
+    current_attempt: u32,
+    default_max_retries: u32,
+    failure_message: &str,
+    profile: &dyn WrapperProfile,
+    session_id: Option<&str>,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    failure_ctx: &claudine::harness::FailureContext,
+    term: &Terminal,
+) -> Result<Option<NextAttemptPlan>> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::prelude::Renderable;
+
+    let dispatch_handler_feedback = |msg: &Option<String>, say: &Option<String>| {
+        if let Some(text) = say.as_deref() {
+            claudine::harness::speak_when_able(text);
+        }
+        if let Some(msg_text) = msg {
+            let rendered = Prose::new(msg_text).render(term);
+            eprintln!("{rendered}");
+        }
+    };
+
+    match action {
+        claudine::harness::HandlerAction::Retry {
+            prompt_suffix,
+            set,
+            msg,
+            say,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            dispatch_handler_feedback(msg, say);
+            let prompt_append = prompt_suffix.clone().or_else(|| {
+                Some(format!(
+                    "The previous attempt failed: {failure_message}. Please correct the issue and try again."
+                ))
+            });
+            Ok(Some(NextAttemptPlan {
+                next_attempt: current_attempt + 1,
+                prompt_append,
+                prompt_override: None,
+                set_overlay: set.clone(),
+                redirect_source: None,
+                resume_session_id: None,
+                clear_prompt_tail: false,
+            }))
+        }
+        claudine::harness::HandlerAction::Resume {
+            prompt,
+            set,
+            msg,
+            say,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "resume retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            claudine::harness::validate_resume(
+                &profile.provider().to_string(),
+                profile.supports_resume(),
+                session_id,
+            )?;
+            dispatch_handler_feedback(msg, say);
+            Ok(Some(NextAttemptPlan {
+                next_attempt: current_attempt + 1,
+                prompt_append: None,
+                prompt_override: Some(prompt.clone()),
+                set_overlay: set.clone(),
+                redirect_source: None,
+                resume_session_id: session_id.map(|id| id.to_string()),
+                clear_prompt_tail: false,
+            }))
+        }
+        claudine::harness::HandlerAction::Redirect {
+            file,
+            set,
+            msg,
+            say,
+            resume,
+        } => {
+            if *resume {
+                claudine::harness::validate_resume(
+                    &profile.provider().to_string(),
+                    profile.supports_resume(),
+                    session_id,
+                )?;
+            }
+            dispatch_handler_feedback(msg, say);
+            let resolve_ctx = claudine::harness::HarnessResolutionContext {
+                source_path,
+                repo_root,
+            };
+            let redirect_source = claudine::harness::resolve_harness_path(file, &resolve_ctx)?;
+            let resume_session_id = if *resume {
+                session_id.map(|id| id.to_string())
+            } else {
+                None
+            };
+            Ok(Some(NextAttemptPlan {
+                next_attempt: current_attempt + 1,
+                prompt_append: None,
+                prompt_override: None,
+                set_overlay: set.clone(),
+                redirect_source: Some(redirect_source),
+                resume_session_id,
+                clear_prompt_tail: true,
+            }))
+        }
+        claudine::harness::HandlerAction::Deviate {
+            command,
+            set,
+            msg,
+            say,
+        } => {
+            dispatch_handler_feedback(msg, say);
+            match claudine::harness::execute_deviate_command(
+                command,
+                failure_ctx,
+                Some(source_path),
+            ) {
+                Ok(deviate_exit) => {
+                    if deviate_exit != 0 {
+                        log::warn(&format!(
+                            "deviate command '{}' exited with code {deviate_exit}",
+                            command.raw
+                        ));
+                    }
+                    Ok(Some(NextAttemptPlan {
+                        next_attempt: current_attempt + 1,
+                        prompt_append: None,
+                        prompt_override: None,
+                        set_overlay: set.clone(),
+                        redirect_source: None,
+                        resume_session_id: None,
+                        clear_prompt_tail: false,
+                    }))
+                }
+                Err(e) => Err(eyre!("deviate failed: {e}")),
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_harness_loop(
+    provider: Provider,
+    profile: &dyn WrapperProfile,
+    binary_path: &Path,
+    child_cwd: &Path,
+    effective_non_interactive: bool,
+    cli_timeout: Option<u64>,
+    base_args: &[String],
+    base_env: &HashMap<OsString, OsString>,
+    prompt_state: &mut HarnessPromptState,
+    repo_root: Option<&Path>,
+    use_structured: bool,
+    structured_codex_output: Option<&StructuredCodexOutput>,
+    stdout_noise: &[&str],
+    stderr_noise: &[&str],
+    suppress_stderr_on_success: bool,
+    show_checks: bool,
+    stream_verbosity: Verbosity,
+    verbose_requested: bool,
+    env_context: &EnvironmentContext,
+    term: &Terminal,
+) -> Result<i32> {
+    const DEFAULT_MAX_RETRIES: u32 = 3;
+    let shell_options = build_harness_shell_options(&prompt_state.source_path, repo_root);
+    let mut attempt = 1u32;
+
+    loop {
+        let materialized = materialize_harness_prompt(prompt_state, repo_root)?;
+        let resolve_ctx = claudine::harness::HarnessResolutionContext {
+            source_path: &prompt_state.source_path,
+            repo_root,
+        };
+        let plan = claudine::harness::parse_harness_plan_with_shell(
+            &materialized.frontmatter,
+            &prompt_state.source_path,
+            &resolve_ctx,
+            Some(&shell_options),
+        )?;
+
+        match claudine::harness::evaluate_pre_checks(&plan, term) {
+            Ok(()) => {}
+            Err(claudine::harness::HarnessError::PreCheckFailed { ref failures }) => {
+                let contexts = claudine::harness::build_validation_failure_context(
+                    failures, attempt, None, None,
+                );
+                let mut next_plan = None;
+                for failure_ctx in &contexts {
+                    match claudine::harness::resolve_handler(
+                        failure_ctx,
+                        &plan.handlers,
+                        plan.programmatic_handler.as_ref(),
+                    ) {
+                        Ok(Some(action)) => {
+                            next_plan = build_next_attempt_plan(
+                                &action,
+                                attempt,
+                                DEFAULT_MAX_RETRIES,
+                                &failure_ctx.message,
+                                profile,
+                                None,
+                                &prompt_state.source_path,
+                                repo_root,
+                                failure_ctx,
+                                term,
+                            )?;
+                            if next_plan.is_some() {
+                                break;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => return Err(eyre!("{e}")),
+                    }
+                }
+                if let Some(plan) = next_plan {
+                    attempt = plan.next_attempt;
+                    apply_next_attempt_plan(prompt_state, &plan);
+                    continue;
+                }
+                return Err(eyre!(
+                    "pre-check validation failed ({} {})",
+                    failures.len(),
+                    if failures.len() == 1 {
+                        "failure"
+                    } else {
+                        "failures"
+                    }
+                ));
+            }
+            Err(e) => return Err(eyre!("{e}")),
+        }
+
+        let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
+            .map_err(|e| eyre!("harness snapshot: {e}"))?;
+        let launch = build_harness_launch(
+            provider,
+            profile,
+            base_args,
+            base_env,
+            prompt_state,
+            &materialized,
+            effective_non_interactive,
+            cli_timeout,
+            plan.timeout,
+        )?;
+
+        let outcome = execute_harness_attempt(
+            attempt,
+            provider,
+            profile,
+            binary_path,
+            child_cwd,
+            &launch,
+            prompt_state.mode,
+            prompt_state,
+            &materialized,
+            use_structured,
+            structured_codex_output,
+            stdout_noise,
+            stderr_noise,
+            suppress_stderr_on_success,
+            show_checks,
+            stream_verbosity,
+            verbose_requested,
+            env_context,
+            term,
+        )?;
+
+        if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
+            return Ok(outcome.exit_code);
+        }
+
+        if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
+            let message = match failure_event {
+                claudine::harness::FailureEvent::Timeout => {
+                    format!("provider timed out (attempt {attempt})")
+                }
+                claudine::harness::FailureEvent::AgentFailure => {
+                    format!(
+                        "agent exited with error code {} (attempt {attempt})",
+                        outcome.exit_code
+                    )
+                }
+                _ => format!("failure on attempt {attempt}"),
+            };
+            let ctx = claudine::harness::build_agent_failure_context(
+                failure_event,
+                message.clone(),
+                attempt,
+                outcome.session_id.clone(),
+                Some(outcome.clone()),
+            );
+            match claudine::harness::resolve_handler(
+                &ctx,
+                &plan.handlers,
+                plan.programmatic_handler.as_ref(),
+            ) {
+                Ok(Some(action)) => {
+                    if let Some(next_plan) = build_next_attempt_plan(
+                        &action,
+                        attempt,
+                        DEFAULT_MAX_RETRIES,
+                        &ctx.message,
+                        profile,
+                        outcome.session_id.as_deref(),
+                        &prompt_state.source_path,
+                        repo_root,
+                        &ctx,
+                        term,
+                    )? {
+                        attempt = next_plan.next_attempt;
+                        apply_next_attempt_plan(prompt_state, &next_plan);
+                        continue;
+                    }
+                    return Err(eyre!("{message}"));
+                }
+                Ok(None) => return Err(eyre!("{message}")),
+                Err(e) => return Err(eyre!("{e}")),
+            }
+        }
+
+        match claudine::harness::evaluate_post_checks(&plan, &snapshot, &outcome, term) {
+            Ok(()) => return Ok(outcome.exit_code),
+            Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
+                let contexts = claudine::harness::build_validation_failure_context(
+                    failures,
+                    attempt,
+                    outcome.session_id.clone(),
+                    Some(outcome.clone()),
+                );
+
+                let mut next_plan = None;
+                for failure_ctx in &contexts {
+                    match claudine::harness::resolve_handler(
+                        failure_ctx,
+                        &plan.handlers,
+                        plan.programmatic_handler.as_ref(),
+                    ) {
+                        Ok(Some(action)) => {
+                            next_plan = build_next_attempt_plan(
+                                &action,
+                                attempt,
+                                DEFAULT_MAX_RETRIES,
+                                &failure_ctx.message,
+                                profile,
+                                outcome.session_id.as_deref(),
+                                &prompt_state.source_path,
+                                repo_root,
+                                failure_ctx,
+                                term,
+                            )?;
+                            if next_plan.is_some() {
+                                break;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => return Err(eyre!("{e}")),
+                    }
+                }
+
+                if let Some(plan) = next_plan {
+                    attempt = plan.next_attempt;
+                    apply_next_attempt_plan(prompt_state, &plan);
+                    continue;
+                }
+
+                return Err(eyre!(
+                    "post-check validation failed ({} {})",
+                    failures.len(),
+                    if failures.len() == 1 {
+                        "failure"
+                    } else {
+                        "failures"
+                    }
+                ));
+            }
+            Err(e) => return Err(eyre!("{e}")),
+        }
+    }
+}
+
+/// Apply a resolved handler action and return the next attempt number if the
+/// loop should continue, or `None` if the action cannot be applied (e.g.,
+/// retry ceiling reached, resume unsupported).
+///
+/// Returns `Ok(Some(next_attempt))` to continue the harness loop, or
+/// `Ok(None)` to stop (caller should report the original failure).
+#[allow(clippy::too_many_arguments)]
+fn apply_handler_action(
+    action: &claudine::harness::HandlerAction,
+    current_attempt: u32,
+    default_max_retries: u32,
+    failure_message: &str,
+    profile: &dyn WrapperProfile,
+    session_id: Option<&str>,
+    source_path: &std::path::Path,
+    failure_ctx: &claudine::harness::FailureContext,
+    term: &Terminal,
+) -> Result<Option<u32>> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::prelude::Renderable;
+
+    let dispatch_handler_feedback = |msg: &Option<String>, say: &Option<String>| {
+        if let Some(text) = say.as_deref() {
+            claudine::harness::speak_when_able(text);
+        }
+        if let Some(msg_text) = msg {
+            let rendered = Prose::new(msg_text).render(term);
+            eprintln!("{rendered}");
+        }
+    };
+
+    match action {
+        claudine::harness::HandlerAction::Retry {
+            prompt_suffix: _,
+            set: _,
+            msg,
+            say,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
+            } else {
+                log::message(&format!(
+                    "retrying (attempt {}/{max})...",
+                    current_attempt + 1
+                ));
+            }
+            Ok(Some(current_attempt + 1))
+        }
+        claudine::harness::HandlerAction::Resume {
+            prompt: _,
+            set: _,
+            msg,
+            say,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "resume retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            // Validate resume support
+            if let Err(e) = claudine::harness::validate_resume(
+                &profile.provider().to_string(),
+                profile.supports_resume(),
+                session_id,
+            ) {
+                log::warn(&format!("cannot resume: {e}"));
+                return Ok(None);
+            }
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
+            } else {
+                log::message(&format!(
+                    "resuming session (attempt {}/{max})...",
+                    current_attempt + 1
+                ));
+            }
+            Ok(Some(current_attempt + 1))
+        }
+        claudine::harness::HandlerAction::Deviate {
+            command,
+            set: _,
+            msg,
+            say,
+        } => {
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
+            } else {
+                log::message(&format!("running deviate command: {}", command.raw));
+            }
+            match claudine::harness::execute_deviate_command(
+                command,
+                failure_ctx,
+                Some(source_path),
+            ) {
+                Ok(deviate_exit) => {
+                    if deviate_exit != 0 {
+                        log::warn(&format!(
+                            "deviate command '{}' exited with code {deviate_exit}",
+                            command.raw
+                        ));
+                    }
+                    // After deviate, retry the main provider
+                    Ok(Some(current_attempt + 1))
+                }
+                Err(e) => Err(eyre!("deviate failed: {e}")),
+            }
+        }
+        claudine::harness::HandlerAction::Redirect {
+            file,
+            set: _,
+            msg,
+            say,
+            resume: _,
+        } => {
+            dispatch_handler_feedback(msg, say);
+            Err(eyre!(
+                "redirect handler to '{file}' is not yet supported in the execution loop"
+            ))
+        }
+    }
 }
 
 fn resolve_binary_path(

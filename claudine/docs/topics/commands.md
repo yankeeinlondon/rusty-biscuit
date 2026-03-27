@@ -51,7 +51,7 @@ The reporting is broken down into the following sections:
           - Since commands are single files (not directory bundles), there is **no `FileSystem` tree**. Instead, show the command's **frontmatter properties** as a dim key-value list with a left margin of 2 characters:
               - Each recognized frontmatter property is rendered as `<dim>{key}: {value}</dim>`
               - Only properties that are actually present in the file are shown
-              - The `model` property, if present, should additionally be flagged: `<dim>model: {value}</dim> <red><i>(not shareable)</i></red>`
+              - The `model` property, if present, should additionally be flagged: `<dim>model: {value}</dim> <red><i>(not shareable)</i></red>` — see [Non-Portable Properties](non-portable-properties.md)
           - After the frontmatter summary, show the file size in bytes and the format type: `<dim>({size} bytes, {format})</dim>`
 
       - **Verbose**
@@ -110,14 +110,14 @@ The reporting is broken down into the following sections:
 
    **Property passthrough:**
 
-   Many properties — `argument-hint`, `user-invocable`, `disable-model-invocation`, `allowed-tools`, `template`, `subtask`, `agent`, `context`, `mode`, etc. — are only recognized by some CLIs. Under the same simplifying assumption (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical command file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it.
+   Many properties — `argument-hint`, `user-invocable`, `disable-model-invocation`, `allowed-tools`, `template`, `subtask`, `agent`, `context`, `mode`, etc. — are only recognized by some CLIs. Under the same simplifying assumption (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical command file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it. For the full analysis of which properties are safe to pass through and which block sharing, see [Non-Portable Properties](non-portable-properties.md).
 
    When the `--verbose` flag is used, the Footer Messages section includes per-property notes showing which CLIs actually consume each property present in the listed commands (see section 7).
 
    **Fixes that cannot be automated:**
 
    - **Format conversion** (Markdown → TOML for Gemini, Markdown → MCP for Goose): These require fundamentally different file structures. Tracked as `format_incompatible` and left for human resolution.
-   - **`model` property translation**: Model values are provider-specific. Automated translation is planned for Phase 2 (see `model-property-design.md`). In Phase 1, commands with `model` are flagged as `ModelPropertyNotShareable`.
+   - **`model` property translation**: Model values are provider-specific. Automated translation is planned for Phase 2 (see `model-property-design.md`). In Phase 1, commands with `model` are flagged as `ModelPropertyNotShareable`. See [Non-Portable Properties](non-portable-properties.md) for the full portability analysis.
    - **`prompt` property for Gemini**: Gemini commands require a `prompt` field in TOML format. This is a structural difference, not a property alias — it cannot be derived from Markdown frontmatter alone.
    - **Built-in only providers** (KimiCode): No custom command files are supported, so there is nothing to fix.
 

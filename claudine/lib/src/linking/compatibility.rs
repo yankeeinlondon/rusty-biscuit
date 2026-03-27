@@ -486,6 +486,55 @@ fn normalize_key(key: &str) -> String {
         .collect()
 }
 
+/// Frontmatter properties that are non-portable across providers. Resources
+/// containing any of these should not be symlinked into non-Claude provider
+/// directories.
+///
+/// - `model`: shared property name but values are provider-specific (e.g.,
+///   `sonnet` vs `gemini-2.5-pro`). Present in Claude, Gemini, and OpenCode
+///   agent schemas but with incompatible value semantics.
+/// - `tools`: shared property name but Claude uses a comma-separated string
+///   while other providers (OpenCode, KimiCode) expect structured records.
+///   Value format mismatch causes parse errors.
+/// - `skills`: Claude-only. No other provider has a skill auto-loading
+///   mechanism. Unknown key — likely ignored but not guaranteed.
+///
+/// Note: `allowed-tools` / `allowed_tools` is intentionally excluded. It is
+/// Claude-only (used in skills/commands) and other providers simply ignore
+/// unrecognized frontmatter keys.
+const NON_PORTABLE_PROPERTIES: &[&str] = &["model", "tools", "skills"];
+
+/// Check whether a markdown file contains Claude-specific frontmatter properties
+/// that make it unsafe to share with other providers via symlink.
+///
+/// Returns the list of Claude-specific property names found, or an empty vec
+/// if the file is shareable.
+pub(crate) fn claude_specific_properties(path: &Path) -> Vec<String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let parsed = match parse_markdown_document(&content) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+
+    NON_PORTABLE_PROPERTIES
+        .iter()
+        .filter(|prop| {
+            parsed
+                .frontmatter
+                .contains_key(serde_yaml_ng::Value::String(prop.to_string()))
+        })
+        .map(|prop| prop.to_string())
+        .collect()
+}
+
+/// Returns true if the file contains any Claude-specific frontmatter properties.
+pub(crate) fn has_claude_specific_properties(path: &Path) -> bool {
+    !claude_specific_properties(path).is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
@@ -924,5 +973,80 @@ mod tests {
             }
             other => panic!("expected IncompleteLink, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn claude_specific_detects_model() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "---\ndescription: Test\nmodel: sonnet\n---\nBody\n").unwrap();
+        let props = claude_specific_properties(&file);
+        assert_eq!(props, vec!["model"]);
+        assert!(has_claude_specific_properties(&file));
+    }
+
+    #[test]
+    fn claude_specific_detects_tools() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(
+            &file,
+            "---\ndescription: Test\ntools: Bash, Read\n---\nBody\n",
+        )
+        .unwrap();
+        let props = claude_specific_properties(&file);
+        assert_eq!(props, vec!["tools"]);
+    }
+
+    #[test]
+    fn claude_specific_detects_skills() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "---\ndescription: Test\nskills: rust\n---\nBody\n").unwrap();
+        let props = claude_specific_properties(&file);
+        assert_eq!(props, vec!["skills"]);
+    }
+
+    #[test]
+    fn claude_specific_ignores_allowed_tools() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(
+            &file,
+            "---\ndescription: Test\nallowed-tools: Bash(git:*), Read\n---\nBody\n",
+        )
+        .unwrap();
+        // allowed-tools is not in the non-portable list — other providers ignore it
+        assert!(claude_specific_properties(&file).is_empty());
+        assert!(!has_claude_specific_properties(&file));
+    }
+
+    #[test]
+    fn claude_specific_detects_multiple() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(
+            &file,
+            "---\ndescription: Test\nmodel: opus\ntools: Bash\nskills: rust\n---\nBody\n",
+        )
+        .unwrap();
+        let props = claude_specific_properties(&file);
+        assert_eq!(props, vec!["model", "tools", "skills"]);
+    }
+
+    #[test]
+    fn claude_specific_returns_empty_for_shareable() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("test.md");
+        std::fs::write(&file, "---\ndescription: A shareable agent\n---\nBody\n").unwrap();
+        assert!(claude_specific_properties(&file).is_empty());
+        assert!(!has_claude_specific_properties(&file));
+    }
+
+    #[test]
+    fn claude_specific_returns_empty_for_missing_file() {
+        let path = std::path::PathBuf::from("/nonexistent/file.md");
+        assert!(claude_specific_properties(&path).is_empty());
+        assert!(!has_claude_specific_properties(&path));
     }
 }

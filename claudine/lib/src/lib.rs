@@ -7,6 +7,7 @@ pub mod config;
 pub mod dispatch;
 pub mod error;
 pub mod events;
+pub mod harness;
 pub mod linking;
 pub mod mcp;
 pub mod reporting;

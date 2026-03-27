@@ -1,4 +1,0 @@
-- skills
-- commands
-- connectors (MCP integrations to external tools)
-- manifest

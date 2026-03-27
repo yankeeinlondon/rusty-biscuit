@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
-use super::compatibility::parse_markdown_document;
+use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_resource_link};
@@ -131,6 +131,8 @@ pub struct CommandFixSummary {
     pub skipped: usize,
     /// Commands where format is incompatible with target provider.
     pub format_incompatible: usize,
+    /// Commands skipped because they have Claude-specific frontmatter (not shareable).
+    pub not_shareable: usize,
 }
 
 /// Fix missing command links for non-Claude providers.
@@ -148,8 +150,13 @@ pub fn fix_missing_commands(paths: &ProviderSkillPaths) -> Result<CommandFixSumm
         ResourceScope::Repo,
     );
 
-    let user_commands = scan_command_dir(user_dir.as_ref());
-    let repo_commands = scan_command_dir(repo_dir.as_ref());
+    let all_user_commands = scan_command_dir(user_dir.as_ref());
+    let all_repo_commands = scan_command_dir(repo_dir.as_ref());
+
+    // Filter out commands with Claude-specific frontmatter — these are not shareable
+    let (user_commands, user_skipped) = filter_unshareable_commands(all_user_commands);
+    let (repo_commands, repo_skipped) = filter_unshareable_commands(all_repo_commands);
+    summary.not_shareable = user_skipped + repo_skipped;
 
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -234,6 +241,20 @@ fn fix_scope_commands(
         }
     }
     Ok(())
+}
+
+/// Partition commands into shareable (no Claude-specific properties) and count of skipped.
+fn filter_unshareable_commands(commands: Vec<ScannedCommand>) -> (Vec<ScannedCommand>, usize) {
+    let mut shareable = Vec::new();
+    let mut skipped = 0;
+    for cmd in commands {
+        if has_claude_specific_properties(&cmd.path) {
+            skipped += 1;
+        } else {
+            shareable.push(cmd);
+        }
+    }
+    (shareable, skipped)
 }
 
 /// Discover all commands from Claude's user and repo command directories.
