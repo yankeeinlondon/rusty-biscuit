@@ -33,19 +33,6 @@ Inspect hook registrations and provider capabilities.
 
 Sound effect validation runs automatically when viewing hooks and uses a 5-tier fuzzy matching algorithm to suggest replacements for invalid effect names.
 
-### `claudine link [provider] [flags]`
-
-Analyze and optionally repair skill/command/agent/script link state across providers.
-
-| Flag | Description |
-|------|-------------|
-| `--support` | Provider resource support matrix (Skill/Command/Agent/Script) |
-| `<provider>` | Detailed capability view for one provider (fuzzy matching) |
-| `--scope <user\|repo>` | Choose user-scope or repo-scope analysis (default: `user`) |
-| `--apply` | Apply auto-fixable states (`LinkMissing`, `DerivedMissing`, `DerivedStale`) |
-| `--filter <name>` | Analyze only resources with this name |
-| `--detailed` | Show detailed output |
-
 ### `claudine providers`
 
 Show a compact provider capability matrix with:
@@ -176,7 +163,6 @@ cli/src/
     ├── dry_run.rs       → Event simulation with mock payloads
     ├── handle.rs        → Event processing from stdin
     ├── hooks.rs         → Hook inspection and validation
-    ├── link.rs          → Skill synchronization management
     ├── logs.rs          → JSONL log reporting queries
     ├── mcp.rs           → MCP catalog, defaults, aliasing, import, and sync commands
     ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
