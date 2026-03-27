@@ -1,0 +1,1 @@
+../../.claude/commands/create-schematic-api.md
