@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 
 /// Claudine — cross-agent hook/event system for agentic CLIs.
 #[derive(Parser)]
-#[command(name = "claudine", version, about)]
+#[command(name = "claudine", version, about, disable_help_subcommand = true)]
 pub(crate) struct Cli {
     /// Increase verbosity (-v for verbose, -vv for debug).
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
@@ -20,13 +20,10 @@ pub(crate) struct Cli {
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Handle an incoming event from a provider hook.
+    #[command(hide = true)]
     Handle(commands::handle::HandleArgs),
-    /// Show what would happen for an event (no side effects).
-    DryRun(commands::dry_run::DryRunArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
-    /// Show detailed help and usage information.
-    About,
     /// Interactive setup wizard.
     Init(commands::init::InitArgs),
     /// Link skills and commands across providers.
@@ -69,4 +66,7 @@ pub(crate) enum Commands {
     Goose(commands::wrap::WrapperArgs),
     /// Compose a Markdown document through an agentic CLI.
     Compose(commands::compose::ComposeArgs),
+    /// Inline composition: use frontmatter prompt, replace body with output.
+    #[command(name = "compose-inline")]
+    ComposeInline(commands::compose::ComposeInlineArgs),
 }

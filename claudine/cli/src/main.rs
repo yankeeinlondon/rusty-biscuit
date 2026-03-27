@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use claudine::events::Provider;
 use color_eyre::eyre::Result;
 use tracing::level_filters::LevelFilter;
@@ -35,9 +35,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Handle(args)) => commands::handle::run(args).await,
-        Some(Commands::DryRun(args)) => commands::dry_run::run(args).await,
         Some(Commands::Completions(args)) => commands::completions::run(args),
-        Some(Commands::About) => commands::about::run(),
         Some(Commands::Init(args)) => commands::init::run(args).await,
         Some(Commands::Link(args)) => commands::link::run(args),
         Some(Commands::Sync(args)) => commands::sync::run(args).await,
@@ -74,11 +72,10 @@ async fn main() -> Result<()> {
             commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
         }
         Some(Commands::Compose(args)) => commands::compose::run_compose(args, cli.verbose),
-        None => {
-            // No subcommand given - show help
-            Cli::command().print_help()?;
-            Ok(())
+        Some(Commands::ComposeInline(args)) => {
+            commands::compose::run_compose_inline(args, cli.verbose)
         }
+        None => commands::help::run(),
     }
 }
 

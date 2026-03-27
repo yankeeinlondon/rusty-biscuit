@@ -59,6 +59,45 @@ pub struct InlineArgs {
     pub file: String,
 }
 
+/// Arguments for the top-level `compose-inline` command.
+#[derive(Debug, Clone, Args)]
+pub struct ComposeInlineArgs {
+    /// Force interactive provider selection.
+    #[arg(short = 'i', long)]
+    pub interactive: bool,
+
+    /// Exclude providers from automatic selection (repeatable).
+    #[arg(long = "exclude", value_name = "PROVIDER")]
+    pub exclude: Vec<String>,
+
+    /// Timeout in seconds for the provider session.
+    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
+    pub timeout: Option<u64>,
+
+    /// Suppress all output except the composition result.
+    #[arg(long)]
+    pub silent: bool,
+
+    /// File reference to compose.
+    #[arg(value_name = "FILE")]
+    pub file: String,
+}
+
+/// Entry point for `claudine compose-inline`.
+pub fn run_compose_inline(args: ComposeInlineArgs, verbose: u8) -> Result<()> {
+    let compose_args = ComposeArgs {
+        interactive: args.interactive,
+        exclude: args.exclude,
+        timeout: args.timeout,
+        silent: args.silent,
+        file: None,
+        subcommand: Some(ComposeSubcommand::Inline(InlineArgs {
+            file: args.file,
+        })),
+    };
+    run_compose(compose_args, verbose)
+}
+
 /// Entry point for `claudine compose`.
 pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_compose_inner(args, verbose) {
