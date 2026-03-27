@@ -1387,7 +1387,7 @@ fn format_validation_issues(
 
     out.push('\n');
 
-    for (_order, (kind, issues)) in &groups {
+    for (kind, issues) in groups.values() {
         let label = reference_kind_category_label(*kind);
         let header = format!("<red-500><b>{label}</b></red-500>");
         out.push_str(&Prose::new(header).render(term));
@@ -1590,10 +1590,10 @@ fn insertion_to_json(
     }
 
     // Recursively expand child node when following
-    if follow {
-        if let Some(child) = child_node {
-            obj["node"] = graph_node_to_json(child, graph, true);
-        }
+    if follow
+        && let Some(child) = child_node
+    {
+        obj["node"] = graph_node_to_json(child, graph, true);
     }
 
     obj
@@ -1702,10 +1702,10 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
         if let Some(graph) = tree.graph() {
             let mut root_json = graph_node_to_json(&graph.root, graph, follow);
 
-            if validate {
-                if let Some(report) = tree.validation_report() {
-                    root_json["validation"] = validation_report_to_json(report);
-                }
+            if validate
+                && let Some(report) = tree.validation_report()
+            {
+                root_json["validation"] = validation_report_to_json(report);
             }
 
             println!("{}", serde_json::to_string_pretty(&root_json)?);
@@ -1719,26 +1719,26 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
     print!("{}", tree.display(&term));
 
     // Validation summary footer
-    if validate {
-        if let Some(report) = tree.validation_report() {
-            use biscuit_terminal::components::prose::Prose;
-            use biscuit_terminal::components::renderable::Renderable as _;
+    if validate
+        && let Some(report) = tree.validation_report()
+    {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::Renderable as _;
 
-            let formatted = format_validation_issues(report, &term);
-            if !formatted.is_empty() {
-                println!("{formatted}");
-            } else {
-                let summary = format!(
-                    "{} references scanned, {} valid, 0 issues",
-                    report.references_scanned, report.references_valid,
-                );
-                println!("\n{}", Prose::new(summary).render(&term));
-            }
+        let formatted = format_validation_issues(report, &term);
+        if !formatted.is_empty() {
+            println!("{formatted}");
+        } else {
+            let summary = format!(
+                "{} references scanned, {} valid, 0 issues",
+                report.references_scanned, report.references_valid,
+            );
+            println!("\n{}", Prose::new(summary).render(&term));
+        }
 
-            // Exit code 2 for validation errors
-            if !report.is_valid() {
-                std::process::exit(2);
-            }
+        // Exit code 2 for validation errors
+        if !report.is_valid() {
+            std::process::exit(2);
         }
     }
 

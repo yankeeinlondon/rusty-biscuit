@@ -451,21 +451,21 @@ fn build_node(
             } else {
                 // Target didn't resolve — still emit reference record and
                 // a context-only insertion for the caption.
-                if extract_references {
-                    if let Some(raw_target) = directive.targets.first() {
-                        local_references.records.push(ReferenceRecord {
-                            id: ref_id.clone(),
-                            kind: ReferenceKind::Transclusion,
-                            target: classify_target(raw_target),
-                            origin: ReferenceOrigin {
-                                source: source.clone(),
-                                line: directive.line,
-                                span: directive.span.clone(),
-                                syntax: ReferenceSyntax::DirectiveTocLinking,
-                            },
-                            attributes: serde_json::Map::new(),
-                        });
-                    }
+                if extract_references
+                    && let Some(raw_target) = directive.targets.first()
+                {
+                    local_references.records.push(ReferenceRecord {
+                        id: ref_id.clone(),
+                        kind: ReferenceKind::Transclusion,
+                        target: classify_target(raw_target),
+                        origin: ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveTocLinking,
+                        },
+                        attributes: serde_json::Map::new(),
+                    });
                 }
 
                 child_insertions.push(ReferenceInsertion {
@@ -521,8 +521,9 @@ fn build_node(
                 });
             }
 
-            if !is_literal {
-            if let Some(child_path) = resolve_local_target(prologue, source, &options.compose.magic_paths) {
+            if !is_literal
+                && let Some(child_path) = resolve_local_target(prologue, source, &options.compose.magic_paths)
+            {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
@@ -555,7 +556,6 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
-            } // if !is_literal
         }
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
@@ -593,8 +593,9 @@ fn build_node(
                 });
             }
 
-            if !is_literal {
-            if let Some(child_path) = resolve_local_target(epilogue, source, &options.compose.magic_paths) {
+            if !is_literal
+                && let Some(child_path) = resolve_local_target(epilogue, source, &options.compose.magic_paths)
+            {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
@@ -630,7 +631,6 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
-            } // if !is_literal
         }
     }
 

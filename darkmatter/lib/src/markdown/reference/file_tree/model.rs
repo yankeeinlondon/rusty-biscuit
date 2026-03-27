@@ -178,7 +178,7 @@ pub fn build_file_tree_model(
     follow: bool,
 ) -> FileTreeModel {
     let issue_map = report
-        .map(|r| build_issue_map(r))
+        .map(build_issue_map)
         .unwrap_or_default();
 
     // Build an id → &ReferenceGraphNode map once for O(1) lookups
@@ -328,12 +328,11 @@ fn build_node_model(
         });
 
         // Follow into child if enabled
-        if follow && followable {
-            if let Some(ref cid) = child_node_id {
-                if let Some(child_graph_node) = node_map.get(cid.as_str()) {
-                    children.push(build_node_model(child_graph_node, node_map, issue_map, follow));
-                }
-            }
+        if follow && followable
+            && let Some(ref cid) = child_node_id
+            && let Some(child_graph_node) = node_map.get(cid.as_str())
+        {
+            children.push(build_node_model(child_graph_node, node_map, issue_map, follow));
         }
     }
 
