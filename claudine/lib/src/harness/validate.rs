@@ -75,10 +75,10 @@ pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, Ha
                     }
                 } else if !snapshot.tracked_frontmatter.contains_key(prop) {
                     // Source already loaded, just grab this property
-                    if let Some(ref md) = snapshot.source_markdown {
-                        if let Ok(Some(val)) = md.fm_get::<serde_json::Value>(prop) {
-                            snapshot.tracked_frontmatter.insert(prop.clone(), val);
-                        }
+                    if let Some(ref md) = snapshot.source_markdown
+                        && let Ok(Some(val)) = md.fm_get::<serde_json::Value>(prop)
+                    {
+                        snapshot.tracked_frontmatter.insert(prop.clone(), val);
                     }
                 }
             }

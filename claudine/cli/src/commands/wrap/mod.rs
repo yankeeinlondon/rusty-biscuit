@@ -1004,51 +1004,51 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         } else if let Some((ref source, _, _, _)) = inline_composition_source {
             // --frontmatter-prompt: frontmatter from source.markdown
             Some(fm_to_value(source.markdown.frontmatter().as_map()))
-        } else if let Some(ref source) = chained_composition_source {
-            Some(fm_to_value(source.markdown.frontmatter().as_map()))
         } else {
-            None
+            chained_composition_source
+                .as_ref()
+                .map(|source| fm_to_value(source.markdown.frontmatter().as_map()))
         };
 
-    if let Some(ref fm) = composed_frontmatter {
-        if claudine::harness::has_harness_properties(fm) {
-            // Determine source path and repo root for resolution context
-            let source_path = prompt_file_dry_run
-                .as_ref()
-                .map(|pf| pf.resolved_path.clone())
-                .or_else(|| {
-                    inline_composition_source
-                        .as_ref()
-                        .map(|(s, _, _, _)| s.resolved_path.clone())
-                })
-                .or_else(|| {
-                    chained_composition_source
-                        .as_ref()
-                        .map(|source| source.resolved_path.clone())
-                })
-                .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
+    if let Some(ref fm) = composed_frontmatter
+        && claudine::harness::has_harness_properties(fm)
+    {
+        // Determine source path and repo root for resolution context
+        let source_path = prompt_file_dry_run
+            .as_ref()
+            .map(|pf| pf.resolved_path.clone())
+            .or_else(|| {
+                inline_composition_source
+                    .as_ref()
+                    .map(|(s, _, _, _)| s.resolved_path.clone())
+            })
+            .or_else(|| {
+                chained_composition_source
+                    .as_ref()
+                    .map(|source| source.resolved_path.clone())
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
 
-            let resolve_ctx = claudine::harness::HarnessResolutionContext {
-                source_path: &source_path,
-                repo_root: env_plan.repo_root.as_deref(),
-            };
-            let shell_options =
-                build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
+        let resolve_ctx = claudine::harness::HarnessResolutionContext {
+            source_path: &source_path,
+            repo_root: env_plan.repo_root.as_deref(),
+        };
+        let shell_options =
+            build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
 
-            match claudine::harness::parse_harness_plan_with_shell(
-                fm,
-                &source_path,
-                &resolve_ctx,
-                Some(&shell_options),
-            ) {
-                Ok(plan) => {
-                    let _ = plan;
-                    harness_enabled = true;
-                }
-                Err(e) => {
-                    // Parse error: render and exit before provider launch
-                    return Err(eyre!("{e}"));
-                }
+        match claudine::harness::parse_harness_plan_with_shell(
+            fm,
+            &source_path,
+            &resolve_ctx,
+            Some(&shell_options),
+        ) {
+            Ok(plan) => {
+                let _ = plan;
+                harness_enabled = true;
+            }
+            Err(e) => {
+                // Parse error: render and exit before provider launch
+                return Err(eyre!("{e}"));
             }
         }
     }
@@ -1753,21 +1753,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     outcome.session_id.clone(),
                     Some(outcome.clone()),
                 );
-                match claudine::harness::resolve_handler(
+                if let Ok(Some(_action)) = claudine::harness::resolve_handler(
                     &ctx,
                     &plan.handlers,
                     plan.programmatic_handler.as_ref(),
                 ) {
-                    Ok(Some(_action)) => {
-                        // For the inline path, retry requires re-running the entire
-                        // inline composition flow which is not loopable in this context.
-                        // Log the handler message but still fail.
-                        log::warn(
-                            "handler resolved for inline (--frontmatter-prompt) failure, \
-                                       but retry is not supported for inline composition",
-                        );
-                    }
-                    Ok(None) | Err(_) => {}
+                    // For the inline path, retry requires re-running the entire
+                    // inline composition flow which is not loopable in this context.
+                    // Log the handler message but still fail.
+                    log::warn(
+                        "handler resolved for inline (--frontmatter-prompt) failure, \
+                                   but retry is not supported for inline composition",
+                    );
                 }
                 return Err(eyre!("{message}"));
             }
@@ -1851,16 +1848,16 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
         'harness: loop {
             // On retry (attempt > 1), re-run pre-checks and re-capture snapshot
-            if harness_attempt > 1 {
-                if let Some((ref plan, ref mut snapshot)) = harness_state {
-                    if let Err(e) =
-                        claudine::harness::evaluate_pre_checks(plan, Some(&permission_probe), &term)
-                    {
-                        return Err(eyre!("{e}"));
-                    }
-                    *snapshot = claudine::harness::capture_pre_run_snapshot(plan)
-                        .map_err(|e| eyre!("harness snapshot: {e}"))?;
+            if harness_attempt > 1
+                && let Some((ref plan, ref mut snapshot)) = harness_state
+            {
+                if let Err(e) =
+                    claudine::harness::evaluate_pre_checks(plan, Some(&permission_probe), &term)
+                {
+                    return Err(eyre!("{e}"));
                 }
+                *snapshot = claudine::harness::capture_pre_run_snapshot(plan)
+                    .map_err(|e| eyre!("harness snapshot: {e}"))?;
             }
 
             // Execute the provider
@@ -2294,6 +2291,7 @@ fn materialize_harness_prompt(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_harness_launch(
     provider: Provider,
     profile: &dyn WrapperProfile,
@@ -2491,6 +2489,7 @@ fn execute_harness_attempt(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finalize_inline_harness_attempt(
     provider: Provider,
     source_path: &Path,
@@ -3277,12 +3276,12 @@ fn emit_stream_summary(
         if let Some(markup) = primary_markup {
             let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
-            eprint!("{rendered}\n");
+            eprintln!("{rendered}");
         }
         if let Some(markup) = secondary_markup {
             let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);
-            eprint!("  {rendered}\n");
+            eprintln!("  {rendered}");
         }
     }
 
@@ -3309,19 +3308,20 @@ fn emit_stream_summary_no_separator(
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
 
-    if verbosity != Verbosity::Silent {
-        if let Some(markup) = format_summary_prose(summary) {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("{rendered}");
-        }
+    if verbosity != Verbosity::Silent
+        && let Some(markup) = format_summary_prose(summary)
+    {
+        let term = crate::log::terminal();
+        let rendered = Prose::new(markup).render(&term);
+        eprintln!("{rendered}");
     }
-    if verbosity != Verbosity::Silent && verbose {
-        if let Some(markup) = format_verbose_summary_details_prose(summary, details) {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("  {rendered}");
-        }
+    if verbosity != Verbosity::Silent
+        && verbose
+        && let Some(markup) = format_verbose_summary_details_prose(summary, details)
+    {
+        let term = crate::log::terminal();
+        let rendered = Prose::new(markup).render(&term);
+        eprintln!("  {rendered}");
     }
 
     // Write synthetic summary event to JSONL (best-effort)

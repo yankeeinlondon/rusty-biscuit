@@ -243,16 +243,16 @@ fn execute_programmatic_handler(
         })?;
 
     // Reject deviate from programmatic handlers
-    if let Some(action_type) = value.get("action").and_then(|v| v.as_str()) {
-        if action_type == "deviate" {
-            return Err(HarnessError::HandlerFailed {
-                action: "handle".to_string(),
-                detail: "programmatic handlers cannot return 'deviate' — \
-                         deviate commands must be declared in frontmatter so they \
-                         can be pre-screened at parse time"
-                    .to_string(),
-            });
-        }
+    if let Some(action_type) = value.get("action").and_then(|v| v.as_str())
+        && action_type == "deviate"
+    {
+        return Err(HarnessError::HandlerFailed {
+            action: "handle".to_string(),
+            detail: "programmatic handlers cannot return 'deviate' — \
+                     deviate commands must be declared in frontmatter so they \
+                     can be pre-screened at parse time"
+                .to_string(),
+        });
     }
 
     parse_programmatic_response(&value)
