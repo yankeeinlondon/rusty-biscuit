@@ -13,8 +13,8 @@
             "path": "prompts"
         },
         {
-            "name": "Monorepo Scripts",
-            "path": "scripts"
+            "name": ".claudine Config",
+            "path": ".claudine"
         },
         {
             "name": "claudine",

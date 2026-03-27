@@ -16,8 +16,10 @@
 
 - Using `git commit -- path/to/file` does NOT limit the commit to only those paths if other files are also staged. Git will commit ALL staged files. To commit only specific files, ensure ONLY those files are staged (not using `git add` broadly) or use `git commit -m "message" -- path1 path2` with explicit paths when you are certain only those files are staged
 
-- When files are renamed and staged as renames (e.g., `old.md -> new.md`), specifying explicit paths to `git commit -m "..." -- new.md` may not include all intended files if the rename detection in the index is incomplete. If a planned commit appears to omit files, check whether those files are rename targets that need to be committed separately or verify the full rename is reflected in `git diff --staged --name-status`
+- When files are renamed and staged as renames (e.g., `old.md -> new.md`), specifying explicit paths to `git commit -m "..." -- new.md` only commits the "new" side; the "deleted" side remains staged even when rename detection is complete (R100). Always verify both sides of a rename are committed with `git diff --staged --name-status`
 
 - When committing files in directories with spaces in their names (e.g., `darkmatter/features/2026-03-24. reference-validation/`), paths must be properly quoted when passed to `git commit -m "..." -- "path with spaces/file.md"`. Failure to quote results in git treating each space-separated token as a separate path argument.
 
 - Do not second guess the files which were staged; the user intentionally chose which files they were interested in committing.
+
+- When the user lists files as "(created)" in the prompt, those files are untracked (not staged) and must be added with `git add` before they can be committed. Check `git status` to verify the actual state when subagents report files as untracked rather than staged.
