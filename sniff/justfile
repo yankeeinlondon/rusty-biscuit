@@ -122,11 +122,11 @@ build *args="":
 
 # test library and CLI
 test *args="":
-    @echo "Testing {{BOLD}}Library{{RESET}} code"
+    @echo -e "Testing {{BOLD}}Library{{RESET}} code"
     @echo ""
     @cargo test -p sniff -- {{args}}
     @echo ""
-    @echo "Testing {{BOLD}}CLI{{RESET}} code"
+    @echo -e "Testing {{BOLD}}CLI{{RESET}} code"
     @echo ""
     @cargo test -p sniff-cli -- {{args}}
 
@@ -150,14 +150,14 @@ install *args="":
 
 # build and show the docs for the library code
 docs:
-    @echo "Building and then showing latest docs for the library code"
+    @echo -e "Building and then showing latest docs for the library code"
     @echo ""
     @cargo doc -p {{LIB}} --open
     @just _speak "Documentation for the {{PACKAGE}} library has been built"
 
 # build and show the docs for the Sniff CLI
 docs_cli:
-    @echo "Building and then showing latest docs for the Sniff CLI"
+    @echo -e "Building and then showing latest docs for the Sniff CLI"
     @echo ""
     @cargo doc -p {{CLI}} --open
 
@@ -199,7 +199,7 @@ commit:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}sniff{{RESET}} via Rust drift script"
+    @echo -e "Running drift workflow for {{BOLD}}sniff{{RESET}} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
