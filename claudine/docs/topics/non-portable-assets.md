@@ -1,4 +1,4 @@
-# Non Portable Properties
+# Non-Portable Assets
 
 While **skills** were such a hit with the public that all of the properties found in a skill are _largely_ 100% portable between Agentic CLIs. The same statement can not be made for **slash commands** and **agent/subagent definitions**.
 
@@ -65,16 +65,77 @@ Any skill, command, or agent definition that contains **any** of these three fro
 
 The check is implemented centrally in `linking/compatibility.rs` as `NON_PORTABLE_PROPERTIES` and applied by all three fix paths (agents, commands, skills) before any symlink creation occurs. Resources that fail this check are counted in the `not_shareable` field of the fix summary.
 
-## Format Incompatibility
+## Format Incompatibilities
 
-Beyond frontmatter properties, some providers use a fundamentally different file format for their resources. These never reach the property-level check because they are filtered out earlier:
+Beyond frontmatter properties, some providers use a fundamentally different file format for their resources. A Markdown file cannot be symlinked into a directory that expects TOML or YAML, regardless of what properties it contains. These show up as `FormatIncompatible` exceptions and are filtered out before the property-level portability check is reached.
 
-- **Gemini** uses TOML for commands rather than Markdown.
-- **Goose** uses YAML for agent "recipes" and MCP for commands.
-- **KimiCode** uses YAML for agent definitions.
-- **RooCode** uses YAML for mode definitions (their agent equivalent).
+### Serialization Format vs Schema
 
-A Markdown file cannot be symlinked into these directories regardless of what properties it contains. These show up as `FormatIncompatible` exceptions.
+The format difference is not just about serialization (YAML vs Markdown frontmatter). The YAML-based providers each define **structurally different schemas** with different required properties, different property names, and different value types. The YAML that these providers expect is not the same data as Markdown frontmatter written in YAML syntax -- it is a different schema entirely.
+
+### Gemini — TOML Commands
+
+Gemini CLI stores commands as `.toml` files rather than Markdown. The required properties are `name` and `description`, matching the Markdown convention in name only. The `prompt` field in TOML serves the role that the Markdown body plays in Claude Code commands.
+
+### Goose — YAML "Recipes"
+
+Goose stores agent definitions as YAML files called "recipes" in `.goose/recipes/` (repo) or `.config/goose/recipes/` (user).
+
+| Goose Property | Required | Claude Equivalent | Notes |
+|---|---|---|---|
+| `title` | Yes | `name` | Different property name |
+| `description` | Yes | `description` | Same name, same purpose |
+| `instructions` | No | body content | Free-form guidance text |
+| `prompt` | No | body content | Alternative to `instructions` |
+| `extensions` | No | `tools` | Goose's term for tool/plugin references |
+| `parameters` | No | _(none)_ | No Claude equivalent |
+| `sub_recipes` | No | _(none)_ | Nested recipe composition; no Claude equivalent |
+
+A Claude agent definition with `description: "Code reviewer"` in Markdown frontmatter cannot become a Goose recipe by simply re-serializing as YAML -- the recipe requires `title` (not `name`), and Goose ignores `description` if `title` is absent.
+
+### KimiCode — YAML Agents
+
+KimiCode stores agent definitions as YAML files in `.kimi/agents/`.
+
+| KimiCode Property | Required | Claude Equivalent | Notes |
+|---|---|---|---|
+| `name` | Yes | `name` | Same name |
+| `system_prompt_path` | **Yes** | _(none)_ | File path to an external prompt document; no Claude equivalent |
+| `tools` | **Yes** | `tools` | Same property name but **structured YAML mapping**, not a comma-separated string |
+| `extend` | No | _(none)_ | Inheritance mechanism; no Claude equivalent |
+| `system_prompt_args` | No | _(none)_ | Template variables for the system prompt |
+| `exclude_tools` | No | `disallowedTools` | Similar concept, different name |
+| `subagents` | No | _(none)_ | No Claude equivalent |
+
+KimiCode agents are fundamentally incompatible because two of the three required properties (`system_prompt_path` and `tools` as a structured type) have no Claude equivalent and cannot be derived from any information in a Claude agent definition.
+
+### RooCode — YAML Mode Definitions
+
+RooCode stores agent-equivalent "mode" definitions as YAML in `.roomodes/` (repo) or `.roo/custom_modes.yaml` (user).
+
+| RooCode Property | Required | Claude Equivalent | Notes |
+|---|---|---|---|
+| `slug` | **Yes** | _(none)_ | URL-safe identifier; no Claude equivalent |
+| `name` | **Yes** | `name` | Same name |
+| `roleDefinition` | **Yes** | _(none)_ | Persona definition; semantically distinct from `description` |
+| `groups` | **Yes** | _(none)_ | Permission groups (`read`, `edit`, `command`, etc.); no Claude equivalent |
+| `description` | No | `description` | Same name but optional in Roo, not the primary identifier |
+| `whenToUse` | No | _(none)_ | Trigger conditions; no Claude equivalent |
+| `customInstructions` | No | body content | Closest equivalent to Markdown body |
+
+All four required properties present a portability problem: `slug` and `groups` have no Claude equivalent, and `roleDefinition` is semantically different from `description` (it defines a persona, not a usage hint). Automated conversion is not feasible.
+
+### Why Automated Format Conversion Is Not Viable
+
+The `link` command's derived artifact workflow attempts to bridge the format gap by converting Markdown frontmatter to TOML or YAML. However, this conversion is purely a _serialization_ change -- it copies Claude's frontmatter keys into the target format and maps the body to a `prompt` field. It does not:
+
+- Translate property names (`name` → `title` for Goose)
+- Generate required properties that have no source (`system_prompt_path` for Kimi, `slug`/`groups`/`roleDefinition` for Roo)
+- Convert value formats (`tools: Bash, Read` as a string → structured YAML mapping for Kimi)
+
+The resulting files would fail schema validation for every YAML-based provider. This means the derived artifact workflow produces non-functional output for agent definitions, and the `FormatIncompatible` exception raised by `skills --apply`, `agents --apply`, and `commands --apply` is the correct behavior.
+
+For **Gemini TOML commands**, the conversion is closer to viable because Gemini's command schema is structurally similar to Claude's (both use `name`, `description`, and a `prompt` field). However, even here, the conversion is limited to resources that do not contain non-portable properties.
 
 ## Required Property Gaps
 
