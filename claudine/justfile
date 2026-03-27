@@ -136,7 +136,27 @@ _claude_file PROMPT_FILE:
     echo -e "\n\033[2m✓ claude finished\033[0m" >&2
 
 
-
+compose-refactor:
+    @claudine claude "ultrathink. implement phase 1-3 of the plan in @claudine/features/2026-03-27-compose-refactor/plan.md"
+    @just _speak "Phase 1, 2, and 3 have been implemented"
+    @echo -e "Phase 1-3 have completed"
+    @git add .
+    @just commit
+    @just _speak "Changes committed"
+    @claudine claude "ultrathink. implement phase 4-6 of the plan in @claudine/features/2026-03-27-compose-refactor/plan.md"
+    @just _speak "Phase 4 through 6 have been implemented"
+    @messenger send "Phase 4 through 6 have been implemented of Claudine's compose functionality. Two more phases left."
+    @git add .
+    @just commit
+    @just _speak "Changes committed"
+    @claudine claude "ultrathink. implement phase 7 and 8 to finish the plan in @claudine/features/2026-03-27-compose-refactor/plan.md"
+    @just _speak "Implementation of Claudine refactor is complete"
+    @messenger send "Implementation of Claudine refactor is complete"
+    @echo "Implementation of Claudine refactor is complete"
+    @git add .
+    @just commit
+    @just _speak "Changes committed"
+    @claudine gemini "We have just refactored Claudine's compose functionality. The specification can be found at @claudine/features/2026-03-27-compose-refactor/spec.md and the technical design at @claudine/features/2026-03-27-compose-refactor/tech-design.md. Your task is to perform a review of the implementation. Look for gaps in functionality that were designed but not implemented, features who's implementation is broken or incomplete, functionality which is light on test coverage (we expect strong unit and integration testing for everything), are there any changes which would make the code more ergonomic, more performant, or both? Write your recommendations to @claudine/features/2026-03-27-compose-refactor/review.md"
 
 # Build the library and CLI
 build *args="":
