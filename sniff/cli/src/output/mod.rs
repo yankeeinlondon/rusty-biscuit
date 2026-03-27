@@ -211,7 +211,7 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
 ///
 /// When multiple flags are combined, results are intersected (AND logic).
 /// When no flags are set, all documents are returned.
-fn filter_docs(
+pub fn filter_docs(
     docs: &[sniff::filesystem::docs::MarkdownMeta],
     filter: &DocsFilter,
 ) -> Vec<sniff::filesystem::docs::MarkdownMeta> {
@@ -266,6 +266,15 @@ pub fn emit_text(text: &str, plain: bool) {
         print!("{}", biscuit_terminal::prelude::strip_escape_codes(text));
     } else {
         print!("{text}");
+    }
+}
+
+/// Emit rendered text to stderr, optionally stripping ANSI escape codes.
+pub fn emit_stderr(text: &str, plain: bool) {
+    if plain {
+        eprint!("{}", biscuit_terminal::prelude::strip_escape_codes(text));
+    } else {
+        eprint!("{text}");
     }
 }
 
@@ -542,11 +551,15 @@ pub fn render_text(
             }
         }
         OutputFilter::Docs => {
+            // Docs is handled as an early return in commands.rs with split-stream output.
+            // This branch is kept for the All filter case.
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref docs) = filesystem.docs
             {
                 let filtered = filter_docs(docs, docs_filter);
-                out.push_str(&render_docs_section(&filtered, verbose));
+                let text_output = filesystem::render_docs_output(&filtered, verbose);
+                out.push_str(&text_output.stderr);
+                out.push_str(&text_output.stdout);
             }
         }
         OutputFilter::Programs

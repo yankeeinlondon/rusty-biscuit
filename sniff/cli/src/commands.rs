@@ -1,5 +1,9 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
+use sniff::filesystem::blast_radius::{
+    ChangedPathKind, ChangedPathQuery, ChangeScope, collect_changed_paths,
+    find_blast_radius_documents,
+};
 use sniff::package::{enrich_dependency, is_major_update, is_owner_repo_shorthand};
 use sniff::programs::ProgramsInfo;
 use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
@@ -7,9 +11,10 @@ use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 
 use crate::args::{
-    COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter, FilesFilter, ServiceStateArg,
+    BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
+    FileListArgs, FilesFilter, ServiceStateArg,
 };
-use crate::output::{self, OutputFilter};
+use crate::output::{self, OutputFilter, PathListFormat};
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle dynamic shell completions (invoked by shell completion scripts)
@@ -98,10 +103,106 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
 
+        // Handle docs mode separately for split-stream output
+        if let Commands::Docs { .. } = cmd {
+            let base = cli
+                .base
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+            let docs_filter = cmd.docs_filter();
+
+            // Discover repo root for detect_docs
+            let repo = git2::Repository::discover(&base)
+                .map_err(|e| format!("Not a git repository: {}", e))?;
+            let repo_root = repo
+                .workdir()
+                .ok_or("Bare repository not supported")?
+                .to_path_buf();
+
+            let all_docs = sniff::filesystem::detect_docs(&repo_root).unwrap_or_default();
+            let filtered = output::filter_docs(&all_docs, &docs_filter);
+
+            if cli.json {
+                let json_val = serde_json::to_value(&filtered).unwrap_or(serde_json::json!([]));
+                println!("{}", serde_json::to_string_pretty(&json_val)?);
+            } else {
+                let text_output = output::render_docs_output(&filtered, cli.verbose);
+                output::emit_stderr(&text_output.stderr, cli.plain);
+                output::emit_text(&text_output.stdout, cli.plain);
+            }
+            return Ok(());
+        }
+
         // Handle blast-radius mode separately (doesn't use SniffResult)
-        if let Commands::BlastRadius { .. } = cmd {
-            // Handled in Phase 4 (wiring) — placeholder for now
-            eprintln!("Not yet implemented");
+        if let Commands::BlastRadius {
+            scope,
+            package,
+            package_area,
+            list,
+            csv,
+            no_path,
+            no_error,
+            on_error,
+        } = cmd
+        {
+            let base = cli
+                .base
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+
+            let change_scope = match scope {
+                BlastRadiusScopeArg::Dirty => ChangeScope::Dirty,
+                BlastRadiusScopeArg::Staged => ChangeScope::Staged,
+                BlastRadiusScopeArg::LastCommit => ChangeScope::LastCommit,
+            };
+
+            let matched_docs = find_blast_radius_documents(
+                &base,
+                change_scope,
+                package.as_deref(),
+                package_area.as_deref(),
+            )?;
+
+            if matched_docs.is_empty() {
+                return handle_no_results(*no_error, on_error, cli.plain);
+            }
+
+            if cli.json {
+                let json_val = serde_json::json!({
+                    "scope": change_scope,
+                    "documents": matched_docs.iter().map(|d| serde_json::json!({
+                        "relative": d.relative,
+                        "title": d.title,
+                        "blast_radius": d.blast_radius,
+                    })).collect::<Vec<_>>(),
+                });
+                println!("{}", serde_json::to_string_pretty(&json_val)?);
+            } else {
+                // Extract document paths and render
+                let repo = git2::Repository::discover(&base)
+                    .map_err(|e| format!("Not a git repository: {}", e))?;
+                let repo_root = repo
+                    .workdir()
+                    .ok_or("Bare repository not supported")?
+                    .to_path_buf();
+
+                let doc_paths: Vec<std::path::PathBuf> = matched_docs
+                    .iter()
+                    .map(|d| std::path::PathBuf::from(&d.relative))
+                    .collect();
+
+                let format = if *list {
+                    PathListFormat::BulletList
+                } else if *csv {
+                    PathListFormat::Csv
+                } else {
+                    PathListFormat::Lines
+                };
+
+                let rendered = output::render_path_list(&repo_root, &doc_paths, format, *no_path);
+                output::emit_text(&rendered, cli.plain);
+            }
+
             return Ok(());
         }
 
@@ -241,13 +342,28 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::DirtySourceCode(_)
-            | crate::args::RepoAction::StagedSourceCode(_)
-            | crate::args::RepoAction::UnstagedSourceCode(_)
-            | crate::args::RepoAction::DirtyFiles(_) => {
-                // Handled in Phase 4 (wiring) — placeholder for now
-                eprintln!("Not yet implemented");
-                return Ok(());
+            crate::args::RepoAction::DirtySourceCode(args)
+            | crate::args::RepoAction::StagedSourceCode(args)
+            | crate::args::RepoAction::UnstagedSourceCode(args)
+            | crate::args::RepoAction::DirtyFiles(args) => {
+                let (scope, kind) = match action {
+                    crate::args::RepoAction::DirtySourceCode(_) => {
+                        (ChangeScope::Dirty, ChangedPathKind::SourceCode)
+                    }
+                    crate::args::RepoAction::StagedSourceCode(_) => {
+                        (ChangeScope::Staged, ChangedPathKind::SourceCode)
+                    }
+                    crate::args::RepoAction::UnstagedSourceCode(_) => {
+                        (ChangeScope::Unstaged, ChangedPathKind::SourceCode)
+                    }
+                    crate::args::RepoAction::DirtyFiles(_) => {
+                        (ChangeScope::Dirty, ChangedPathKind::AllFiles)
+                    }
+                    _ => unreachable!(),
+                };
+                return handle_file_list_command(
+                    args, scope, kind, cli.json, cli.plain, base_dir.as_deref(),
+                );
             }
             _ => {
                 // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
@@ -754,6 +870,95 @@ fn resolve_package_path(
         areas.join(", ")
     )
     .into())
+}
+
+/// Resolve `FileListArgs` flags into a `PathListFormat`.
+fn path_list_format(args: &FileListArgs) -> PathListFormat {
+    if args.list {
+        PathListFormat::BulletList
+    } else if args.csv {
+        PathListFormat::Csv
+    } else {
+        PathListFormat::Lines
+    }
+}
+
+/// Handle the no-results exit behavior for file-list and blast-radius commands.
+///
+/// - Default: exit 1 with no output.
+/// - `--no-error`: exit 0 with no output.
+/// - `--on-error <msg>`: render message to stderr.
+/// - `--on-error` + `--no-error`: render message to stdout, exit 0.
+fn handle_no_results(
+    no_error: bool,
+    on_error: &Option<String>,
+    plain: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::terminal::Terminal;
+
+    if let Some(msg) = on_error {
+        let terminal = Terminal::default();
+        let rendered = Prose::new(msg).render(&terminal);
+        let text = if plain {
+            biscuit_terminal::prelude::strip_escape_codes(&rendered)
+        } else {
+            rendered
+        };
+        if no_error {
+            print!("{text}");
+        } else {
+            eprint!("{text}");
+        }
+    }
+
+    if no_error {
+        std::process::exit(0);
+    } else {
+        std::process::exit(1);
+    }
+}
+
+/// Handle `sniff repo dirty-source-code`, `staged-source-code`, `unstaged-source-code`,
+/// and `dirty-files` commands.
+fn handle_file_list_command(
+    args: &FileListArgs,
+    scope: ChangeScope,
+    kind: ChangedPathKind,
+    json: bool,
+    plain: bool,
+    base_dir: Option<&std::path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
+    let query = ChangedPathQuery {
+        scope,
+        kind,
+        package: args.package.clone(),
+        package_area: args.package_area.clone(),
+        filters: args.filter.clone(),
+    };
+
+    let result = collect_changed_paths(dir, &query)?;
+
+    if result.paths.is_empty() {
+        return handle_no_results(args.no_error, &args.on_error, plain);
+    }
+
+    if json {
+        let json_val = serde_json::json!({
+            "scope": scope,
+            "kind": kind,
+            "paths": result.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&json_val)?);
+    } else {
+        let format = path_list_format(args);
+        let rendered = output::render_path_list(&result.repo_root, &result.paths, format, args.no_path);
+        output::emit_text(&rendered, plain);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
