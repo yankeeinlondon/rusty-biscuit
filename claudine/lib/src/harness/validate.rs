@@ -27,7 +27,7 @@ pub fn evaluate_pre_checks(
     plan: &HarnessPlan,
     term: &Terminal,
 ) -> Result<(), HarnessError> {
-    let failures = run_checks(&plan.pre_checks, None, None, term);
+    let failures = run_checks(&plan.pre_checks, None, None, None, term);
     if failures.is_empty() {
         Ok(())
     } else {
@@ -92,13 +92,21 @@ pub fn capture_pre_run_snapshot(
 /// Evaluate all post-checks in declaration order.
 ///
 /// Uses pre-state from `snapshot` and post-state from disk/outcome.
+/// The `source_path` is used to re-read the current on-disk frontmatter
+/// for frontmatter comparison checks.
 pub fn evaluate_post_checks(
     plan: &HarnessPlan,
     snapshot: &PreRunSnapshot,
     outcome: &AttemptOutcome,
     term: &Terminal,
 ) -> Result<(), HarnessError> {
-    let failures = run_checks(&plan.post_checks, Some(snapshot), Some(outcome), term);
+    let failures = run_checks(
+        &plan.post_checks,
+        Some(snapshot),
+        Some(outcome),
+        Some(&plan.source_path),
+        term,
+    );
     if failures.is_empty() {
         Ok(())
     } else {
@@ -111,12 +119,22 @@ fn run_checks(
     rules: &[ValidationRule],
     snapshot: Option<&PreRunSnapshot>,
     outcome: Option<&AttemptOutcome>,
+    source_path: Option<&Path>,
     term: &Terminal,
 ) -> Vec<ValidationFailure> {
     let mut failures = Vec::new();
 
+    // For post-checks involving frontmatter, parse the current on-disk
+    // markdown once and share it across all frontmatter checks.
+    let post_run_markdown = source_path.and_then(|p| {
+        fs::read_to_string(p).ok().map(|text| {
+            let md: darkmatter::markdown::Markdown = text.into();
+            md
+        })
+    });
+
     for rule in rules {
-        let result = evaluate_single(rule, snapshot, outcome);
+        let result = evaluate_single(rule, snapshot, outcome, post_run_markdown.as_ref());
         let (passed, rendered) = render_check_result(rule, &result, term);
         // Print the check line
         eprintln!("{rendered}");
@@ -142,6 +160,7 @@ fn evaluate_single(
     rule: &ValidationRule,
     snapshot: Option<&PreRunSnapshot>,
     outcome: Option<&AttemptOutcome>,
+    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
 ) -> CheckResult {
     match &rule.kind {
         // --- Filesystem checks ---
@@ -193,18 +212,18 @@ fn evaluate_single(
 
         // --- Post-only: frontmatter comparison ---
         ValidationKind::FrontmatterPropChanged { prop } => {
-            check_frontmatter_prop_changed(prop, snapshot, true)
+            check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, true)
         }
         ValidationKind::FrontmatterPropUnchanged { prop } => {
-            check_frontmatter_prop_changed(prop, snapshot, false)
+            check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, false)
         }
         ValidationKind::FrontmatterPropEquals { expected } => {
-            check_frontmatter_prop_equals(expected, snapshot)
+            check_frontmatter_prop_equals(expected, post_run_markdown)
         }
 
         // --- Post-only: response checks ---
         ValidationKind::ResponseLengthAtLeast { length } => {
-            let resp = outcome.map(|o| &o.final_response).map(|s| s.len()).unwrap_or(0);
+            let resp = outcome.map(|o| o.final_response.chars().count()).unwrap_or(0);
             if resp >= *length {
                 Ok(())
             } else {
@@ -214,7 +233,7 @@ fn evaluate_single(
             }
         }
         ValidationKind::ResponseLengthAtMost { length } => {
-            let resp = outcome.map(|o| &o.final_response).map(|s| s.len()).unwrap_or(0);
+            let resp = outcome.map(|o| o.final_response.chars().count()).unwrap_or(0);
             if resp <= *length {
                 Ok(())
             } else {
@@ -491,23 +510,18 @@ fn check_file_changed(
 fn check_frontmatter_prop_changed(
     prop: &str,
     snapshot: Option<&PreRunSnapshot>,
+    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
     expect_changed: bool,
 ) -> CheckResult {
     let snapshot = snapshot.ok_or("internal error: no pre-run snapshot for frontmatter comparison")?;
     let pre_value = snapshot.tracked_frontmatter.get(prop);
 
-    // Re-read the source document to get current frontmatter post-state.
-    // We use the source_markdown to locate the file — the Markdown itself
-    // was captured at snapshot time, so we re-read from disk.
-    let source_md = snapshot.source_markdown.as_ref().ok_or(
-        "internal error: source markdown not captured in snapshot",
+    // Read the current on-disk post-state from the post-run markdown.
+    let post_md = post_run_markdown.ok_or(
+        "internal error: post-run markdown not available for frontmatter comparison",
     )?;
 
-    // Get the current post-state value from the (possibly mutated) source_md
-    // In the full integration, this will re-read from disk. For now, compare
-    // against the same markdown object (the caller is responsible for
-    // providing a post-state snapshot or the disk-read happens in the loop).
-    let post_value = source_md
+    let post_value = post_md
         .fm_get::<serde_json::Value>(prop)
         .ok()
         .flatten();
@@ -530,16 +544,15 @@ fn check_frontmatter_prop_changed(
 
 fn check_frontmatter_prop_equals(
     expected: &indexmap::IndexMap<String, serde_json::Value>,
-    snapshot: Option<&PreRunSnapshot>,
+    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
 ) -> CheckResult {
-    let snapshot = snapshot.ok_or("internal error: no pre-run snapshot for frontmatter equals")?;
-    let source_md = snapshot.source_markdown.as_ref().ok_or(
-        "internal error: source markdown not captured in snapshot",
+    let post_md = post_run_markdown.ok_or(
+        "internal error: post-run markdown not available for frontmatter equals check",
     )?;
 
     let mut mismatches = Vec::new();
     for (key, expected_val) in expected {
-        let actual = source_md.fm_get::<serde_json::Value>(key).ok().flatten();
+        let actual = post_md.fm_get::<serde_json::Value>(key).ok().flatten();
         match actual {
             Some(ref actual_val) if actual_val == expected_val => {}
             Some(actual_val) => {
@@ -706,6 +719,7 @@ mod tests {
             &make_rule(0, ValidationEvent::FileExists, ValidationKind::FileExists { file }),
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -720,6 +734,7 @@ mod tests {
                     file: std::path::PathBuf::from("/nonexistent/file.txt"),
                 },
             ),
+            None,
             None,
             None,
         );
@@ -737,6 +752,7 @@ mod tests {
                     dir: dir.path().to_path_buf(),
                 },
             ),
+            None,
             None,
             None,
         );
@@ -760,6 +776,7 @@ mod tests {
             ),
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -776,6 +793,7 @@ mod tests {
                 ValidationEvent::JsonFileExists,
                 ValidationKind::JsonFileExists { file, shape: None },
             ),
+            None,
             None,
             None,
         );
@@ -799,6 +817,7 @@ mod tests {
             ),
             None,
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -815,6 +834,7 @@ mod tests {
                 ValidationEvent::TomlFileExists,
                 ValidationKind::TomlFileExists { file },
             ),
+            None,
             None,
             None,
         );
@@ -844,6 +864,7 @@ mod tests {
             ),
             Some(&snapshot),
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -867,6 +888,7 @@ mod tests {
             ),
             Some(&snapshot),
             None,
+            None,
         );
         assert!(result.is_err());
     }
@@ -889,6 +911,7 @@ mod tests {
             ),
             Some(&snapshot),
             None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -906,6 +929,7 @@ mod tests {
             ),
             None,
             Some(&outcome),
+            None,
         );
         assert!(result.is_ok());
     }
@@ -921,6 +945,7 @@ mod tests {
             ),
             None,
             Some(&outcome),
+            None,
         );
         assert!(result.is_err());
     }
@@ -938,6 +963,7 @@ mod tests {
             ),
             None,
             Some(&outcome),
+            None,
         );
         assert!(result.is_ok());
     }
@@ -955,6 +981,7 @@ mod tests {
             ),
             None,
             Some(&outcome),
+            None,
         );
         assert!(result.is_err());
     }
@@ -988,7 +1015,7 @@ mod tests {
         ];
 
         let term = Terminal::default();
-        let failures = run_checks(&rules, None, None, &term);
+        let failures = run_checks(&rules, None, None, None, &term);
         assert_eq!(failures.len(), 3, "all failures should be collected");
     }
 

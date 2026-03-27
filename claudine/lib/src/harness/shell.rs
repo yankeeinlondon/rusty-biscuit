@@ -177,11 +177,14 @@ pub fn validate_and_approve_command(
 
 /// Execute an approved command and return its exit code and stdout/stderr.
 ///
-/// Uses timeout protection. Returns `(exit_code, stdout, stderr)`.
+/// Enforces the given timeout: if the command does not complete within the
+/// duration, it is killed with SIGKILL and an error is returned.
+///
+/// Returns `(exit_code, stdout, stderr)`.
 pub fn execute_approved_command(
     command: &ApprovedRuntimeCommand,
     working_dir: Option<&std::path::Path>,
-    _timeout: std::time::Duration,
+    timeout: std::time::Duration,
 ) -> Result<(i32, String, String), HarnessError> {
     let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
         action: "shell_command".to_string(),
@@ -196,23 +199,58 @@ pub fn execute_approved_command(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    let child = cmd.spawn().map_err(|e| HarnessError::HandlerFailed {
+    let mut child = cmd.spawn().map_err(|e| HarnessError::HandlerFailed {
         action: "shell_command".to_string(),
         detail: format!("failed to spawn '{}': {e}", command.executable),
     })?;
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| HarnessError::HandlerFailed {
-            action: "shell_command".to_string(),
-            detail: format!("failed to wait for '{}': {e}", command.executable),
-        })?;
+    // Poll for completion with timeout enforcement
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_millis(50);
 
-    let exit_code = output.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    Ok((exit_code, stdout, stderr))
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process finished — collect output
+                let mut stdout_buf = Vec::new();
+                let mut stderr_buf = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    use std::io::Read;
+                    let _ = out.read_to_end(&mut stdout_buf);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = err.read_to_end(&mut stderr_buf);
+                }
+                let exit_code = status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+                let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+                return Ok((exit_code, stdout, stderr));
+            }
+            Ok(None) => {
+                // Still running — check timeout
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(HarnessError::HandlerFailed {
+                        action: "shell_command".to_string(),
+                        detail: format!(
+                            "command '{}' timed out after {}s",
+                            command.raw,
+                            timeout.as_secs()
+                        ),
+                    });
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => {
+                return Err(HarnessError::HandlerFailed {
+                    action: "shell_command".to_string(),
+                    detail: format!("failed to wait for '{}': {e}", command.executable),
+                });
+            }
+        }
+    }
 }
 
 #[cfg(test)]

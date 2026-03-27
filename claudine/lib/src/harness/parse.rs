@@ -433,7 +433,7 @@ fn parse_validation_kind(
 fn parse_handlers(
     obj: &serde_json::Map<String, Value>,
     source_path: &Path,
-    _ctx: &HarnessResolutionContext<'_>,
+    ctx: &HarnessResolutionContext<'_>,
 ) -> Result<(HandlerTable, Option<ApprovedRuntimeCommand>), HarnessError> {
     let mut table = HandlerTable::default();
     let mut programmatic = None;
@@ -447,7 +447,7 @@ fn parse_handlers(
 
         if let Some(event_name) = key.strip_prefix("handle_") {
             let failure_event = parse_failure_event(event_name, source_path)?;
-            parse_handler_entry(value, failure_event, source_path, &mut table)?;
+            parse_handler_entry(value, failure_event, source_path, ctx, &mut table)?;
         }
     }
 
@@ -548,6 +548,7 @@ fn parse_handler_entry(
     value: &Value,
     event: FailureEvent,
     source_path: &Path,
+    ctx: &HarnessResolutionContext<'_>,
     table: &mut HandlerTable,
 ) -> Result<(), HarnessError> {
     let obj = value.as_object().ok_or_else(|| HarnessError::InvalidFrontmatter {
@@ -585,15 +586,52 @@ fn parse_handler_entry(
                 source_path,
                 &format!("handle_{event}.{subject_key}"),
             )?;
+            // Normalize subject key through the same path resolver used for
+            // validation subjects so that handler matching works correctly
+            // regardless of whether the author used @-prefixed, relative, or
+            // absolute paths.
+            let canonical_key = normalize_handler_subject_key(subject_key, &event, ctx);
             table.exact.push(HandlerRule {
                 event: event.clone(),
-                subject_key: Some(subject_key.clone()),
+                subject_key: Some(canonical_key),
                 action,
             });
         }
     }
 
     Ok(())
+}
+
+/// Normalize a handler subject key using the same path resolution as
+/// validation subjects. For path-based events, resolve through
+/// `resolve_harness_path`; for non-path events, return as-is.
+fn normalize_handler_subject_key(
+    raw: &str,
+    event: &FailureEvent,
+    ctx: &HarnessResolutionContext<'_>,
+) -> String {
+    let is_path_event = matches!(
+        event,
+        FailureEvent::Validation(
+            ValidationEvent::FileExists
+                | ValidationEvent::DirExists
+                | ValidationEvent::JsonFileExists
+                | ValidationEvent::YamlFileExists
+                | ValidationEvent::TomlFileExists
+                | ValidationEvent::HasWritePermission
+                | ValidationEvent::FileChanged
+                | ValidationEvent::FileUnchanged
+                | ValidationEvent::NoDirtySourceCode
+                | ValidationEvent::HasDirtySourceCode
+        )
+    );
+    if is_path_event {
+        resolve_harness_path(raw, ctx)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| raw.to_string())
+    } else {
+        raw.to_string()
+    }
 }
 
 /// Parse a handler action object into a [`HandlerAction`].
@@ -1009,9 +1047,10 @@ mod tests {
         });
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
         assert_eq!(plan.handlers.exact.len(), 1);
+        // Subject key should be canonicalized (resolved via repo root)
         assert_eq!(
             plan.handlers.exact[0].subject_key.as_deref(),
-            Some("@docs/output.md")
+            Some("/repo/docs/output.md")
         );
     }
 
