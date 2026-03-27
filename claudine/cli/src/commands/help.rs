@@ -153,7 +153,8 @@ pub fn run() -> Result<()> {
 
     // Usage
     output.push_str(
-        &Prose::new("<dim>Usage:</dim> <bold>claudine</bold> [OPTIONS] <COMMAND>").render(&term),
+        &Prose::new("<dim>Usage:</dim> <b>claudine</b> \\<command\\> [<i><dim>options</dim></i>]")
+            .render(&term),
     );
     output.push('\n');
 

@@ -168,7 +168,7 @@ impl StreamThinkingRenderer {
         if !self.active {
             // Emit a dim+italic "Thinking..." header on first thinking chunk
             let header = Self::render_dim_italic("\u{27e1} Thinking...");
-            eprint!("{header}\n");
+            eprintln!("{header}");
             self.active = true;
         }
         self.buffer.push_str(text);
@@ -178,7 +178,7 @@ impl StreamThinkingRenderer {
             let line = self.buffer[..newline_pos].to_string();
             self.buffer.drain(..=newline_pos);
             let rendered = Self::render_dim(&line);
-            eprint!("{rendered}\n");
+            eprintln!("{rendered}");
         }
     }
 
@@ -191,7 +191,7 @@ impl StreamThinkingRenderer {
         if !self.buffer.is_empty() {
             let remaining = std::mem::take(&mut self.buffer);
             let rendered = Self::render_dim(&remaining);
-            eprint!("{rendered}\n");
+            eprintln!("{rendered}");
         }
         // Blank line to separate thinking from assistant text
         eprintln!();
@@ -811,7 +811,7 @@ pub(crate) fn run_child_stream(
 ///
 /// Like `run_child_stream` but captures assistant text instead of printing.
 /// Used by compose flows.
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 pub(crate) fn run_child_stream_capture(
     binary: &Path,
     args: &[String],
