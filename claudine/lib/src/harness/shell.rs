@@ -3,8 +3,9 @@
 //! Thin adapter that reuses Darkmatter's shell expansion infrastructure
 //! for tokenization, blacklist/whitelist checking, and command approval.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
@@ -16,6 +17,13 @@ use darkmatter::markdown::compose::shell_expansion::{
 use crate::harness::error::HarnessError;
 use crate::harness::model::ApprovedRuntimeCommand;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CachedApprovalDecision {
+    Allowed,
+    Denied,
+    Blacklisted,
+}
+
 /// Options for the shell approval flow.
 #[derive(Clone)]
 pub struct ShellApprovalOptions {
@@ -23,6 +31,8 @@ pub struct ShellApprovalOptions {
     pub policy_root: Option<PathBuf>,
     /// Callback for interactive command approval.
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+    /// Session-local cache for repeated approval decisions.
+    pub approval_cache: Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
 }
 
 impl Default for ShellApprovalOptions {
@@ -30,6 +40,7 @@ impl Default for ShellApprovalOptions {
         Self {
             policy_root: None,
             approval_handler: None,
+            approval_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -126,6 +137,34 @@ pub fn validate_and_approve_command_parts(
         });
     }
 
+    if let Some(decision) = options
+        .approval_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&normalized).copied())
+    {
+        match decision {
+            CachedApprovalDecision::Allowed => {
+                return Ok(ApprovedRuntimeCommand {
+                    raw,
+                    executable: executable.to_string(),
+                    args,
+                });
+            }
+            CachedApprovalDecision::Denied => {
+                return Err(HarnessError::ShellCommandDenied {
+                    command: raw.clone(),
+                });
+            }
+            CachedApprovalDecision::Blacklisted => {
+                return Err(HarnessError::ShellCommandBlacklisted {
+                    command: raw.clone(),
+                    reason: "command was previously blacklisted during this session".to_string(),
+                });
+            }
+        }
+    }
+
     // If not whitelisted, invoke approval handler
     if let Some(ref handler) = options.approval_handler {
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
@@ -149,15 +188,34 @@ pub fn validate_and_approve_command_parts(
                             &policy_paths,
                             &normalized,
                         );
+                        cache_approval_decision(
+                            &options.approval_cache,
+                            &normalized,
+                            CachedApprovalDecision::Allowed,
+                        );
                     }
                     ShellApprovalDecision::AllowCommandPersist => {
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
                             &policy_paths,
                             executable,
                         );
+                        cache_approval_decision(
+                            &options.approval_cache,
+                            &normalized,
+                            CachedApprovalDecision::Allowed,
+                        );
                     }
-                    ShellApprovalDecision::AllowOnce => {}
+                    ShellApprovalDecision::AllowOnce => cache_approval_decision(
+                        &options.approval_cache,
+                        &normalized,
+                        CachedApprovalDecision::Allowed,
+                    ),
                     ShellApprovalDecision::Deny => {
+                        cache_approval_decision(
+                            &options.approval_cache,
+                            &normalized,
+                            CachedApprovalDecision::Denied,
+                        );
                         return Err(HarnessError::ShellCommandDenied {
                             command: raw.clone(),
                         });
@@ -166,6 +224,11 @@ pub fn validate_and_approve_command_parts(
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
                             &policy_paths,
                             &normalized,
+                        );
+                        cache_approval_decision(
+                            &options.approval_cache,
+                            &normalized,
+                            CachedApprovalDecision::Blacklisted,
                         );
                         return Err(HarnessError::ShellCommandBlacklisted {
                             command: raw.clone(),
@@ -190,6 +253,16 @@ pub fn validate_and_approve_command_parts(
         executable: executable.to_string(),
         args,
     })
+}
+
+fn cache_approval_decision(
+    cache: &Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
+    normalized: &str,
+    decision: CachedApprovalDecision,
+) {
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(normalized.to_string(), decision);
+    }
 }
 
 /// Execute an approved command and return its exit code and stdout/stderr.
@@ -273,6 +346,31 @@ pub fn execute_approved_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::compose::shell_expansion::{
+        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct CountingApprovalHandler {
+        approvals: AtomicUsize,
+    }
+
+    impl CountingApprovalHandler {
+        fn approvals(&self) -> usize {
+            self.approvals.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ShellApprovalHandler for CountingApprovalHandler {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            self.approvals.fetch_add(1, Ordering::SeqCst);
+            Ok(ShellApprovalDecision::AllowOnce)
+        }
+    }
 
     #[test]
     fn unknown_command_denied_without_approval_handler() {
@@ -281,6 +379,7 @@ mod tests {
         let options = ShellApprovalOptions {
             policy_root: Some(dir.path().to_path_buf()),
             approval_handler: None,
+            ..Default::default()
         };
         let result = validate_and_approve_command("echo hello", &options);
         // Without whitelist or approval handler, this should be denied
@@ -310,6 +409,26 @@ mod tests {
         let options = ShellApprovalOptions::default();
         let result = validate_and_approve_command("echo hello | cat", &options);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn approval_cache_avoids_prompting_for_same_command_twice() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(CountingApprovalHandler {
+            approvals: AtomicUsize::new(0),
+        });
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let first = validate_and_approve_command("echo hello", &options);
+        let second = validate_and_approve_command("echo hello", &options);
+
+        assert!(first.is_ok());
+        assert!(second.is_ok());
+        assert_eq!(handler.approvals(), 1);
     }
 
     #[test]
