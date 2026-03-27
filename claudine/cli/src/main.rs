@@ -33,48 +33,51 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    match cli.command {
-        Some(Commands::Handle(args)) => commands::handle::run(args).await,
-        Some(Commands::Completions(args)) => commands::completions::run(args),
-        Some(Commands::Init(args)) => commands::init::run(args).await,
-        Some(Commands::Sync(args)) => commands::sync::run(args).await,
-        Some(Commands::Hooks(args)) => commands::hooks::run(args, cli.verbose > 0),
-        Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),
-        Some(Commands::Skills(args)) => commands::skills::run(args, cli.verbose > 0).await,
-        Some(Commands::Agents(args)) => commands::agents::run(args, cli.verbose > 0).await,
-        Some(Commands::SlashCommands(args)) => {
+    if cli.help || cli.command.is_none() {
+        return commands::help::run();
+    }
+
+    match cli.command.unwrap() {
+        Commands::Handle(args) => commands::handle::run(args).await,
+        Commands::Completions(args) => commands::completions::run(args),
+        Commands::Init(args) => commands::init::run(args).await,
+        Commands::Sync(args) => commands::sync::run(args).await,
+        Commands::Hooks(args) => commands::hooks::run(args, cli.verbose > 0),
+        Commands::Actions(args) => commands::actions::run(args, cli.verbose > 0),
+        Commands::Skills(args) => commands::skills::run(args, cli.verbose > 0).await,
+        Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
+        Commands::SlashCommands(args) => {
             commands::slash_commands::run(args, cli.verbose > 0).await
         }
-        Some(Commands::Providers) => commands::providers::run(),
-        Some(Commands::Logs(args)) => commands::logs::run(args).await,
-        Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
-        Some(Commands::Mcp(args)) => commands::mcp::run(args),
-        Some(Commands::Claude(args)) => {
+        Commands::Providers => commands::providers::run(),
+        Commands::Logs(args) => commands::logs::run(args).await,
+        Commands::Uninstall(args) => commands::uninstall::run(args),
+        Commands::Mcp(args) => commands::mcp::run(args),
+        Commands::Claude(args) => {
             commands::wrap::run_provider_wrapper(Provider::Claude, args, cli.verbose)
         }
-        Some(Commands::Codex(args)) => {
+        Commands::Codex(args) => {
             commands::wrap::run_provider_wrapper(Provider::Codex, args, cli.verbose)
         }
-        Some(Commands::Gemini(args)) => {
+        Commands::Gemini(args) => {
             commands::wrap::run_provider_wrapper(Provider::Gemini, args, cli.verbose)
         }
-        Some(Commands::Kimi(args)) => {
+        Commands::Kimi(args) => {
             commands::wrap::run_provider_wrapper(Provider::KimiCode, args, cli.verbose)
         }
-        Some(Commands::Qwen(args)) => {
+        Commands::Qwen(args) => {
             commands::wrap::run_provider_wrapper(Provider::QwenCode, args, cli.verbose)
         }
-        Some(Commands::Opencode(args)) => {
+        Commands::Opencode(args) => {
             commands::wrap::run_provider_wrapper(Provider::OpenCode, args, cli.verbose)
         }
-        Some(Commands::Goose(args)) => {
+        Commands::Goose(args) => {
             commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
         }
-        Some(Commands::Compose(args)) => commands::compose::run_compose(args, cli.verbose),
-        Some(Commands::ComposeInline(args)) => {
+        Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
+        Commands::ComposeInline(args) => {
             commands::compose::run_compose_inline(args, cli.verbose)
         }
-        None => commands::help::run(),
     }
 }
 
