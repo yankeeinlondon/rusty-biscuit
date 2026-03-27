@@ -169,3 +169,64 @@ The utility of these processes are:
     - there are, of course, many other use cases too
 - Chained operations are used to compose a reference file and then use it to prompt a non-interactive agent session
     - this provides a way to take a static "template" and inject dynamic content into the content before using it as a prompt to an Agent
+
+## Validations and Handlers
+
+Composed documents can declare **pre-checks**, **post-checks**, **timeouts**, and **handlers** in their frontmatter. When present, Claudine activates a harness that gates provider execution behind validation rules and can recover from failures automatically.
+
+### Pre-checks and Post-checks
+
+Pre-checks run before the provider launches; post-checks run after:
+
+```yaml
+pre_checks:
+  - file_exists: "@docs/plan.md"
+  - dir_exists: "@src/components"
+post_checks:
+  - file_changed: "@docs/plan.md"
+  - response_includes: "## Summary"
+```
+
+Available validations include filesystem checks (`file_exists`, `dir_exists`, `json_file_exists`, `yaml_file_exists`, `toml_file_exists`, `has_write_permission`), git checks (`no_dirty_source_code`, `has_dirty_source_code`), post-only file comparisons (`file_changed`, `file_unchanged`), frontmatter comparisons (`frontmatter_prop_changed`, `frontmatter_prop_unchanged`, `frontmatter_prop_equals`), response checks (`response_length_at_least`, `response_length_at_most`, `response_includes`, `response_missing`), and shell commands (`shell_command`).
+
+### Timeouts
+
+The `timeout` frontmatter property sets a per-page deadline:
+
+```yaml
+timeout: 5m
+```
+
+Accepts `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours` units.
+
+### Handlers
+
+Handlers define recovery actions when failures occur:
+
+```yaml
+handle_timeout:
+  resume:
+    prompt: "Continue from where you stopped."
+
+handle_agent_failure:
+  retry:
+    prompt_suffix: "The previous attempt failed. Please try again."
+    retries: 3
+
+handle_file_exists:
+  "@docs/plan.md":
+    redirect:
+      file: "./fallback.md"
+```
+
+Four handler actions are available:
+- **retry** — re-run the same prompt with optional modifications
+- **resume** — continue from the previous session (provider must support session resume)
+- **redirect** — switch to a different source document
+- **deviate** — execute a shell command, then re-evaluate post-checks
+
+A programmatic `handle` property accepts a shell command that receives failure context on stdin and returns a handler action as JSON on stdout.
+
+### Shell Policy
+
+Shell commands in `shell_command` validations and `deviate`/`handle` declarations share Darkmatter's shell policy files (`.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist`). Commands are tokenized and validated at parse time — before the provider is launched — so users are prompted for approval once rather than mid-execution.
