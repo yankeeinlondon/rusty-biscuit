@@ -93,6 +93,25 @@ sniff git         # Git repository information
 sniff repo        # Repository/monorepo structure
 sniff language    # Programming language results
 sniff files       # Broad file association results
+sniff docs        # Repository markdown documents
+```
+
+**Blast Radius:**
+
+```bash
+sniff blast-radius              # Docs affected by dirty source changes
+sniff blast-radius staged       # Docs affected by staged changes
+sniff blast-radius last-commit  # Docs affected by last commit
+```
+
+**Repository File Listing:**
+
+```bash
+sniff repo dirty-source-code     # Dirty source code files
+sniff repo staged-source-code    # Staged source code files
+sniff repo unstaged-source-code  # Unstaged source code files
+sniff repo dirty-files           # All dirty files
+sniff repo staged-files          # All staged files
 ```
 
 **Programs Subcommands:**
