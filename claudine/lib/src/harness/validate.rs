@@ -14,8 +14,9 @@ use biscuit_terminal::terminal::Terminal;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    AttemptOutcome, FileFingerprint, HarnessPlan, PreRunSnapshot, StructuredShape,
-    ValidationFailure, ValidationKind, ValidationRule,
+    AttemptOutcome, FailurePhase, FileFingerprint, HarnessPermissionProbe, HarnessPlan,
+    PermissionAssessment, PreRunSnapshot, StructuredShape, ValidationFailure, ValidationKind,
+    ValidationRule,
 };
 
 /// Evaluate all pre-checks in declaration order.
@@ -23,8 +24,20 @@ use crate::harness::model::{
 /// Runs every rule and collects all failures (does not short-circuit).
 /// Returns `Ok(())` if all pass, or `HarnessError::PreCheckFailed` with
 /// all failures.
-pub fn evaluate_pre_checks(plan: &HarnessPlan, term: &Terminal) -> Result<(), HarnessError> {
-    let failures = run_checks(&plan.pre_checks, None, None, None, term);
+pub fn evaluate_pre_checks(
+    plan: &HarnessPlan,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
+    term: &Terminal,
+) -> Result<(), HarnessError> {
+    let failures = run_checks(
+        &plan.pre_checks,
+        None,
+        None,
+        &plan.source_path,
+        permission_probe,
+        FailurePhase::PreCheck,
+        term,
+    );
     if failures.is_empty() {
         Ok(())
     } else {
@@ -89,13 +102,16 @@ pub fn evaluate_post_checks(
     plan: &HarnessPlan,
     snapshot: &PreRunSnapshot,
     outcome: &AttemptOutcome,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
     term: &Terminal,
 ) -> Result<(), HarnessError> {
     let failures = run_checks(
         &plan.post_checks,
         Some(snapshot),
         Some(outcome),
-        Some(&plan.source_path),
+        &plan.source_path,
+        permission_probe,
+        FailurePhase::PostCheck,
         term,
     );
     if failures.is_empty() {
@@ -110,22 +126,32 @@ fn run_checks(
     rules: &[ValidationRule],
     snapshot: Option<&PreRunSnapshot>,
     outcome: Option<&AttemptOutcome>,
-    source_path: Option<&Path>,
+    source_path: &Path,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
+    failure_phase: FailurePhase,
     term: &Terminal,
 ) -> Vec<ValidationFailure> {
     let mut failures = Vec::new();
 
     // For post-checks involving frontmatter, parse the current on-disk
     // markdown once and share it across all frontmatter checks.
-    let post_run_markdown = source_path.and_then(|p| {
-        fs::read_to_string(p).ok().map(|text| {
-            let md: darkmatter::markdown::Markdown = text.into();
-            md
-        })
+    let post_run_markdown = outcome.map(|_| match fs::read_to_string(source_path) {
+        Ok(text) => PostRunMarkdownState::Loaded(text.into()),
+        Err(error) => PostRunMarkdownState::ReadFailed {
+            path: source_path.to_path_buf(),
+            error: error.to_string(),
+        },
     });
 
     for rule in rules {
-        let result = evaluate_single(rule, snapshot, outcome, post_run_markdown.as_ref());
+        let result = evaluate_single(
+            rule,
+            snapshot,
+            outcome,
+            source_path,
+            permission_probe,
+            post_run_markdown.as_ref(),
+        );
         let (passed, rendered) = render_check_result(rule, &result, term);
         // Print the check line
         eprintln!("{rendered}");
@@ -134,6 +160,7 @@ fn run_checks(
             failures.push(ValidationFailure {
                 rule_id: rule.id,
                 event: rule.event.clone(),
+                phase: failure_phase,
                 subject_key: rule.subject_key.clone(),
                 message: result.unwrap_err(),
             });
@@ -146,12 +173,19 @@ fn run_checks(
 /// Result of evaluating a single validation: `Ok(())` for pass, `Err(message)` for fail.
 type CheckResult = Result<(), String>;
 
+enum PostRunMarkdownState {
+    Loaded(darkmatter::markdown::Markdown),
+    ReadFailed { path: std::path::PathBuf, error: String },
+}
+
 /// Evaluate a single validation rule.
 fn evaluate_single(
     rule: &ValidationRule,
     snapshot: Option<&PreRunSnapshot>,
     outcome: Option<&AttemptOutcome>,
-    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
+    source_path: &Path,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
+    post_run_markdown: Option<&PostRunMarkdownState>,
 ) -> CheckResult {
     match &rule.kind {
         // --- Filesystem checks ---
@@ -172,7 +206,9 @@ fn evaluate_single(
         ValidationKind::JsonFileExists { file, shape } => check_json_file(file, shape.as_ref()),
         ValidationKind::YamlFileExists { file, shape } => check_yaml_file(file, shape.as_ref()),
         ValidationKind::TomlFileExists { file } => check_toml_file(file),
-        ValidationKind::HasWritePermission { file } => check_write_permission(file),
+        ValidationKind::HasWritePermission { file } => {
+            check_write_permission(file, source_path, permission_probe)
+        }
         ValidationKind::ShellCommand {
             command,
             show_stdout,
@@ -306,7 +342,11 @@ fn check_value_shape(
     }
 }
 
-fn check_write_permission(file: &Path) -> CheckResult {
+fn check_write_permission(
+    file: &Path,
+    source_path: &Path,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
+) -> CheckResult {
     match std::fs::metadata(file) {
         Ok(metadata) => {
             if metadata.is_dir() {
@@ -325,13 +365,37 @@ fn check_write_permission(file: &Path) -> CheckResult {
                         "cannot write existing file {}: {e} (filesystem write check failed; provider runtime policy may also deny writes)",
                         file.display()
                     )
-                })
+                })?;
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            check_parent_allows_file_creation(file)
+            check_parent_allows_file_creation(file)?;
         }
         Err(e) => Err(format!(
             "cannot inspect {} for write access: {e}",
+            file.display()
+        ))?,
+    }
+
+    evaluate_provider_write_policy(file, source_path, permission_probe)
+}
+
+fn evaluate_provider_write_policy(
+    file: &Path,
+    source_path: &Path,
+    permission_probe: Option<&dyn HarnessPermissionProbe>,
+) -> CheckResult {
+    let Some(probe) = permission_probe else {
+        return Ok(());
+    };
+
+    match probe.can_write(file, source_path) {
+        PermissionAssessment::Allowed => Ok(()),
+        PermissionAssessment::Denied { reason } => Err(format!(
+            "provider runtime policy denies writes to {}: {reason}",
+            file.display()
+        )),
+        PermissionAssessment::Unknown { reason } => Err(format!(
+            "provider runtime policy for {} is unknown: {reason}",
             file.display()
         )),
     }
@@ -550,7 +614,7 @@ fn check_file_changed(
 fn check_frontmatter_prop_changed(
     prop: &str,
     snapshot: Option<&PreRunSnapshot>,
-    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
+    post_run_markdown: Option<&PostRunMarkdownState>,
     expect_changed: bool,
 ) -> CheckResult {
     let snapshot =
@@ -558,8 +622,10 @@ fn check_frontmatter_prop_changed(
     let pre_value = snapshot.tracked_frontmatter.get(prop);
 
     // Read the current on-disk post-state from the post-run markdown.
-    let post_md = post_run_markdown
-        .ok_or("internal error: post-run markdown not available for frontmatter comparison")?;
+    let post_md = get_post_run_markdown(
+        post_run_markdown,
+        "frontmatter comparison",
+    )?;
 
     let post_value = post_md.fm_get::<serde_json::Value>(prop).ok().flatten();
 
@@ -581,10 +647,9 @@ fn check_frontmatter_prop_changed(
 
 fn check_frontmatter_prop_equals(
     expected: &indexmap::IndexMap<String, serde_json::Value>,
-    post_run_markdown: Option<&darkmatter::markdown::Markdown>,
+    post_run_markdown: Option<&PostRunMarkdownState>,
 ) -> CheckResult {
-    let post_md = post_run_markdown
-        .ok_or("internal error: post-run markdown not available for frontmatter equals check")?;
+    let post_md = get_post_run_markdown(post_run_markdown, "frontmatter equals check")?;
 
     let mut mismatches = Vec::new();
     for (key, expected_val) in expected {
@@ -606,6 +671,22 @@ fn check_frontmatter_prop_equals(
         Ok(())
     } else {
         Err(format!("frontmatter mismatch: {}", mismatches.join("; ")))
+    }
+}
+
+fn get_post_run_markdown<'a>(
+    post_run_markdown: Option<&'a PostRunMarkdownState>,
+    context: &str,
+) -> Result<&'a darkmatter::markdown::Markdown, String> {
+    match post_run_markdown {
+        Some(PostRunMarkdownState::Loaded(markdown)) => Ok(markdown),
+        Some(PostRunMarkdownState::ReadFailed { path, error }) => Err(format!(
+            "failed to read {} for {context}: {error}",
+            path.display()
+        )),
+        None => Err(format!(
+            "internal error: post-run markdown not available for {context}"
+        )),
     }
 }
 
@@ -733,9 +814,20 @@ fn render_template(template: &str, vars: &HashMap<&str, String>) -> String {
 mod tests {
     use super::*;
     use crate::harness::model::{
-        ProcessTermination, ValidationEvent, ValidationPhase, ValidationRuleId,
+        PermissionAssessment, ProcessTermination, ValidationEvent, ValidationPhase,
+        ValidationRuleId,
     };
     use tempfile::TempDir;
+
+    struct StaticPermissionProbe {
+        assessment: PermissionAssessment,
+    }
+
+    impl HarnessPermissionProbe for StaticPermissionProbe {
+        fn can_write(&self, _path: &Path, _source_path: &Path) -> PermissionAssessment {
+            self.assessment.clone()
+        }
+    }
 
     fn make_rule(id: u32, event: ValidationEvent, kind: ValidationKind) -> ValidationRule {
         ValidationRule {
@@ -759,6 +851,23 @@ mod tests {
         }
     }
 
+    fn evaluate_single_for_tests(
+        rule: &ValidationRule,
+        snapshot: Option<&PreRunSnapshot>,
+        outcome: Option<&AttemptOutcome>,
+        post_run_markdown: Option<&PostRunMarkdownState>,
+    ) -> CheckResult {
+        let source_path = std::path::PathBuf::from("/tmp/source.md");
+        evaluate_single(
+            rule,
+            snapshot,
+            outcome,
+            &source_path,
+            None,
+            post_run_markdown,
+        )
+    }
+
     // --- Filesystem checks ---
 
     #[test]
@@ -767,7 +876,7 @@ mod tests {
         let file = dir.path().join("test.txt");
         fs::write(&file, "hello").unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::FileExists,
@@ -782,7 +891,7 @@ mod tests {
 
     #[test]
     fn file_exists_fails_for_missing_file() {
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::FileExists,
@@ -800,7 +909,7 @@ mod tests {
     #[test]
     fn dir_exists_passes_for_existing_dir() {
         let dir = TempDir::new().unwrap();
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::DirExists,
@@ -821,7 +930,7 @@ mod tests {
         let file = dir.path().join("data.json");
         fs::write(&file, r#"{"key": "value"}"#).unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::JsonFileExists,
@@ -843,7 +952,7 @@ mod tests {
         let file = dir.path().join("bad.json");
         fs::write(&file, "not json at all {").unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::JsonFileExists,
@@ -861,7 +970,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("new-file.txt");
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::HasWritePermission,
@@ -884,7 +993,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("missing").join("new-file.txt");
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::HasWritePermission,
@@ -901,12 +1010,58 @@ mod tests {
     }
 
     #[test]
+    fn has_write_permission_fails_when_provider_probe_denies_write() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("allowed-by-os.txt");
+        fs::write(&file, "hello").unwrap();
+        let source_path = dir.path().join("source.md");
+        let probe = StaticPermissionProbe {
+            assessment: PermissionAssessment::Denied {
+                reason: "sandbox is read-only".to_string(),
+            },
+        };
+
+        let result = evaluate_single(
+            &make_rule(
+                0,
+                ValidationEvent::HasWritePermission,
+                ValidationKind::HasWritePermission { file: file.clone() },
+            ),
+            None,
+            None,
+            &source_path,
+            Some(&probe),
+            None,
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("provider runtime policy denies writes"));
+        assert!(error.contains("sandbox is read-only"));
+    }
+
+    #[test]
+    fn frontmatter_equals_reports_post_run_read_error_clearly() {
+        let mut expected = indexmap::IndexMap::new();
+        expected.insert("status".to_string(), serde_json::json!("done"));
+        let state = PostRunMarkdownState::ReadFailed {
+            path: std::path::PathBuf::from("/tmp/missing.md"),
+            error: "No such file or directory".to_string(),
+        };
+
+        let result = check_frontmatter_prop_equals(&expected, Some(&state));
+
+        let error = result.unwrap_err();
+        assert!(error.contains("failed to read /tmp/missing.md"));
+        assert!(error.contains("frontmatter equals check"));
+    }
+
+    #[test]
     fn yaml_file_exists_passes_for_valid_yaml_with_shape() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("data.yaml");
         fs::write(&file, "- item1\n- item2\n").unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::YamlFileExists,
@@ -928,7 +1083,7 @@ mod tests {
         let file = dir.path().join("bad.toml");
         fs::write(&file, "{{not toml}}").unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::TomlFileExists,
@@ -956,7 +1111,7 @@ mod tests {
         // Modify the file
         fs::write(&file, "modified content").unwrap();
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::FileChanged,
@@ -980,7 +1135,7 @@ mod tests {
         snapshot.tracked_files.insert(file.clone(), pre_fingerprint);
 
         // Don't modify — same hash
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::FileChanged,
@@ -1003,7 +1158,7 @@ mod tests {
         let mut snapshot = PreRunSnapshot::default();
         snapshot.tracked_files.insert(file.clone(), pre_fingerprint);
 
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::FileUnchanged,
@@ -1021,7 +1176,7 @@ mod tests {
     #[test]
     fn response_length_at_least_passes_at_boundary() {
         let outcome = make_outcome("hello"); // len=5
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::ResponseLengthAtLeast,
@@ -1037,7 +1192,7 @@ mod tests {
     #[test]
     fn response_length_at_most_fails_above_boundary() {
         let outcome = make_outcome("hello world"); // len=11
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::ResponseLengthAtMost,
@@ -1053,7 +1208,7 @@ mod tests {
     #[test]
     fn response_includes_passes_with_substring() {
         let outcome = make_outcome("the quick brown fox");
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::ResponseIncludes,
@@ -1071,7 +1226,7 @@ mod tests {
     #[test]
     fn response_missing_fails_with_substring_present() {
         let outcome = make_outcome("operation failed");
-        let result = evaluate_single(
+        let result = evaluate_single_for_tests(
             &make_rule(
                 0,
                 ValidationEvent::ResponseMissing,
@@ -1115,7 +1270,15 @@ mod tests {
         ];
 
         let term = Terminal::default();
-        let failures = run_checks(&rules, None, None, None, &term);
+        let failures = run_checks(
+            &rules,
+            None,
+            None,
+            std::path::Path::new("/tmp/source.md"),
+            None,
+            FailurePhase::PreCheck,
+            &term,
+        );
         assert_eq!(failures.len(), 3, "all failures should be collected");
     }
 
