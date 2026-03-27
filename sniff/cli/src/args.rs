@@ -103,7 +103,7 @@ fn repo_package_area_candidates() -> Vec<clap_complete::engine::CompletionCandid
         .collect();
     areas
         .into_iter()
-        .map(|a| CompletionCandidate::new(a))
+        .map(CompletionCandidate::new)
         .collect()
 }
 

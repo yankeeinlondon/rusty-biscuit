@@ -149,7 +149,11 @@ pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Resul
                     if let Some(ref name) = query.package {
                         pkg.name.eq_ignore_ascii_case(name)
                     } else if let Some(ref area) = query.package_area {
-                        pkg.package_area.eq_ignore_ascii_case(area)
+                        // Prefix semantics: --package-area foo matches foo, foo/bar, etc.
+                        let pkg_area = pkg.package_area.to_ascii_lowercase();
+                        let target = area.to_ascii_lowercase();
+                        pkg_area == target
+                            || pkg_area.starts_with(&format!("{target}/"))
                     } else {
                         false
                     }
@@ -162,18 +166,40 @@ pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Resul
                 })
                 .collect();
 
+            // Validate that the package/area name matched at least one package
+            if matching_roots.is_empty() {
+                if let Some(ref name) = query.package {
+                    let mut names: Vec<&str> =
+                        packages.iter().map(|p| p.name.as_str()).collect();
+                    names.sort();
+                    names.dedup();
+                    return Err(SniffError::UnknownPackage {
+                        name: name.clone(),
+                        valid: names.join(", "),
+                    });
+                }
+                if let Some(ref area) = query.package_area {
+                    let mut areas: Vec<&str> =
+                        packages.iter().map(|p| p.package_area.as_str()).collect();
+                    areas.sort();
+                    areas.dedup();
+                    return Err(SniffError::UnknownPackageArea {
+                        area: area.clone(),
+                        valid: areas.join(", "),
+                    });
+                }
+            }
+
             paths.retain(|p| matching_roots.iter().any(|root| p.starts_with(root)));
         }
     }
 
     // Apply substring filters (OR logic, case-insensitive)
     if !query.filters.is_empty() {
+        let lowered_filters: Vec<String> = query.filters.iter().map(|f| f.to_lowercase()).collect();
         paths.retain(|p| {
             let p_str = p.to_string_lossy().to_lowercase();
-            query
-                .filters
-                .iter()
-                .any(|f| p_str.contains(&f.to_lowercase()))
+            lowered_filters.iter().any(|f| p_str.contains(f.as_str()))
         });
     }
 
@@ -266,6 +292,10 @@ pub fn find_blast_radius_documents(
     )?;
 
     let changed_set: HashSet<PathBuf> = result.paths.into_iter().collect();
+
+    if changed_set.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let docs = match detect_docs(&result.repo_root) {
         Some(docs) => docs,
@@ -468,6 +498,351 @@ mod tests {
                 },
             );
             assert!(result.is_err());
+        }
+    }
+
+    /// Helper: create a temp git repo with an initial commit.
+    /// Returns (TempDir, repo_path).
+    fn create_temp_repo() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        // Configure git identity for commits
+        let mut config = repo.config().unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
+        config.set_str("user.name", "Test").unwrap();
+
+        // Create initial commit so HEAD exists
+        let sig = repo.signature().unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+
+        let path = dir.path().to_path_buf();
+        (dir, path)
+    }
+
+    /// Helper: write a file, add to index, and commit.
+    fn commit_file(repo_path: &Path, relative: &str, content: &str) {
+        let full = repo_path.join(relative);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&full, content).unwrap();
+
+        let repo = Repository::open(repo_path).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+        index.write().unwrap();
+
+        let sig = repo.signature().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head])
+            .unwrap();
+    }
+
+    /// Helper: write a file and stage it (but don't commit).
+    fn stage_file(repo_path: &Path, relative: &str, content: &str) {
+        let full = repo_path.join(relative);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&full, content).unwrap();
+
+        let repo = Repository::open(repo_path).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+        index.write().unwrap();
+    }
+
+    mod temp_repo_changed_paths {
+        use super::*;
+
+        #[test]
+        fn staged_scope_only_returns_staged_files() {
+            let (_dir, path) = create_temp_repo();
+            // Commit both files first
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            commit_file(&path, "src/lib.rs", "pub fn lib() {}");
+
+            // Stage a modification to main.rs
+            stage_file(&path, "src/main.rs", "fn main() { updated }");
+            // Modify lib.rs without staging (unstaged only)
+            std::fs::write(path.join("src/lib.rs"), "pub fn lib() { modified }").unwrap();
+            // Create an untracked file
+            std::fs::write(path.join("src/new.rs"), "fn new() {}").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Staged,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert_eq!(result.paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn unstaged_scope_only_returns_modified_files() {
+            let (_dir, path) = create_temp_repo();
+            // Commit and then modify without staging
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { modified }").unwrap();
+            // Create an untracked file (should NOT be in unstaged)
+            std::fs::write(path.join("src/new.rs"), "fn new() {}").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Unstaged,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert_eq!(result.paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn dirty_scope_returns_staged_unstaged_and_untracked() {
+            let (_dir, path) = create_temp_repo();
+            // Commit all files first
+            commit_file(&path, "src/a.rs", "a");
+            commit_file(&path, "src/b.rs", "b");
+
+            // Stage a modification to a.rs
+            stage_file(&path, "src/a.rs", "a modified");
+            // Modify b.rs without staging (unstaged)
+            std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
+            // Untracked file
+            std::fs::write(path.join("src/c.rs"), "c").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(result.paths.contains(&PathBuf::from("src/a.rs")));
+            assert!(result.paths.contains(&PathBuf::from("src/b.rs")));
+            assert!(result.paths.contains(&PathBuf::from("src/c.rs")));
+        }
+
+        #[test]
+        fn last_commit_returns_files_from_head() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/committed.rs", "committed");
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::LastCommit,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(result.paths.contains(&PathBuf::from("src/committed.rs")));
+        }
+
+        #[test]
+        fn source_code_kind_filters_non_source() {
+            let (_dir, path) = create_temp_repo();
+            stage_file(&path, "src/main.rs", "fn main() {}");
+            stage_file(&path, "docs/readme.md", "# readme");
+            stage_file(&path, "data.json", "{}");
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Staged,
+                    kind: ChangedPathKind::SourceCode,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert_eq!(result.paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn deleted_file_included_in_staged() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/old.rs", "old code");
+
+            // Delete and stage the deletion
+            std::fs::remove_file(path.join("src/old.rs")).unwrap();
+            let repo = Repository::open(&path).unwrap();
+            let mut index = repo.index().unwrap();
+            index.remove_path(Path::new("src/old.rs")).unwrap();
+            index.write().unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Staged,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(result.paths.contains(&PathBuf::from("src/old.rs")));
+        }
+    }
+
+    mod blast_radius_document_matching {
+        use super::*;
+
+        #[test]
+        fn matched_document_returned() {
+            let (_dir, path) = create_temp_repo();
+            // Commit a source file, then dirty it
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            // Create a docs directory with a document referencing src/main.rs
+            let doc_content = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+            commit_file(&path, "docs/guide.md", doc_content);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert_eq!(matched.len(), 1);
+            assert_eq!(matched[0].relative, "docs/guide.md");
+        }
+
+        #[test]
+        fn unmatched_document_not_returned() {
+            let (_dir, path) = create_temp_repo();
+            // Dirty a source file
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            // Doc references a DIFFERENT file
+            let doc_content =
+                "---\ntitle: Other\nblast_radius:\n  - src/other.rs\n---\n# Other\n";
+            commit_file(&path, "docs/other.md", doc_content);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert!(matched.is_empty());
+        }
+
+        #[test]
+        fn document_with_empty_blast_radius_not_returned() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            let doc_content = "---\ntitle: Empty\nblast_radius: []\n---\n# Empty\n";
+            commit_file(&path, "docs/empty.md", doc_content);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert!(matched.is_empty());
+        }
+
+        #[test]
+        fn document_without_blast_radius_not_returned() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            let doc_content = "---\ntitle: No BR\n---\n# No BR\n";
+            commit_file(&path, "docs/nobr.md", doc_content);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert!(matched.is_empty());
+        }
+
+        #[test]
+        fn no_changed_files_returns_empty() {
+            let (_dir, path) = create_temp_repo();
+            // Everything is committed, nothing dirty
+            let doc_content =
+                "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+            commit_file(&path, "docs/guide.md", doc_content);
+            commit_file(&path, "src/main.rs", "fn main() {}");
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert!(matched.is_empty());
+        }
+
+        #[test]
+        fn staged_scope_only_matches_staged_changes() {
+            let (_dir, path) = create_temp_repo();
+            // Create two source files
+            commit_file(&path, "src/a.rs", "a");
+            commit_file(&path, "src/b.rs", "b");
+
+            // Doc references both
+            let doc_content =
+                "---\ntitle: Guide\nblast_radius:\n  - src/a.rs\n  - src/b.rs\n---\n# Guide\n";
+            commit_file(&path, "docs/guide.md", doc_content);
+
+            // Only stage changes to a.rs
+            stage_file(&path, "src/a.rs", "a modified");
+            // Modify b.rs without staging (unstaged only)
+            std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
+
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Staged, None, None).unwrap();
+            assert_eq!(matched.len(), 1);
+            assert_eq!(matched[0].relative, "docs/guide.md");
+        }
+
+        #[test]
+        fn normalized_dot_slash_path_matches() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            // Doc uses ./src/main.rs (should be normalized to src/main.rs)
+            let doc_content =
+                "---\ntitle: Guide\nblast_radius:\n  - ./src/main.rs\n---\n# Guide\n";
+            commit_file(&path, "docs/guide.md", doc_content);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert_eq!(matched.len(), 1);
+        }
+
+        #[test]
+        fn results_sorted_by_relative_path() {
+            let (_dir, path) = create_temp_repo();
+            commit_file(&path, "src/main.rs", "fn main() {}");
+            std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+            let doc_a =
+                "---\ntitle: Z Doc\nblast_radius:\n  - src/main.rs\n---\n# Z Doc\n";
+            let doc_b =
+                "---\ntitle: A Doc\nblast_radius:\n  - src/main.rs\n---\n# A Doc\n";
+            commit_file(&path, "docs/z_doc.md", doc_a);
+            commit_file(&path, "docs/a_doc.md", doc_b);
+
+            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            assert_eq!(matched.len(), 2);
+            assert!(matched[0].relative < matched[1].relative);
         }
     }
 }

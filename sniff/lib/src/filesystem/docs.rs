@@ -179,7 +179,7 @@ fn parse_markdown_meta(
     let content_hash = format!("{:x}", xx_hash(body));
 
     let has_blast_radius = frontmatter.contains_key("blast_radius");
-    let blast_radius = parse_blast_radius(&frontmatter);
+    let blast_radius = parse_blast_radius(&frontmatter, repo_root);
 
     let mut frontmatter_keys: Vec<String> = frontmatter.keys().cloned().collect();
     frontmatter_keys.sort();
@@ -263,9 +263,15 @@ fn get_string_field(
 
 /// Parse the `blast_radius` frontmatter field as a list of repo-relative paths.
 ///
+/// Paths are normalized to repo-relative form:
+/// - `./` prefixes are stripped
+/// - absolute paths matching `repo_root` are made relative
+/// - `.` segments are resolved
+///
 /// Non-string entries are silently ignored. Returns `None` if the key is missing.
 fn parse_blast_radius(
     frontmatter: &HashMap<String, serde_yaml_ng::Value>,
+    repo_root: &Path,
 ) -> Option<Vec<PathBuf>> {
     let value = frontmatter.get("blast_radius")?;
     match value {
@@ -274,7 +280,7 @@ fn parse_blast_radius(
                 .iter()
                 .filter_map(|v| {
                     if let serde_yaml_ng::Value::String(s) = v {
-                        Some(PathBuf::from(s))
+                        Some(normalize_blast_radius_path(s, repo_root))
                     } else {
                         None
                     }
@@ -284,6 +290,28 @@ fn parse_blast_radius(
         }
         _ => Some(Vec::new()),
     }
+}
+
+/// Normalize a blast-radius path entry to a clean repo-relative path.
+fn normalize_blast_radius_path(raw: &str, repo_root: &Path) -> PathBuf {
+    let p = Path::new(raw);
+
+    // Try stripping repo root from absolute paths
+    if p.is_absolute()
+        && let Ok(relative) = p.strip_prefix(repo_root)
+    {
+        return normalize_relative_components(relative);
+    }
+
+    normalize_relative_components(p)
+}
+
+/// Remove `.` and `./` components from a relative path, and strip leading `./`.
+fn normalize_relative_components(p: &Path) -> PathBuf {
+    use std::path::Component;
+    p.components()
+        .filter(|c| !matches!(c, Component::CurDir))
+        .collect()
 }
 
 /// Extract the document title using priority:
@@ -633,12 +661,16 @@ mod tests {
     mod blast_radius_parsing {
         use super::*;
 
+        fn dummy_root() -> PathBuf {
+            PathBuf::from("/repo")
+        }
+
         #[test]
         fn parses_valid_blast_radius_list() {
             let content = "---\nblast_radius:\n  - src/main.rs\n  - src/lib.rs\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
             assert!(fm.contains_key("blast_radius"));
-            let paths = parse_blast_radius(&fm).unwrap();
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
             assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
         }
 
@@ -647,7 +679,7 @@ mod tests {
             let content = "---\nblast_radius: []\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
             assert!(fm.contains_key("blast_radius"));
-            let paths = parse_blast_radius(&fm).unwrap();
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
             assert!(paths.is_empty());
         }
 
@@ -656,14 +688,14 @@ mod tests {
             let content = "---\ntitle: Hello\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
             assert!(!fm.contains_key("blast_radius"));
-            assert!(parse_blast_radius(&fm).is_none());
+            assert!(parse_blast_radius(&fm, &dummy_root()).is_none());
         }
 
         #[test]
         fn non_string_entries_silently_dropped() {
             let content = "---\nblast_radius:\n  - src/main.rs\n  - 42\n  - true\n  - src/lib.rs\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
-            let paths = parse_blast_radius(&fm).unwrap();
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
             assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
         }
 
@@ -672,6 +704,30 @@ mod tests {
             let content = "---\nblast_radius: []\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
             assert!(fm.contains_key("blast_radius"));
+        }
+
+        #[test]
+        fn normalizes_dot_slash_prefix() {
+            let content = "---\nblast_radius:\n  - ./src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn normalizes_absolute_path_matching_repo_root() {
+            let content = "---\nblast_radius:\n  - /repo/src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn preserves_absolute_path_not_matching_repo_root() {
+            let content = "---\nblast_radius:\n  - /other/src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("/other/src/main.rs")]);
         }
     }
 

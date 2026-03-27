@@ -287,13 +287,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::StagedFiles(_)
-            | crate::args::RepoAction::UnstagedFiles { package: _ }
+            crate::args::RepoAction::UnstagedFiles { package: _ }
             | crate::args::RepoAction::UntrackedFiles { package: _ } => {
                 let status_filter = match action {
-                    crate::args::RepoAction::StagedFiles(_) => {
-                        sniff::filesystem::git::FileStatus::Staged
-                    }
                     crate::args::RepoAction::UnstagedFiles { .. } => {
                         sniff::filesystem::git::FileStatus::Modified
                     }
@@ -315,10 +311,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .file_changes
                         .iter()
                         .filter(|f| match status_filter {
-                            sniff::filesystem::git::FileStatus::Staged => {
-                                f.status == sniff::filesystem::git::FileStatus::Staged
-                                    || f.status == sniff::filesystem::git::FileStatus::Both
-                            }
                             sniff::filesystem::git::FileStatus::Modified => {
                                 f.status == sniff::filesystem::git::FileStatus::Modified
                                     || f.status == sniff::filesystem::git::FileStatus::Both
@@ -342,7 +334,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::DirtySourceCode(args)
+            crate::args::RepoAction::StagedFiles(args)
+            | crate::args::RepoAction::DirtySourceCode(args)
             | crate::args::RepoAction::StagedSourceCode(args)
             | crate::args::RepoAction::UnstagedSourceCode(args)
             | crate::args::RepoAction::DirtyFiles(args) => {
@@ -358,6 +351,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     crate::args::RepoAction::DirtyFiles(_) => {
                         (ChangeScope::Dirty, ChangedPathKind::AllFiles)
+                    }
+                    crate::args::RepoAction::StagedFiles(_) => {
+                        (ChangeScope::Staged, ChangedPathKind::AllFiles)
                     }
                     _ => unreachable!(),
                 };

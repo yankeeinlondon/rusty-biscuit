@@ -668,7 +668,7 @@ pub fn render_git_section(
         }
 
         // Worktree lines: varies based on whether we're inside that worktree
-        for (_key, info) in &git.worktrees {
+        for info in git.worktrees.values() {
             let branch = &info.branch;
             let status = if info.merged && info.ahead == 0 {
                 format!("merged into <b>{}</b>", &info.base_branch)
@@ -2654,28 +2654,20 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
                     TitleSource::H1Heading => "H1 heading",
                     TitleSource::H2Heading => "H2 heading",
                     TitleSource::H3Heading => "H3 heading",
-                    TitleSource::None => "",
+                    TitleSource::None => "none",
                 };
                 if !doc.title.is_empty() {
-                    let title_line = if title_source_label.is_empty() {
-                        format!("<b>title:</b> {}", doc.title)
-                    } else {
-                        format!(
-                            "<b>title:</b> {} <dim><i>(from {})</i></dim>",
-                            doc.title, title_source_label
-                        )
-                    };
+                    let title_line = format!(
+                        "<b>title:</b> {} <dim><i>(from {})</i></dim>",
+                        doc.title, title_source_label
+                    );
                     details.push(Prose::new(&title_line).render(&terminal));
-                } else if !title_source_label.is_empty() {
+                } else {
                     let title_line = format!(
                         "<b>title:</b> <yellow>none</yellow> <dim><i>(from {})</i></dim>",
                         title_source_label
                     );
                     details.push(Prose::new(&title_line).render(&terminal));
-                } else {
-                    details.push(
-                        Prose::new("<b>title:</b> <yellow>none</yellow>").render(&terminal),
-                    );
                 }
 
                 // updated
@@ -3214,6 +3206,148 @@ mod tests {
             let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
             assert!(names.contains(&"biscuit-hash"));
             assert!(names.contains(&"darkmatter-lib"));
+        }
+    }
+
+    mod path_list_rendering {
+        use super::*;
+
+        #[test]
+        fn lines_format_one_path_per_line() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, false);
+            let lines: Vec<&str> = output.trim().lines().collect();
+            assert_eq!(lines.len(), 2);
+        }
+
+        #[test]
+        fn bullet_list_format_has_bullet_prefix() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/main.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::BulletList, false);
+            // UnorderedList uses bullet characters
+            assert!(!output.is_empty());
+        }
+
+        #[test]
+        fn csv_format_comma_separated() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/a.rs"), PathBuf::from("src/b.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Csv, false);
+            assert!(output.contains(", "));
+        }
+
+        #[test]
+        fn no_path_shows_basename_only() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("deeply/nested/file.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, true);
+            // With no_path, should not contain the directory segments in display text
+            // (though they may be in the OSC8 link target)
+            assert!(output.contains("file.rs"));
+        }
+
+        #[test]
+        fn empty_paths_produces_empty_output() {
+            let repo_root = PathBuf::from("/repo");
+            let paths: Vec<PathBuf> = vec![];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, false);
+            assert!(output.is_empty());
+        }
+    }
+
+    mod docs_output_rendering {
+        use super::*;
+        use chrono::Utc;
+
+        fn make_doc(relative: &str, title: &str, title_source: TitleSource) -> MarkdownMeta {
+            MarkdownMeta {
+                filepath: PathBuf::from(format!("/repo/{relative}")),
+                relative: relative.to_string(),
+                package: None,
+                title: title.to_string(),
+                title_source,
+                model: None,
+                prompt: None,
+                last_updated: Utc::now(),
+                updated_source: UpdatedSource::FileMetadata,
+                content_hash: "abc123".to_string(),
+                has_blast_radius: false,
+                blast_radius: None,
+                frontmatter_keys: vec!["title".to_string()],
+            }
+        }
+
+        #[test]
+        fn non_verbose_output_has_header_on_stderr() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stderr.contains("Docs"));
+            assert!(output.stderr.contains("1 document"));
+        }
+
+        #[test]
+        fn non_verbose_output_has_footer_on_stderr() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stderr.contains("--verbose"));
+            assert!(output.stderr.contains("metadata for documents"));
+        }
+
+        #[test]
+        fn non_verbose_document_list_on_stdout() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stdout.contains("readme.md"));
+        }
+
+        #[test]
+        fn verbose_output_includes_title_with_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("title:"));
+            assert!(output.stdout.contains("title property"));
+        }
+
+        #[test]
+        fn verbose_h1_title_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::H1Heading)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("H1 heading"));
+        }
+
+        #[test]
+        fn verbose_none_title_has_provenance() {
+            let docs = vec![make_doc("docs/empty.md", "", TitleSource::None)];
+            let output = render_docs_output(&docs, 1);
+            // Should show "none" provenance, not drop it
+            assert!(output.stdout.contains("none"));
+        }
+
+        #[test]
+        fn verbose_includes_updated_with_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("updated:"));
+            assert!(output.stdout.contains("file metadata"));
+        }
+
+        #[test]
+        fn verbose_includes_frontmatter_properties() {
+            let mut doc = make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle);
+            doc.frontmatter_keys = vec!["blast_radius".to_string(), "title".to_string()];
+            let output = render_docs_output(&[doc], 1);
+            assert!(output.stdout.contains("frontmatter properties:"));
+            assert!(output.stdout.contains("blast_radius"));
+        }
+
+        #[test]
+        fn prompt_count_shown_in_header() {
+            let mut doc = make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle);
+            doc.prompt = Some("Generate a summary".to_string());
+            let output = render_docs_output(&[doc], 0);
+            assert!(output.stderr.contains("with prompts"));
         }
     }
 
